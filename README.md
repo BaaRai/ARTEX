@@ -7,6 +7,8 @@ AI autonomous penetration testing system (Go backend + Next.js frontend)
 
 🌐 **Live demo**: [https://artex-demo.vercel.app/](https://artex-demo.vercel.app/)
 
+ Fork of [ARTEX by Autumn-27](https://github.com/Autumn-27) · English translation of the Chinese source · kept private
+
 </div>
 
 ---
