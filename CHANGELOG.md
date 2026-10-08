@@ -1,240 +1,240 @@
-# 更新日志
+# Changelog
 
-本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
+All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
 ## [0.3.15] - 2026-10-07
 
-### 拦截
+### Interception
 
-#### 新增的功能
+#### Added
 
-- **新增内置拦截规则「删除类接口路径」**：此前内置的 HTTP 破坏性规则只认 DELETE **方法**，而多数应用的删除接口用 GET/POST 就能触发，`curl 'http://t/api/user/delete?id=1'` 这类调用会真实删掉目标数据。现补一条 `deny` 规则覆盖 `/delete /del /remove /unlink /erase /destroy`（动词后必须跟分隔符，`/delivery`、`/details`、`/delta` 不会误拦）。已有实例升级后也会拿到，可在「系统 → 命令拦截」里停用或删除。
-- **模型兜底审批的 token 消耗可单独查看**：审批调用此前没有独立的计量归属，花了多少只能靠猜。现在它单独计量，「系统 → 命令拦截」的「模型兜底审批」开关下方新增用量卡片——调用次数、输入、输出、缓存读写五项累计统计，加一张近 30 天每日消耗的迷你柱图。
+- **Added a built-in interception rule for delete-style endpoint paths**: the previous built-in HTTP destructive rules only matched the DELETE **method**, while most applications trigger deletion via GET/POST, so calls like `curl 'http://t/api/user/delete?id=1'` would really delete target data. A new `deny` rule now covers `/delete /del /remove /unlink /erase /destroy` (the verb must be followed by a separator, so `/delivery`, `/details`, `/delta` are not falsely blocked). Existing instances get it after upgrading too; it can be disabled or deleted under "System → Command Interception".
+- **Token usage of model fallback approvals can now be viewed separately**: approval calls previously had no independent metering, so usage could only be guessed. It is now metered on its own — under the "Model fallback approval" toggle in "System → Command Interception" there is a new usage card with cumulative stats for five items — calls, input, output, and cache read/write — plus a mini bar chart of daily consumption over the last 30 days.
 
-### 漏洞推送
+### Vulnerability push
 
-#### 新增的功能
+#### Added
 
-- **漏洞发现支持推送到 IM**：新增「系统 → 通知推送」页，可把扫描发现推送到**钉钉、飞书、企业微信、通用 Webhook、Telegram、邮件**六种渠道。同一类型可配任意多个实例，每个实例独立设启停、限流与过滤规则。
-- **推送时机分实时与汇总两种模式**：实时模式命中即逐条发送；汇总模式按全局周期（默认 30 分钟）合并成一条消息，开头给出新增数量与级别分布。想做「高危实时、其余汇总」就建两个渠道分别配置。
-- **过滤规则支持四个维度**：最低严重级别、限定任务 / 资产范围、漏洞类型关键词包含与排除（排除优先）、是否接收处置状态变更（默认关）。消息带「查看详情」按钮，目标地址由全局「回链地址」配置，留空则不带按钮。
-- **投递历史与手动重发**：列出每条投递的状态、尝试次数、失败原因与所属渠道，可按渠道与状态筛选；失败项可一键重发（重发会清零重试计数）。
-- **渠道凭据掩码回显**：Webhook 地址、加签密钥、Bot Token、SMTP 密码等只回显带尾号提示的掩码值；提交时原样回传表示「不修改」，清空输入框则删除该字段。
+- **Vulnerability findings can be pushed to IM**: a new "System → Notification Push" page lets you push scan findings to six channels: **DingTalk, Feishu, WeCom, generic Webhook, Telegram, and email**. Any number of instances per type, each with its own enable/disable, rate limiting, and filter rules.
+- **Delivery timing has realtime and digest modes**: realtime mode sends each hit as it happens; digest mode merges them into one message on a global cycle (default 30 minutes), with the new count and severity distribution at the top. For "High-severity realtime, everything else digested", create two channels and configure them separately.
+- **Filter rules support four dimensions**: minimum severity, restricting task / asset scope, vulnerability type keyword inclusion and exclusion (exclusion wins), and whether to receive handling-status changes (default off). Messages carry a "View details" button whose target URL comes from the global "back-link address" setting; leave it empty to omit the button.
+- **Delivery history and manual resend**: lists each delivery's status, attempt count, failure reason, and channel, filterable by channel and status; failed items can be resent with one click (resending resets the retry count).
+- **Channel credentials are masked on display**: Webhook URLs, signing secrets, Bot Tokens, SMTP passwords, etc. are only shown as masked values with a trailing hint; submitting the masked value unchanged means "do not modify", while clearing the input deletes the field.
 
-#### 修复的问题
+#### Fixed
 
-> 本节是功能初版完成后一轮安全审计的结论，每条都先复现、再修、再补回归测试。
+> This section is the outcome of a security audit round after the feature's initial release: every item was reproduced first, then fixed, then given a regression test.
 
-- **修复掩码可被「改目标地址、保留凭据」绕过（严重）**：配置合并对「未提及的键」一律保留库中原值，于是只改地址、对凭据避而不谈，就能让服务端把库里的真凭据发到任意地址，且完全静默。现规定目标地址一旦变化，每个凭据字段都必须显式表态——给新值，或显式留空表示不再需要。
-- **修复 markdown 系渠道对不可信内容零转义**：漏洞标题与摘要来自模型输出、资产 URL 来自扫描结果，构造的标题会在钉钉 / 企业微信 / 飞书里渲染成可点击外链，图片语法则会在渲染时被客户端拉取并泄露阅读者 IP。现统一做单行化 + markdown 元字符转义，且转义发生在各渠道的渲染出口而非共用的标题函数。
-- **修复投递地址的 SSRF 面**：此前环回、内网与云元数据地址一律可投递，而失败响应体前 200 字节会进 `last_error` 并被投递历史回显，构成一条半盲读原语。现改在**拨号阶段**设防，覆盖 DNS 重绑定，并拒绝跨主机重定向；环回与链路本地地址需显式设置 `ARTEX_NOTIFY_ALLOW_LOCAL=1`，RFC1918 私网仍放行（内网自建 SMTP 中继很常见）。
-- **修复推送凭据经错误信息外泄**：钉钉的 `access_token`、企业微信的 `key`、Telegram 的 bot token 都在 URL 里，而投递失败时完整 URL 会流入 `last_error`、投递历史、服务端日志与前端提示四处。现统一脱敏，只保留 `scheme://host` 与底层原因。
-- **修复汇总消息被截断后整批标记已送达导致的静默丢失**：被截掉的漏洞既不在消息里、也不在失败列表里，投递历史却显示成功。现改为按**整条**打包，只标记装进本条的那些，其余回队列等下一条续发且不消耗重试次数，消息头部也写明还有多少条将在下一条继续。
-- **修复最低级别门槛打错字会让过滤器静默失效**：`min_severity` 写成 `hgih` 这类笔误时未知级别序数为 0，判定退化成恒真，用户以为只收高危、实际全部漏洞都被灌进群里。现于写入路径校验取值并列出可选值。
-- **修复 `rate_per_min = 0`（不限流）不可达**：写库这一层把显式 0 悄悄改成了默认值，操作者以为放开了限流、实际仍被卡着。默认值改到接口层在字段缺省时填。
-- **修复汇总渠道完全绕过令牌桶**：`rate_per_min` 对 digest 模式此前没有任何作用。现在领取条数同时受本轮额度与内存上界两个约束。
-- **修复失败处置按整批最大尝试次数判断，让老投递连坐新投递**：一个已重试两次的老投递会把同批里全新的投递一起拖进 failed，新漏洞一次重试都没用上就永久丢失。现改为逐条决定。
-- **修复汇总批次中快照无法解析的投递被静默标记成功**：这类条目会被渲染阶段跳过，却随整批一起算作成功。现在显式判失败并给出原因。
-- **修复单渠道每轮投递条数可能超出租约时长**：多实例部署下，租约过期的行会被重新领走、重复发送并双份递增尝试次数。现按「租约 / 单次超时」倒推每轮上限，并有断言把这几个常量的关系钉死。
-- **修复 Telegram 截断可能切断 HTML 实体**：截断只避开了半截标签，没避开 `&amp` 这类实体残片，而解析器可能因此拒收**整条**消息。现在两者都回避。
-- **修复邮件渠道把临时性 SMTP 失败判成永久失败**：灰名单 `450` 这类 4xx 是临时拒绝、本该稍后重试，此前一律判死，启用灰名单的服务器会让每条推送都在首次尝试后失败。现按应答码首位区分，4xx 可重试、5xx 永久失败。
-- **修复提交嵌套结构时会真的把掩码字面量写进库**：像 `webhook.headers` 这种对象字段只能整体掩码或整体提交，把掩码哨兵塞进对象内部会被当真实值存下来、导致鉴权静默失效。现在这种提交被显式拒绝。
+- **Fixed a mask bypass via "change the target URL, keep the credentials" (Critical)**: config merging preserved the stored value for any "unmentioned key", so changing only the address while saying nothing about credentials would make the server send the real stored credentials to an arbitrary address, completely silently. Now, once the target address changes, every credential field must be stated explicitly — provide a new value, or explicitly leave it empty to indicate it is no longer needed.
+- **Fixed markdown-based channels performing zero escaping of untrusted content**: vulnerability titles and summaries come from model output, and asset URLs come from scan results, so crafted titles would render as clickable external links in DingTalk / WeCom / Feishu, and image syntax would be fetched by clients at render time, leaking the reader's IP. Now everything is single-lined + markdown metacharacters are escaped, and escaping happens at each channel's render exit point rather than in the shared title function.
+- **Fixed the SSRF surface of delivery addresses**: previously loopback, internal, and cloud metadata addresses were all deliverable, and the first 200 bytes of a failed response body went into `last_error` and were echoed in the delivery history, forming a semi-blind read primitive. Defenses now apply **at the dial stage**, covering DNS rebinding and rejecting cross-host redirects; loopback and link-local addresses require explicitly setting `ARTEX_NOTIFY_ALLOW_LOCAL=1`, while RFC1918 private networks are still allowed (self-hosted internal SMTP relays are common).
+- **Fixed push credentials leaking through error messages**: DingTalk's `access_token`, WeCom's `key`, and Telegram's bot token all live in the URL, and on delivery failure the full URL flowed into four places: `last_error`, delivery history, server logs, and frontend messages. Now uniformly redacted, keeping only `scheme://host` and the underlying reason.
+- **Fixed silent loss when a truncated digest message marked the whole batch as sent**: truncated-off vulnerabilities were neither in the message nor in the failure list, yet the delivery history showed success. Packing is now done **per whole item** — only those packed into this message are marked; the rest go back to the queue to continue in the next message without consuming retry attempts, and the message header states how many more will follow.
+- **Fixed a typo in the minimum severity threshold silently disabling the filter**: when `min_severity` was mistyped as something like `hgih`, the unknown severity's ordinal was 0, the check degenerated to always-true, and users who thought they would only receive High-severity findings actually got every vulnerability poured into the group. The write path now validates the value and lists the allowed options.
+- **Fixed `rate_per_min = 0` (no rate limit) being unreachable**: the storage layer silently rewrote an explicit 0 to the default, so operators who thought they had lifted rate limiting were still throttled. The default is now filled in at the API layer when the field is absent.
+- **Fixed digest channels completely bypassing the token bucket**: `rate_per_min` previously had no effect at all in digest mode. The number of claimed items is now constrained by both this round's budget and an in-memory upper bound.
+- **Fixed failure handling judging by the batch's maximum attempt count, dragging new deliveries down with old ones**: an old delivery retried twice would pull brand-new deliveries in the same batch into failed, permanently losing new vulnerabilities before they used a single retry. Now decided per item.
+- **Fixed deliveries with unparseable snapshots in a digest batch being silently marked successful**: these items were skipped at the render stage but counted as successful along with the batch. They are now explicitly marked failed with a reason.
+- **Fixed a single channel's per-round delivery count potentially exceeding the lease duration**: in multi-instance deployments, rows whose leases expired would be re-claimed, sent twice, and have their attempt counts incremented twice. The per-round cap is now derived from "lease / per-send timeout", and assertions pin down the relationship between these constants.
+- **Fixed Telegram truncation potentially cutting through HTML entities**: truncation avoided half-tags but not entity fragments like `&amp`, which could make the parser reject the **entire** message. Both are now avoided.
+- **Fixed the email channel treating transient SMTP failures as permanent**: greylisting `450`-style 4xx replies are temporary rejections that should be retried later, but they were all judged dead before — servers with greylisting enabled would fail every push after its first attempt. Now distinguished by the first digit of the reply code: 4xx is retryable, 5xx is permanent.
+- **Fixed masked literals actually being written to the database when submitting nested structures**: object fields like `webhook.headers` can only be masked or submitted as a whole; stuffing the mask sentinel inside an object would be stored as a real value, silently breaking authentication. Such submissions are now explicitly rejected.
 
-#### 设计说明
+#### Design notes
 
-- **写漏洞的事务只做一次盲 INSERT**：`notification_events` 与漏洞在同一事务内写入，提交即保证两者原子一致。这条 INSERT 刻意不读渠道表、不跑用户的过滤规则，并由 `SAVEPOINT` 包住——否则一条配错的过滤条件就能中止事务，让高危漏洞存不进库。
-- **投递用租约领取而非长事务**：`FOR UPDATE SKIP LOCKED` 领取后把行置为 `sending` 并把 `next_attempt_at` 推到未来作为租约，投递期间不持有数据库锁；进程崩溃留下的行会在租约到期后被重新领取，自愈且不会无限重试。
-- **限流不消耗重试预算**：先按令牌桶算出本轮额度，再按这个数量去领取。顺序反过来会让被限流挡下的投递白计一次尝试次数，三次预算被纯等待耗光后落入失败。
+- **The vulnerability-writing transaction does a single blind INSERT**: `notification_events` and the vulnerability are written in the same transaction, so commit guarantees atomic consistency of both. This INSERT deliberately does not read the channel table or run the user's filter rules, and is wrapped in a `SAVEPOINT` — otherwise one misconfigured filter condition could abort the transaction and keep a High-severity vulnerability out of the database.
+- **Delivery uses lease-based claiming instead of long transactions**: after claiming via `FOR UPDATE SKIP LOCKED`, the row is set to `sending` and `next_attempt_at` is pushed into the future as a lease, so no database lock is held during delivery; rows left behind by a crashed process are re-claimed after the lease expires — self-healing and never retried infinitely.
+- **Rate limiting does not consume the retry budget**: the token bucket computes this round's allowance first, then that many items are claimed. The reverse order would charge an attempt to deliveries blocked by the limiter, and the three-attempt budget would be burned purely by waiting before landing in failed.
 
-### 测试基础设施
+### Test infrastructure
 
-#### 修复的问题
+#### Fixed
 
-- **修复公司 ICP 归属用例的清理顺序导致的资产永久残留**：`defer d.Close()` 在函数返回时先执行、`t.Cleanup` 在其后，于是清理语句全部落在已关闭的连接上，错误又被丢弃，测试资产与公司永久残留在库里，还会让其他按资产计数断言的用例莫名失败。现改为关闭连接也走 `t.Cleanup` 并注册在前，同时让清理失败显形。
+- **Fixed permanent asset residue caused by the cleanup order of the company ICP attribution test case**: `defer d.Close()` ran first at function return, with `t.Cleanup` after it, so all cleanup statements ran on an already-closed connection and their errors were discarded — test assets and companies remained in the database forever and made other cases asserting on asset counts fail mysteriously. Closing the connection now also goes through `t.Cleanup`, registered first, and cleanup failures are surfaced.
 
-### 流量
+### Traffic
 
-#### 新增的功能
+#### Added
 
-- **流量列表支持内容检索、路径 / 状态码 / 长度筛选与列排序**：筛选行支持按**响应内容**（走全文索引）、**路径**、**状态码**（精确值或 `2xx` 这类分桶）、**响应长度范围**过滤，表头可按时间、状态码、响应长度排序，排序偏好记在本地。新增两个索引，已有实例升级后自动生效；Agent 工具的 query 契约未改动。
-- **流量列表新增「清空全部」**：一次删除全部流量记录（忽略当前筛选），并清理索引已不再记录的历史 host 目录，清空后顺带做一次全量压实并提示实际释放了多少空间。已绑定到漏洞的流量证据存在独立的证据库中，不受影响。
+- **The traffic list supports content search, path / status code / length filtering, and column sorting**: the filter row supports filtering by **response content** (via the full-text index), **path**, **status code** (exact value or buckets like `2xx`), and **response length range**; column headers sort by time, status code, and response length, with the sort preference stored locally. Two new indexes were added and take effect automatically after upgrade; the Agent tool's query contract is unchanged.
+- **The traffic list gains "Clear all"**: deletes all traffic records at once (ignoring the current filter), cleans up historical host directories no longer recorded in the index, and then runs a full compaction, reporting how much space was actually freed. Traffic evidence already bound to vulnerabilities lives in a separate evidence store and is unaffected.
 
-#### 修复的问题
+#### Fixed
 
-- **修复删除流量后磁盘空间不被释放**：索引库建库时没有启用 `auto_vacuum`，文件永不收缩；全文索引又是 `contentless_delete`，`DELETE` 只写 tombstone 而不回收原 postings——删流量反而让索引变大（实测抓 6MB 正文 → 索引 16MB，删光后仍是 16MB）。现在新建索引库启用 `auto_vacuum=incremental`，每次删除后在后台分块执行全文索引合并与增量回收，逐步把空间还给系统（同一场景回落到 104KB）；回收在块间释放写锁，不阻塞流量录制。
+- **Fixed disk space not being freed after deleting traffic**: the index database was created without `auto_vacuum`, so the file never shrinks; the full-text index is `contentless_delete`, so `DELETE` only writes tombstones without reclaiming the original postings — deleting traffic actually made the index bigger (measured: 6MB of captured bodies → 16MB index, still 16MB after deleting everything). Newly created index databases now enable `auto_vacuum=incremental`, and after each deletion a background chunked run performs full-text index merges and incremental reclaim, gradually returning space to the system (the same scenario drops to 104KB); reclaiming releases the write lock between chunks so it does not block traffic recording.
 
-> 升级说明：`auto_vacuum` 只能在建库时设定，因此**已有实例的索引库仍是旧模式**，增量回收在其上是空操作（启动时会打印一行提示）。这类库升级后 tombstone 的增长已经止住，而已占用的体积用「清空全部」回收一次即可——那一步会把库转成增量回收模式，此后日常删除自行生效。
+> Upgrade note: `auto_vacuum` can only be set at database creation, so **existing instances' index databases remain in the old mode**, and incremental reclaim on them is a no-op (a notice line is printed at startup). For such databases, tombstone growth stops after upgrading, and the already-occupied space can be reclaimed once with "Clear all" — that step converts the database to incremental reclaim mode, after which everyday deletions take effect on their own.
 
 ### LLM
 
-#### 修复的问题
+#### Fixed
 
-- **修复自定义会话头在「一次性 LLM 调用」路径上不生效**：目标拆解（第 0 轮）与冷节点压缩都是不挂 transcript store 的一次性调用，context 上没有 session id，网关侧因此读不到该头——对 opencode zen 这类缺头直接 400 的端点，表现为「第 0 轮失败、后续 planner 轮次却完全正常」。现为这两条路径显式挂上按探索稳定的 session id，顺带让 token 用量能正确归因到对应探索（此前完全记不到）。
+- **Fixed custom session headers not taking effect on "one-shot LLM call" paths**: goal decomposition (round 0) and cold-node compression are one-shot calls without a transcript store, so there is no session id on the context and the gateway cannot read the header — for endpoints like opencode zen that return 400 when the header is missing, this showed up as "round 0 fails, yet subsequent planner rounds are perfectly fine". Both paths now explicitly attach a session id that is stable per exploration, which also lets token usage be correctly attributed to the corresponding exploration (previously it was not recorded at all).
 
-### 工具
+### Tools
 
-#### 修复的问题
+#### Fixed
 
-- **修复 MCP 与自定义工具的输出截断不生效，大结果整段灌爆上下文**：MCP 工具的返回此前完全不经截断，HTTP 类自定义工具则因传入空的工具上下文，一直用写死的 6000 字符而非会话配置的上限。现两条路径统一走 `actool.Capture`：按会话 `MaxOutputChars`（默认 30000）截断，配了 `ToolOutputDir` 时把全量输出溢写到磁盘、消息里只留开头片段与文件指针。
-- **升级 norma 到 v0.4.3**：harness 层统一执行 `CaptureOnce`，任何工具（含今后新增的）都不会再因为漏接截断而溢爆上下文。
+- **Fixed output truncation not working for MCP and custom tools, flooding the context with large results**: MCP tool returns previously bypassed truncation entirely, while HTTP-style custom tools, because they were given an empty tool context, always used the hardcoded 6000 characters instead of the session-configured limit. Both paths now go through `actool.Capture`: truncated to the session's `MaxOutputChars` (default 30000), and when `ToolOutputDir` is configured, the full output spills to disk and only a leading excerpt plus a file pointer stays in the message.
+- **Upgraded norma to v0.4.3**: the harness layer uniformly executes `CaptureOnce`, so no tool (including future ones) will overflow the context by missing truncation again.
 
-### 部署
+### Deployment
 
-#### 修复的问题
+#### Fixed
 
-- **修复反向代理部署下活动流连不上**：SSE 地址此前无条件拼成 `${hostname}:8787`，反代到 443 的部署里页面从 `https://域名/` 加载、SSE 却被指向未对公网开放的 8787 端口，表现为活动流反复重连。现按 `NODE_ENV` 区分：生产默认同源，仅 `next dev` 保留 `:8787` 以绕过 Next.js 对 SSE 的缓冲；`NEXT_PUBLIC_SSE_BASE` 覆盖口保留。README 补充了反向代理部署说明。
+- **Fixed the activity stream failing to connect under reverse proxy deployments**: the SSE address was previously unconditionally assembled as `${hostname}:8787`; in deployments reverse-proxied to 443, the page loads from `https://domain/` while SSE pointed at port 8787, which is not publicly exposed, so the activity stream kept reconnecting. Now distinguished by `NODE_ENV`: production defaults to same-origin, and only `next dev` keeps `:8787` to bypass Next.js's SSE buffering; the `NEXT_PUBLIC_SSE_BASE` override remains. The README gained a reverse proxy deployment section.
 
-### 发现
+### Findings
 
-#### 修复的问题
+#### Fixed
 
-- **修复「按资产」视图资产列表溢出后没有滚动条**：外层卡片只给了 `max-height` 而没有确定高度，滚动视口的百分比高度解析不出来，于是资产多时列表要么撑破卡片、要么被截断且无法滚动。现把高度上限直接落到资产树的原生滚动容器上，随窗口高度自适应。
+- **Fixed the "By asset" view's asset list having no scrollbar after overflowing**: the outer card had only `max-height` and no definite height, so the scrolling viewport's percentage height could not resolve — with many assets the list either broke out of the card or was truncated and unscrollable. The height cap now lands directly on the asset tree's native scroll container and adapts to the window height.
 
-### 数据库
+### Database
 
-#### 修复的问题
+#### Fixed
 
-- **为连接池设置上限**：`database/sql` 默认不限制应用自身可打开的连接数，池里没有空闲连接时会无条件新建，一路顶到 PostgreSQL 的 `max_connections`（默认 100）才被拒。现封顶 32 条，超额查询改为等待空闲连接，同样的负载下表现为变慢而不是报错；若 `max_connections` 调低过需同步下调。
-- **提升连接复用率**：`MaxIdleConns` 的默认值是 2，并发超过 2 的连接用完即关、下次请求要重做 TCP 与 PostgreSQL 认证握手。现将空闲上限提到与总上限一致，并补上 30 分钟连接寿命与 5 分钟空闲淘汰，让池能自然换掉长期存活的坏连接。
+- **Set an upper bound on the connection pool**: `database/sql` by default does not limit how many connections the application itself may open — when the pool has no idle connection it unconditionally creates new ones, and is only rejected after hitting PostgreSQL's `max_connections` (default 100). Now capped at 32; excess queries wait for an idle connection, so the same load shows up as slower rather than errors; if `max_connections` was lowered, lower this accordingly.
+- **Improved connection reuse**: `MaxIdleConns` defaults to 2, so connections beyond 2 concurrent users are closed as soon as they finish, and the next request has to redo the TCP and PostgreSQL auth handshake. The idle cap is now raised to match the total cap, plus a 30-minute connection lifetime and 5-minute idle eviction, letting the pool naturally replace long-lived bad connections.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 
 ## [0.3.14] - 2026-09-24
 
-### 任务列表
+### Task list
 
-#### 新增的功能
+#### Added
 
-- **任务列表新增「漏洞」列**：按严重度分档显示 严 / 高 / 中 / 低 的数量，非零档位按严重度着色，一眼看清每个任务的漏洞规模与分布。
+- **The task list gains a "Vulnerabilities" column**: shows counts bucketed by severity (Critical / High / Medium / Low), non-zero buckets colored by severity, so each task's vulnerability scale and distribution is clear at a glance.
 
-#### 修改的功能
+#### Changed
 
-- **「描述 / 目标」两列宽度收窄**：超长内容省略显示，鼠标悬浮可查看全文，减少长文本挤占列表横向空间。
+- **The "Description / Goal" columns are narrower**: overly long content is ellipsized, with the full text on hover, reducing long text hogging horizontal space.
 
-### 探索图与规划态势概览
+### Exploration graph and planning situation overview
 
-#### 修改的功能
+#### Changed
 
-- **精简规划态势概览（graph_overview）并为各列表设定数量上限**：最近事实、已结束意图、待办意图、冷区摘要与确认漏洞明细均改为「最新一窗 + 计数兜底」，未展示的可按需查询；显著降低每轮 LLM 上下文体积、避免长任务上下文膨胀（关联任务概览的冷区一并限流）。
+- **Slimmed down the planning situation overview (graph_overview) and set count caps on each list**: recent facts, finished intents, pending intents, cold-area digests, and confirmed vulnerability details are all now "latest window + count fallback", with anything not shown queryable on demand; this significantly reduces per-round LLM context size and avoids context bloat in long tasks (the cold area of linked-task overviews is rate-limited as well).
 
-#### 修复的问题
+#### Fixed
 
-- **折叠冷节点后消除探索图中 digest 与 finding 之间的反向重复边**。
+- **After folding cold nodes, eliminated the reverse duplicate edges between digest and finding nodes in the exploration graph**.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 
 ## [0.3.13] - 2026-09-19
 
-### 资产拦截
+### Asset interception
 
-#### 新增的功能
+#### Added
 
-- **新增全局资产拦截规则（黑名单）**：支持录入全等与模糊匹配的域名 / IP / URL 以及 CIDR 网段，提供规则的增删改查与启用/停用，管理页位于「系统 → 资产拦截」；默认内置模糊拦截政府（`.gov` / `.gov.cn`）与教育（`.edu` / `.edu.cn`）网站。
-- **资产拦截接入执行链**：Agent 在下发意图（`add_intent`）与插入资产（`insert_assets`）前先对目标资产做拦截判定——命中拦截的意图不下发、命中拦截的资产不插入，并向 Agent 返回资产信息与拦截原因。
-- **新增任务级拦截 / 允许（白名单）规则**：独立于全局规则、仅对本任务生效，判定顺序为「先拦截后允许」——命中拦截即禁止；未命中拦截但本任务配置了允许规则且都不命中，则「不允许测试」；未配置允许规则时不启用白名单。可在创建任务时录入，也可在任务详情「总览」中增删改与启用/停用。
-- **任务模板支持预设分类与任务级拦截/允许规则**：模板可保存任务分类与一组任务级规则，应用模板时一并带入新任务表单。
+- **Added global asset interception rules (blacklist)**: supports entering exact-match and fuzzy-match domains / IPs / URLs and CIDR ranges, with full CRUD and enable/disable for rules; the management page is under "System → Asset Interception"; fuzzy interception of government (`.gov` / `.gov.cn`) and education (`.edu` / `.edu.cn`) sites is built in by default.
+- **Asset interception is wired into the execution chain**: before dispatching an intent (`add_intent`) or inserting assets (`insert_assets`), the agent first runs an interception check on the target assets — intents that hit interception are not dispatched, assets that hit interception are not inserted, and the agent gets back the asset info and the interception reason.
+- **Added task-level interception / allow (whitelist) rules**: independent of global rules and effective only for this task. Evaluation order is "intercept first, then allow" — a hit on interception forbids; if interception is not hit but the task has allow rules configured and none of them match, then "testing is not allowed"; when no allow rules are configured, the whitelist is not enabled. Rules can be entered when creating a task, and added/edited/removed and enabled/disabled in the task details "Overview".
+- **Task templates support preset categories and task-level interception/allow rules**: a template can save a task category and a set of task-level rules, and applying the template brings them into the new-task form.
 
-### 操作审查
+### Operation review
 
-#### 修复的问题
+#### Fixed
 
-- **收紧模型裁判输出协议，减少截断导致的误放行**：将裁决说明（comment）上限由 500 汉字下调至 120 汉字并强制「只输出 JSON、不带前言或代码块」，避免裁决被 `MaxTokens` 截断后无法解析、进而按模型失败策略放行（fail-open）。
+- **Tightened the model judge's output protocol to reduce false allows caused by truncation**: lowered the verdict comment cap from 500 Chinese characters to 120 and enforced "output JSON only, no preamble or code blocks", avoiding cases where a verdict truncated by `MaxTokens` becomes unparseable and is then allowed per the model-failure policy (fail-open).
 
-### 任务归档
+### Task archiving
 
-#### 修复的问题
+#### Fixed
 
-- **归档遇到符号链接时跳过而非整包失败**：归档格式端到端仅支持普通文件与目录，此前工作目录中出现任意符号链接都会导致整个任务归档失败；现改为跳过该符号链接并记录日志，其余文件正常归档（不跟随链接、不越出目录树）。
+- **Archiving now skips symbolic links instead of failing the whole package**: the archive format end-to-end only supports regular files and directories, and previously any symbolic link in the working directory failed the entire task archive; now the link is skipped with a log entry and the remaining files archive normally (links are not followed, and nothing escapes the directory tree).
 
-### 账户与合规
+### Accounts and compliance
 
-#### 新增的功能
+#### Added
 
-- **登录前新增「使用须知与免责声明」弹窗**：需勾选同意后方可登录。
+- **Added a "Terms of use and disclaimer" dialog before login**: login requires checking the consent box.
 
-### 许可与依赖
+### License and dependencies
 
-#### 修改的功能
+#### Changed
 
-- **项目采用 AGPL-3.0 开源协议**，并完善 README 的许可与免责声明说明。
-- **升级 norma 至 v0.4.1**。
+- **The project is now under the AGPL-3.0 open source license**, and the README's license and disclaimer sections were improved.
+- **Upgraded norma to v0.4.1**.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 
 ## [0.3.12] - 2026-09-17
 
-### 探索链路播报板
+### Exploration chain broadcast board
 
-#### 新增的功能
+#### Added
 
-- **任务详情页新增「探索链路播报板」**（#144）：以时间轴流水视角呈现任务的探索节点（起点/目标/意图/事实/漏洞/提示/压缩），支持按类型筛选、关键字搜索、正序/倒序、分页与自动刷新；处于「最新在前的第一页」时为直播位、每轮刷新，离开该位时只累计未读计数、不打扰当前阅读，并以「N 条新播报 · 回到最新」一键返回。按天分组，长任务翻页也能认出「这是哪天的事」。
-- **播报板每行显示节点 id**（#145），便于对照探索链路图与定位具体节点。
-- **播报板节点详情展开显示上下游与锚定资产**（#147）：展开一条播报可见该节点的上游（由此而来）/下游（由此产生）关系，鼠标悬停关联条目弹出对应节点的名片（类型/状态/来源/时间/摘要/payload 片段）；并顺带列出该节点锚定的资产（类型标签 + 可辨识文本）。相关数据随播报页一并下发，展开不额外发请求。
-- **播报板搜索支持按节点 id 筛选**（#150）：搜索框在「内容 / 来源」之外新增节点 id 匹配，输入纯数字或界面展示的「#41」形式即可精确定位对应节点。
+- **The task details page gains an "Exploration chain broadcast board"** (#144): presents the task's exploration nodes (start/goal/intent/fact/vulnerability/hint/compaction) as a timeline stream, with type filtering, keyword search, ascending/descending order, pagination, and auto-refresh; while on "page one, newest first" it is a live position that refreshes every round, and leaving it only accumulates an unread count without disturbing your reading, with a one-click "N new broadcasts · back to latest" return. Grouped by day, so even when paging through long tasks you can tell "which day this was".
+- **Each broadcast board row shows the node id** (#145), making it easier to cross-reference the exploration graph and locate specific nodes.
+- **Broadcast board node details expand to show upstream/downstream and anchored assets** (#147): expanding a broadcast shows the node's upstream (where it came from) / downstream (what it produced) relationships; hovering a related entry pops up the corresponding node's card (type/status/source/time/summary/payload excerpt); and also lists the assets anchored to that node (type label + identifiable text). The related data is delivered along with the broadcast page, so expanding sends no extra requests.
+- **Broadcast board search supports filtering by node id** (#150): in addition to "content / source", the search box now matches node ids — enter a plain number or the "#41" form shown in the UI to precisely locate the corresponding node.
 
-### 意图管理
+### Intent management
 
-#### 新增的功能
+#### Added
 
-- **意图删除支持「假删除 / 真删除」两种模式**（#149）：待领、运行中、已暂停的意图均可删除，删除需填写原因；删除模式在确认弹窗中选择。
-  - **假删除（默认）**：意图置为「已删除」并把原因记入独立字段，保留意图节点与其全部产出、血缘。
-  - **真删除**：物理移除该意图，以及「仅由它支撑」的独占子孙节点（沿产出 / 意图链级联到叶子），避免留下孤立数据；被删意图的 Token 计量按原始日期归档保留；共享节点（还被其它意图引用）、目标与任务根事实一律保留，真删除弹窗会展示预计级联影响的节点数。
+- **Intent deletion supports "soft delete / hard delete" modes** (#149): Open, Running, and Paused intents can all be deleted, and deletion requires a reason; the mode is chosen in the confirmation dialog.
+  - **Soft delete (default)**: the intent is set to "Deleted" with the reason recorded in a dedicated field; the intent node and all its outputs and lineage are preserved.
+  - **Hard delete**: physically removes the intent plus its exclusive descendant nodes "supported only by it" (cascading along output / intent chains to the leaves), avoiding orphaned data; the deleted intent's token metering is archived by its original date; shared nodes (still referenced by other intents), goals, and task root facts are all preserved, and the hard-delete dialog shows the expected number of cascade-affected nodes.
 
-  两种模式都会通知规划者「该意图由用户删除 + 原因」并据此重新规划。
+  Both modes notify the planner "this intent was deleted by the user + reason" and trigger re-planning accordingly.
 
-### 操作审查
+### Operation review
 
-#### 新增的功能
+#### Added
 
-- **审批记录支持按状态与判定来源筛选**（#139）：可按审批状态、判定来源过滤审批记录，快速定位目标记录。
+- **Approval records support filtering by status and decision source** (#139): filter approval records by approval status and decision source to quickly locate target records.
 
-#### 修复的问题
+#### Fixed
 
-- **待处理审批请求独立于历史分页加载**（#133）：待处理请求不再受历史列表分页影响，翻阅历史记录时仍完整可见。
+- **Pending approval requests now load independently of history pagination** (#133): pending requests are no longer affected by history list pagination and remain fully visible while browsing history.
 
 ### Agent
 
-#### 修改的功能
+#### Changed
 
-- **Worker 角色描述改为通用网络安全平台表述**（#138）。
+- **The Worker role description was reworded to generic cybersecurity platform phrasing** (#138).
 
-#### 修复的问题
+#### Fixed
 
-- **修复冷节点压缩从不触发**：给按任务运行的规划器接上 Compactor，冷节点压缩（cold-digest）此前因未接入而从不执行，现已恢复。
+- **Fixed cold-node compression never triggering**: the per-task planner is now wired to the Compactor; cold-node compression (cold-digest) previously never ran because it was never connected, and now works again.
 
-### 聊天
+### Chat
 
-#### 新增的功能
+#### Added
 
-- **聊天支持多类型记录的 @ 引用及滚动分页**（#135）：可在聊天中 @ 引用多种类型的记录，引用候选支持滚动分页加载。
+- **Chat supports @-referencing multiple record types with scroll pagination** (#135): you can @-reference several types of records in chat, and the reference candidates load with scroll pagination.
 
-#### 修复的问题
+#### Fixed
 
-- **长消息气泡约束在会话面板内**（#137）：过长的消息气泡不再溢出会话区域。
-- **修复新对话未创建时上传文件报「缺少上传文件」**：Composer 的文件选择在清空 input 之前先把 `FileList` 快照为数组再回调；此前草稿态需先异步创建会话，恢复执行时与 input 活绑定的 `FileList` 已被清空，导致上传缺少文件字段、后端返回 400。
+- **Long message bubbles are constrained within the conversation panel** (#137): overly long message bubbles no longer overflow the conversation area.
+- **Fixed "missing uploaded file" when uploading a file before the new conversation was created**: the Composer's file selection now snapshots the `FileList` into an array before clearing the input, then calls back; previously, the draft state had to asynchronously create the conversation first, and when execution resumed, the `FileList` live-bound to the input had already been cleared, so the upload lacked the file field and the backend returned 400.
 
-### 流量
+### Traffic
 
-#### 修复的问题
+#### Fixed
 
-- **流量录制代理默认只监听 127.0.0.1**（#129、#130）：避免默认配置下开放代理暴露在其它网络接口。
+- **The traffic recording proxy now listens on 127.0.0.1 by default** (#129, #130): prevents the open proxy from being exposed on other network interfaces under the default configuration.
 
 ### Web
 
-#### 修复的问题
+#### Fixed
 
-- **修复静态导出版任务列表页丢失全局头部**。
-- **补齐 demo 漏洞详情页关联流量 mock，修复白屏**。
+- **Fixed the static-export task list page losing the global header**.
+- **Filled in the demo vulnerability details page's associated-traffic mock, fixing a white screen**.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@RuoJi6](https://github.com/RuoJi6)
@@ -242,95 +242,95 @@
 
 ## [0.3.11] - 2026-09-15
 
-### 操作审查
+### Operation review
 
-#### 新增的功能
+#### Added
 
-- **审批记录支持来源定位**（#125）：点审批记录的「来源」可跳回触发该次审批的那一次工具执行——打开原始完整会话、自动分页加载到目标位置、就地展开命令与结果并在滚动区居中高亮，前后消息保持可读；用户手动滚动时停止自动校正。跨普通对话、任务 Worker、规划器与主 Agent 分段会话，均通过持久化的 `tool_use_id` 与任务映射精确定位（新增作用域内调用 ID 索引），缺失、重复或关联不明确时显式提示而非跳到其他执行。会话被删除或任务归档/记录缺失时给出明确提示。
-- **审批记录支持翻页**（#115）。
+- **Approval records support source locating** (#125): clicking an approval record's "Source" jumps back to the exact tool execution that triggered that approval — opens the original full conversation, auto-paginates to the target position, expands the command and result in place, and centers and highlights them in the scroll area while surrounding messages stay readable; automatic adjustment stops when the user scrolls manually. Across plain conversations, task Workers, planner, and main agent segmented conversations, locating is precise via the persisted `tool_use_id` and task mapping (a new scoped call-ID index); when missing, duplicated, or ambiguous, it explicitly says so instead of jumping to another execution. A clear notice is given when the conversation was deleted or the task archive/records are missing.
+- **Approval records support pagination** (#115).
 
-#### 修改的功能
+#### Changed
 
-- **精简模型审查输入**（#124、#125）：模型审查（规则未命中后的 LLM 裁判）输入收敛为「当前这一次完整工具调用 + 明确选定的简短背景 + 本机工作目录」的版本化 JSON。背景只取真实用户消息（聊天/任务主 Agent 的当前用户消息），Worker 不再附带意图摘要、也清除从上级 Agent 继承的背景；规划器与自动触发会话不补造用户消息。不再附带任务描述、目标、操作约束、全局探索态势、历史调用或 Worker 完整意图——这些仍按原逻辑用于 Agent 执行与独立会话审计，只是不进入操作审查。所有裁决要求输出 JSON 的 `decision`/`comment`，说明必须包含「实际操作、成功后的后果、命中规则」；参数或背景中的指令不能改变审查策略。保存实际发送给模型的输入快照及指纹，旧版快照保留并标注版本，不用当前数据补造旧输入。
+- **Slimmed down model review input** (#124, #125): the model review (the LLM judge after no rule matches) input converges to a versioned JSON of "the current full tool call + explicitly selected brief background + the local working directory". The background only takes real user messages (the current user message of the chat / task main agent); Workers no longer attach intent summaries, and backgrounds inherited from parent agents are cleared; the planner and auto-triggered sessions do not fabricate user messages. Task descriptions, goals, operation constraints, global exploration situation, historical calls, and full Worker intents are no longer attached — these are still used as before for agent execution and independent session audits, just not fed into operation review. All verdicts must output JSON `decision`/`comment`, and the comment must include "the actual operation, the consequences if it succeeds, and the matched rule"; instructions in parameters or background cannot change the review policy. A snapshot and fingerprint of the actual input sent to the model is saved; old-version snapshots are kept and labeled with their version, and old inputs are not reconstructed from current data.
 
-#### 修复的问题
+#### Fixed
 
-- **模型裁决被代码块包裹时不再静默放行**（#126）：模型返回的裁决 JSON 若被 ``` 代码块包裹，此前解析失败会经模型失败策略被静默放行；现在先剥离代码块围栏再解析，解析仍失败才按已配置的失败策略处理。
+- **Model verdicts wrapped in code blocks are no longer silently allowed** (#126): if the verdict JSON returned by the model is wrapped in ``` code fences, the previous parse failure would be silently allowed via the model-failure policy; now the code fence is stripped before parsing, and only a still-failing parse falls back to the configured failure policy.
 
 ### Agent
 
-#### 新增的功能
+#### Added
 
-- **新增实验性 noa 上下文压缩**（norma 升级至 v0.4.0）：系统设置中可开启的实验功能，默认关闭。开启后由 noa（模型驱动的上下文压缩）接管主 Agent、规划器、Worker、聊天四类 Agent 的上下文压缩，替代内置压缩；压缩原文持久化归档，集中落在 `<workDir>/noa/<会话ID>/` 下（不分散在各任务目录内），按会话 ID 全局唯一分目录。接入失败自动回退内置压缩，不中断真实任务；开关每次运行读取一次，切换只影响之后启动的运行。
+- **Added experimental noa context compression** (norma upgraded to v0.4.0): an experimental feature toggleable in system settings, off by default. When enabled, noa (model-driven context compression) takes over context compression for the four agent types — main agent, planner, Worker, and chat — replacing the built-in compression; compression originals are persisted to an archive, centrally under `<workDir>/noa/<session ID>/` (not scattered across task directories), one globally unique directory per session ID. If integration fails it automatically falls back to built-in compression without interrupting real tasks; the toggle is read once per run, so switching only affects runs started afterwards.
 
-#### 修复的问题
+#### Fixed
 
-- **探索图工具在无任务上下文时拒绝而非 nil 崩溃**：非任务上下文调用探索图相关工具时返回明确错误，不再因空存储解引用崩溃。
+- **Exploration graph tools now refuse instead of nil-crashing when there is no task context**: calling exploration-graph-related tools from a non-task context returns a clear error instead of crashing on a nil store dereference.
 
 ### MCP
 
-#### 新增的功能
+#### Added
 
-- **支持旧版 SSE MCP 服务**（#117）：兼容仅提供旧式 SSE 传输的 MCP 服务端。
+- **Support for legacy SSE MCP servers** (#117): compatible with MCP servers that only provide the legacy SSE transport.
 
-### 流量
+### Traffic
 
-#### 修复的问题
+#### Fixed
 
-- **流量检索按端口感知匹配记录的主机**（#114）：`traffic_search` 的主机匹配纳入端口，避免不同端口的同主机记录相互串扰。
-- **`traffic_search` 描述迁移出错不再中断后续 reporter 迁移**：单条迁移失败被隔离，不影响后续迁移执行。
+- **Traffic search host matching is now port-aware** (#114): `traffic_search` host matching now includes the port, preventing records of the same host on different ports from cross-talking.
+- **A `traffic_search` description migration error no longer interrupts subsequent reporter migrations**: a single migration failure is isolated and does not affect later migrations.
 
 ### Web
 
-#### 修改的功能
+#### Changed
 
-- **任务复测漏洞选项增加分割线**（#122）：复测漏洞选择项之间增加分隔，视觉更清晰。
+- **Added dividers between task retest vulnerability options** (#122): separators between retest vulnerability choices for clearer visuals.
 
-#### 修复的问题
+#### Fixed
 
-- **修复 demo 任务详情页整页崩溃**：mock 模式下任务详情「会话」标签会去拉 `GET /api/tasks/<id>/side-questions`（旁路提问历史），但 mock handler 没有这条路由，被读兜底按“路径以 s 结尾即集合”返回了 `[]`，导致 `data.items` 为 `undefined`，旁路 hook 的 `merge()` 对其迭代抛 `TypeError: t is not iterable`；该异常发生在 `setItems` 的 updater 里、被 React 推迟到 render 阶段重抛，调用方 `catch` 接不住，整页被错误边界接管显示 “This page couldn't load”。现在 mock handler 显式返回空的旁路历史，`sideAPI.history` 也对返回值做归一化（`items` 非数组一律兜成 `[]`）作为防御纵深。
+- **Fixed the demo task details page crashing entirely**: in mock mode, the task details "Sessions" tab fetches `GET /api/tasks/<id>/side-questions` (side question history), but the mock handler has no such route, and the read fallback returned `[]` per "path ending in s means collection", leaving `data.items` as `undefined`; the side-question hook's `merge()` iterating over it threw `TypeError: t is not iterable`; the exception occurred in `setItems`' updater and was re-thrown by React deferred to the render phase, so the caller's `catch` could not catch it and the whole page was taken over by the error boundary showing "This page couldn't load". The mock handler now explicitly returns an empty side-question history, and `sideAPI.history` also normalizes the return value (any non-array `items` becomes `[]`) as defense in depth.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@RuoJi6](https://github.com/RuoJi6)
 
 ## [0.3.10] - 2026-09-13
 
-### 网络
+### Network
 
-#### 新增的功能
+#### Added
 
-- **网络搜索新增 DeepSeek 官方来源**：直接复用当前激活的 LLM 配置。它与其余三个来源性质不同——DeepSeek 没有可直接调用的搜索接口，搜索只存在于其 Anthropic 兼容接口内部（`web_search_20250305` 服务端工具），由 DeepSeek 服务端执行。因此它**仅支持 DeepSeek 官方端点 + anthropic 协议**（OpenAI 协议端点会直接拒绝服务端工具），且每次搜索会**额外消耗一次模型调用**、请求**不经过搜索出口代理**、也**不计入流量留痕**，返回结果**只有标题与链接**（无摘要，需正文时由 WebFetch 抓取）。设置页说明上述限制但**不做校验拦截**，是否满足由用户自行确认，可用「测试搜索」按钮实跑一次验证。
+- **Web search gains an official DeepSeek source**: it directly reuses the currently active LLM configuration. It differs in nature from the other three sources — DeepSeek has no directly callable search API; search exists only inside its Anthropic-compatible API (the `web_search_20250305` server-side tool), executed by DeepSeek's servers. Therefore it **only supports the official DeepSeek endpoint + the anthropic protocol** (OpenAI-protocol endpoints outright reject server-side tools), and each search **consumes an extra model call**, the request **does not go through the search egress proxy**, and **is not counted in traffic records**; results contain **only titles and links** (no snippets — WebFetch fetches the body when needed). The settings page documents these limits but **does not validate or block**; whether they are met is up to the user to confirm, and the "Test search" button runs a real query to verify.
 
 ### Agent
 
-#### 新增的功能
+#### Added
 
-- **worker 获得跨 work 回看能力**：新增 `search_all_worker_traces`（不必先知道 intent_id，按关键字在本任务所有 work 的执行过程里全局检索命中步骤）与 `get_worker_trace`（锁定某条 work 后列步骤流、就地按关键字搜、按 step_id 取完整内容），用于复用别的 work 见过却没写进 fact 的观察、避免重复劳动。
-- **`node_detail` 下放给 worker**：配合上面的回看工具，worker 拿到 intent_id / 节点 id 后可直接查该节点的完整详情。
-- **`add_hint` 触发的规划轮会被显式播报**：此前新增提示只把 hint 折进态势总览、让规划者自己发现；现在一次 `add_hint` 会给规划者记一条「人新增了 N 条战略提示：…」触发（批量算一条，不逐条刷屏），规划者被明确告知“本轮由新增 hint 触发”并直接看到提示内容。
+- **Workers gain cross-work lookback**: new `search_all_worker_traces` (no need to know the intent_id first — globally keyword-searches the execution processes of all works in this task for matching steps) and `get_worker_trace` (after locking onto a work, lists its step stream, searches in place by keyword, and fetches full content by step_id), used to reuse observations other works saw but never wrote into facts, avoiding duplicate work.
+- **`node_detail` is delegated to workers**: paired with the lookback tools above, once a worker has an intent_id / node id it can directly query that node's full details.
+- **Planning rounds triggered by `add_hint` are now explicitly broadcast**: previously, new hints were only folded into the situation overview for the planner to discover on its own; now one `add_hint` records a trigger for the planner like "human added N strategic hints: …" (a batch counts as one, no per-item spam), and the planner is explicitly told "this round was triggered by new hints" and sees the hint content directly.
 
-#### 修改的功能
+#### Changed
 
-- **全局态势提示改为“松绑”口吻**：鼓励探索发散、跨意图线索及时上报，而非过早收敛。
-- **精简 worker 边界措辞**：初次受阻不代表探透，聚焦“把本意图内的绕过手段走完再下结论”。
-- `insert_assets` 移除每条资产的 `related` 入参：它唯一的作用是决定要不要把这条资产加进本任务范围，值又不落库（同一资产被再次登记就作废、界面上也看不出谁被判为无关），实际只是让模型多做一次留不住的判断。
-- **测试范围(`task_scope`)不再受资产覆盖度开关影响**：`insert_assets` 的自动入范围(`source='auto'`)无论覆盖度开启与否都执行，`add_task_scope` 也始终提供给 planner / 任务内主 Agent / 目标拆解 Agent。范围是任务的授权边界、资产查询的过滤基准，覆盖度开关只决定要不要拿它当分母算指标，不该决定要不要累积范围本身。此前关闭覆盖度会让 `auto`/`agent` 两条写入路径同时失效，`task_scope` 只剩界面手工添加的行。`list_untested_assets` 仍随覆盖度关闭而隐藏（它本身就是纯覆盖度视角）。
+- **The global situation prompt now uses a "loosen up" tone**: encouraging exploratory divergence and timely reporting of cross-intent clues, rather than premature convergence.
+- **Streamlined the worker boundary wording**: a first setback does not mean fully explored — focus on "exhaust the bypass methods within this intent before concluding".
+- `insert_assets` removes the per-asset `related` parameter: its only effect was deciding whether to add the asset to this task's scope, and the value was never persisted (re-registering the same asset voids it, and the UI cannot show what was judged unrelated) — in practice it just made the model do one more judgment that nothing kept.
+- **The test scope (`task_scope`) is no longer affected by the asset coverage toggle**: `insert_assets`' automatic scope insertion (`source='auto'`) runs regardless of whether coverage is enabled, and `add_task_scope` is always provided to the planner / in-task main agent / goal-decomposition agent. Scope is the task's authorization boundary and the filter baseline for asset queries; the coverage toggle should only decide whether to use it as the denominator for metrics, not whether to accumulate scope itself. Previously, turning coverage off disabled both the `auto` and `agent` write paths, leaving `task_scope` with only manually added rows. `list_untested_assets` is still hidden when coverage is off (it is itself a pure coverage view).
 
-#### 修复的问题
+#### Fixed
 
-- **修复任务间资产互串**（#59）：`list_assets` 此前把任务 id 写死为 0、裸查整个共享资产库，模型又无从写出范围过滤条件，于是把别的任务的资产（尤其 IP）当成本任务目标，测试方向被带偏。现在它只返回落在【本任务及直接关联任务】测试范围(`task_scope`)内的资产，按**归属**匹配而非字面值：范围里有某根域即可查到其名下全部子域/服务/接口，有某网段即可查到段内主机及服务；按 id 直取范围外资产同样取不到。非任务上下文(Auto/pentest)无范围可依，仍回退全库。顺带修复 IP 直连主机(如 `http://1.2.3.4/api`)无法被网段范围命中的归属盲区。UI 的「测试资产」视图（按任务生产者过滤）不受影响。
-- **修复 worker 跨 work 回看工具被误删**：`search_all_worker_traces` / `get_worker_trace`（以及 `node_detail`）加进 worker 默认工具集后，被一段“收敛 worker 工具面”的旧迁移在启动时又解绑掉，导致 worker 实际拿不到这些工具。已把它们移出该解绑清单，并对已跑过旧迁移的库一次性补绑回 worker。
-- **修复 `/btw` 旁路提问偶发入库失败**：side_question checkpoint 落库前剥除 JSONB 不支持的 NUL(`\u0000`) 转义，避免含该字符的内容写入报错。
+- **Fixed assets crossing over between tasks** (#59): `list_assets` previously hardcoded the task id to 0 and raw-queried the entire shared asset database, and the model had no way to write scope filters, so assets from other tasks (especially IPs) were treated as this task's targets and testing went astray. Now it only returns assets within the test scope (`task_scope`) of [this task and directly linked tasks], matched by **ownership** rather than literal value: with a root domain in scope, all of its subdomains/services/endpoints are reachable; with a CIDR range in scope, hosts and services inside it are reachable; fetching an out-of-scope asset directly by id likewise fails. Non-task contexts (Auto/pentest) have no scope to rely on and still fall back to the whole database. Also fixed the ownership blind spot where direct-IP hosts (e.g. `http://1.2.3.4/api`) could not be matched by CIDR scopes. The UI's "Test assets" view (filtered by task producer) is unaffected.
+- **Fixed the worker cross-work lookback tools being accidentally removed**: after `search_all_worker_traces` / `get_worker_trace` (and `node_detail`) were added to the worker default toolset, an old "narrow the worker tool surface" migration unbound them again at startup, so workers could not actually get these tools. They have been removed from that unbind list, and databases that already ran the old migration get a one-time re-binding to worker.
+- **Fixed `/btw` side questions occasionally failing to persist**: the side_question checkpoint now strips the NUL (`\u0000`) escape that JSONB does not support before writing, avoiding write errors for content containing that character.
 
-### 触发器
+### Triggers
 
-#### 修复的问题
+#### Fixed
 
-- **合并触发会话按任务去重任务描述/目标**：多任务合并触发时，同一任务的任务描述/目标不再重复拼进消息，避免长目标反复堆叠把上下文撑爆。
+- **Merged trigger sessions deduplicate task descriptions/goals per task**: when multiple tasks are merged into one trigger, the same task's description/goal is no longer repeatedly concatenated into the message, avoiding long goals stacking up and blowing up the context.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 
@@ -338,95 +338,95 @@
 
 ### Agent
 
-#### 新增的功能
+#### Added
 
-- 任务内主 Agent 支持**多会话**：可新建、切换、独立重置上下文，每个会话都能交互。
-- 支持持久化的 `/btw` **旁路提问**：不打断主线追问，问答落库，重启后仍在。
-- `spawn_task` 新增 `source_task_ids`，新任务可**只读继承**来源任务的资产与发现。
+- The in-task main agent supports **multiple sessions**: create, switch, and independently reset context; every session is interactive.
+- Supports persistent `/btw` **side questions**: ask without interrupting the main line; Q&A is persisted and survives restarts.
+- `spawn_task` adds `source_task_ids`, letting new tasks **read-only inherit** assets and findings from source tasks.
 
-#### 修改的功能
+#### Changed
 
-- 关闭 worker 的跨 engagement 记忆并收敛其默认工具面：读上下文、跨 work 复盘属规划职责，worker 只管单条意图的执行与写回。
-- 精简 worker 默认提示词；`get_worker_output` 移除 `terminated` 与 `worker_name` 字段；精简 `insert_assets` / `list_assets` 的描述。
+- Disabled workers' cross-engagement memory and narrowed their default tool surface: reading context and cross-work retrospection are planning duties; workers only handle execution and write-back of a single intent.
+- Streamlined the worker default prompt; `get_worker_output` dropped the `terminated` and `worker_name` fields; streamlined the `insert_assets` / `list_assets` descriptions.
 
-#### 修复的问题
+#### Fixed
 
-- 修复 work 因**空转回合**提前中断的问题：模型有时会用一整轮只输出思考，既不给正文也不调工具，此时 harness 看到的是一次自然结束（`end_turn` 且无 `tool_use`），直接以 `completed` + 空总结收场——一条还没做完的意图就断在半路，表现为「任务正常结束但没有任何文字总结」。五层 LLM 重试一层都够不着它：它不是错误，同 provider 安全窗口重试的入口是"流失败"，熔断在 `err == nil` 时直接判成功，意图重跑只认 `model_error`；SDK 的空响应重试也够不着，因为那层以"有没有 yield 过事件"判空，而思考增量本身就是事件。现在 work 的 Stop 钩子会识别这种回合并注入一条续跑指令，让模型带着已经产出的思考继续执行下一步——刻意不选"原样重发"，因为这类空转通常由提示词与上下文形状决定，是稳定行为而非随机抽风，重发只会让模型再想一遍。
-- 次数复用 LLM 页「重试与退避」里的**空响应重试次数**（两者都在回答"模型完成了却没产出实质内容"，只是判据与手段不同），默认 2 次，填 `-1` 即关掉、退回原先"空转即收场"的行为。它是一条意图的**总量**上限而非连续次数：harness 自身已限死连续空转只推一次，只有真正发生过工具回合配额才刷新，所以这个数挡的是「工具 → 空转 → 推 → 工具 → 空转」这类循环把意图预算耗光。触发时日志记 `[work <worker> · #<意图>] 空转回合…注入续跑指令 (n/N)`。设计见 `docs/LLM重试设计.md` §1.1。
-- 修复长对话下 `/btw` 的上下文预算与输入布局；非安全上下文（非 HTTPS 访问）降级生成旁路请求 ID。
+- Fixed works being cut short by **idle-spin rounds**: the model sometimes spends an entire round outputting only thinking, with neither content nor tool calls, and the harness sees a natural end (`end_turn` with no `tool_use`), finishing directly as `completed` + empty summary — an unfinished intent breaks halfway, showing up as "the task ended normally but with no written summary". None of the five LLM retry layers can reach it: it is not an error; the same-provider safe-window retry's entry point is "stream failure"; circuit breaking judges success directly when `err == nil`; intent rerun only recognizes `model_error`; the SDK's empty-response retry cannot reach it either, because that layer judges emptiness by "whether any event was yielded", and thinking deltas are themselves events. Now the work's Stop hook recognizes this kind of round and injects a continue instruction, letting the model carry its already-produced thinking into the next step — deliberately not "resend as-is", because such idle spins are usually determined by the prompt and context shape, a stable behavior rather than a random glitch, and resending would just make the model think it all over again.
+- The count reuses the **empty-response retry count** from the LLM page's "Retry & Backoff" (both answer "the model finished but produced nothing of substance", just with different criteria and means), default 2, and `-1` turns it off, reverting to the previous "idle spin means wrap up" behavior. It is a **total** cap per intent, not a consecutive count: the harness itself already limits consecutive idle spins to one push, and the quota only refreshes after a real tool round, so this number guards against "tool → idle spin → push → tool → idle spin" loops burning through the intent budget. When triggered, the log records `[work <worker> · #<intent>] idle-spin round…injecting continue instruction (n/N)`. See `docs/llm-retry-design.md` §1.1 for the design.
+- Fixed the `/btw` context budget and input layout in long conversations; insecure contexts (non-HTTPS access) degrade how side-question request IDs are generated.
 
-### 流量
+### Traffic
 
-#### 新增的功能
+#### Added
 
-- 漏洞支持**关联多条流量证据**，可排序、加备注、按角色区分（请求/响应/佐证）。
-- 报告 Agent 会在写报告前**自动关联**相关流量证据。
-- 新增 Agent **流量绑定开关**，并补齐证据在 Agent 之间的交接。
+- Vulnerabilities support **linking multiple traffic evidence items**, sortable, with notes, and distinguished by role (request/response/corroboration).
+- The report agent **automatically links** relevant traffic evidence before writing the report.
+- Added an Agent **traffic binding toggle**, and completed the evidence handoff between agents.
 
-### 任务
+### Tasks
 
-#### 新增的功能
+#### Added
 
-- 支持**会话级漏洞复测**：复测跑在独立 Agent 会话里，列表与详情显示运行状态。
+- Supports **session-level vulnerability retesting**: retests run in independent agent sessions, with run status shown in lists and details.
 
-### 拦截
+### Interception
 
-#### 新增的功能
+#### Added
 
-- 审批记录新增**详情与执行审计**：可查看工具请求上下文、模型/规则初判、执行输出与参数指纹。
+- Approval records gain **details and execution audit**: view the tool request context, model/rule initial verdicts, execution output, and parameter fingerprints.
 
-### 资产
+### Assets
 
-#### 新增的功能
+#### Added
 
-- 任务测试资产支持 **DSL 搜索**。
+- Task test assets support **DSL search**.
 
 ### LLM
 
-#### 修复的问题
+#### Fixed
 
-- 修复测试连接未补发自定义会话头，导致 opencode zen 返回 400 的问题。
+- Fixed the test connection not resending custom session headers, which made opencode zen return 400.
 
-### 网络
+### Network
 
-#### 新增的功能
+#### Added
 
-- MCP 的 HTTP 传输支持**跳过 TLS 证书校验**，便于接入自签证书的服务。
+- MCP's HTTP transport supports **skipping TLS certificate verification**, making it easier to connect services with self-signed certificates.
 
 ### UI
 
-#### 新增的功能
+#### Added
 
-- 会话列表按 Agent 分组，支持展开收起与独立置顶；对话支持按 Agent 筛选。
-- 攻击链路图渲染压缩（digest）节点，并收缩其成员。
+- The session list is grouped by agent, supports expand/collapse and independent pinning; conversations support filtering by agent.
+- The attack chain graph renders compaction (digest) nodes and collapses their members.
 
-#### 修复的问题
+#### Fixed
 
-- 修复登录凭据不同步导致的白屏。
-- 拦截提示文案改为明确标示「平台管控」，避免被误读成目标侧的防御。
+- Fixed the white screen caused by out-of-sync login credentials.
+- The interception notice wording now explicitly marks it as "platform control", avoiding being misread as target-side defense.
 
-### 部署与更新
+### Deployment and updates
 
-#### 新增的功能
+#### Added
 
-- 支持**页面一键更新**：系统配置页新增「版本与更新」卡片，顶栏在有新版时亮出提示。流程为下载发布包 → 校验 `SHA256SUMS` → 冒烟测试 → 暂存 → 退出由守护脚本重新拉起完成换装，页面自动刷新。
-- 新增守护启动脚本 `start.sh` / `start.bat` 作为正式启动入口（发布包与 Docker 镜像均已带上，`install.sh` 不变），按退出码决定是否重新拉起，并负责把 SIGTERM 转发给 artex。校验与换装逻辑都在 Go 里，脚本保持傻瓜化。
-- 失败自动兜底：校验或冒烟不通过就丢弃、继续跑当前版本；新版连续 3 次启动失败则回滚上一版本。设置页另有手动回滚（注意数据库结构不会回退）。
-- 更新只认 GitHub 域名且强制 HTTPS，发布源不可配置；开发构建禁用一键更新。GitHub 查询结果缓存 30 分钟，避免顶栏提示耗尽 API 配额。
+- Supports **one-click update from the page**: the system settings page gains a "Version & Updates" card, and the top bar shows a notice when a new version is available. The flow is: download the release package → verify `SHA256SUMS` → smoke test → stage → exit and get relaunched by the daemon script to complete the swap, with the page auto-refreshing.
+- Added the daemon startup scripts `start.sh` / `start.bat` as the official launch entry (already shipped in release packages and the Docker image; `install.sh` unchanged). They decide whether to relaunch based on the exit code and forward SIGTERM to artex. Verification and swap logic all live in Go; the scripts stay dumb-simple.
+- Automatic failure fallback: failed verification or smoke test discards the staged file and keeps running the current version; if the new version fails to start 3 times in a row it rolls back to the previous one. The settings page also has manual rollback (note the database schema is not rolled back).
+- Updates only trust GitHub domains and enforce HTTPS; the release source is not configurable; dev builds disable one-click update. GitHub query results are cached for 30 minutes so the top-bar notice does not exhaust the API quota.
 
-#### 已知限制
+#### Known limitations
 
-- Docker 下只换程序、不换镜像：工具链不会跟着升级，且重建容器会退回镜像自带版本，需要时仍用 `docker compose pull artex`。
-- 不同步发布包里的 `skills/`，新版新增的内置 skill 不会自动生效。
-- 更新即重启，会中断正在运行的任务。
+- Under Docker only the program is swapped, not the image: toolchains are not upgraded along with it, and recreating the container reverts to the image-bundled version — use `docker compose pull artex` when needed.
+- The `skills/` from the release package are not synced; new built-in skills in the new version do not take effect automatically.
+- Updating means restarting, which interrupts running tasks.
 
-### 依赖
+### Dependencies
 
-#### 修改的功能
+#### Changed
 
-- 升级 norma 至 v0.3.7。
+- Upgraded norma to v0.3.7.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@RuoJi6](https://github.com/RuoJi6)
@@ -435,71 +435,71 @@
 
 ### LLM
 
-#### 新增的功能
+#### Added
 
-- LLM 页新增「重试与退避」标签页：五层重试的**次数**与**间隔**都可以配。一次模型调用的失败由内到外经过建连重试（SDK，流开始前的连接重置 / 超时 / 429 / 5xx）、空响应重试（SDK，正常结束却没有任何内容，仅 openai 格式）、同 provider 安全窗口重试（未向调用方交付任何输出前的断流重放）、轮询熔断（连续失败到阈值就冷却跳过）、意图重跑（worker 以 model_error 收场后整条意图重跑）五层，内层用尽才轮到外层。每层两个旋钮，语义统一：留空 = 用原本的默认次数与指数退避；填次数就用该次数；填间隔就把指数退避换成固定间隔；填 -1 = 关掉这层重试。前三层跟着端点走，可在每个模型配置里逐字段覆盖全局默认（只钉间隔的仍继承全局次数）；熔断与意图重跑是进程级语义，只有全局一份。保存后热生效，不需要重启。全部留空即当前行为，旧库升级后逐字节不变（新列默认 0、settings 键不存在即全默认）。连接测试刻意不带这些参数——它有 30s 硬超时，叠上用户配的重试只会把能用的端点测成超时失败。设计见 `docs/LLM重试设计.md`。
-- 每个 LLM 配置支持自定义**会话头**（`session_header_key`）：非空时每次 LLM 请求都会带上该 HTTP 头，头值为当前运行的 session id（chat 会话为 `conv-<id>`、worker 为 `exp<x>-worker-i<intent>` 等），用于某些按 session-id 头做提示缓存 / 粘性路由的网关。实现上从请求 context 里读取 session id 注入，无需改 norma，同一共享 provider 也能按会话发出不同头值。旧库带迁移，前端 LLM 配置弹窗新增输入框。
+- The LLM page gains a "Retry & Backoff" tab: both the **count** and the **interval** of all five retry layers are configurable. A failed model call passes, from inside out, through connect retry (SDK; connection reset / timeout / 429 / 5xx before the stream starts), empty-response retry (SDK; a normal end with no content at all, openai format only), same-provider safe-window retry (replaying a broken stream before any output was delivered to the caller), polling circuit breaker (cool down and skip after consecutive failures hit the threshold), and intent rerun (after a worker ends with model_error, the whole intent reruns) — an outer layer only kicks in after the inner ones are exhausted. Each layer has two knobs with unified semantics: empty = use the original default count with exponential backoff; a count = use that count; an interval = switch exponential backoff to a fixed interval; -1 = turn off this layer. The first three layers follow the endpoint and can override the global defaults field by field in each model configuration (pinning only the interval still inherits the global count); circuit breaking and intent rerun are process-level semantics with only one global copy. Changes take effect hot after saving, no restart needed. Leaving everything empty is the current behavior, and upgraded databases are byte-for-byte unchanged (new columns default to 0; absent settings keys mean all defaults). The connection test deliberately does not carry these parameters — it has a 30s hard timeout, and stacking user-configured retries would only misdiagnose a working endpoint as a timeout failure. See `docs/llm-retry-design.md` for the design.
+- Each LLM configuration supports a custom **session header** (`session_header_key`): when non-empty, every LLM request carries this HTTP header whose value is the current run's session id (`conv-<id>` for chat sessions, `exp<x>-worker-i<intent>` for workers, etc.), for gateways that do prompt caching / sticky routing by session-id header. Implementation reads the session id from the request context and injects it, no norma changes needed, and even a shared provider can emit different header values per session. Existing databases get a migration, and the frontend LLM configuration dialog gains an input box.
 
-#### 修复的问题
+#### Fixed
 
-- 修复保存 LLM 配置时因会话头字段为空直接报 `23502` 的问题：该列是 `NOT NULL DEFAULT ''`，此前误套 `NULLIF($n,'')` 把未填写的会话头写成 NULL 触发非空约束，现按空串语义直接传参。
+- Fixed saving an LLM configuration failing with `23502` when the session header field was empty: the column is `NOT NULL DEFAULT ''`, but a misplaced `NULLIF($n,'')` wrote an unfilled session header as NULL and tripped the not-null constraint; it now passes the parameter directly with empty-string semantics.
 
 ### Agent
 
-#### 新增的功能
+#### Added
 
-- 墙钟超时改为**就地收尾**：依赖 norma v0.3.6，`MaxDuration` 到点会打断正在跑的工具并在活 ctx 上按收尾轮数续跑（写回已识别内容 + 总结，终态为 timeout），不再依赖 worker/planner 各自的 `maxDur+90s` 外部硬 ctx 把卡住的 run 直接杀成 `aborted_tools`。chat 走同一 harness 自动获得同样行为，mainagent 无 `MaxDuration` 不受影响。
-- 停摆兜底：planner 在心跳 / 无变动唤醒且全图已无任何 open 或 running 意图时，开场白改为停摆告警，明确告知无 worker 在跑、无排队方向，本轮必须产出一个或多个互不重复的新意图（不得产出 0 意图）。
+- Wall-clock timeout now **wraps up in place**: depending on norma v0.3.6, when `MaxDuration` hits, the running tool is interrupted and the run continues on a live ctx for the wrap-up rounds (writing back identified content + summary, final state timeout), instead of relying on worker/planner's own `maxDur+90s` external hard ctx to kill a stuck run straight into `aborted_tools`. Chat goes through the same harness and gets the same behavior automatically; mainagent has no `MaxDuration` and is unaffected.
+- Stall fallback: when the planner wakes on a heartbeat / no-change wake-up and the whole graph has no open or running intents left, its opening message becomes a stall alarm, clearly stating that no worker is running and no direction is queued, and that this round must produce one or more mutually non-duplicate new intents (zero intents is not allowed).
 
-#### 修改的功能
+#### Changed
 
-- worker 提示词重构：意图 / 启动指令 / 锚定资产原始 JSON 移入 system prompt，每轮重拼、绝不被 compaction 压掉，续跑也不依赖 transcript 首消息留存；启动 user 消息瘦身为仅全局态势 overview（可降级、容忍 stale）。代价是 system 混入 per-intent 数据、失去跨意图缓存复用，是「不丢意图」的刻意取舍。
-- 精简 planner / worker 默认正文并修正若干实战问题：planner 对 `recent_done` 按状态区分（blocked/exhausted 先查 trace 再决定，不当死路也不无脑重跑）、否定结论改为「观察 / 存疑、非定论」且采信前看 evidence、目标未达成且无 open/running 意图必须产出（硬底线）、深度优先于覆盖度；worker 否定类结论只写「观察 + 试探性读法」、判决权归 planner，跨意图线索写进 fact 的 summary 交规划者、不自己追。reseed 会把新默认作为新版本追加并切过去，用户自定义 / 旧版本保留在历史可回滚。
-- 收敛 work agent 默认工具集与资产写回提示：worker 只负责单条意图的执行与写回，读上下文 / 跨 work 复盘属规划职责，故从其默认工具移除 `list_facts` / `node_detail` / `list_companies` 及跨 work 检索（`search_all_worker_traces` / `list_worker_traces` / `get_worker_trace`），只留 `list_findings`（报漏洞前查重）+ `add_finding` / `record_fact` + `insert_assets` / `list_assets`；提示词删掉与 `insert_assets` schema 冲突的陈旧字段说明（`type=tech`/`on_url`/`props`）。旧库带一次性迁移剥离对应绑定，planner/main 的同名绑定不动。
+- Worker prompt rework: the intent / launch instructions / anchored-asset raw JSON moved into the system prompt, reassembled every round, never compacted away, and continuation no longer depends on the transcript's first message surviving; the launch user message slimmed down to just the global situation overview (degradable, stale-tolerant). The cost is per-intent data mixing into system and losing cross-intent cache reuse — a deliberate trade-off for "never lose the intent".
+- Streamlined planner / worker default bodies and fixed several field issues: the planner distinguishes `recent_done` by status (blocked/exhausted → check the trace before deciding, neither treated as a dead end nor blindly rerun), negative conclusions become "observation / doubtful, not verdict" with evidence checked before acceptance, an unmet goal with no open/running intents must produce output (hard floor), and depth takes priority over coverage; worker negative conclusions only write "observation + tentative reading", the verdict belongs to the planner, and cross-intent clues go into a fact's summary for the planner instead of being chased by the worker itself. Reseeding appends the new defaults as a new version and switches to it; user-customized / old versions are kept in history and can be rolled back.
+- Narrowed the work agent default toolset and the asset write-back hints: workers only handle execution and write-back of a single intent — reading context / cross-work retrospection are planning duties — so `list_facts` / `node_detail` / `list_companies` and the cross-work retrieval tools (`search_all_worker_traces` / `list_worker_traces` / `get_worker_trace`) were removed from their default tools, keeping only `list_findings` (dedup before reporting vulnerabilities) + `add_finding` / `record_fact` + `insert_assets` / `list_assets`; the prompt dropped stale field descriptions that conflict with the `insert_assets` schema (`type=tech`/`on_url`/`props`). Existing databases get a one-time migration stripping the corresponding bindings; the same-named bindings of planner/main are untouched.
 
-### 探索图
+### Exploration graph
 
-#### 新增的功能
+#### Added
 
-- **探索图冷节点压缩（cold-digest）**：把老且长期不活跃的意图 / 事实折叠成 digest 节点在 `graph_overview` 里展示，原始节点永久保留、按 id 可完整还原（存储无损、只压呈现、折叠可逆）。冷热判定按逆向可达 + 任一活分支即热，配 R=6 轮防抖与连通分量分组；后台压缩（minor 折未覆盖冷块、major 回源重压合并碎片）带活跃度复核与冷却互斥，绝不上热路径也绝不覆盖已复活节点。概览侧提供 `cold_digests` 与按资产索引的 `cold_index`，`expand_digest` / `expand_index` 负责还原。关联 / 继承任务的概览同样复用其自身折叠视图，`expand_digest` 支持跨任务只读还原。`expand_digest` / `expand_index` 只给 planner 与 main agent，不给 worker。均带旧库迁移。
-- `graph_overview` 全量输出 `finding_list`：findings 是任务最高价值产物且单任务通常不多，改为在概览里全量带出（不像 facts 只给最近窗口），planner/worker 每轮即可一眼看全所有确认漏洞，无需再调 `list_findings`。每条精简为 `{id, summary, evidence?, from_intent?, assets?}`，其中受影响资产直接给可读内容（url / 域名 / ip:port）而非裸 id。
+- **Exploration graph cold-node compression (cold-digest)**: folds old, long-inactive intents / facts into digest nodes shown in `graph_overview`; the original nodes are kept forever and fully restorable by id (lossless storage, presentation-only compression, reversible folding). Hot/cold is determined by reverse reachability + any live branch making it hot, with R=6 rounds of debounce and connected-component grouping; background compression (minor folds uncovered cold blocks, major re-compresses from source and merges fragments) has activity rechecks and cooldown mutual exclusion, never touches the hot path and never overwrites revived nodes. The overview side provides `cold_digests` and the per-asset `cold_index`; `expand_digest` / `expand_index` restore them. Linked / inherited tasks' overviews likewise reuse their own folded views, and `expand_digest` supports cross-task read-only restore. `expand_digest` / `expand_index` go to planner and main agent only, not workers. All with migrations for existing databases.
+- `graph_overview` now outputs `finding_list` in full: findings are a task's highest-value output and usually few per task, so they are now fully included in the overview (unlike facts, which only give a recent window) — planner/worker can see all confirmed vulnerabilities at a glance each round without calling `list_findings`. Each is slimmed to `{id, summary, evidence?, from_intent?, assets?}`, with affected assets given as readable content (url / domain / ip:port) instead of bare ids.
 
-#### 修改的功能
+#### Changed
 
-- `graph_overview` 不再平铺 `hosts`：coverage 块移除 host 列表（大范围任务里每轮最多携带 500 个 host 字符串，对规划决策价值有限），只保留 `host_count`，具体主机按需 `list_assets` 查。新增顶层 `done_intents_total`（已结束意图总数），与被截断到 ≤15 的 `recent_done_intents` 平行，让 planner 去重时知道有无被截。
+- `graph_overview` no longer lists `hosts` flat: the coverage block drops the host list (in large-scope tasks it carried up to 500 host strings per round, of limited value to planning decisions) and keeps only `host_count`; specific hosts are queried on demand via `list_assets`. Added a top-level `done_intents_total` (total finished intents), parallel to `recent_done_intents` which is truncated to ≤15, so the planner knows whether truncation happened when deduplicating.
 
-### 工具
+### Tools
 
-#### 修改的功能
+#### Changed
 
-- `add_company_scope` 默认绑定由 worker 改为 planner：定义企业资产范围属规划 / 主控 / Auto 的职责，worker 只执行探索。新库 seed 默认绑定为 mainagent/planner/auto，老库带一次性迁移。
-- planner 默认绑定 `list_assets`：现同时具备 `list_assets`（DSL 全库检索）与 `list_untested_assets`（范围内未测），老库一次性回填、不覆盖用户解绑。
+- `add_company_scope` default binding changed from worker to planner: defining a company's asset scope is the duty of planning / main control / Auto; workers only execute exploration. Fresh seeds default-bind to mainagent/planner/auto; existing databases get a one-time migration.
+- planner now default-binds `list_assets`: it has both `list_assets` (DSL full-database search) and `list_untested_assets` (untested within scope); existing databases get a one-time backfill that does not override user unbindings.
 
-### 任务
+### Tasks
 
-#### 新增的功能
+#### Added
 
-- 任务列表新增「运行中 Worker」列：统计该任务下 `state='running'` 的意图节点数，口径与任务详情页概览的「运行中 Worker」完全一致，无运行中 Worker 时显示 0。
+- The task list gains a "Running Workers" column: counts the intent nodes with `state='running'` under that task, with exactly the same semantics as the "Running Workers" in the task details overview; shows 0 when none are running.
 
-### 网络
+### Network
 
-#### 新增的功能
+#### Added
 
-- 新增**全局出口代理**配置：所有目标流量可经统一的全局代理出网（http/https/socks5，支持 `user:pass`）。开启流量捕获时作为 MITM 记录代理的上游（流量照录再经代理出网，拦截与透传两条路径都走上游、不泄露源 IP）；关闭捕获时直接注入 agent 的 bash 环境与 WebFetch（`proxyEnv` 增加 `ALL_PROXY` 支持 socks5）。配置存于 settings KV 表（无需迁移），前端系统配置页新增「全局代理」卡片，与网络搜索代理、LLM 代理相互独立。
+- Added a **global egress proxy** configuration: all target traffic can egress through one unified global proxy (http/https/socks5, `user:pass` supported). When traffic capture is on, it acts as the upstream of the MITM recording proxy (traffic is still recorded, then egresses via the proxy; both interception and passthrough paths use the upstream and never leak the source IP); when capture is off, it is injected directly into the agent's bash environment and WebFetch (`proxyEnv` gains `ALL_PROXY` for socks5). The configuration lives in the settings KV table (no migration needed); the frontend system settings page gains a "Global proxy" card, independent of the web search proxy and the LLM proxy.
 
 ### UI
 
-#### 修复的问题
+#### Fixed
 
-- 修正意图状态标签的语义错误：`exhausted`「已穷尽」→「预算耗尽」（实为达步数 / 时间预算被中途掐断、只写回部分结果，并非该方向已探尽）、`blocked`「被拦截」→「执行出错」（实为模型 / API / 网络故障重试用尽、意图基本没真正探成，并非目标 / WAF 拦截），并补上此前缺失的 `stopped`「已停止」（用户手动停止的 work）。
+- Fixed semantic errors in intent status labels: `exhausted` "Exhausted" → "Budget exhausted" (it actually means the step/time budget was cut off midway with only partial results written back, not that the direction was fully explored), `blocked` "Blocked" → "Error" (it actually means model / API / network failures exhausted retries and the intent barely got explored, not target / WAF interception), and added the previously missing `stopped` "Stopped" (a work manually stopped by the user).
 
-### 依赖
+### Dependencies
 
-#### 修改的功能
+#### Changed
 
-- 升级 norma 至 v0.3.4：MCP 工具输出增加截断与落盘（见 `651b961`），后续 v0.3.6 支撑墙钟就地收尾。
+- Upgraded norma to v0.3.4: MCP tool output gains truncation and disk spilling (see `651b961`); the later v0.3.6 supports in-place wall-clock wrap-up.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 
@@ -507,61 +507,61 @@
 
 ### LLM
 
-#### 新增的功能
+#### Added
 
-- 模型配置新增「输出上限」，并可选择上限用哪个请求字段名：上限限制单次回复最多生成多少 token，随每次请求发出，0（默认）= 不发送该字段、由服务端默认值决定；它与「上下文窗口」是两回事——后者是模型总容量，只在本地用来算压缩阈值，不出现在请求里。字段名开关仅对 `openai`（Chat Completions）格式有意义：空（默认）发 `max_tokens`，绝大多数兼容网关只认它；OpenAI 官方推理模型（o 系列 / GPT-5）反过来只认 `max_completion_tokens`，收到 `max_tokens` 会直接报 `unsupported_parameter`，这类端点需手动切到新字段。两种格式各自定死了字段名（Anthropic 为 `max_tokens`、Responses API 为 `max_output_tokens`），故非 openai 格式该开关置灰并在保存时清空。同时补上一条此前从未接通的链路：planner / worker / chat / 主 Agent / 目标拆解五处都没设过输出上限，openai 系压根不发、Anthropic 走 SDK 的 8192 兜底，光加配置项而不接这条线，填了数字也不会生效；现在取值与「流式输出」一样按配置每轮解析，故障转移切换后下一轮即生效。旧库升级后行为完全不变（新列默认 0 与空字段名）。
-- 后台点「测试」时把每次 HTTP 尝试的状态码与网关原始响应体打进服务端日志（响应体裁到 4K），便于诊断 401、额度文案、空帧、返回 HTML 页面等情况，不再只能看到 UI 折叠后的 ok / err。该日志不依赖「LLM 记录」开关。
+- Model configurations gain an "output limit", plus a choice of which request field name carries it: the limit caps how many tokens a single reply may generate and is sent with every request; 0 (default) = do not send the field, the server's default decides. It is not the same as the "context window" — the latter is the model's total capacity, used only locally to compute compression thresholds, and never appears in requests. The field-name switch only matters for the `openai` (Chat Completions) format: empty (default) sends `max_tokens`, which the vast majority of compatible gateways only accept; OpenAI's official reasoning models (o-series / GPT-5), conversely, only accept `max_completion_tokens` and respond to `max_tokens` with `unsupported_parameter`, so such endpoints must be switched manually. The other two formats hardcode their field names (Anthropic is `max_tokens`, Responses API is `max_output_tokens`), so for non-openai formats the switch is greyed out and cleared on save. Also connected a link that was never wired before: none of planner / worker / chat / main agent / goal decomposition ever set an output limit — openai-style never sent it, Anthropic fell back to the SDK's 8192 — so adding the config without wiring this link would make any filled number ineffective; now the value is resolved per round from the configuration, just like "streaming output", and takes effect the round after a failover switch. Behavior is completely unchanged after upgrading existing databases (new column defaults to 0 and empty field name).
+- Clicking "Test" in the backend now logs each HTTP attempt's status code and the gateway's raw response body to the server log (bodies truncated to 4K), making it easier to diagnose 401s, quota messages, empty frames, HTML page responses, etc., instead of only seeing the UI's collapsed ok / err. This logging does not depend on the "LLM records" toggle.
 
-#### 修改的功能
+#### Changed
 
-- 任务 LLM 配置链改为任何状态都可修改，不再限制「运行中 / 暂停 / 配置链耗尽」：任务结束（done / failed / timeout）后主 Agent 对话仍走这条链，链上模型出问题时原先既不能改也就没法继续交互。后端 HTTP 与 DB 事务两处终态拦截一并去掉，前端弹窗对终态任务也开放编辑与保存。终态任务保存时不再重开额度阻塞意图（那些意图会被挪到 open，既没有 worker 执行、也不再满足「重跑意图」的条件），想继续跑仍走重跑意图 / 新增目标，由它们把任务重新拉回运行态。
+- The task LLM configuration chain can now be modified in any state, no longer restricted to "Running / Paused / chain exhausted": after a task ends (done / failed / timeout), the main agent conversation still uses this chain, and when a model on the chain had problems you previously could neither edit it nor continue interacting. Both terminal-state blocks — the backend HTTP layer and the DB transaction layer — were removed, and the frontend dialog allows editing and saving for terminal tasks too. Saving a terminal task no longer reopens quota-blocked intents (those intents are moved to open — no worker executes them, and they no longer meet the "rerun intent" conditions); to keep running, use rerun intent / add goal, which pull the task back to the running state.
 
 ### Agent
 
-#### 修改的功能
+#### Changed
 
-- 「给运行中的 Worker 发消息调方向」改为复用已有的暂停 / 恢复 + transcript resume 机制，行为与主 Agent 对话一致：此前走的是一套自建的介入持久化协议，牵动调度屏障、恢复流程与十余处活动查询过滤。现在消息经下一轮输入注入，意图在专属 goroutine 里直接跑，不受 3 槽 worker 池限制、随发随跑；前端保留消息框并恢复「直接继续」按钮，发送改由 SSE 承载。无 DB schema 改动。取舍：消息仅存内存、不做崩溃恢复，且发消息时该任务可能瞬时超并发一个 worker（低频场景，可接受）。
+- "Messaging a running Worker to adjust its direction" now reuses the existing pause / resume + transcript resume mechanism, behaving consistently with main agent conversations: it previously used a self-built intervention persistence protocol that touched scheduling barriers, recovery flows, and a dozen-plus activity query filters. Now messages are injected via the next round's input, and the intent runs directly in a dedicated goroutine, unconstrained by the 3-slot worker pool — send and it runs; the frontend keeps the message box and restores the "Continue directly" button, with sending now carried over SSE. No DB schema changes. Trade-offs: messages live only in memory with no crash recovery, and the task may transiently exceed concurrency by one worker while messaging (a low-frequency scenario, acceptable).
 
-### 任务
+### Tasks
 
-#### 修复的问题
+#### Fixed
 
-- 修复归档大型任务时内存耗尽（OOM）崩溃的问题：归档改为流式写入快照，不再把整个任务一次性读进内存；同时补齐冷归档路径上的三处恢复缺口——现代安装的流量只存在 SQLite 里，此前在 PostgreSQL 提交与 SQLite 提交之间崩溃会让已归档任务的流量滞留在热存储且无从恢复，现在无论有无历史目录都会写暂存日志，缺失的 `journal.json` 也按可丢弃处理。
-- 修复任务较多时系统卡顿的问题：加载对话与加载界面存在明显延迟。任务列表、任务上下文与探索记录的查询一并优化，前端的仪表盘、对话页与任务详情页同步减少了重复请求。
+- Fixed out-of-memory (OOM) crashes when archiving large tasks: archiving now streams the snapshot instead of reading the whole task into memory at once; also closed three recovery gaps on the cold-archive path — traffic from modern installs lives only in SQLite, and previously a crash between the PostgreSQL commit and the SQLite commit would leave an archived task's traffic stranded in hot storage with no way to recover; now a staging journal is written whether or not a history directory exists, and a missing `journal.json` is treated as discardable.
+- Fixed system sluggishness with many tasks: loading conversations and loading pages had noticeable delays. Queries for the task list, task context, and exploration records were optimized together, and the frontend dashboard, conversation page, and task details page reduced duplicate requests in sync.
 
-### 资产
+### Assets
 
-#### 修改的功能
+#### Changed
 
-- 去掉企业资产范围「最多 256 条规则」的限制：逐个 IP / 域名录入范围的企业很容易撞上这个上限，撞上之后只能拆成多个企业，而范围本身并不因为条数多就更慢。前后端与 demo mock 三处上限一并移除，单条规则仍限 1024 字符，请求正文 2 MiB 的上限保留作兜底（约合四五万条规则）。
+- Removed the "at most 256 rules" limit on company asset scopes: companies entering scopes IP by IP / domain by domain easily hit this cap, after which they could only split into multiple companies, even though the scope itself is no slower with more entries. The cap was removed in all three places — frontend, backend, and demo mock; each rule is still limited to 1024 characters, and the 2 MiB request body cap remains as a backstop (roughly forty to fifty thousand rules).
 
-### 技能
+### Skills
 
-#### 修复的问题
+#### Fixed
 
-- 修复上传技能压缩包报「上传失败：zip: unsupported compression」的问题：Go 标准库只内置 Store / Deflate 两种解压器，压缩软件在非默认档位下写出的 bzip2、Zstandard 包一律解不开。现在补上这两种解压器（纯 Go 实现，不引新的外部依赖）；Deflate64 / LZMA / XZ / PPMd 等确实解不了的方式，以及加密压缩包，改为在解压前就报出中文提示，直接点名是哪个文件用了哪种压缩方式、该怎么重新打包，不再把底层英文错误甩给用户。
-- 修复技能内文件名校验把中文文件名判为非法的问题：路径校验原先是 `[A-Za-z0-9-_./]` 的 ASCII 白名单，压缩包里只要有一个中文命名的文件（`参考/说明.md` 之类），整包上传就会以「压缩包含非法路径」失败。改为 Unicode 黑名单：允许各种语言的文件名与空格，仍然拒绝控制字符、非法 UTF-8、零宽与双向控制字符（RLO 文件名伪装）、`\ % # ? * : " < > |` 以及 `..` / 绝对路径 / 空路径段，防目录穿越的行为不变。技能名同样放开——ASCII 仍限小写字母、数字与连字符（agentskills.io 规范），中文等非 ASCII 字母可直接作技能名，但不接受空格、点和路径分隔符。
-- 修复 Windows 压缩软件打出的中文包解压后文件名乱码或整包被拒的问题：这类 zip 不置 UTF-8 标志位、按 GBK 写文件名，现在按 GBK 兜底解码后再做路径校验。同时 `name: "中文技能"` 这种带引号的 frontmatter 也能正确取到技能名。
+- Fixed "upload failed: zip: unsupported compression" when uploading skill archives: the Go standard library only ships Store / Deflate decompressors, so bzip2 and Zstandard archives written by compression software at non-default settings could not be opened at all. Both decompressors are now added (pure Go implementations, no new external dependencies); methods that genuinely cannot be decompressed, like Deflate64 / LZMA / XZ / PPMd, and encrypted archives, now produce a clear message before extraction naming exactly which file uses which compression method and how to repackage it, instead of throwing the low-level English error at the user.
+- Fixed skill-internal filename validation rejecting Chinese filenames as illegal: path validation used to be an ASCII whitelist of `[A-Za-z0-9-_./]`, so an archive with even one Chinese-named file (like `reference/notes.md`) failed the whole upload with "archive contains illegal paths". Now it's a Unicode blacklist: filenames in any language and spaces are allowed, while control characters, invalid UTF-8, zero-width and bidi control characters (RLO filename spoofing), `\ % # ? * : " < > |`, and `..` / absolute paths / empty path segments are still rejected — directory traversal protection is unchanged. Skill names are likewise relaxed — ASCII is still limited to lowercase letters, digits, and hyphens (the agentskills.io spec), while non-ASCII letters like Chinese can be used directly as skill names, but spaces, dots, and path separators are not accepted.
+- Fixed garbled filenames or whole-package rejection when extracting Chinese-language archives made by Windows compression software: such zips do not set the UTF-8 flag and write filenames as GBK; they are now decoded with a GBK fallback before path validation. Also, quoted frontmatter like `name: "My Skill"` now correctly yields the skill name.
 
 ### UI
 
-#### 新增的功能
+#### Added
 
-- 发现页新增「全部发现」平铺视图并设为默认，与原「按任务分组」视图通过页头 Tab 切换：分组视图要逐个任务展开才看得到漏洞，只想跨任务扫一眼列表时反而绕路。平铺视图是一张跨任务大表（每页 10/20/50/100 条），行为与分组视图完全一致——勾选导出、行内展开看证据与详细报告、行内改名称/类别/严重度、改处置状态、深入、删除。两个视图共用统计卡片与筛选条，切换不丢筛选，当前视图与筛选项一并记在本地；轮询只打当前视图，行内改动会同步写两边缓存，切过去不会看到过期数据。
-- 发现页新增「按资产」视图：左侧资产树（企业 → 根域名 / IP → 子域名 → 服务 → 接口，企业层只在资产确实有归属时才出现），右侧是选中节点整棵子树下的发现，与另外两个视图共用同一张表和同一批筛选条件。树只收有发现的资产，祖先链按需补齐（发现只挂在最深的接口上时，上面几层照样能拼出来），节点上的计数是子树聚合并按发现去重的；资产已删除或本就没关联资产的发现进「未关联资产」桶。与另外两个视图不同，资产视图不轮询——进入视图、改筛选、页内增删改发现、或点树上的刷新按钮时才查询，左树是导航结构，没必要每 5 秒重算。树上每层只显示相对上一层的增量（子域名去掉根域名后缀、服务显示 `https :443`、接口只显示路径），完整值在悬停提示与面包屑里；节点过多时整层丢弃接口/服务层级并给出提示，计数仍计入上层。
+- The findings page gains an "All findings" flat view, set as default, switching with the original "Group by task" view via header tabs: the grouped view requires expanding tasks one by one to see vulnerabilities, which is a detour when you just want to scan a cross-task list. The flat view is one big cross-task table (10/20/50/100 per page) with behavior identical to the grouped view — checkbox export, inline expand for evidence and detailed reports, inline edit of name/category/severity, change handling status, deep-dive, delete. Both views share the stat cards and filter bar; switching does not lose filters, and the current view plus filters are stored locally; polling only hits the current view, inline edits write both caches, so switching never shows stale data.
+- The findings page gains a "By asset" view: an asset tree on the left (company → root domain / IP → subdomain → service → endpoint; the company level only appears when assets actually have an owner), and on the right the findings under the selected node's entire subtree, sharing the same table and the same filters as the other two views. The tree only includes assets with findings, with ancestor chains filled in as needed (when a finding hangs only on the deepest endpoint, the layers above are still assembled); node counts are subtree aggregates deduplicated by finding; findings whose assets were deleted or were never linked go into the "Unlinked assets" bucket. Unlike the other two views, the asset view does not poll — it queries on entering the view, changing filters, adding/removing/editing findings in the page, or clicking the tree's refresh button; the left tree is a navigation structure, no need to recompute every 5 seconds. Each tree level shows only the delta relative to the level above (subdomains drop the root domain suffix, services show `https :443`, endpoints show only the path); full values are in hover tooltips and breadcrumbs; when there are too many nodes, whole levels drop the endpoint/service tiers with a notice, and counts still roll up.
 
-#### 修复的问题
+#### Fixed
 
-- 修复手机端会话详情里会话记录被挤压看不全的问题：窄屏下折叠会话列表，把宽度让给记录本身。
+- Fixed conversation records being squeezed and unreadable in session details on mobile: on narrow screens the session list collapses, yielding width to the records themselves.
 
-### 依赖
+### Dependencies
 
-#### 修改的功能
+#### Changed
 
-- 升级 norma v0.3.2 → v0.3.3：新增 `Config.MaxTokensField`，让 OpenAI Chat Completions 的输出上限可以改发 `max_completion_tokens`（推理模型只认这个键）。两个键互斥、只发其中一个，默认仍是 `max_tokens`。
-- 升级 `golang.org/x/mod` v0.37.0 → v0.40.0，修复两处依赖安全告警。
+- Upgraded norma v0.3.2 → v0.3.3: adds `Config.MaxTokensField`, letting OpenAI Chat Completions' output limit be sent as `max_completion_tokens` instead (reasoning models only accept this key). The two keys are mutually exclusive — only one is sent, default still `max_tokens`.
+- Upgraded `golang.org/x/mod` v0.37.0 → v0.40.0, fixing two dependency security alerts.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
@@ -571,30 +571,30 @@
 
 ### LLM
 
-#### 修复的问题
+#### Fixed
 
-- 修复「非流式」开关保存后重新打开又变回「流式」的问题（#69）：配置列表接口的 DTO 漏了 `streaming` 字段，响应从不返回它，前端读到 `undefined` 后一律回落成默认流式；实际写入与 DB 存储本无问题，只是读不回来。DTO 补回该字段（不加 `omitempty`，`false` 也必须出现在响应里）。
-- 测试连接改为校验模型确有回复、并按该配置真实的收发模式来测（#65）：此前只判 HTTP 是否成功，请求通但模型零回复（思考烧光预算 / 正文被安全策略吞掉 / 兼容层丢 `content`）也报「连接成功」，与会话里「不回话」的表现割裂；且测试恒走流式，非流式配置测的其实是另一条通道。现在空回复直接判失败、成功时在提示里展示模型回复，并把当前流式开关一并带入测试，让「测试通过」与「会话跑得通」保持一致。
+- Fixed the "non-streaming" toggle reverting to "streaming" after saving and reopening (#69): the config list API's DTO was missing the `streaming` field, so the response never returned it, and the frontend read `undefined` and always fell back to the default streaming; the actual write and DB storage were fine — it just could not be read back. The DTO regained the field (without `omitempty`, so `false` must appear in the response too).
+- The connection test now verifies the model actually replies, and tests with the configuration's real send/receive mode (#65): previously it only checked whether HTTP succeeded, so a request that went through but got zero model reply (thinking burned the budget / content swallowed by safety policy / the compatibility layer dropping `content`) still reported "connection successful", which was inconsistent with the "no reply" behavior in conversations; and the test always used streaming, so a non-streaming configuration was actually testing a different channel. Now an empty reply is judged a failure outright, success shows the model's reply in the message, and the current streaming toggle is carried into the test, keeping "test passed" consistent with "conversations work".
 
 ### Agent
 
-#### 修改的功能
+#### Changed
 
-- `list_facts` 改为分页 + 关键词过滤，避免事实多时单次调用撑爆上下文（#74）：默认返回最新 20 条，支持 `limit`（上限 100）/ `before` 游标 / `q` 摘要关键词，返回 `{facts, total, has_more, next_before}`；单条 summary 过长按字数截断（全文仍走 `node_detail`）。worker / planner 提示词同步为分页语义。旧库通过一次性迁移把新参数 schema 刷进工具目录表（`SeedTool` 首插入only，否则工具管理页显示「无参数」）。
+- `list_facts` is now paginated + keyword-filtered, avoiding blowing up the context in one call when there are many facts (#74): returns the latest 20 by default, supports `limit` (cap 100) / `before` cursor / `q` summary keyword, and returns `{facts, total, has_more, next_before}`; overly long per-item summaries are truncated by character count (full text still via `node_detail`). The worker / planner prompts were synced to the pagination semantics. Existing databases get a one-time migration refreshing the new parameter schema into the tool catalog table (`SeedTool` inserts only on first insert, otherwise the tool management page shows "no parameters").
 
-### 工具
+### Tools
 
-#### 新增的功能
+#### Added
 
-- 「工具执行」页新增工具调用次数统计（#72）：工具栏「统计」按钮打开弹窗，按工具展示调用次数、占比与失败次数（次数降序）；沿用列表的任务 / 关键词筛选，统计整个结果集而非当前页，弹窗打开时才拉取。
+- The "Tool executions" page gains tool call count statistics (#72): the toolbar's "Statistics" button opens a dialog showing per-tool call counts, shares, and failure counts (sorted by count descending); it reuses the list's task / keyword filters and computes over the whole result set, not the current page, fetching only when the dialog opens.
 
-### 依赖
+### Dependencies
 
-#### 修改的功能
+#### Changed
 
-- 升级 norma v0.3.1 → v0.3.2：修复 OpenAI 系响应里被静默丢弃的 reasoning/refusal（Responses 补 `reasoning_text`）、reasoning 字段三名去重、空响应（零内容块）有界重试、压缩边界切断工具配对导致的网关 400（同时修复已烤进 transcript 的存量孤儿）。
+- Upgraded norma v0.3.1 → v0.3.2: fixes silently dropped reasoning/refusal in OpenAI-family responses (Responses gains `reasoning_text`), dedup of the three reasoning field names, bounded retry of empty responses (zero content blocks), and gateway 400s caused by compression boundaries cutting tool pairings (also repairing existing orphans already baked into transcripts).
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 
@@ -602,47 +602,47 @@
 
 ### LLM
 
-#### 新增的功能
+#### Added
 
-- 每个 LLM 配置支持流式/非流式切换（默认流式）：开走流式 SSE；关走真·非流式（`stream:false`、一次性返回完整 JSON），可绕开部分网关糟糕的 SSE 实现（空帧、思考字段丢帧），代价是失去运行中的实时进度与实时 Token 计数。worker / planner / mainagent / chat / goals 均按当前激活配置动态取值；`llmpool` / `llmrec` / 任务运行时三层 Provider 包装均兼容非流式；`llm_profiles` 新增 `streaming` 列并 `ALTER` 补旧库（默认 `true`，旧配置无感）。
-- 支持 OpenAI Responses API 格式的 LLM 配置：每个配置新增第三种格式 `openai-responses`（打 `POST /v1/responses`），与 Chat Completions / Anthropic 并列；`BaseURL` 归一化、默认模型 `gpt-5`；`llm_profiles` 的 `format` 约束加入 `openai-responses` 并幂等迁移补旧库；前端格式下拉新增「OpenAI (Responses API)」。依赖升级 norma v0.3.1（含 `reasoning_content` 回传修复）。
-- 录制 LLM 请求/响应 HTTP 原文：在 HTTP transport 层捕获真实 wire body，保留归一化视图看不到的工具 schema、`tool_use` 块与原始 SSE 帧；norma 内部重试的多次尝试逐次保留；`llm_records` 新增 `raw_request` / `raw_response` 两列并 `ALTER` 补旧库；录制页详情面板增加「原文」视图切换与请求/响应复制按钮（兼容非安全上下文的 `execCommand` 回退）。
+- Each LLM configuration supports a streaming/non-streaming toggle (default streaming): on means streaming SSE; off means true non-streaming (`stream:false`, one complete JSON returned at once), which can bypass some gateways' broken SSE implementations (empty frames, lost thinking-field frames), at the cost of losing realtime progress and realtime token counts during runs. worker / planner / mainagent / chat / goals all take the value dynamically from the currently active configuration; the three Provider wrappers `llmpool` / `llmrec` / task runtime all support non-streaming; `llm_profiles` gains a `streaming` column with an `ALTER` backfill for existing databases (default `true`, old configurations unaffected).
+- Support for LLM configurations in the OpenAI Responses API format: each configuration gains a third format `openai-responses` (hitting `POST /v1/responses`), alongside Chat Completions / Anthropic; `BaseURL` normalization, default model `gpt-5`; the `format` constraint of `llm_profiles` adds `openai-responses` with an idempotent migration for existing databases; the frontend format dropdown gains "OpenAI (Responses API)". Depends on the norma v0.3.1 upgrade (includes the `reasoning_content` pass-through fix).
+- Record the raw HTTP of LLM requests/responses: captures the real wire body at the HTTP transport layer, preserving tool schemas, `tool_use` blocks, and raw SSE frames invisible in the normalized view; each of norma's internal retry attempts is kept individually; `llm_records` gains `raw_request` / `raw_response` columns with an `ALTER` backfill for existing databases; the records page details panel gains a "Raw" view toggle and request/response copy buttons (with an `execCommand` fallback for insecure contexts).
 
-### 对话
+### Conversations
 
-#### 修改的功能
+#### Changed
 
-- 会话列表多选改为「多选」模式开关：默认列表不再常驻每行勾选框（观感更干净），表头改为「共 N 个 + 多选」按钮；点「多选」进入选择模式（勾选框、全选、批量删除），「完成」退出并清空选择，批量删除全部成功后自动退出（有失败则留在选择模式便于重试）；单条重命名 / 置顶 / 删除仍走每行 ⋯ 菜单。
+- Session list multi-select becomes a "Multi-select" mode toggle: the list no longer permanently shows per-row checkboxes (cleaner look); the header becomes a "N total + Multi-select" button; clicking "Multi-select" enters selection mode (checkboxes, select all, batch delete), "Done" exits and clears the selection, and batch delete exits automatically when all succeed (stays in selection mode on failures for easy retry); single-item rename / pin / delete still go through the per-row ⋯ menu.
 
 ### UI
 
-#### 修改的功能
+#### Changed
 
-- 任务管理、会话操作与流量查看体验增强（#57）：任务列表列排序偏好可持久化记忆、行内重命名改用图标直接触发（不再经菜单）、抽屉（sheet）交互与流量查看细节优化。
+- Enhanced task management, session operations, and traffic viewing experience (#57): task list column sort preferences are now persisted, inline rename is triggered directly by an icon (no longer via a menu), and drawer (sheet) interactions and traffic viewing details were polished.
 
-#### 修复的问题
+#### Fixed
 
-- Worker 资产标签只显示域名与 IP，并正确处理空标签的场景。
+- Worker asset labels now show only domains and IPs, and empty-label cases are handled correctly.
 
 ### Agent
 
-#### 新增的功能
+#### Added
 
-- planner 判目标时新增「量化验收核对」：目标含可量化验收条件（资产测试覆盖度达到 X%、拿到 N 个 flag、获得某权限）时，`prove_goal` 前必须核对 `graph_overview` 的实测值（`coverage.pct`、findings 计数等），实测未达标则禁止 `prove_goal`、改为派意图补足差距，不得以「主要部分已完成/大体达成」为由提前标 met。修复了目标要求覆盖度 100%、实测仅 40% 却被判完成的问题。
+- The planner's goal judgment gains a "quantitative acceptance check": when a goal contains quantifiable acceptance criteria (asset test coverage reaches X%, N flags obtained, a certain permission gained), the measured values in `graph_overview` (`coverage.pct`, findings count, etc.) must be checked before `prove_goal`; if the measured values fall short, `prove_goal` is forbidden and intents are dispatched to close the gap instead — it may not be marked met early on grounds of "the main part is done / roughly achieved". Fixed the problem where a goal requiring 100% coverage was judged complete at a measured 40%.
 
-#### 修改的功能
+#### Changed
 
-- 重写 planner 提示词中「本轮 0 意图」的判定依据：原文将 0 意图描述为「最常见、最重要的原则」，会让规划者在目标未达成、范围内仍有未测面时过早收手。现改为只在两种具体情况下才应产出 0 意图——① 想到的方向都已被 open/running/recent_done 意图覆盖；② 下一步依赖当前正在运行的 work 的产出、而产出尚未出现（应等其跑完、图更新后的下一次唤醒再规划）。并补充反向约束：确有未被覆盖且不依赖在跑 work 的新方向、或目标未达成且仍有未测面时，不要因「0 意图常见」而收手。
-- 强化 worker 提示词中「否定结论的证据门槛」：对「不可注入/端口关闭/无登录入口」等可能让规划者放弃一整条方向的否定结论，要求下结论前先穷尽该意图内的合理手段（换编码/参数/路径/方法）；手段未走完或证据偏弱一律标 `confidence=inferred`，避免用轻率的 `observed` 否定把整条路线焊死（任务早期的错误否定尤其会把方向带偏且难以自愈）。
-- 上述 planner / worker 默认提示词变更通过一次性迁移（`reseedPlannerPrompt` / `reseedWorkerPrompt`，各带 settings flag 守卫）追加为新版本并切为当前版本；旧版本保留在版本历史中，自定义过提示词的用户可在版本记录里恢复。
+- Rewrote the criteria for "0 intents this round" in the planner prompt: the original text described 0 intents as "the most common, most important principle", which made the planner fold too early when goals were unmet and untested surface remained in scope. Now 0 intents should only be produced in two concrete situations — ① every direction thought of is already covered by open/running/recent_done intents; ② the next step depends on the output of a currently running work that has not appeared yet (wait for it to finish and plan on the next wake-up after the graph updates). A reverse constraint was added: when there genuinely are uncovered new directions independent of running works, or the goal is unmet with untested surface remaining, do not fold just because "0 intents is common".
+- Strengthened the "evidence bar for negative conclusions" in the worker prompt: for negative conclusions like "not injectable / port closed / no login entry" that could make the planner abandon an entire direction, reasonable methods within the intent must be exhausted before concluding (switch encoding/parameter/path/method); if methods are unfinished or evidence is weak, always mark `confidence=inferred`, avoiding welding a whole route shut with a rash `observed` negative (wrong negatives early in a task especially derail direction and are hard to self-heal).
+- The above planner / worker default prompt changes are appended as new versions and switched to current via one-time migrations (`reseedPlannerPrompt` / `reseedWorkerPrompt`, each guarded by a settings flag); old versions are kept in version history, and users who customized prompts can restore them from the version records.
 
-### 运维
+### Operations
 
-#### 新增的功能
+#### Added
 
-- 新增 `reset-password.sh` 重置管理员（用户名固定 `ARTEX`）密码：支持 local / docker 两种部署，连接信息可显式指定或自动从 `--dsn`/`$ARTEX_PG_DSN`/`config.json` 读取；在库内用 `pgcrypto` 生成与后端登录兼容的 bcrypt 哈希并写回 `settings.auth.password_hash`，重置后无需重启服务。密码经环境变量传入、不进入进程 argv，并做转义防注入。
+- Added `reset-password.sh` to reset the admin (username fixed as `ARTEX`) password: supports both local / docker deployments; connection info can be specified explicitly or read automatically from `--dsn`/`$ARTEX_PG_DSN`/`config.json`; uses `pgcrypto` in the database to generate a bcrypt hash compatible with backend login and writes it back to `settings.auth.password_hash`, no service restart needed after reset. The password is passed via an environment variable, never enters the process argv, and is escaped against injection.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
@@ -651,48 +651,48 @@
 
 ### UI
 
-#### 新增的功能
+#### Added
 
-- 任务列表勾选多个任务后可批量修改分类，目标分类支持「未分类」以将任务移出当前分类；整批写入在一个事务内完成，失败项只会是勾选后已被删除的任务。
+- After selecting multiple tasks in the task list you can batch-change their category; the target category supports "Uncategorized" to move tasks out of their current category; the whole batch writes in one transaction, and failures can only be tasks deleted after being selected.
 
-#### 修改的功能
+#### Changed
 
-- 新建任务的「任务分类」由下拉选择改为可搜索输入框：输入即过滤已有分类，库里没有的名称回车（或点下拉里的「创建」）即时新建并选中，选中项以可移除的 tag 展示；仍限单个分类。
+- The new-task "Task category" changed from a dropdown to a searchable input: typing filters existing categories, Enter (or clicking "Create" in the dropdown) instantly creates and selects a name not in the database, and the selection shows as a removable tag; still limited to a single category.
 
-### 对话
+### Conversations
 
-#### 修复的问题
+#### Fixed
 
-- 修复会话已选定 LLM 配置、但全局无激活配置时，发送消息被「LLM 未配置，无法对话」拦截的问题。发送前的检查原本只看全局激活配置，而实际执行会优先用会话所选配置，两处解析逻辑不一致；现统一为同一套（会话/Agent 绑定优先，全局兜底）。
-- 无法对话时的提示按状态细分：完全没有配置提示「添加配置」，有配置但未激活提示「激活或为本会话指定一个配置」，不再一律显示「未配置」，便于定位。
+- Fixed messages being blocked with "LLM not configured, cannot chat" when the conversation had an LLM configuration selected but no global active configuration existed. The pre-send check only looked at the global active configuration, while actual execution prefers the conversation-selected configuration — the two resolution logics were inconsistent; they are now unified into one (session/Agent binding first, global as fallback).
+- The cannot-chat message is now differentiated by state: no configuration at all suggests "Add a configuration", having configurations but none activated suggests "Activate one or specify one for this session" — no longer always showing "Not configured", making it easier to locate the problem.
 
 ### Agent
 
-#### 新增的功能
+#### Added
 
-- 目标已全部达成的任务，主 Agent 经 `add_intent` 下发的意图可被 Worker 直接领取执行、跑完即止：此时 Planner 不再运行（任务无 open 目标即不进规划），避免其重判目标达成而取消刚下发的意图；frontier 抽干后任务回到已完成。主 Agent 下发意图前会依据意图内容反问用户是否将其登记为正式目标，登记则任务恢复常规自主规划。
+- For tasks whose goals are all met, intents dispatched by the main agent via `add_intent` can be claimed and executed by Workers directly, stopping when done: the Planner does not run in this state (a task with no open goals does not enter planning), avoiding it re-judging goal completion and cancelling freshly dispatched intents; once the frontier is drained the task returns to Completed. Before dispatching an intent, the main agent asks the user, based on the intent content, whether to register it as a formal goal — registering restores the task's normal autonomous planning.
 
-#### 修改的功能
+#### Changed
 
-- `get_worker_trace` / `get_task_worker_trace` 的 `step_ids` 超过一次上限（5 个）时不再直接报错，改为返回前 5 步的完整内容，并在结果中通过 `returned_step_ids` / `omitted_step_ids` / `notice` 告知本次取了哪些、还有哪些未取，并提示「若已足够则无需再取」。传入的重复与非法 id 会先去重、剔除后再计数。
+- When `step_ids` of `get_worker_trace` / `get_task_worker_trace` exceed the per-call cap (5), it no longer errors outright — it returns the full content of the first 5 steps and tells you via `returned_step_ids` / `omitted_step_ids` / `notice` which were fetched and which remain, with a hint that "if this is enough, no further fetch is needed". Duplicate and invalid ids in the input are deduplicated and removed before counting.
 
-#### 修复的问题
+#### Fixed
 
-- 任务列表改为按任务 id 降序（最新创建在最前），替换原先的按创建时间排序。同一时刻创建的多个任务时间戳相同、排序不稳定，配合每 10 秒轮询和内存 map 的随机遍历，会导致它们在列表里频繁互换位置。
+- The task list now sorts by task id descending (newest first), replacing the previous sort by creation time. Multiple tasks created in the same instant had identical timestamps and unstable ordering, which — combined with 10-second polling and random map iteration — made them frequently swap positions in the list.
 
-### 资产
+### Assets
 
-#### 修复的问题
+#### Fixed
 
-- 修复企业归属重算被单行脏数据打挂：`assets.ip` 存了主机名（Agent 或资产 API 写入）时，`a.ip::inet` 会抛 `22P02`，导致新增/修改企业资产范围和删除企业全部失败并回滚。改用安全转换 `try_inet()`，非法值跳过而不是中断整条语句。
-- 无法解析的 `ip` 不再静默跳过：企业范围保存后会明确提示有多少条资产的 `ip` 不是合法 IP（含具体 id 和取值），提醒这些资产不会被 IP/CIDR 规则归属；同一信息也写入服务端日志，覆盖没有前端响应的路径（删除企业、scopesentry 同步、Agent 写入）。
-- 任务测试范围的 IP/CIDR 匹配同步改用 `try_inet()`，替换原先只检查字符集的正则守卫（`abc.def` 这类全 hex 字母的主机名此前仍会漏过并触发同样的报错）。
+- Fixed company attribution recomputation being broken by a single row of dirty data: when `assets.ip` held a hostname (written by an agent or the asset API), `a.ip::inet` threw `22P02`, making add/edit of company asset scopes and company deletion all fail and roll back. Switched to the safe conversion `try_inet()` — illegal values are skipped instead of aborting the whole statement.
+- Unparseable `ip` values are no longer silently skipped: after saving a company scope, it explicitly reports how many assets' `ip` is not a legal IP (with concrete ids and values), reminding that these assets will not be attributed by IP/CIDR rules; the same information is written to the server log, covering paths with no frontend response (company deletion, scopesentry sync, agent writes).
+- IP/CIDR matching of the task test scope likewise switched to `try_inet()`, replacing the previous regex guard that only checked the character set (hostnames like `abc.def`, all hex letters, still slipped through and triggered the same error).
 
-#### 修改的功能
+#### Changed
 
-- `ip`、`service`、`endpoint` 资产的 `ip` 字段不再接受主机名：`insert_assets` 和资产 API 会逐条返回带 `index` 的错误，并直接给出改正方法（改用 `type=subdomain` 填 `domain`，或先解析 A/AAAA 记录），Agent 可据此自行修正后重插。同批次中的其他资产不受影响，照常入库。
+- The `ip` field of `ip`, `service`, and `endpoint` assets no longer accepts hostnames: `insert_assets` and the asset API return per-item errors with `index`, and directly give the fix (use `type=subdomain` with `domain`, or resolve A/AAAA records first), so the agent can correct and reinsert on its own. Other assets in the same batch are unaffected and stored as usual.
 
-### 贡献者
+### Contributors
 
 - [@neouks](https://github.com/neouks)
 
@@ -700,148 +700,148 @@
 
 ### Worker
 
-#### 新增的功能
+#### Added
 
-- 运行中的 Worker 支持单项暂停、恢复和取消；暂停保留意图、事实与漏洞，取消会在执行退出后事务性清理当前意图及其直接产物。
-- 增加 `paused` 意图状态、执行栅栏和具名终止原因，防止暂停、取消或任务删除后出现迟到黑板写入。
-- 增加可选任务并发上限；新建、恢复、漏洞深入和队列补位统一通过持久化 FIFO 准入路径。
+- Running Workers support per-item pause, resume, and cancel; pausing keeps intents, facts, and vulnerabilities, while cancelling transactionally cleans up the current intent and its direct products after execution exits.
+- Added the `paused` intent state, execution fences, and named termination reasons, preventing late blackboard writes after pause, cancel, or task deletion.
+- Added an optional task concurrency cap; new, resumed, vulnerability deep-dive, and queue backfill all go through a unified persisted FIFO admission path.
 
-#### 修改的功能
+#### Changed
 
-- Worker 单次运行墙钟默认时长由 600 秒调整为 1200 秒；超时任务复活后在下一次真实执行时重新计时。
-- Worker、Planner 和主 Agent 的真实执行状态统一驱动任务状态徽标，修复 Worker 运行时仍显示“空闲”的问题。
-- Worker 会话保留单项控制和当前会话 Token 汇总，模型名称移动到当前会话标题右侧展示。
+- The default wall-clock duration of a single Worker run changed from 600 to 1200 seconds; after a timed-out task is revived, the clock restarts at the next real execution.
+- The task status badge is now uniformly driven by the real execution states of Worker, Planner, and main agent, fixing the problem where it still showed "Idle" while Workers were running.
+- The Worker session keeps per-item controls and the current session's token summary; the model name moved to the right of the current session title.
 
-#### 删除的功能
+#### Removed
 
-- 删除 Worker 多选、全选及批量暂停/继续界面，同时移除 Worker 批量控制 API 和 Mock 契约。
-- 删除 Worker 列表行中的 Token 徽标与 Tooltip，底层完整 Token 账本和任务聚合接口继续保留。
+- Removed Worker multi-select, select-all, and batch pause/resume UI, along with the Worker batch control API and Mock contract.
+- Removed the Token badge and Tooltip from Worker list rows; the underlying full token ledger and task aggregation API remain.
 
 ### LLM
 
-#### 新增的功能
+#### Added
 
-- 任务支持有序 LLM 配置链；明确识别供应商额度不足时自动切换下一配置，并持久化当前配置、耗尽状态和错误摘要。
-- 运行中和暂停任务支持编辑完整配置链、调整顺序和手动切换当前配置，从下一次 LLM 调用生效。
-- 自动切换、手动切换和全链耗尽写入结构化系统活动，并通过任务活动流弹出可去重提醒。
-- 增加任务角色模型解析接口，统一解析 Main Agent、Planner 和 Worker 下一次调用使用的配置与模型。
-- 增加可选的全局 LLM Pool，支持配置调用顺序、指定模型失败兜底、健康状态、冷却恢复和手动重置。
-- 增加始终开启的 LLM 用量账本，按任务、会话、模型和配置聚合输入、输出及缓存 Token。
+- Tasks support ordered LLM configuration chains; when provider quota exhaustion is clearly identified, it automatically switches to the next configuration, persisting the current configuration, exhaustion state, and error summary.
+- Running and paused tasks support editing the full configuration chain, reordering, and manually switching the current configuration, effective from the next LLM call.
+- Automatic switches, manual switches, and full-chain exhaustion are written as structured system activities and surfaced via the task activity stream as dedupable alerts.
+- Added a task-role model resolution API, uniformly resolving which configuration and model the Main Agent, Planner, and Worker use for their next call.
+- Added an optional global LLM Pool, supporting call ordering, per-model failure fallback, health states, cooldown recovery, and manual reset.
+- Added an always-on LLM usage ledger, aggregating input, output, and cached tokens by task, session, model, and configuration.
 
-#### 修改的功能
+#### Changed
 
-- 目标拆解、Planner、Worker 和主 Agent 共享任务级 LLM runtime（解析优先级见下）。
-- 故障转移只响应明确的额度、余额或账单错误；普通限流、鉴权、网络、服务端和上下文错误不会错误切换。
-- LLM 配置页改为配置卡片列表和右侧抽屉编辑，并提供 Pool 轮询顺序、优先级、排除项、健康状态和恢复操作。
-- 配置链耗尽信息支持窄屏换行；当前模型由会话列表图标改为当前会话标题旁的文字标签和完整 Tooltip。
-- 任务内各角色解析 LLM 的顺序调整为「Agent 绑定 → 任务配置链 → 全局」：显式绑定模型的角色始终跑在该模型上，未绑定角色才落到任务链，任务链为空时再落到全局。
-- 出站代理留空即直连，不再回退 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量（显式 `ARTEX_LLM_PROXY` 不受影响）；代理输入支持带账号密码的 `socks5://user:pass@host:port`。
+- Goal decomposition, Planner, Worker, and main agent share the task-level LLM runtime (resolution priority below).
+- Failover only responds to explicit quota, balance, or billing errors; ordinary rate limiting, auth, network, server, and context errors do not cause erroneous switching.
+- The LLM configuration page is now a configuration card list with a right-side drawer editor, providing Pool polling order, priorities, exclusions, health states, and recovery operations.
+- Chain-exhaustion messages wrap on narrow screens; the current model changed from a session list icon to a text label next to the current session title with a full Tooltip.
+- The LLM resolution order for roles within a task is now "Agent binding → task configuration chain → global": roles with an explicitly bound model always run on that model, unbound roles fall to the task chain, and only when the task chain is empty do they fall to global.
+- An empty outbound proxy now means direct connection, no longer falling back to the `HTTP_PROXY`/`HTTPS_PROXY` environment variables (an explicit `ARTEX_LLM_PROXY` is unaffected); proxy input supports `socks5://user:pass@host:port` with credentials.
 
-#### 修复的问题
+#### Fixed
 
-- 提交前（尚未产出任何输出）的瞬时流式失败在同一 provider 上安全退避重试，显著减少「只跑了一两个工具就中断、无总结、终态 `model_error`」的情况；额度耗尽、上下文过长和 4xx 确定性错误不重试，仍分别交由故障转移与压缩恢复处理。
+- Transient streaming failures before commit (before any output was produced) now safely back off and retry on the same provider, significantly reducing cases of "interrupted after only one or two tools, no summary, final state `model_error`"; quota exhaustion, over-long context, and deterministic 4xx errors are not retried and are still handled by failover and compaction recovery respectively.
 
-#### 删除的功能
+#### Removed
 
-- 删除会话列表中的 LLM 图标式标识，避免与 Worker 状态图标混淆。
+- Removed the LLM icon-style marker in the session list, avoiding confusion with Worker status icons.
 
 ### UI
 
-#### 新增的功能
+#### Added
 
-- 任务支持全局分类的创建、重命名、删除和筛选；新建任务可直接选择分类。
-- 增加全局任务模板 CRUD 和右侧管理抽屉；新建任务可加载预设描述与目标，也可将当前内容另存为模板。
-- 新建任务支持关联多个来源任务和多个企业资产范围；企业范围通过单个多行文本框自动识别域名、URL、IP、CIDR、ICP 和企业关键词。
-- 任务测试资产支持实时新增和删除，记录人工、企业、继承或 Agent 发现等来源；Worker 会话标题旁显示当前测试资产及来源摘要。
-- 发现页按任务分组并提供组内独立分页，支持为漏洞填写描述并创建高优先级深入意图。
-- 对话支持重命名、置顶、取消置顶和删除；任务列表支持当前页批量暂停与继续。
-- 流量详情和工具执行详情改为右侧抽屉；HTTP 报文补齐 `Host` 并高亮请求行、状态码、Header、JSON 和标记语言正文。
-- 任务列表操作列新增「详情」与「暂停/继续」按钮；会话发送键位可在系统设置中配置（`Enter` / `Cmd+Enter` 等），Web 搜索区新增代理输入框。
-- 会话标题右侧徽标改为显示 LLM 配置名称，模型 ID 移至 hover Tooltip；任务可设置可选名称，任务列表新增名称列与搜索（空则回退到描述）。
-- 技能页增加使用次数、最近使用时间和缺失依赖统计，便于定位未生效或未安装的技能。
+- Tasks support creating, renaming, deleting, and filtering by global categories; new tasks can pick a category directly.
+- Added global task template CRUD and a right-side management drawer; new tasks can load preset descriptions and goals, or save the current content as a template.
+- New tasks support linking multiple source tasks and multiple company asset scopes; company scopes auto-recognize domains, URLs, IPs, CIDRs, ICPs, and company keywords from a single multi-line text box.
+- Task test assets support realtime add and delete, recording sources such as manual, company, inherited, or agent-discovered; the Worker session title shows the current test assets and a source summary.
+- The findings page groups by task with independent per-group pagination, and supports filling in a description for a vulnerability and creating a high-priority deep-dive intent.
+- Conversations support rename, pin, unpin, and delete; the task list supports batch pause and resume of the current page.
+- Traffic details and tool execution details are now right-side drawers; HTTP messages fill in the `Host` header and highlight the request line, status code, headers, JSON, and markup bodies.
+- The task list actions column gains "Details" and "Pause/Resume" buttons; the conversation send keybinding is configurable in system settings (`Enter` / `Cmd+Enter`, etc.), and the web search area gains a proxy input box.
+- The badge right of the session title now shows the LLM configuration name, with the model ID moved to the hover Tooltip; tasks can have an optional name, and the task list gains a name column and search (falling back to the description when empty).
+- The skills page adds usage counts, last-used times, and missing-dependency stats, making it easier to locate skills that are not effective or not installed.
 
-#### 修改的功能
+#### Changed
 
-- 任务标题改为可聚焦详情链接；任务资产、企业资产、发现任务组和组内漏洞使用服务端真实分页、稳定排序与精确总数。
-- 新增企业改用右侧抽屉，范围录入统一为多行文本并提供实时识别、校验和类型预览。
-- 主 Agent 输入框支持自动增长、`Enter` 发送、`Shift+Enter` 换行，并避免中文输入法组合态误发送。
-- Agent 预览、任务报告和相关详情统一使用共享 Markdown 渲染；删除确认、长错误和移动端抽屉宽度统一修复。
-- 任务模板选择框以模板名称显示和搜索、以模板 ID 提交；恢复系统原始字体尺寸，应用版本统一显示为 `0.3.3`。
-- 任务总计和当前会话 Token 只高亮输入、缓存读取和输出数值；发送按钮使用更简洁的上箭头图标。
-- 任务总览的测试范围显示企业名称而非 ID。
+- Task titles are now focusable details links; task assets, company assets, finding task groups, and in-group vulnerabilities use real server-side pagination, stable ordering, and exact totals.
+- Adding a company now uses a right-side drawer; scope entry is unified into multi-line text with realtime recognition, validation, and type preview.
+- The main agent input box supports auto-growing, `Enter` to send, `Shift+Enter` for newline, and avoids accidental sends during IME composition.
+- Agent preview, task reports, and related details uniformly use the shared Markdown renderer; delete confirmations, long errors, and mobile drawer widths were uniformly fixed.
+- The task template selector displays and searches by template name and submits by template ID; restored the system's original font sizes, and the app version uniformly displays as `0.3.3`.
+- Task total and current session tokens now only highlight input, cache-read, and output values; the send button uses a simpler up-arrow icon.
+- The task overview's test scope shows company names instead of IDs.
 
-#### 修复的问题
+#### Fixed
 
-- 含点号的普通文本不再被误判为 ICP 备案号。
-- 修复变量目录中与全局运行时变量（如 `{{.Now}}`）撞名，导致 Agent 编辑器变量列表渲染出重复 key 的问题。
+- Plain text containing dots is no longer misjudged as an ICP registration number.
+- Fixed duplicate keys rendered in the Agent editor's variable list caused by variable catalog entries colliding with global runtime variables (like `{{.Now}}`).
 
-#### 删除的功能
+#### Removed
 
-- 删除任务卡片独立“进入”按钮，统一点击任务标题进入详情。
-- 删除仪表盘“新建任务”按钮、新增企业的 Logo URL 输入项，以及发现页顶部和任务分组中的漏洞数量 Badge。
-- 撤销全局字体增大 10% 的样式，并删除会话列表中的 Worker 选择框、模型图标和行级 Token 统计。
+- Removed the standalone "Enter" button on task cards — clicking the task title now uniformly opens details.
+- Removed the dashboard "New task" button, the Logo URL input when adding a company, and the vulnerability count Badges at the top of the findings page and in task groups.
+- Reverted the global 10% font-size increase, and removed the Worker checkbox, model icons, and row-level token stats from the session list.
 
 ### Agent
 
-#### 新增的功能
+#### Added
 
-- 新任务可直接关联多个已有任务，实时只读继承直接来源任务的目标、事实、漏洞、已完成意图、资产范围和黑板上下文。
-- 黑板读取工具支持按需查询来源任务节点、事实、漏洞和执行轨迹；继承节点带来源标记且所有写工具拒绝修改。
-- 企业范围工具支持域名、URL、IP、CIDR、ICP 和企业关键词；关键词仅作为 Agent 范围提示，不参与资产自动归属。
-- 漏洞深入操作会在原任务创建带资产锚点和 `derived_from` 边的高优先级人工 Worker 意图。
-- 总览新增「目标管理」卡片，支持人工查看、新增、修改和删除目标；新增或修改会通知 Planner 并复活任务，删除硬删目标节点（级联删边与锚点）但不复活。
-- 主 Agent 默认获得 `steer_work` 工具，可对运行中的 Worker 实时注入纠偏指令而不打断、不丢失进展（仍校验意图归属本任务）。
+- New tasks can directly link multiple existing tasks, read-only inheriting the direct source tasks' goals, facts, vulnerabilities, completed intents, asset scopes, and blackboard context in realtime.
+- Blackboard read tools support on-demand queries of source tasks' nodes, facts, vulnerabilities, and execution traces; inherited nodes carry a source marker and all write tools refuse to modify them.
+- Company scope tools support domains, URLs, IPs, CIDRs, ICPs, and company keywords; keywords only serve as scope hints for the agent and do not participate in automatic asset attribution.
+- The vulnerability deep-dive action creates a high-priority manual Worker intent in the original task, with an asset anchor and a `derived_from` edge.
+- The overview gains a "Goal management" card, supporting manual view, add, edit, and delete of goals; adding or editing notifies the Planner and revives the task, while deleting hard-deletes the goal node (cascading to edges and anchors) without reviving.
+- The main agent gets the `steer_work` tool by default, injecting corrective instructions into running Workers in realtime without interrupting or losing progress (still validating that the intent belongs to this task).
 
-#### 修改的功能
+#### Changed
 
-- 来源任务意图不进入新任务 frontier，新任务继续使用独立 exploration、执行队列、工作目录和对话历史。
-- 删除运行中的意图不再销毁数据：改为停到 `stopped`、要求填写删除原因、把原因作为事实挂到该意图并写入 payload，规划者按 `cancelled` 触发感知（保留意图内容与原因）。
-- 主 Agent 对话改为服务端活动流驱动，发送失败可恢复输入；打开会话时自动贴底并在详情懒加载后保持最后回复可见。
-- 任务暂停会终止当前 Main Agent、Planner 和 Worker 调用，但不阻止暂停期间用户主动发起新的主 Agent 编排会话。
-- 取消、关闭和流式中断统一保留真实终止原因、已生成内容、运行轮数、耗时、Token 与未返回工具调用。
+- Source task intents do not enter the new task's frontier; new tasks keep using independent exploration, execution queues, working directories, and conversation history.
+- Deleting a running intent no longer destroys data: it now stops to `stopped`, requires a deletion reason, attaches the reason to the intent as a fact and writes it into the payload, and the planner is notified via a `cancelled` trigger (intent content and reason preserved).
+- The main agent conversation is now driven by the server-side activity stream, with input recoverable after send failures; opening a session auto-scrolls to the bottom and keeps the last reply visible after details lazy-load.
+- Pausing a task terminates current Main Agent, Planner, and Worker calls, but does not prevent the user from actively starting a new main agent orchestration session during the pause.
+- Cancel, close, and stream interruption uniformly preserve the real termination reason, generated content, round count, elapsed time, tokens, and unreturned tool calls.
 
-#### 删除的功能
+#### Removed
 
-- 删除主 Agent 客户端乐观消息回显，避免暂停、失败或并发活动下出现重复消息和跨会话串流。
+- Removed optimistic client-side message echo in the main agent, avoiding duplicate messages and cross-session stream mixing under pause, failure, or concurrent activity.
 
-### 约束
+### Constraints
 
-#### 新增的功能
+#### Added
 
-- 目标拆解阶段先抽取操作约束（allow/deny）再拆目标，主 Agent 运行时可补充；约束按最高优先级注入 Planner 与 Worker 系统提示，去偏后多样性与拓面探索显式服从约束。
-- 总览新增「约束管理」卡片与增删改接口；约束注入范围可按 Planner / Worker 分别开关（默认都开，每轮读取、即时生效）。新表 `task_constraints` 使用 `CREATE TABLE IF NOT EXISTS`，旧库自动补建。
+- The goal decomposition phase now extracts operation constraints (allow/deny) before decomposing goals, and the main agent can add more at runtime; constraints are injected into Planner and Worker system prompts at the highest priority, and after de-biasing, diversity and surface-expansion exploration explicitly obey the constraints.
+- The overview gains a "Constraint management" card and add/edit/delete APIs; constraint injection scope can be toggled separately for Planner / Worker (both on by default, read every round, effective immediately). The new table `task_constraints` uses `CREATE TABLE IF NOT EXISTS`, so existing databases get it automatically.
 
-### 拦截
+### Interception
 
-#### 新增的功能
+#### Added
 
-- 命令拦截在正则/字符串规则之外新增模型兜底审批：一条规则都未命中时由模型做 `ALLOW`/`ASK`/`DENY` 语义判定，失败回退动作与审批超时动作可配置；拦截页拆分「拦截规则 / 模型配置」两个 Tab，模型判定结果标注 `[模型]` 前缀与理由。
+- Command interception adds a model fallback approval beyond regex/string rules: when no rule matches, the model makes an `ALLOW`/`ASK`/`DENY` semantic judgment; the failure fallback action and approval timeout action are configurable; the interception page splits into "Interception rules / Model configuration" tabs, and model judgments are marked with a `[Model]` prefix and a reason.
 
-#### 修复的问题
+#### Fixed
 
-- 加固裁判输出解析，避免正确的 `DENY` 判定被误当作放行。
+- Hardened verdict output parsing, preventing a correct `DENY` verdict from being mistaken for an allow.
 
-### 流量
+### Traffic
 
-#### 修改的功能
+#### Changed
 
-- 流量录制改为整条 exchange 落 SQLite（大正文溢出到按 hash 去重的 blob 桶），文本正文建 trigram 全文索引，支持任意子串与中文搜索；删除退化为单条 SQL 事务，从数小时降到毫秒级且期间不再停摆录制。新增大 body 流式下载与 `traffic_search` 全文参数；旧文件树数据免迁移，仍可读、可搜、可删。
+- Traffic recording now stores whole exchanges in SQLite (large bodies spill into hash-deduplicated blob buckets), with a trigram full-text index over text bodies supporting arbitrary substring and Chinese search; deletion degenerated to a single SQL transaction — from hours down to milliseconds, and recording no longer stalls during it. Added streaming download of large bodies and a full-text parameter for `traffic_search`; old file-tree data needs no migration and remains readable, searchable, and deletable.
 
-### 任务与资产
+### Tasks and assets
 
-#### 新增的功能
+#### Added
 
-- 创建任务新增「资产覆盖度功能」开关（默认开）：关闭后不计算与展示覆盖度、态势图只显示资产、不自动累积 `task_scope`，相关工具从 Planner / 主 Agent 剔除；企业关联不受此开关影响。
-- `insert_assets` 每条资产新增 `related` 标记（默认 `true`）：仅在开启覆盖度时生效，`false` 只入共享资产库、不计入本任务覆盖度（如顺带发现的旁站或无关资产）。
-- 企业范围和任务测试资产统一支持域名、URL、IP、CIDR、ICP 与关键词文本识别；域名/IP 可创建或复用全局资产，CIDR/ICP/关键词保留为任务范围上下文。
+- Task creation gains an "asset coverage feature" toggle (default on): when off, coverage is neither computed nor displayed, the situation graph shows only assets, `task_scope` is not auto-accumulated, and related tools are removed from Planner / main agent; company linking is unaffected by this toggle.
+- `insert_assets` gains a per-asset `related` flag (default `true`): only effective when coverage is on; `false` puts the asset only into the shared asset database, not counting toward this task's coverage (e.g. incidentally discovered adjacent sites or unrelated assets).
+- Company scopes and task test assets uniformly support recognizing domain, URL, IP, CIDR, ICP, and keyword text; domains/IPs can create or reuse global assets, while CIDRs/ICPs/keywords are kept as task scope context.
 
-### 构建
+### Build
 
-- `build.sh --release` 支持一次构建 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64，并生成带 `skills/`、配置示例和 README 的 zip 发布包。
-- 使用 Go linker 去除调试信息并生成 zip 发布包；UPX 改为显式可选，避免其自解压 ELF 在部分 Linux 环境启动时发生段错误。
-- Release Workflow 对 Linux amd64 二进制执行启动冒烟测试，并随发布包提供 `SHA256SUMS`。
+- `build.sh --release` builds Linux amd64/arm64, macOS amd64/arm64, and Windows amd64 in one go, generating zip release packages with `skills/`, a config example, and the README.
+- Uses the Go linker to strip debug info and generate zip release packages; UPX is now explicitly opt-in, avoiding segfaults at startup of its self-extracting ELF on some Linux environments.
+- The Release workflow runs a startup smoke test on the Linux amd64 binary and ships `SHA256SUMS` with the release packages.
 
-### 贡献者
+### Contributors
 
 - [@neouks](https://github.com/neouks)
 
@@ -849,39 +849,39 @@
 
 ### Added
 
-- 新建任务支持关联多个已有任务，实时、只读继承直接来源任务的事实、漏洞、已完成意图、资产范围和黑板上下文；新任务仍使用独立的执行队列、工作目录和会话历史。
-- 任务支持有序 LLM 配置链。明确识别到供应商额度不足时自动切换到下一配置，并持久化当前配置、耗尽状态和结构化审计活动。
-- 运行中和暂停任务支持编辑 LLM 配置链、调整顺序及手动切换当前配置；自动切换、手动切换和全链耗尽会在任务详情页提示。
-- 运行中的 Worker 支持暂停、恢复和取消。暂停保留黑板数据，取消会在 Worker 停止写入后事务性清理该意图及其直接产出的事实、漏洞和执行记录。
-- 删除任务可选择同时清理关联资产、流量、漏洞和任务落地文件，并增加删除屏障、并发保护和可审计的删除统计。
-- 增加可选的任务并发上限；达到上限的新任务按 FIFO 排队，并在运行槽位释放后自动启动。
-- 增加任务资产分页、公司资产分页、任务分类统计及分页意图 Mock 契约。
-- 增加 `build.sh` 单二进制构建脚本，支持静态前端导出、资源嵌入、跨平台目标和构建版本注入。
+- New tasks can link multiple existing tasks, inheriting the direct source tasks' facts, vulnerabilities, completed intents, asset scopes, and blackboard context in realtime and read-only; new tasks still use independent execution queues, working directories, and session history.
+- Tasks support ordered LLM configuration chains. When provider quota exhaustion is clearly identified, it automatically switches to the next configuration, persisting the current configuration, exhaustion state, and structured audit activities.
+- Running and paused tasks support editing the LLM configuration chain, reordering, and manually switching the current configuration; automatic switches, manual switches, and full-chain exhaustion are surfaced on the task details page.
+- Running Workers support pause, resume, and cancel. Pausing keeps blackboard data; cancelling transactionally cleans up the intent and its directly produced facts, vulnerabilities, and execution records after the Worker stops writing.
+- Deleting a task can optionally also clean up linked assets, traffic, vulnerabilities, and task files on disk, with deletion barriers, concurrency protection, and auditable deletion stats added.
+- Added an optional task concurrency cap; new tasks beyond the cap queue in FIFO order and start automatically once a running slot frees up.
+- Added task asset pagination, company asset pagination, task category statistics, and paged intent Mock contracts.
+- Added the `build.sh` single-binary build script, supporting static frontend export, asset embedding, cross-platform targets, and build version injection.
 
 ### Changed
 
-- 任务级显式 LLM 配置链与现有全局 LLM Pool 并存；显式链继续采用严格的额度故障转移语义，无显式链时沿用 Agent 绑定和全局配置规则。
-- 主 Agent 输入框支持自动增长的多行输入，`Enter` 发送、`Shift+Enter` 换行，并避免中文输入法组合态误发送。
-- Planner、Worker 和主 Agent 共享任务级 LLM runtime；任务链使用候选模型中最小上下文窗口作为安全压缩阈值。
-- 任务详情页按真实 LLM 调用状态展示运行、空闲和暂停状态；来源任务的事实、漏洞、意图、资产引用和图谱节点统一标记来源并保持只读。
-- Agent 预览、任务报告和相关详情视图统一使用共享 Markdown 渲染组件。
-- LLM 模型配置采用卡片和抽屉交互，模型列表在抽屉内支持独立滚动。
-- 任务暂停不再拦截主 Agent 对话：主 Agent 编排会话独立于任务暂停，暂停中仍可继续发送新消息（暂停只终止当前进行中的那一轮）。
-- Worker 单次 run 的墙钟默认时长由 600 秒调整为 1200 秒。
+- Task-level explicit LLM configuration chains coexist with the existing global LLM Pool; explicit chains keep the strict quota failover semantics, and without an explicit chain the Agent binding and global configuration rules apply.
+- The main agent input box supports auto-growing multi-line input, `Enter` to send, `Shift+Enter` for newline, and avoids accidental sends during IME composition.
+- Planner, Worker, and main agent share the task-level LLM runtime; the task chain uses the smallest context window among candidate models as the safe compression threshold.
+- The task details page shows running, idle, and paused states based on real LLM call states; source tasks' facts, vulnerabilities, intents, asset references, and graph nodes are uniformly marked with their source and kept read-only.
+- Agent preview, task reports, and related detail views uniformly use the shared Markdown rendering component.
+- LLM model configuration uses card and drawer interactions, and the model list scrolls independently inside the drawer.
+- Task pause no longer blocks main agent conversations: main agent orchestration sessions are independent of task pause, and new messages can still be sent while paused (pause only terminates the currently running round).
+- The default wall-clock duration of a single Worker run changed from 600 to 1200 seconds.
 
 ### Fixed
 
-- 移除主 Agent 控制台的乐观回显，改为纯服务端数据渲染，修复暂停或发送失败等场景下消息错乱、串入其他会话内容的问题。
-- 打开主 Agent 会话默认滚动到底并完整显示最后一条回复：最后一条回复的完整内容懒加载展开后自动贴底，不再被顶出屏幕。
-- 修复暂停任务后主 Agent 会话仍继续运行，以及编排 Agent 暂停任务时未同步停止主 Agent 的问题。
-- 修复任务完成、Planner、Worker 或主 Agent 实际运行时，任务状态徽标与操作按钮状态不同步的问题。
-- 修复 Worker 取消、任务删除和并发写入之间可能产生迟到黑板写入或残留文件的问题。
-- 修复 Markdown 预览失效、删除确认长文本溢出、移动端宽度和部分任务详情按钮未对齐的问题。
-- 为所有 Agent 取消路径增加具名终止原因，活动详情可显示取消方、终态、运行轮数、耗时、Token 使用量和未返回的工具调用。
-- 修复后端关闭时父 context 可能抢先覆盖具名 `shutdown` 原因的竞态，以及中文活动摘要按字节截断导致乱码的问题。
-- 修复带部分流式输出的取消事件丢失真实终止原因的问题，同时保留取消前已生成的内容。
+- Removed optimistic echo from the main agent console in favor of pure server-side data rendering, fixing message disorder and content from other sessions mixing in under pause or send-failure scenarios.
+- Opening a main agent session now scrolls to the bottom by default and fully shows the last reply: after the last reply's full content lazy-loads and expands, it auto-sticks to the bottom and is no longer pushed off screen.
+- Fixed the main agent session continuing to run after the task was paused, and the orchestrating agent not synchronously stopping the main agent when pausing a task.
+- Fixed the task status badge and action button states being out of sync while the task was done or the Planner, Worker, or main agent was actually running.
+- Fixed late blackboard writes or leftover files that could occur between Worker cancellation, task deletion, and concurrent writes.
+- Fixed broken Markdown preview, long-text overflow in delete confirmations, mobile width, and some misaligned task details buttons.
+- Added named termination reasons to all agent cancellation paths; activity details can show the canceller, final state, round count, elapsed time, token usage, and unreturned tool calls.
+- Fixed a race where the parent context could preemptively overwrite the named `shutdown` reason during backend shutdown, and garbled text caused by byte-wise truncation of Chinese activity summaries.
+- Fixed cancellation events with partial streaming output losing the real termination reason, while preserving content generated before cancellation.
 
-### 贡献者
+### Contributors
 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
