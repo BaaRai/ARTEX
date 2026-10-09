@@ -16,6 +16,8 @@ import type {
   Asset,
   AssetInterceptRule,
   AssetInterceptRuleInput,
+  TaskCredential,
+  TaskCredentialInput,
   Audit,
   BatchCategoryItem,
   BatchControlItem,
@@ -260,6 +262,7 @@ export const api = {
     planHeartbeatSeconds?: number;
     coverageEnabled?: boolean;
     interceptRules?: AssetInterceptRuleInput[];
+    credentials?: TaskCredentialInput[];
   }) =>
     post<Task>("/tasks", {
       name: input.name ?? "",
@@ -274,12 +277,17 @@ export const api = {
       plan_heartbeat_seconds: input.planHeartbeatSeconds ?? 0, // 0 = the backend normalizes to the default 600 (10min)
       coverage_enabled: input.coverageEnabled ?? true, // on by default; false disables the asset coverage feature
       intercept_rules: input.interceptRules ?? [], // task-level asset interception rules
+      credentials: input.credentials ?? [], // test accounts declared at creation; an empty password = the agent generates and records it (#3)
     }),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
   updateTask: (id: string, input: { name?: string; pinned?: boolean }) => patch<Task>(`/tasks/${id}`, input),
   renameTask: (id: string, name: string) => patch<Task>(`/tasks/${id}`, { name }),
   pinTask: (id: string, pinned: boolean) => patch<Task>(`/tasks/${id}`, { pinned }),
   createTaskCategory: (name: string) => post<TaskCategory>("/task-categories", { name }),
+  taskCredentials: (id: string) => get<TaskCredential[]>(`/tasks/${id}/credentials`).then((r) => arr(r)),
+  addTaskCredential: (id: string, input: TaskCredentialInput) =>
+    post<TaskCredential>(`/tasks/${id}/credentials`, input),
+  deleteTaskCredential: (id: string, cid: number) => del(`/tasks/${id}/credentials/${cid}`),
   renameTaskCategory: (id: number, name: string) => patch<TaskCategory>(`/task-categories/${id}`, { name }),
   deleteTaskCategory: (id: number) => del<{ deleted: number }>(`/task-categories/${id}`),
   updateTaskCategory: (taskId: string, categoryId?: number) =>

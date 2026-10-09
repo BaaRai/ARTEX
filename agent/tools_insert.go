@@ -663,6 +663,9 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// add_company_scope is not given to workers: defining a company's asset scope is
 		// the duty of planning/main-control/Auto; a worker only executes exploration.
 		t.insertAssets(), t.listAssets(),
+		// Task credentials (#3): reuse user-declared test accounts, record
+		// self-registered ones so they are not forgotten.
+		t.saveTaskCredential(), t.listTaskCredentials(),
 		// Cross-work review: a worker can also reuse other works' observations to avoid
 		// duplicate work.
 		// search_all_worker_traces: no need to know an intent_id first — fish out matching

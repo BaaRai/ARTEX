@@ -564,6 +564,14 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 			}
 		}
 	}
+	// Task credentials (#3): test accounts for this target — user-declared (e.g. a
+	// program alias) plus accounts recorded by earlier runs. Surfaced every round so
+	// authenticated testing reuses them instead of re-registering, and so accounts
+	// this run registers get saved back (see save_task_credential).
+	if creds := t.taskCredentialOverview(); creds != nil {
+		out["task_credentials"] = creds
+		out["task_credentials_note"] = "test accounts for this task; use the matching entry for authenticated testing instead of registering a new account; entries with an empty password mean you must register that account first (strong unique password) and record it via save_task_credential; ALWAYS record accounts you register via save_task_credential"
+	}
 	return out
 }
 

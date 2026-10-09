@@ -33,6 +33,7 @@ import {
   PinOffIcon,
   PlayIcon,
   PlusIcon,
+  TrashIcon,
   SaveIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -123,6 +124,7 @@ import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.
 import { type SortDirection, useStoredSortPreference } from "@/lib/sort-preference";
 import type {
   AssetInterceptRuleInput,
+  TaskCredentialInput,
   ChatAttachment,
   Company,
   DeleteTaskOptions,
@@ -3088,6 +3090,7 @@ function CreateTaskSheet({
   const [seedFirstIntent, setSeedFirstIntent] = React.useState(false); // dispatch a seed intent at creation so the worker starts without waiting for the first planner round; off by default, standard plan-then-execute
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // asset coverage feature; on by default. Off = no coverage computed/displayed, no scope accumulation, scope-related tools hidden (company links unaffected)
   const [interceptRules, setInterceptRules] = React.useState<AssetInterceptRuleInput[]>([]); // task-level asset intercept rules (this task only, never entering the global table)
+  const [credentials, setCredentials] = React.useState<TaskCredentialInput[]>([]); // test accounts declared at creation (#3); an empty password = the agent registers that account and records it
   // Method 1, file upload: files are staged under drafts/<draftId>/uploads/ before the task is created, and their absolute paths are appended to the description.
   const [uploading, setUploading] = React.useState(false);
   const [uploadCount, setUploadCount] = React.useState(0);
@@ -3157,6 +3160,9 @@ function CreateTaskSheet({
         interceptRules: interceptRules
           .map((r) => ({ ...r, pattern: r.pattern.trim() }))
           .filter((r) => r.pattern !== ""),
+        credentials: credentials
+          .map((c) => ({ domain: c.domain.trim(), username: c.username.trim(), password: c.password, note: c.note?.trim() ?? "" }))
+          .filter((c) => c.domain !== "" && c.username !== ""),
       });
       toast.success("Task created");
       setName("");
@@ -3400,6 +3406,59 @@ function CreateTaskSheet({
               </CollapsibleContent>
             </Collapsible>
           </div>
+        </div>
+
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium">Test accounts (optional)</label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setCredentials((prev) => [...prev, { domain: "", username: "", password: "", note: "" }])}
+            >
+              <PlusIcon /> Add account
+            </Button>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Test accounts reused by the agent for authenticated testing. Leave the password empty to have the agent register that
+            account itself and record the password it chose. Use dedicated test accounts only — anything declared here is sent to
+            the configured LLM provider during the task.
+          </p>
+          {credentials.map((c, i) => (
+            <div key={i} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+              <Input
+                placeholder="domain (e.g. target.example.com)"
+                value={c.domain}
+                onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, domain: e.target.value } : x)))}
+              />
+              <Input
+                placeholder="username"
+                value={c.username}
+                onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, username: e.target.value } : x)))}
+              />
+              <Input
+                placeholder="password (empty = agent generates)"
+                value={c.password}
+                onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, password: e.target.value } : x)))}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Remove account"
+                onClick={() => setCredentials((prev) => prev.filter((_, j) => j !== i))}
+              >
+                <TrashIcon />
+              </Button>
+              <Input
+                className="sm:col-span-4"
+                placeholder="note (optional, e.g. program alias account)"
+                value={c.note ?? ""}
+                onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))}
+              />
+            </div>
+          ))}
         </div>
 
         <SheetFooter className="flex-row justify-end gap-2 border-t p-4">

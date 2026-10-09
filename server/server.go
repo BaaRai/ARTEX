@@ -693,6 +693,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tasks/control/batch", s.controlTasksBatch)
 	mux.HandleFunc("GET /api/task-archives", s.listTaskArchives)
 	mux.HandleFunc("GET /api/task-archives/{id}", s.getTaskArchive)
+	mux.HandleFunc("GET /api/tasks/{id}/credentials", s.listTaskCredentials)
+	mux.HandleFunc("POST /api/tasks/{id}/credentials", s.addTaskCredential)
+	mux.HandleFunc("DELETE /api/tasks/{id}/credentials/{cid}", s.deleteTaskCredential)
 	mux.HandleFunc("POST /api/tasks/{id}/archive", s.queueTaskArchive)
 	mux.HandleFunc("POST /api/tasks/archive/batch", s.queueTaskArchivesBatch)
 	mux.HandleFunc("POST /api/task-archives/{id}/restore", s.queueTaskArchiveRestore)
@@ -1457,6 +1460,16 @@ type createTaskReq struct {
 	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`  // asset coverage feature; omitted/null = default on (true). false = disables coverage calculation/display/auto-accumulated scope + hides add_task_scope/list_untested_assets. company links are unaffected.
 	// InterceptRules: task-level asset interception/allow rules (entered at creation, stored in task_intercept_rules, never the global table).
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
+	// Credentials: test accounts declared at creation (#3). An empty password means
+	// "agent generates": the agent registers that account and records it back.
+	Credentials []taskCredentialReq `json:"credentials,omitempty"`
+}
+
+type taskCredentialReq struct {
+	Domain   string `json:"domain"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Note     string `json:"note"`
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -1528,6 +1541,20 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("[task] created task #%s «%s» goal: %s", t.ID, req.Description, req.Goal)
+	// Task credentials (#3): rows land after the task row commits; a bad entry
+	// fails the whole request so the UI never shows a half-configured task.
+	if len(req.Credentials) > 0 {
+		taskNum, _ := strconv.ParseInt(t.ID, 10, 64)
+		for _, c := range req.Credentials {
+			if _, err := s.m.PG().UpsertTaskCredential(taskNum, db.TaskCredentialInput{
+				Domain: c.Domain, Username: c.Username, Password: c.Password,
+				Source: "user", Note: c.Note,
+			}); err != nil {
+				writeErr(w, 400, "invalid credential for "+c.Domain+": "+err.Error())
+				return
+			}
+		}
+	}
 	// Shared post-create flow (seed + seed intent + background goal decomposition + engine.Run), reusing the same launchTask as spawn_task.
 	// launchTask is async internally and never blocks the UI — goal decomposition visibly proceeds in the background.
 	s.launchTask(t, req.Description+" "+req.Goal, req.SeedFirstIntent != nil && *req.SeedFirstIntent)

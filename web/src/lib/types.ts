@@ -1293,6 +1293,25 @@ export interface AssetInterceptRuleInput {
   enabled: boolean;
 }
 
+// Task credentials (#3): per-task test accounts. An empty password on a user-declared
+// entry means "agent generates": the agent registers that account and records it back.
+export type TaskCredentialInput = {
+  domain: string;
+  username: string;
+  password: string;
+  note?: string;
+};
+
+export type TaskCredential = TaskCredentialInput & {
+  id: number;
+  task_id: number;
+  source: "user" | "agent";
+  note: string;
+  created_at: string;
+  updated_at: string;
+};
+
+
 export interface AssetInterceptRule {
   id: number;
   enabled: boolean;
