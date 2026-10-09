@@ -1187,8 +1187,12 @@ func (m *Manager) ApplyTaskAdmission(id, expectedStatus, status string, queued b
 	    END,
 	    deadline_at=CASE
 	        WHEN $6='timeout' AND $2 NOT IN ('done','failed','timeout') THEN NULL
+	        -- Leaving the paused state: credit the paused interval back onto the
+	        -- deadline so the timeout budget only counts running time (#1).
+	        WHEN paused_at IS NOT NULL AND deadline_at IS NOT NULL THEN deadline_at + (now() - paused_at)
 	        ELSE deadline_at
-	    END
+	    END,
+	    paused_at=NULL
 	WHERE id=$1 AND deleted_at IS NULL AND status=$6
 	RETURNING queued_at, queue_mode, completed_at, first_run_at, deadline_at`, n, status, queued, mode, preservePosition, expectedStatus).
 		Scan(&queuedAt, &committedMode, &completedAt, &firstRunAt, &deadlineAt)
@@ -1229,7 +1233,9 @@ func (m *Manager) ApplyTaskAdmission(id, expectedStatus, status string, queued b
 }
 
 // ApplyTaskPause atomically removes a task from the admission queue and records
-// the user pause. queue_mode is intentionally retained so resuming a never-run
+// the user pause. paused_at is stamped so the admission that follows can credit
+// the paused interval back onto deadline_at — the timeout budget must not burn
+// while the task is parked (#1). queue_mode is intentionally retained so resuming a never-run
 // bootstrap task still performs goal decomposition, but the next enqueue receives
 // a new queued_at timestamp and therefore moves to the FIFO tail.
 func (m *Manager) ApplyTaskPause(id string) error {
@@ -1241,7 +1247,7 @@ func (m *Manager) ApplyTaskPause(id string) error {
 	}
 	var mode string
 	err = m.pg.QueryRow(`UPDATE tasks
-		SET paused=true, queued=false, queued_at=NULL
+		SET paused=true, queued=false, queued_at=NULL, paused_at=now()
 		WHERE id=$1 AND deleted_at IS NULL AND paused=false
 		  AND status NOT IN ('done','failed','timeout')
 		RETURNING COALESCE(queue_mode,'')`, n).Scan(&mode)
