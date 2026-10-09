@@ -144,7 +144,7 @@ export function CredentialsTab({ taskId }: { taskId: string }) {
         )}
         <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
           <Input placeholder="domain (e.g. target.example.com)" value={domain} onChange={(e) => setDomain(e.target.value)} />
-          <Input placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} />
+          <Input placeholder="email or username" value={username} onChange={(e) => setUsername(e.target.value)} />
           <Input
             placeholder="password (empty = agent generates)"
             type="text"
