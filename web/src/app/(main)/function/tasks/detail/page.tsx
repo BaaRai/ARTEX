@@ -434,14 +434,14 @@ function TaskDetailInner() {
         <TabsContent value="findings" className="mt-0">
           <FindingsTab taskId={id} />
         </TabsContent>
-        <TabsContent value="credentials" className="mt-0">
-          <CredentialsTab taskId={task.id} />
-        </TabsContent>
         <TabsContent value="retests" className="mt-0">
           <RetestsTab key={id} taskId={id} />
         </TabsContent>
         <TabsContent value="assets" className="mt-0">
           <AssetsTab taskId={id} />
+        </TabsContent>
+        <TabsContent value="credentials" className="mt-0">
+          <CredentialsTab taskId={id} />
         </TabsContent>
         <TabsContent value="coverage" className="mt-0">
           <CoverageGraphTab taskId={id} coverageEnabled={task?.coverage_enabled !== false} />
