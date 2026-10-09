@@ -491,8 +491,9 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedPlannerDefaultBindings()
 	s.seedPlannerListAssetsBinding()
 	s.seedCompanyScopeRebind()
-	s.seedWorkerReadToolsUnbind() // list_facts/list_companies/list_worker_traces unbound from worker's defaults (one-time)
-	s.seedWorkerReadbackRebind()  // repairs an old migration's wrong removal: re-binds search_all_worker_traces/get_worker_trace/node_detail back onto worker (one-time)
+	s.seedWorkerReadToolsUnbind()  // list_facts/list_companies/list_worker_traces unbound from worker's defaults (one-time)
+	s.seedWorkerReadbackRebind()   // repairs an old migration's wrong removal: re-binds search_all_worker_traces/get_worker_trace/node_detail back onto worker (one-time)
+	s.seedTaskCredentialBindings() // save/list_task_credential onto worker + pentest (one-time, #3)
 	s.seedAutoReportFindingBinding()
 	s.unbindGoalMetDefault()
 	s.reseedGoalsPrompt()             // goals prompt gains the "extract operation constraints" step → old DBs append a new default version (one-time)
@@ -882,6 +883,24 @@ func (s *Server) seedWorkerReadToolsUnbind() {
 // they had been added to WorkerTools(), so any DB that ran that migration lost them.
 // Fresh DBs already have them via WorkerTools() and this is a harmless no-op there.
 // One-shot + flag-guarded so a user who later deliberately unbinds them isn't overridden.
+// seedTaskCredentialBindings binds the task-credential tools onto worker and
+// pentest ONCE (guarded by a settings flag), so existing DBs seeded before #3
+// still get them — fresh DBs already have them via WorkerTools()/the pentest
+// catalog seed. A user who deliberately unbinds them is not overridden.
+func (s *Server) seedTaskCredentialBindings() {
+	const flag = "task_credential_bindings_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	for _, agentKey := range []string{"worker", "pentest"} {
+		if err := s.m.pg.AddAgentToToolBinding(agentKey, []string{"save_task_credential", "list_task_credentials"}); err != nil {
+			log.Printf("[%s] task-credential default binding failed: %v", agentKey, err)
+			return // flag not set; retried on next startup
+		}
+	}
+	_ = s.m.pg.SetSetting(flag, "true")
+}
+
 func (s *Server) seedWorkerReadbackRebind() {
 	const flag = "worker_readback_rebind_v2" // v2: adds node_detail
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {

@@ -1292,6 +1292,23 @@ CREATE TABLE IF NOT EXISTS task_intercept_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_task_intercept_task ON task_intercept_rules(task_id);
 -- Backfills old databases (an earlier revision created this table without the action column): add the column (with IF NOT EXISTS).
+-- Per-task test accounts (#3): user-declared (e.g. a program-provided alias
+-- account) or agent-registered and recorded so they are not forgotten. Passwords
+-- are local-only, same trust domain as captured traffic evidence; the UI masks
+-- them by default.
+CREATE TABLE IF NOT EXISTS task_credentials (
+    id         BIGSERIAL PRIMARY KEY,
+    task_id    BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    domain     TEXT NOT NULL,
+    username   TEXT NOT NULL,
+    password   TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL DEFAULT 'user' CHECK (source IN ('user','agent')),
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (task_id, domain, username)
+);
+
 ALTER TABLE task_intercept_rules ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT 'block';
 DROP TRIGGER IF EXISTS trg_task_intercept_rules_upd ON task_intercept_rules;
 CREATE TRIGGER trg_task_intercept_rules_upd BEFORE UPDATE ON task_intercept_rules
