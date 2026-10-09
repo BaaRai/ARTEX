@@ -41,7 +41,7 @@ type Task struct {
 	// Task-level timeout (see the task-level timeout and wrap-up design doc).
 	TimeoutSeconds int        `json:"timeout_seconds"`        // 0=no time limit
 	FirstRunAt     *time.Time `json:"first_run_at,omitempty"` // when it first actually started running (not created_at); nil=not yet run
-	DeadlineAt     *time.Time `json:"deadline_at,omitempty"`  // = first_run_at + timeout_seconds; nil=unlimited or not yet run
+	DeadlineAt     *time.Time `json:"deadline_at,omitempty"`  // = first_run_at + timeout_seconds, shifted forward by paused intervals on resume; nil=unlimited or not yet run
 	// planner heartbeat trigger interval (seconds): when this much time has passed since the
 	// last plan round ended / the task started, with no trigger in between → trigger a round.
 	// Floor = default = 300 (5min); anything lower is raised to 300 (normalized in CreateTask). See docs/planner-trigger-impl-plan.md
