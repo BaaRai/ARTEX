@@ -51,6 +51,43 @@ eyes() { # $1 = issue or PR number
   gh api -X POST "repos/$repo/issues/$1/reactions" -f content=eyes >/dev/null 2>&1 || true
 }
 
+# The model ends its triage reply with a "LABELS: a, b" line. Extract the
+# whitelisted labels, strip the line from the comment, and apply the labels.
+LABEL_COLORS=(bug=d73a4a question=d876e3 feature=a2eeef P1=b60205 P2=fbca04 P3=c5def5)
+
+ensure_label() { # $1 = label name
+  local entry color
+  for entry in "${LABEL_COLORS[@]}"; do
+    [ "${entry%%=*}" = "$1" ] && color="${entry#*=}"
+  done
+  gh label create "$1" --color "${color:-cccccc}" --force >/dev/null 2>&1 || true
+}
+
+apply_labels() { # $1 = issue number, $2 = comma separated label names from the model
+  local wanted=() item ok w
+  IFS=',' read -ra parts <<<"$2"
+  for item in "${parts[@]}"; do
+    item=$(echo "$item" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    ok=0
+    for w in bug question feature p1 p2 p3; do [ "$item" = "$w" ] && ok=1; done
+    [ "$ok" = 1 ] || continue
+    case "$item" in p1|p2|p3) item=${item^^} ;; esac
+    wanted+=("$item")
+  done
+  if [ "${#wanted[@]}" -gt 0 ]; then
+    for item in "${wanted[@]}"; do ensure_label "$item"; done
+    gh issue edit "$1" --add-label "$(IFS=,; echo "${wanted[*]}")" >/dev/null 2>&1 || log "label apply failed"
+    log "applied labels: ${wanted[*]}"
+  fi
+}
+
+split_labels() { # stdin: model reply; stdout: reply without the LABELS line; the label names land in /tmp/bot-labels-line (survives the command-substitution subshell)
+  awk '
+    /^LABELS:[ \t]*/ { sub(/^[^:]*:[ \t]*/, ""); print > "/dev/stderr"; next }
+    { print }
+  ' 2>/tmp/bot-labels-line
+}
+
 already_triaged() { # $1 = issue number
   gh api "repos/$repo/issues/$1/comments" --jq '.[].body' 2>/dev/null \
     | grep -q 'automated reply from the repo bot'
@@ -66,7 +103,7 @@ case "$event_name" in
     if already_triaged "$number"; then log "issue #$number already triaged"; exit 0; fi
     eyes "$number"
     answer=$(ask_model \
-      'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Classify this report as bug, question, or feature request. If it is a question, answer it concisely using the repository file list as context. If it is a bug report, say what reproduction steps or version information are missing. If it is a feature request, restate it in one sentence. Maximum 180 words, plain markdown, reply in the language of the report, no heading.' \
+      'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Classify this report as bug, question, or feature request. If it is a question, answer it concisely using the repository file list as context. If it is a bug report, say what reproduction steps or version information are missing. If it is a feature request, restate it in one sentence. Maximum 180 words, plain markdown, reply in the language of the report, no heading. End your reply with one final line of the exact form "LABELS: x, y" choosing only from: bug, question, feature, and for bugs a priority: P1 (security impact or data loss), P2 (core functionality broken), P3 (minor or cosmetic); omit the priority for questions and features; use "LABELS: none" if nothing fits.' \
       "Issue title: $title
 
 Issue body:
@@ -75,7 +112,11 @@ $body
 Repository file list:
 $(repo_context)")
     [ -z "$answer" ] && { log "model returned nothing"; exit 0; }
-    post_comment "$number" "$answer"
+    clean_text=$(split_labels <<<"$answer")
+    reply_labels=$(tail -1 /tmp/bot-labels-line 2>/dev/null)
+    [ -z "$reply_labels" ] && reply_labels="none"
+    post_comment "$number" "$clean_text"
+    apply_labels "$number" "$reply_labels"
     ;;
 
   issue_comment)
