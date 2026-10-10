@@ -117,6 +117,7 @@ $body
 Repository file list:
 $(repo_context)")
     [ -z "$answer" ] && { log "model returned nothing"; exit 0; }
+    log "raw reply tail: ...${answer: -160}"
     clean_text=$(split_labels <<<"$answer")
     reply_labels=$(tail -1 /tmp/bot-labels-line 2>/dev/null)
     [ -z "$reply_labels" ] && reply_labels="none"
