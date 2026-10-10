@@ -100,8 +100,10 @@ case "$event_name" in
     number=$(jq -r '.issue.number' <<<"$ev")
     title=$(jq -r '.issue.title' <<<"$ev")
     body=$(jq -r '.issue.body // ""' <<<"$ev")
-    if already_triaged "$number"; then log "issue #$number already triaged"; exit 0; fi
-    eyes "$number"
+    maintainer_opened=false
+    [ "$GITHUB_ACTOR" = "BaaRai" ] && maintainer_opened=true
+    if [ "$maintainer_opened" = false ] && already_triaged "$number"; then log "issue #$number already triaged"; exit 0; fi
+    [ "$maintainer_opened" = false ] && eyes "$number"
     answer=$(ask_model \
       'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Classify this report as bug, question, or feature request. If it is a question, answer it concisely using the repository file list as context. If it is a bug report, say what reproduction steps or version information are missing. If it is a feature request, restate it in one sentence. Maximum 180 words, plain markdown, reply in the language of the report, no heading. End your reply with one final line of the exact form "LABELS: x, y" choosing only from: bug, question, feature, and for bugs a priority: P1 (security impact or data loss), P2 (core functionality broken), P3 (minor or cosmetic); omit the priority for questions and features; use "LABELS: none" if nothing fits.' \
       "Issue title: $title
@@ -115,6 +117,11 @@ $(repo_context)")
     clean_text=$(split_labels <<<"$answer")
     reply_labels=$(tail -1 /tmp/bot-labels-line 2>/dev/null)
     [ -z "$reply_labels" ] && reply_labels="none"
+    if [ "$maintainer_opened" = true ]; then
+      log "maintainer issue #$number: labels only, staying silent"
+      apply_labels "$number" "$reply_labels"
+      exit 0
+    fi
     post_comment "$number" "$clean_text"
     apply_labels "$number" "$reply_labels"
     ;;
