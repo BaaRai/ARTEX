@@ -67,7 +67,8 @@ apply_labels() { # $1 = issue number, $2 = comma separated label names from the 
   local wanted=() item ok w
   IFS=',' read -ra parts <<<"$2"
   for item in "${parts[@]}"; do
-    item=$(echo "$item" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    # strip whitespace plus any markdown decoration smaller models leave on items
+    item=$(echo "$item" | tr -d '[:space:]*`_' | tr '[:upper:]' '[:lower:]')
     ok=0
     for w in bug question feature p1 p2 p3; do [ "$item" = "$w" ] && ok=1; done
     [ "$ok" = 1 ] || continue
@@ -82,8 +83,10 @@ apply_labels() { # $1 = issue number, $2 = comma separated label names from the 
 }
 
 split_labels() { # stdin: model reply; stdout: reply without the LABELS line; the label names land in /tmp/bot-labels-line (survives the command-substitution subshell)
+  # Tolerant match: smaller models sometimes bold or backtick the marker
+  # (**LABELS:**, `LABELS:`, "labels:"), so accept any decoration and case.
   awk '
-    /^LABELS:[ \t]*/ { sub(/^[^:]*:[ \t]*/, ""); print > "/dev/stderr"; next }
+    tolower($0) ~ /^[*`_"'"'"' -]*labels[ \t]*:/ { sub(/^[^:]*:[ \t]*/, ""); print > "/dev/stderr"; next }
     { print }
   ' 2>/tmp/bot-labels-line
 }
@@ -105,7 +108,7 @@ case "$event_name" in
     if [ "$maintainer_opened" = false ] && already_triaged "$number"; then log "issue #$number already triaged"; exit 0; fi
     [ "$maintainer_opened" = false ] && eyes "$number"
     answer=$(ask_model \
-      'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Classify this report as bug, question, or feature request. If it is a question, answer it concisely using the repository file list as context. If it is a bug report, say what reproduction steps or version information are missing. If it is a feature request, restate it in one sentence. Maximum 180 words, plain markdown, reply in the language of the report, no heading. End your reply with one final line of the exact form "LABELS: x, y" choosing only from: bug, question, feature, and for bugs a priority: P1 (security impact or data loss), P2 (core functionality broken), P3 (minor or cosmetic); omit the priority for questions and features; use "LABELS: none" if nothing fits.' \
+      'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Classify this report as bug, question, or feature request. If it is a question, answer it concisely using the repository file list as context. If it is a bug report, say what reproduction steps or version information are missing. If it is a feature request, restate it in one sentence. Maximum 180 words, plain markdown, reply in the language of the report, no heading. End your reply with one final line, plain text with no markdown formatting, characters, or emphasis of any kind, of the exact form LABELS: x, y choosing only from: bug, question, feature, and for bugs a priority: P1 (security impact or data loss), P2 (core functionality broken), P3 (minor or cosmetic); omit the priority for questions and features; use LABELS: none if nothing fits. Example final line: LABELS: bug, P2' \
       "Issue title: $title
 
 Issue body:
@@ -117,6 +120,7 @@ $(repo_context)")
     clean_text=$(split_labels <<<"$answer")
     reply_labels=$(tail -1 /tmp/bot-labels-line 2>/dev/null)
     [ -z "$reply_labels" ] && reply_labels="none"
+    log "parsed labels: $reply_labels"
     if [ "$maintainer_opened" = true ]; then
       log "maintainer issue #$number: labels only, staying silent"
       apply_labels "$number" "$reply_labels"
