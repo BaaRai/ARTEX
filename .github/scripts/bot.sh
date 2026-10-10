@@ -27,7 +27,7 @@ ask_model() { # $1 = system prompt, $2 = user payload; prints the answer
   local body="${2:0:$MAX_CHARS}"
   local req
   req=$(jq -n --arg sys "$1" --arg body "$body" \
-    '{model: "deepseek-chat",
+    '{model: "deepseek-flash",
       messages: [{role: "system", content: $sys}, {role: "user", content: $body}],
       max_tokens: 900, temperature: 0.2}')
   curl -sS --max-time 120 https://api.deepseek.com/chat/completions \
