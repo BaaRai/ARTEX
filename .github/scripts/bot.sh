@@ -23,13 +23,15 @@ ev=$(cat "$GITHUB_EVENT_PATH")
 event_name="$GITHUB_EVENT_NAME"
 repo="$GITHUB_REPOSITORY"
 
-ask_model() { # $1 = system prompt, $2 = user payload; prints the answer
-  local body="${2:0:$MAX_CHARS}"
+ask_model() { # $1 = system prompt, $2 = user payload, $3 = "json" for JSON mode; prints the answer
+  local body="${2:0:$MAX_CHARS}" extra
   local req
-  req=$(jq -n --arg sys "$1" --arg body "$body" \
-    '{model: "deepseek-chat",
+  extra='{}'
+  [ "${3:-}" = "json" ] && extra='{response_format: {type: "json_object"}}'
+  req=$(jq -n --arg sys "$1" --arg body "$body" --argjson extra "$extra" \
+    '{model: "deepseek-flash",
       messages: [{role: "system", content: $sys}, {role: "user", content: $body}],
-      max_tokens: 900, temperature: 0.2}')
+      max_tokens: 900, temperature: 0} * $extra')
   curl -sS --max-time 120 https://api.deepseek.com/chat/completions \
     -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
     -H 'Content-Type: application/json' \
@@ -51,8 +53,7 @@ eyes() { # $1 = issue or PR number
   gh api -X POST "repos/$repo/issues/$1/reactions" -f content=eyes >/dev/null 2>&1 || true
 }
 
-# The model ends its triage reply with a "LABELS: a, b" line. Extract the
-# whitelisted labels, strip the line from the comment, and apply the labels.
+# Labels the triage may request; anything else the model names is dropped.
 LABEL_COLORS=(bug=d73a4a question=d876e3 feature=a2eeef P1=b60205 P2=fbca04 P3=c5def5)
 
 ensure_label() { # $1 = label name
@@ -67,8 +68,7 @@ apply_labels() { # $1 = issue number, $2 = comma separated label names from the 
   local wanted=() item ok w
   IFS=',' read -ra parts <<<"$2"
   for item in "${parts[@]}"; do
-    # strip whitespace plus any markdown decoration smaller models leave on items
-    item=$(echo "$item" | tr -d '[:space:]*`_' | tr '[:upper:]' '[:lower:]')
+    item=$(echo "$item" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
     ok=0
     for w in bug question feature p1 p2 p3; do [ "$item" = "$w" ] && ok=1; done
     [ "$ok" = 1 ] || continue
@@ -80,15 +80,6 @@ apply_labels() { # $1 = issue number, $2 = comma separated label names from the 
     gh issue edit "$1" --add-label "$(IFS=,; echo "${wanted[*]}")" >/dev/null 2>&1 || log "label apply failed"
     log "applied labels: ${wanted[*]}"
   fi
-}
-
-split_labels() { # stdin: model reply; stdout: reply without the LABELS line; the label names land in /tmp/bot-labels-line (survives the command-substitution subshell)
-  # Tolerant match: smaller models sometimes bold or backtick the marker
-  # (**LABELS:**, `LABELS:`, "labels:"), so accept any decoration and case.
-  awk '
-    tolower($0) ~ /^[*`_"'"'"' -]*labels[ \t]*:/ { sub(/^[^:]*:[ \t]*/, ""); print > "/dev/stderr"; next }
-    { print }
-  ' 2>/tmp/bot-labels-line
 }
 
 already_triaged() { # $1 = issue number
@@ -108,18 +99,18 @@ case "$event_name" in
     if [ "$maintainer_opened" = false ] && already_triaged "$number"; then log "issue #$number already triaged"; exit 0; fi
     [ "$maintainer_opened" = false ] && eyes "$number"
     answer=$(ask_model \
-      'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Classify this report as bug, question, or feature request. If it is a question, answer it concisely using the repository file list as context. If it is a bug report, say what reproduction steps or version information are missing. If it is a feature request, restate it in one sentence. Maximum 180 words, plain markdown, reply in the language of the report, no heading. End your reply with one final line of the exact form "LABELS: x, y" choosing only from: bug, question, feature, and for bugs a priority: P1 (security impact or data loss), P2 (core functionality broken), P3 (minor or cosmetic); omit the priority for questions and features; use "LABELS: none" if nothing fits.' \
+      'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Respond ONLY with a single JSON object, no markdown, no prose outside the JSON, exactly of this shape: {"comment": "<your triage comment, max 180 words, same language as the report>", "labels": ["<zero or more of: bug, question, feature, P1, P2, P3>"]}. Classify the report as bug, question, or feature request; if it is a question, answer it concisely using the repository file list as context in the comment; if it is a bug report, the comment says what reproduction steps or version information are missing; if it is a feature request, the comment restates it in one sentence; add a priority label (P1 security impact or data loss, P2 core functionality broken, P3 minor or cosmetic) only for bugs; use an empty labels array if nothing fits.' \
       "Issue title: $title
 
 Issue body:
 $body
 
 Repository file list:
-$(repo_context)")
+$(repo_context)" json)
     [ -z "$answer" ] && { log "model returned nothing"; exit 0; }
-    log "raw reply tail: ...${answer: -160}"
-    clean_text=$(split_labels <<<"$answer")
-    reply_labels=$(tail -1 /tmp/bot-labels-line 2>/dev/null)
+    log "raw json: $answer"
+    comment=$(jq -r '.comment // empty' <<<"$answer" 2>/dev/null)
+    reply_labels=$(jq -r 'if (.labels | type) == "array" then (.labels | map(tostring) | join(",")) else "" end' <<<"$answer" 2>/dev/null)
     [ -z "$reply_labels" ] && reply_labels="none"
     log "parsed labels: $reply_labels"
     if [ "$maintainer_opened" = true ]; then
@@ -127,7 +118,11 @@ $(repo_context)")
       apply_labels "$number" "$reply_labels"
       exit 0
     fi
-    post_comment "$number" "$clean_text"
+    if [ -n "$comment" ]; then
+      post_comment "$number" "$comment"
+    else
+      log "no comment field in JSON; labels only"
+    fi
     apply_labels "$number" "$reply_labels"
     ;;
 
