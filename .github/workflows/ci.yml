@@ -39,7 +39,11 @@ jobs:
       #   test that passes locally but is timing-sensitive on 2-core CI runners.
       # Skipping keeps the baseline green so real regressions stand out.
       - name: go test
-        run: go test ./... -skip 'TestInterceptFilterHTTP|TestGraphOverviewExpandsAssociatedCompanyScope|TestCaptureApprovalLifecycle|TestSideUsageRecordedOnceOnConsumerCancellation'
+        # -p 1: package test suites share the single postgres service; running
+        # them in parallel makes packages delete each other's rows (observed
+        # as rotating failures in the agent package). Serial package execution
+        # keeps the database state deterministic.
+        run: go test -p 1 ./... -skip 'TestInterceptFilterHTTP|TestGraphOverviewExpansAssociatedCompanyScope|TestCaptureApprovalLifecycle|TestSideUsageRecordedOnceOnConsumerCancellation'
 
   web:
     runs-on: ubuntu-latest
