@@ -25,17 +25,23 @@ repo="$GITHUB_REPOSITORY"
 
 ask_model() { # $1 = system prompt, $2 = user payload, $3 = "json" for JSON mode; prints the answer
   local body="${2:0:$MAX_CHARS}" extra
-  local req
+  local req resp
   extra='{}'
-  [ "${3:-}" = "json" ] && extra='{response_format: {type: "json_object"}}'
+  [ "${3:-}" = "json" ] && extra='{ "response_format": { "type": "json_object" } }'
   req=$(jq -n --arg sys "$1" --arg body "$body" --argjson extra "$extra" \
     '{model: "deepseek-flash",
       messages: [{role: "system", content: $sys}, {role: "user", content: $body}],
       max_tokens: 900, temperature: 0} * $extra')
-  curl -sS --max-time 120 https://api.deepseek.com/chat/completions \
+  resp=$(curl -sS --max-time 120 https://api.deepseek.com/chat/completions \
     -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
     -H 'Content-Type: application/json' \
-    -d "$req" | jq -r '.choices[0].message.content // empty'
+    -d "$req")
+  if ! jq -e '.choices[0].message.content' <<<"$resp" >/dev/null 2>&1; then
+    log "api call failed, raw response: ${resp:0:300}"
+    echo ""
+    return
+  fi
+  jq -r '.choices[0].message.content' <<<"$resp"
 }
 
 repo_context() { git ls-files | head -120; }
