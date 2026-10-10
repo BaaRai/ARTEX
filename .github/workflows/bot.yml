@@ -15,11 +15,14 @@ permissions:
 
 jobs:
   reply:
-    # Serves visitors only: never react to the maintainer, to bots, or to itself.
+    # Issue opening is always handled (the maintainer gets silent labeling,
+    # visitors get the full triage). Comments and PRs serve visitors only:
+    # never react to the maintainer, to bots, or to itself.
     if: >
-      github.actor != 'BaaRai' &&
-      github.actor != 'github-actions[bot]' &&
-      github.actor != 'dependabot[bot]'
+      github.event_name == 'issues' ||
+      (github.actor != 'BaaRai' &&
+       github.actor != 'github-actions[bot]' &&
+       github.actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
