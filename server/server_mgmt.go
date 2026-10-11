@@ -1108,17 +1108,21 @@ func (s *Server) fsCreateSkill(w http.ResponseWriter, r *http.Request) {
 	//   Markdown body:    step-by-step instructions
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	fmt.Fprintf(&sb, "name: %s\n", body.Name)
-	fmt.Fprintf(&sb, "description: %s\n", body.Description)
+	fmt.Fprintf(&sb, "name: %s\n", yamlScalar(body.Name))
+	fmt.Fprintf(&sb, "description: %s\n", yamlScalar(body.Description))
 	if body.License != "" {
-		fmt.Fprintf(&sb, "license: %s\n", body.License)
+		fmt.Fprintf(&sb, "license: %s\n", yamlScalar(body.License))
 	}
 	if body.Compatibility != "" {
-		fmt.Fprintf(&sb, "compatibility: %s\n", body.Compatibility)
+		fmt.Fprintf(&sb, "compatibility: %s\n", yamlScalar(body.Compatibility))
 	}
 	// mcps: MCP servers this skill unlocks on load (skill-gated deferred tools).
 	if mcps := cleanStrs(body.MCPs); len(mcps) > 0 {
-		fmt.Fprintf(&sb, "mcps: %s\n", strings.Join(mcps, ", "))
+		quoted := make([]string, len(mcps))
+		for i, m := range mcps {
+			quoted[i] = yamlScalar(m)
+		}
+		fmt.Fprintf(&sb, "mcps: %s\n", strings.Join(quoted, ", "))
 	}
 	sb.WriteString("---\n")
 	if strings.TrimSpace(body.Instructions) != "" {
@@ -1132,6 +1136,14 @@ func (s *Server) fsCreateSkill(w http.ResponseWriter, r *http.Request) {
 	if err := os.WriteFile(filepath.Join(skillPath, "SKILL.md"), []byte(sb.String()), 0o644); err != nil {
 		_ = os.RemoveAll(skillPath)
 		writeErr(w, 500, err.Error())
+		return
+	}
+	// Verify with the real parser: a description containing ": " (or any value that
+	// is not plain-safe YAML) used to break the whole frontmatter silently, leaving
+	// a skill whose fields were all empty and whose name came from the directory.
+	if err := verifySkillFile(skillPath, body.Name, cleanStrs(body.MCPs)); err != nil {
+		_ = os.RemoveAll(skillPath)
+		writeErr(w, 400, "generated SKILL.md does not round-trip through the skill parser: "+err.Error())
 		return
 	}
 	writeJSON(w, 201, map[string]any{"name": body.Name})
@@ -1176,6 +1188,54 @@ func (s *Server) fsUpdateSkillMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// yamlScalar renders one frontmatter scalar so the emitted YAML is valid by
+// construction: plain-safe tokens stay bare, everything else is single-quoted
+// with internal quotes doubled (YAML single-quote escaping).
+func yamlScalar(s string) string {
+	if s != "" && !strings.ContainsAny(s, ":#{}[]&*!|>'\"%@`,\n") && !strings.HasPrefix(s, " ") && !strings.HasSuffix(s, " ") {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// verifySkillFile re-loads a written SKILL.md with the real skill parser and
+// asserts the name and the mcps list survived the round trip.
+func verifySkillFile(skillPath, wantName string, wantMCPs []string) error {
+	reg, err := skill.LoadDir(skillPath)
+	if err != nil {
+		return fmt.Errorf("load: %w", err)
+	}
+	for _, s := range reg.List() {
+		if s.Dir == "" {
+			continue
+		}
+		if s.Name != wantName {
+			return fmt.Errorf("parsed name %q != written %q (frontmatter did not parse; the name fell back to the directory)", s.Name, wantName)
+		}
+		if len(wantMCPs) > 0 && len(s.MCPs) != len(wantMCPs) {
+			return fmt.Errorf("parsed mcps %v != written %v", s.MCPs, wantMCPs)
+		}
+		return nil
+	}
+	return fmt.Errorf("no skill loaded from %s", skillPath)
+}
+
+// warnBrokenSkills logs skills whose parsed name does not match their directory
+// name: the signature of frontmatter that failed to parse and silently fell back
+// (fields empty, mcps gate lost). Best-effort, startup only.
+func warnBrokenSkills(dir string) {
+	reg, err := skill.LoadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, s := range reg.List() {
+		if s.Dir == "" || s.Name == filepath.Base(s.Dir) {
+			continue
+		}
+		log.Printf("[skill] %s: frontmatter did not parse (loaded under the directory name; description and mcps are empty) - fix the YAML in %s", s.Name, filepath.Join(s.Dir, "SKILL.md"))
+	}
+}
+
 // rewriteSkillFrontmatter parses the SKILL.md YAML frontmatter and replaces the
 // fields given as non-nil pointers. The instruction body (after the closing ---) is
 // preserved verbatim. Returns an error if the file has no recognisable frontmatter.
@@ -1211,11 +1271,11 @@ func rewriteSkillFrontmatter(content []byte, mcps *[]string, description, licens
 		}
 		for i, p := range pairs {
 			if p.k == key {
-				pairs[i].v = strings.TrimSpace(*val)
+				pairs[i].v = yamlScalar(strings.TrimSpace(*val))
 				return
 			}
 		}
-		pairs = append(pairs, kv{key, strings.TrimSpace(*val)})
+		pairs = append(pairs, kv{key, yamlScalar(strings.TrimSpace(*val))})
 	}
 	applyStr("description", description)
 	applyStr("license", license)
@@ -1231,7 +1291,11 @@ func rewriteSkillFrontmatter(content []byte, mcps *[]string, description, licens
 		}
 		pairs = filtered
 		if len(cleaned) > 0 {
-			pairs = append(pairs, kv{"mcps", strings.Join(cleaned, ", ")})
+			quoted := make([]string, len(cleaned))
+			for i, m := range cleaned {
+				quoted[i] = yamlScalar(m)
+			}
+			pairs = append(pairs, kv{"mcps", strings.Join(quoted, ", ")})
 		}
 	}
 	// Reconstruct
