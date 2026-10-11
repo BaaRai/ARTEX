@@ -1,6 +1,6 @@
 ---
 name: rea
-description: Reverse-engineer binaries and application packages (ELF, PE, Mach-O, APK, IPA, HAP, WASM, ZIP/JAR containers, JavaScript bundles) through the rea MCP server running on the host. Invoke when a task needs static analysis of a compiled or packaged target: embedded secrets, hardcoded endpoints, native library review, string and constant extraction, managed code structure, or deobfuscation.
+description: "Reverse-engineer binaries and application packages (ELF, PE, Mach-O, APK, IPA, HAP, WASM, ZIP/JAR containers, JavaScript bundles) through the rea MCP server running on the host. Invoke when a task needs static analysis of a compiled or packaged target: embedded secrets, hardcoded endpoints, native library review, string and constant extraction, managed code structure, or deobfuscation."
 mcps: rea
 ---
 
