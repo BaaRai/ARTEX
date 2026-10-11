@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
 	actool "github.com/Autumn-27/norma/tool"
@@ -17,6 +18,7 @@ import (
 
 func (s *Server) platformTools() []actool.CoreTool {
 	return []actool.CoreTool{
+		s.toolMCPStatus(),
 		s.toolCreateSkill(),
 		s.toolUpdateSkillFile(),
 		s.toolCreateCustomTool(),
@@ -241,6 +243,55 @@ func (s *Server) toolUpdateCustomTool() actool.CoreTool {
 			}
 			return actool.Text("custom tool updated: " + a.Key), nil
 		})
+}
+
+// ---- MCP health ----
+
+// toolMCPStatus reports each MCP server's last connect outcome so a worker can
+// notice a missing server (and say so) instead of silently degrading when the
+// catalog is cached but the server is unreachable.
+func (s *Server) toolMCPStatus() actool.CoreTool {
+	return wrTool("mcp_status",
+		"Report the health of every configured MCP server: name, transport, enabled, cached tool count, and the outcome of the last connect attempt (time, ok/error). Use this when tools you expect are missing or before relying on a skill-gated server.",
+		map[string]any{"type": "object", "properties": map[string]any{}},
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			servers, err := s.m.pg.ListMCP()
+			if err != nil {
+				return actool.Errorf("Error: " + err.Error()), nil
+			}
+			var b strings.Builder
+			fmt.Fprintf(&b, "%d MCP server(s):\n", len(servers))
+			for _, m := range servers {
+				status := "never connected"
+				switch {
+				case m.LastConnectOK != nil && *m.LastConnectOK:
+					status = "connected ok"
+				case m.LastConnectOK != nil && !*m.LastConnectOK:
+					status = "DOWN: " + strings.TrimSpace(coalesceStr(m.LastConnectErr, "connect failed"))
+				}
+				fmt.Fprintf(&b, "- %s [%s, %s, %d cached tools]: %s", m.Name, m.Transport, enabledWord(m.Enabled), len(m.Tools), status)
+				if m.LastConnectAt != nil {
+					fmt.Fprintf(&b, " (last attempt %s)", m.LastConnectAt.UTC().Format(time.RFC3339))
+				}
+				b.WriteByte('\n')
+			}
+			b.WriteString("If a server you need is DOWN, tell the operator in your final report instead of working around it.")
+			return actool.Text(b.String()), nil
+		})
+}
+
+func coalesceStr(p *string, fallback string) string {
+	if p == nil {
+		return fallback
+	}
+	return *p
+}
+
+func enabledWord(b bool) string {
+	if b {
+		return "enabled"
+	}
+	return "disabled"
 }
 
 // ---- MCP ----

@@ -404,6 +404,19 @@ export default function MCPPage() {
                 <Badge variant="outline" className="uppercase">
                   {s.transport}
                 </Badge>
+                {s.last_connect_ok === false ? (
+                  <Badge variant="destructive" className="max-w-55 truncate font-normal" title={s.last_connect_err ?? "connect failed"}>
+                    down: {s.last_connect_err ? s.last_connect_err.slice(0, 60) : "connect failed"}
+                  </Badge>
+                ) : s.last_connect_ok === true ? (
+                  <Badge variant="secondary" className="font-normal">
+                    ok {s.last_connect_at ? new Date(s.last_connect_at).toLocaleTimeString() : ""}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground font-normal">
+                    not connected yet
+                  </Badge>
+                )}
                 <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                   <Switch
                     checked={s.enabled}

@@ -822,11 +822,14 @@ type MCPServer struct {
 	Enabled        bool            `json:"enabled"`
 	Insecure       bool            `json:"insecure"`        // http: skip TLS cert verification (self-signed servers, issue #108)
 	TimeoutSeconds int             `json:"timeout_seconds"` // http: per-request timeout in seconds; 0 = default 120
+	LastConnectAt  *time.Time      `json:"last_connect_at,omitempty"`
+	LastConnectOK  *bool           `json:"last_connect_ok,omitempty"`
+	LastConnectErr *string         `json:"last_connect_err,omitempty"`
 	Tools          []string        `json:"tools,omitempty"` // cached tool names (mcp_tools_cache)
 }
 
 func (d *DB) ListMCP() ([]*MCPServer, error) {
-	rows, err := d.Query(`SELECT id,name,transport,COALESCE(command,''),args,env,COALESCE(url,''),enabled,insecure,COALESCE(timeout_seconds,120) FROM mcp_servers ORDER BY id`)
+	rows, err := d.Query(`SELECT id,name,transport,COALESCE(command,''),args,env,COALESCE(url,''),enabled,insecure,COALESCE(timeout_seconds,120),last_connect_at,last_connect_ok,last_connect_err FROM mcp_servers ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -834,7 +837,7 @@ func (d *DB) ListMCP() ([]*MCPServer, error) {
 	for rows.Next() {
 		var m MCPServer
 		var args, env []byte
-		if err := rows.Scan(&m.ID, &m.Name, &m.Transport, &m.Command, &args, &env, &m.URL, &m.Enabled, &m.Insecure, &m.TimeoutSeconds); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.Transport, &m.Command, &args, &env, &m.URL, &m.Enabled, &m.Insecure, &m.TimeoutSeconds, &m.LastConnectAt, &m.LastConnectOK, &m.LastConnectErr); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -912,6 +915,17 @@ ON CONFLICT (server_id, tool_name) DO UPDATE SET description=EXCLUDED.descriptio
 		}
 	}
 	return tx.Commit()
+}
+
+// UpdateMCPHealth records the outcome of one connect attempt. The WHERE clause
+// skips the write when nothing changed, so per-run wiring does not amplify writes.
+func (d *DB) UpdateMCPHealth(id int64, ok bool, errMsg string) error {
+	_, err := d.Exec(`UPDATE mcp_servers
+		SET last_connect_at = now(), last_connect_ok = $2, last_connect_err = NULLIF($3, '')
+		WHERE id = $1
+		  AND (last_connect_ok IS DISTINCT FROM $2 OR last_connect_err IS DISTINCT FROM NULLIF($3, '') OR last_connect_at IS NULL)`,
+		id, ok, errMsg)
+	return err
 }
 
 func (d *DB) SaveMCP(m *MCPServer) (int64, error) {
