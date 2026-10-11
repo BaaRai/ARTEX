@@ -96,12 +96,19 @@ func normalizeHeaders(headers map[string]string) (map[string]string, error) {
 // headers are sent on every request (Authorization, custom API keys, …).
 // When insecure is true, TLS certificate verification is skipped so servers that
 // present a self-signed certificate can still be reached (issue #108).
-func New(ctx context.Context, server, url string, headers map[string]string, insecure bool) (*Client, error) {
+// timeoutSeconds bounds each request (handshake, tools/list, one tools/call); 0
+// falls back to the 120s default. Analysis servers with minutes-long tool calls
+// raise it per server.
+func New(ctx context.Context, server, url string, headers map[string]string, insecure bool, timeoutSeconds int) (*Client, error) {
 	cleanHeaders, err := normalizeHeaders(headers)
 	if err != nil {
 		return nil, err
 	}
-	hc := &http.Client{Timeout: 120 * time.Second}
+	timeout := 120 * time.Second
+	if timeoutSeconds > 0 {
+		timeout = time.Duration(timeoutSeconds) * time.Second
+	}
+	hc := &http.Client{Timeout: timeout}
 	if insecure {
 		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	}

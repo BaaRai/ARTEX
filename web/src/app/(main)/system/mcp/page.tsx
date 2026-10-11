@@ -32,6 +32,7 @@ type FormState = {
   url: string;
   env: string;
   insecure: boolean;
+  timeoutSeconds: string;
 };
 const emptyForm: FormState = {
   name: "",
@@ -41,6 +42,7 @@ const emptyForm: FormState = {
   url: "",
   env: "",
   insecure: false,
+  timeoutSeconds: "",
 };
 
 export default function MCPPage() {
@@ -117,6 +119,7 @@ export default function MCPPage() {
       url: s.url ?? "",
       env: envToText(s.env),
       insecure: s.insecure ?? false,
+      timeoutSeconds: s.timeout_seconds ? String(s.timeout_seconds) : "",
     });
     setTab("config");
     setOpen(true);
@@ -158,6 +161,9 @@ export default function MCPPage() {
               args: [] as string[],
               env: parseEnv(form.env), // in remote mode env holds request headers
               insecure: form.insecure,
+              ...(Number.isFinite(Number(form.timeoutSeconds)) && Number(form.timeoutSeconds) > 0
+                ? { timeout_seconds: Number(form.timeoutSeconds) }
+                : {}),
             }
           : {
               transport: "stdio" as const,
@@ -306,6 +312,15 @@ export default function MCPPage() {
               />
               Skip TLS certificate verification (self-signed certs)
             </label>
+            <Label htmlFor="m-timeout">Request timeout (seconds, default 120)</Label>
+            <Input
+              id="m-timeout"
+              type="number"
+              min={5}
+              placeholder="120"
+              value={form.timeoutSeconds}
+              onChange={(e) => setF({ timeoutSeconds: e.target.value })}
+            />
           </div>
         )}
         <div className="grid gap-2">

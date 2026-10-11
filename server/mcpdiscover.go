@@ -33,7 +33,7 @@ func connectMCP(ctx context.Context, m *db.MCPServer) (mcpClient, error) {
 			return nil, fmt.Errorf("http transport is missing a URL")
 		}
 		// env map doubles as HTTP headers (e.g. Authorization).
-		return mcphttp.New(ctx, m.Name, m.URL, jsonStrMap(m.Env), m.Insecure)
+		return mcphttp.New(ctx, m.Name, m.URL, jsonStrMap(m.Env), m.Insecure, m.TimeoutSeconds)
 	case "sse":
 		if m.URL == "" {
 			return nil, fmt.Errorf("sse transport is missing a URL")
