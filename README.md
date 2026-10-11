@@ -148,6 +148,29 @@ ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 
 ---
 
+## Backups
+
+`scripts/backup.sh` dumps the Postgres database (and optionally the data
+directory) with timestamped output and rotation:
+
+```bash
+scripts/backup.sh --with-data          # db dump + data/ archive, keep 14
+scripts/backup.sh --keep 7             # db only, keep 7
+```
+
+Restore a dump into a running stack:
+
+```bash
+gunzip -c backups/artex-db-<timestamp>.sql.gz | docker compose exec -T postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+Daily cron example (03:20, operator crontab):
+
+```
+20 3 * * * cd /path/to/ARTEX && scripts/backup.sh --with-data >> backups/backup.log 2>&1
+```
+
 ## Updating and upgrading
 
 > Upgrading only swaps the program and never touches data: the Postgres volume `pgdata`, `./data` (jwt.key / SQLite, etc.), and `./skills` are all preserved. **No manual database migration is needed**: `artex` idempotently re-runs `schema.sql` on every start (with `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`), i.e. "restart equals migrate". It is still recommended to back up `./data` and the database before upgrading.
