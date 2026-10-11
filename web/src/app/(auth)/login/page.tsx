@@ -158,7 +158,7 @@ export default function LoginPage() {
             <div className="space-y-0.5">
               <DialogTitle className="text-base">ARTEX Terms of Use and Disclaimer</DialogTitle>
               <p className="text-xs text-muted-foreground">
-                Version v1.0 · Effective 2026-09-18 · Please read all the following terms in full before signing in
+                Version v1.1 · Effective 2026-10-11 · Please read all the following terms in full before signing in
               </p>
             </div>
           </DialogHeader>
@@ -199,7 +199,7 @@ export default function LoginPage() {
                 Article 2 · Permitted Scope of Use
               </h4>
               <p className="pl-7">
-                This software is for personal study, code research, exploring security-technique principles, and technical verification in a locally isolated environment you set up yourself — non-offensive, non-destructive uses such as learning, academic research, and code review. Beyond the cases expressly permitted by this Article, you must not use this software for any other purpose.
+                This software is a security-testing platform. You may use it for: personal study, code research, and technical verification in environments you set up yourself; security testing of systems you own; security testing of third-party systems when you hold the owner's explicit authorization; and testing within the written scope of a bug bounty or vulnerability disclosure program, in compliance with that program's rules of engagement. You are responsible for obtaining and keeping proof of authorization, for staying inside the authorized scope, and for the safety and proportionality of every action the software takes on your behalf.
               </p>
             </section>
 
@@ -213,9 +213,8 @@ export default function LoginPage() {
               </h4>
               <ul className="ml-7 list-decimal space-y-1.5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 pl-8 text-foreground/80 marker:text-destructive/70">
                 <li>
-                  Strictly forbidden: scanning, probing, exploiting, or attacking any website, online service, or networked system owned by others or third parties (regardless of authorization, and even if it is your own asset);
+                  Strictly forbidden: scanning, probing, exploiting, or attacking any system whose owner has not explicitly authorized you to test it, or exceeding the authorized scope or a program's rules of engagement once granted;
                 </li>
-                <li>Strictly forbidden: using this software for any real penetration testing, attack-defense engagement, red-team/blue-team drill, or production environment;</li>
                 <li>Strictly forbidden: using this software for illegal intrusion, data theft, extortion, denial of service (DoS/DDoS), or any destructive or criminal activity;</li>
                 <li>Strictly forbidden: removing, tampering with, or circumventing any copyright, license, or security notice in this software or its output;</li>
                 <li>Strictly forbidden: engaging in any conduct that violates the laws, regulations, or regulatory rules of your country or region.</li>
@@ -255,7 +254,7 @@ export default function LoginPage() {
                 Article 6 · Compliance and Legal Liability
               </h4>
               <p className="pl-7">
-                You must comply on your own with all laws and regulations of your country or region on cybersecurity, data security and personal-information protection, computer crime, and the like (in mainland China including, without limitation, the Cybersecurity Law, the Data Security Law, the Personal Information Protection Law, and related judicial interpretations).
+                You must comply on your own with all laws and regulations of your country or region on cybersecurity, data security and personal-information protection, computer crime, and the like (for example, laws on unauthorized access to computer systems, on personal-data protection, and on the responsibilities of security researchers and penetration testers in your jurisdiction).
                 <span className="font-medium text-foreground">
                   {" "}
                   All legal liability and consequences arising from your violation of the above laws and regulations or of this Statement are borne by you alone and have nothing to do with this software's authors and contributors.
