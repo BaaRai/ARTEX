@@ -19,6 +19,7 @@ import (
 func (s *Server) platformTools() []actool.CoreTool {
 	return []actool.CoreTool{
 		s.toolMCPStatus(),
+		s.toolAskOperator(),
 		s.toolCreateSkill(),
 		s.toolUpdateSkillFile(),
 		s.toolCreateCustomTool(),
