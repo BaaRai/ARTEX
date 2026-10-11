@@ -793,6 +793,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/traffic/all", s.deleteAllTraffic)
 	mux.HandleFunc("GET /api/traffic/exchange", s.getTrafficExchange)
 	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
+	mux.HandleFunc("POST /api/traffic/ingest", s.ingestTraffic)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // aggregate call counts per tool
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
