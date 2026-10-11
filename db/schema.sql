@@ -863,6 +863,11 @@ ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS insecure BOOLEAN NOT NULL DEFAU
 -- servers whose tools legitimately run minutes (e.g. binary reverse engineering) need room
 -- beyond the default without forcing every other server to wait as long.
 ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS timeout_seconds INT NOT NULL DEFAULT 120;
+-- Connect health: updated on every connect attempt (discovery, refresh, per-agent-run
+-- wiring). NULL = never attempted. The WHERE-deduped update avoids write amplification.
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS last_connect_at TIMESTAMPTZ;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS last_connect_ok BOOLEAN;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS last_connect_err TEXT;
 DROP TRIGGER IF EXISTS trg_mcp_upd ON mcp_servers;
 CREATE TRIGGER trg_mcp_upd BEFORE UPDATE ON mcp_servers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

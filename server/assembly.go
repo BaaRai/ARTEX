@@ -86,14 +86,17 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 				cl, err := connectMCP(ctx, m)
 				if err != nil {
 					log.Printf("[mcp] %s connect failed: %v", m.Name, err)
+					_ = pg.UpdateMCPHealth(m.ID, false, "connect: "+err.Error())
 					continue
 				}
 				closers = append(closers, cl)
 				ts, err := cl.Tools(ctx)
 				if err != nil {
 					log.Printf("[mcp] %s tools/list failed: %v", m.Name, err)
+					_ = pg.UpdateMCPHealth(m.ID, false, "tools/list: "+err.Error())
 					continue
 				}
+				_ = pg.UpdateMCPHealth(m.ID, true, "")
 				for _, t := range ts {
 					extra = append(extra, t)
 					allNames = append(allNames, t.Name())
