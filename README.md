@@ -54,6 +54,15 @@ The global "Approval Records", the in-task "Interception Approvals", and the app
 [AegisHook approval details component](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue), reusing ARTEX's components and theme:
 
 
+## Traffic capture browser extension
+
+The bundled browser extension (`extension/`) turns your own browsing into agent-visible evidence: log into an authenticated target once (captchas, email OTP and 2FA included), and the captured requests/responses land in ARTEX's traffic store like proxy-recorded traffic, ready to search and bind to findings:
+
+- Load the unpacked extension from `extension/` (Chrome/Edge, Developer Mode → Load unpacked);
+- In the popup, set your ARTEX URL and token, then press **Start capture** on the tab you are browsing;
+- Use the site normally; text requests/responses are batched to `POST /api/traffic/ingest` (authenticated). Binary bodies (images, fonts) are skipped, bodies are truncated at 256 KiB, batches are capped at 50 entries;
+- Press **Stop** when done. Everything stays in your local traffic store.
+
 ## Asset sync (ScopeSentry)
 
 Sync asset data directly from [ScopeSentry](https://github.com/Autumn-27/ScopeSentry), avoiding duplicate collection:
