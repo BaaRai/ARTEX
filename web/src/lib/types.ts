@@ -1178,6 +1178,7 @@ export interface MCPServer {
   url?: string;
   enabled: boolean;
   insecure?: boolean; // http: skip TLS cert verification (self-signed servers)
+  timeout_seconds?: number; // http/sse: per-request timeout in seconds (default 120)
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 

@@ -859,6 +859,10 @@ ALTER TABLE mcp_servers ADD CONSTRAINT mcp_servers_transport_check
     CHECK (transport IN ('stdio','http','sse'));
 -- Backfill column for old databases (schema.sql runs Exec at every startup).
 ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS insecure BOOLEAN NOT NULL DEFAULT false;
+-- Per-server request timeout for remote MCP transports, in seconds (default 120). Analysis
+-- servers whose tools legitimately run minutes (e.g. binary reverse engineering) need room
+-- beyond the default without forcing every other server to wait as long.
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS timeout_seconds INT NOT NULL DEFAULT 120;
 DROP TRIGGER IF EXISTS trg_mcp_upd ON mcp_servers;
 CREATE TRIGGER trg_mcp_upd BEFORE UPDATE ON mcp_servers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
