@@ -57,4 +57,4 @@ Thumbs.db
 # bench benchmark related (local artifacts, not committed)
 /bench/
 /Dockerfile.bench
-/Dockerfile.bench.v2
+/Dockerfile.bench.v2backups/
