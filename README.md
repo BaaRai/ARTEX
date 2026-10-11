@@ -7,7 +7,7 @@ AI autonomous penetration testing system (Go backend + Next.js frontend)
 
 🌐 **Live demo**: [https://artex-demo.vercel.app/](https://artex-demo.vercel.app/)
 
- Fork of [ARTEX by Autumn-27](https://github.com/Autumn-27) · English translation of the Chinese source · kept private
+ Fork of [ARTEX by Autumn-27](https://github.com/Autumn-27) · English translation of the Chinese source · maintained publicly under AGPL-3.0
 
 </div>
 
@@ -153,7 +153,7 @@ ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 
 ## Updating and upgrading
 
-> Upgrading only swaps the program and never touches data: the Postgres volume `pgdata`, `./data` (jwt.key / SQLite, etc.), and `./skills` are all preserved. **No manual database migration is needed** — `artex` idempotently re-runs `schema.sql` on every start (with `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`), i.e. "restart equals migrate". It is still recommended to back up `./data` and the database before upgrading.
+> Upgrading only swaps the program and never touches data: the Postgres volume `pgdata`, `./data` (jwt.key / SQLite, etc.), and `./skills` are all preserved. **No manual database migration is needed**: `artex` idempotently re-runs `schema.sql` on every start (with `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`), i.e. "restart equals migrate". It is still recommended to back up `./data` and the database before upgrading.
 
 ### Option 1: one-click update from the page (recommended)
 
@@ -163,7 +163,7 @@ After clicking "Update": it downloads the release package for the current platfo
 
 - **A failure never leaves a broken program**: if verification or the smoke test fails, the staged file is discarded and the current version keeps running; if the swapped-in new version fails to start 3 times in a row, it automatically rolls back to `artex.old` (the failed one is kept as `artex.failed` for troubleshooting).
 - **Rollback anytime**: the previous version is kept as `artex.old`, and the card has "Roll back to previous version". Note that the database schema is not rolled back.
-- **Updating interrupts running tasks** — updating means restarting, so do it when the system is idle.
+- **Updating interrupts running tasks**: updating means restarting, so do it when the system is idle.
 - **Dev builds can't update**: updating is disabled when the version is `dev` or a `git describe` output with a suffix, preventing a release from overwriting your local debug binary.
 - **Under Docker, only the program is swapped, not the image**: toolchains inside the image like playwright / nmap are not upgraded along with it, and recreating the container with `docker compose up -d` reverts to the version bundled in the image. To upgrade the image as well, still use `docker compose pull artex && docker compose up -d artex`.
 - If accessing GitHub requires a proxy, configure the **global proxy** on the same page and the update chain will use it. Updates only download from GitHub domains and enforce HTTPS.
@@ -235,7 +235,7 @@ Optional: `ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ART
 
 ### Reverse proxy deployment (HTTPS / only exposing 443)
 
-The frontend and API/SSE are served by the same backend port (default `:8787`), and the realtime activity stream uses the **same-origin** address by default, so **there is no need to configure `NEXT_PUBLIC_SSE_BASE`** — just expose 443 publicly and keep 8787 on the internal network.
+The frontend and API/SSE are served by the same backend port (default `:8787`), and the realtime activity stream uses the **same-origin** address by default, so **there is no need to configure `NEXT_PUBLIC_SSE_BASE`**: just expose 443 publicly and keep 8787 on the internal network.
 
 SSE is a long-lived connection with continuous pushes, so the reverse proxy **must disable buffering**, otherwise the browser connects but never receives events (the activity stream spins forever). Nginx example:
 
@@ -272,7 +272,7 @@ server {
 
 The "Retest" tab on the task details page lets you page through the task's vulnerabilities, review past conclusions and evidence, and manually start a retest. After starting, the current tab keeps its place and shows a spinner with "Retesting"; once the fix is confirmed, the vulnerability status is updated accordingly.
 
-Click "Retest" in the actions area of any row in the vulnerability list, or click "Start Retest" in the "Vulnerability Retest" area of the vulnerability details; fill in the optional fixed version, test conditions, or limits, and the system creates an independent retest agent session while keeping the current page. The flat list, group-by-task, and asset views all support this entry point; while a retest is running, a spinner and "Retesting" are shown — click to enter the corresponding session to watch, and it reverts to "Retest" when finished. Retesting does not require restarting the original scan task; conclusions are "Still reproducible", "Fixed", or "Cannot confirm", and each conclusion, evidence, and session link is saved in the vulnerability details.
+Click "Retest" in the actions area of any row in the vulnerability list, or click "Start Retest" in the "Vulnerability Retest" area of the vulnerability details; fill in the optional fixed version, test conditions, or limits, and the system creates an independent retest agent session while keeping the current page. The flat list, group-by-task, and asset views all support this entry point; while a retest is running, a spinner and "Retesting" are shown: click to enter the corresponding session to watch, and it reverts to "Retest" when finished. Retesting does not require restarting the original scan task; conclusions are "Still reproducible", "Fixed", or "Cannot confirm", and each conclusion, evidence, and session link is saved in the vulnerability details.
 
 On first start, the new backend pre-creates an editable "Vulnerability Retest" (`retester`) agent; you can configure its prompt, LLM, run budget, and tools in Agent management. It uses its bound LLM by default, or the global active configuration when unbound. When a retest session completes successfully with a "Fixed" conclusion, the system automatically sets the vulnerability's handling status to "Fixed"; running, failed, stopped, or other conclusions keep the original status. Original evidence and reports are always preserved. You can also manually select "Fixed" from the status dropdown. While the same vulnerability is being retested, the existing session is reused; after a stop, failure, or service restart, you can start it again.
 
@@ -355,9 +355,9 @@ flowchart TB
 
 The system splits "**what the goals are**" and "**how far testing has progressed**" into two mutually independent graphs linked by anchors:
 
-- **Asset Graph (globally shared)**: a single source of truth for assets shared across tasks. Nodes are `root_domain / subdomain / ip / service / app / endpoint`, owned by companies; the parent-child relationships domain→subdomain→service→endpoint and the dedup keys are all computed by the program — agents only submit raw information.
+- **Asset Graph (globally shared)**: a single source of truth for assets shared across tasks. Nodes are `root_domain / subdomain / ip / service / app / endpoint`, owned by companies; the parent-child relationships domain→subdomain→service→endpoint and the dedup keys are all computed by the program: agents only submit raw information.
 - **Exploration Graph (per-task)**: the "thinking and advancing" process of one task. Nodes are `goal` / `intent` / `fact` / `finding (vulnerability)` / `hint`, connected by edges like `spawns / derived_from / yields / proves` into a **lineage chain**, answering "which directions derive from which facts, and what they produced".
-- **The two graphs are linked by anchors**: `exploration_anchors(node_id, asset_id)` anchors intents/facts/vulnerabilities to concrete assets — so you can see which assets an exploration direction hits, and conversely look up from a given asset which intents tested it in this task and which facts were derived. This also powers **asset test coverage** and the **asset coverage graph** (in-scope assets + tested highlights).
+- **The two graphs are linked by anchors**: `exploration_anchors(node_id, asset_id)` anchors intents/facts/vulnerabilities to concrete assets: so you can see which assets an exploration direction hits, and conversely look up from a given asset which intents tested it in this task and which facts were derived. This also powers **asset test coverage** and the **asset coverage graph** (in-scope assets + tested highlights).
 
 ```mermaid
 flowchart LR
@@ -391,7 +391,7 @@ flowchart LR
 
 ### Engine and intent lifecycle (the closed loop of one exploration)
 
-The engine is an **event-driven** closed loop: any graph change wakes the planner, the planner dispatches intents, workers claim and execute intents and write back, and the write-back triggers the next round — until the goal is proven (`prove_goal`).
+The engine is an **event-driven** closed loop: any graph change wakes the planner, the planner dispatches intents, workers claim and execute intents and write back, and the write-back triggers the next round, until the goal is proven (`prove_goal`).
 
 ```mermaid
 sequenceDiagram
@@ -406,7 +406,7 @@ sequenceDiagram
   EV-->>P: wake up
   P->>DB: read situation (graph_overview prefetch + coverage/scope)
   P->>FR: dispatch 0..N intents (with asset_ids)
-  Note over P,FR: most wake-ups dispatch 0 — no new direction means done
+  Note over P,FR: most wake-ups dispatch 0 (no new direction means done)
   W->>FR: claimNext claims one intent
   W->>DB: fetch the raw assets of the intent's asset_ids as initial information
   W->>PX: real tool execution (Kali / Bash / HTTP)
@@ -423,7 +423,7 @@ During a deep exploration, many valuable observations (an error, a response snip
 - `search_all_worker_traces(q)`: keyword-search the **execution processes of other works in this task** (automatically excluding the steps of your own intent); hits carry `intent_id`;
 - `list_worker_traces` / `get_worker_trace(intent_id, step_ids=[…])`: first see which works have run, then fetch the full content of specific steps of a given work for detailed exchange.
 
-This way, even before a corresponding fact exists on the exploration graph, later workers can reuse observations from others' processes — **information flows between workers at "execution process" granularity**, while the boundary stays the same (each worker still only works on the intent it claimed).
+This way, even before a corresponding fact exists on the exploration graph, later workers can reuse observations from others' processes: **information flows between workers at "execution process" granularity**, while the boundary stays the same (each worker still only works on the intent it claimed).
 
 ```mermaid
 flowchart LR
@@ -439,7 +439,7 @@ flowchart LR
 
 Real attack chains are usually **multi-step sequences with dependencies** (e.g.: find an injection point → obtain credentials → move laterally → escalate privileges); dispatching them all in parallel at once would only cause chaos. The planner therefore keeps a **planning todolist that is retained per task and shared across wake-ups**:
 
-- The planner is event-driven — woken on every graph change, but **each wake-up is a brand-new session**; the shared todolist lets it **record a serial exploitation chain once**, then **dispatch intents step by step by dependency** over subsequent rounds, instead of pre-expanding the whole chain in a single round;
+- The planner is event-driven, woken on every graph change, but **each wake-up is a brand-new session**; the shared todolist lets it **record a serial exploitation chain once**, then **dispatch intents step by step by dependency** over subsequent rounds, instead of pre-expanding the whole chain in a single round;
 - Each round only dispatches intents for next steps whose "prerequisite steps are complete and the facts they depend on exist", and updates the list as progress happens (marking steps satisfied by facts as done).
 
 ```mermaid
@@ -457,7 +457,7 @@ flowchart TB
   R3["round 3 (② produced a fact)  dispatch intent ③"] --> T3
 ```
 
-Thus, even in an "event-driven + stateless session" environment, the attack chain still **advances steadily, without repetition or reordering** — this is the key to ARTEX autonomously completing multi-step exploitation chains.
+Thus, even in an "event-driven + stateless session" environment, the attack chain still **advances steadily, without repetition or reordering**: this is the key to ARTEX autonomously completing multi-step exploitation chains.
 
 ---
 
@@ -485,25 +485,27 @@ This project is licensed under the **GNU Affero General Public License v3.0 (AGP
 
 This means anyone may freely use, modify, and distribute this project, but **derivative works must also be open-sourced under AGPL-3.0**; in particular, **if you modify this project and provide it to users over a network (e.g. deployed as an online service), you must also make the corresponding complete source code available to those users**.
 
-> ⚠️ **Important**: the open source license itself does not restrict how the software is used. The "Usage restrictions" and "Disclaimer" below are additional terms and a solemn statement from the author to users — please abide by them.
+> ⚠️ **Important**: the open source license itself does not restrict how the software is used. The "Usage restrictions" and "Disclaimer" below are additional terms and a solemn statement from the maintainers to users, so please abide by them.
 
-**ARTEX is for personal learning, code study, and local technical verification only; it must not be used to run actual tests against any online system or website.**
+**ARTEX is an offensive-security tool. Use it only against systems you own, or that you are explicitly authorized to test (your own lab, your organization's assets, or a bug bounty / vulnerability disclosure program's targets within its published scope and rules of engagement). Any use without authorization is a violation of these terms.**
 
 ### Permitted use
 
-- It may only be used to **read, learn, and study this project's source code**, and to verify technical principles in a **locally isolated environment**;
-- Suitable for non-offensive purposes such as personal learning, academic research, and code review.
+- **Read, learn, and study this project's source code**;
+- Run it against **systems you own** or in **isolated lab environments**;
+- Run it against **authorized bug bounty / vulnerability disclosure program targets**, within their published scope and rules of engagement;
+- Academic research and code review.
 
 ### Prohibited actions
 
-- **It is strictly forbidden to use this tool to scan, probe, exploit, or attack any website, online service, or networked system** (whether or not authorization was obtained, whether or not the assets are your own);
-- It is strictly forbidden to use this tool for any actual penetration testing, adversarial exercises, or production environments;
+- **It is strictly forbidden to scan, probe, exploit, or attack any website, online service, or networked system without the explicit authorization of its owner**;
+- It is strictly forbidden to test outside a program's published scope, or in violation of its rules of engagement;
 - It is strictly forbidden to use this tool for illegal intrusion, data theft, extortion, denial of service, or any destructive or criminal activity;
 - It is strictly forbidden to use this tool for anything that violates the laws and regulations of your country/region.
 
 ### Compliance responsibility
 
-Users must comply with all laws and regulations of their country/region regarding cybersecurity, data protection, and computer crime (in mainland China, including but not limited to the Cybersecurity Law, the Data Security Law, the Personal Information Protection Law, and related judicial interpretations). **All legal liability and consequences arising from the use of this tool are borne by the user.**
+Users must comply with all laws and regulations of their country/region regarding cybersecurity, data protection, and computer crime. **All legal liability and consequences arising from the use of this tool are borne by the user.**
 
 ### Disclaimer
 
