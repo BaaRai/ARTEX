@@ -219,9 +219,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		}
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
 		domainReg := buildDomainReg(m.Assets())
-		wireTools(m.pg, domainReg) // built-in tools table: filter per agent + override description/schema + inject defaults
-		seedPrompts(m.pg)          // seed built-in agent default prompt bodies into agent_prompts (only when empty)
-		s.seedOrchestrationTools() // seed P2 cross-task orchestration tools into the tools table (bindable per agent)
+		wireTools(m.pg, domainReg)   // built-in tools table: filter per agent + override description/schema + inject defaults
+		seedPrompts(m.pg)            // seed built-in agent default prompt bodies into agent_prompts (only when empty)
+		warnBrokenSkills(s.skillDir) // surface skills whose frontmatter silently failed to parse
+		s.seedOrchestrationTools()   // seed P2 cross-task orchestration tools into the tools table (bindable per agent)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
