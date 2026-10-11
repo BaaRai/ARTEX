@@ -5,8 +5,6 @@
 AI autonomous penetration testing system (Go backend + Next.js frontend)
 
 
-🌐 **Live demo**: [https://artex-demo.vercel.app/](https://artex-demo.vercel.app/)
-
  Fork of [ARTEX by Autumn-27](https://github.com/Autumn-27) · English translation of the Chinese source · maintained publicly under AGPL-3.0
 
 </div>
@@ -15,7 +13,6 @@ AI autonomous penetration testing system (Go backend + Next.js frontend)
 
 ## Screenshots
 
-> For the full interactive experience, see the [live demo](https://artex-demo.vercel.app/).
 
 | Dashboard (overview / token usage / activity stream) | Task list |
 | :---: | :---: |
@@ -80,7 +77,7 @@ Sync asset data directly from [ScopeSentry](https://github.com/Autumn-27/ScopeSe
 ### Option 1: one-click install script (recommended)
 
 ```bash
-git clone https://github.com/Autumn-27/ARTEX.git
+git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 ./install.sh
 ```
@@ -95,7 +92,7 @@ Once installed, open **http://localhost:8787** (on first entry, `/setup` sets th
 ### Option 2: Docker Compose (manual)
 
 ```bash
-git clone https://github.com/Autumn-27/ARTEX.git
+git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 cp .env.example .env          # set POSTGRES_PASSWORD, optionally ANTHROPIC_API_KEY
 docker compose up -d          # pulls the autumn27/artex image + postgres
@@ -111,7 +108,7 @@ Legacy SSE servers usually establish the event stream with `GET /sse`, then rece
 
 ### Option 3: download prebuilt binaries (Releases)
 
-Download the zip for your platform from [Releases](https://github.com/Autumn-27/ARTEX/releases); after extracting you get `artex` + `start.sh` (`start.bat` on Windows) + `skills/` + `config.example.json`:
+Download the zip for your platform from [Releases](https://github.com/BaaRai/ARTEX/releases); after extracting you get `artex` + `start.sh` (`start.bat` on Windows) + `skills/` + `config.example.json`:
 
 ```bash
 cp config.example.json config.json   # fill in the database connection
@@ -193,7 +190,7 @@ docker image prune -f          # clean up old images (optional)
 
 ### Option 4: prebuilt binaries (Releases)
 
-Download the new version's zip from [Releases](https://github.com/Autumn-27/ARTEX/releases), stop the old process, then overwrite `artex` and `skills/` (keep your `config.json` and `data/`), and restart:
+Download the new version's zip from [Releases](https://github.com/BaaRai/ARTEX/releases), stop the old process, then overwrite `artex` and `skills/` (keep your `config.json` and `data/`), and restart:
 
 ```bash
 cp -r <extracted dir>/skills ./ && cp <extracted dir>/artex ./
@@ -461,17 +458,6 @@ Thus, even in an "event-driven + stateless session" environment, the attack chai
 
 ---
 
-## Community group
-
-Scan the QR code to follow the **SecSentry** WeChat official account, then send a private message to the account to join the group.
-
-<div align="center">
-
-<img src="screenshots/wx.png" alt="WeChat official account SecSentry" width="480" />
-
-</div>
-
----
 ## References
 
 https://github.com/oritera/Cairn
