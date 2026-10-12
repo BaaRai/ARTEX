@@ -59,5 +59,8 @@ Thumbs.db
 /Dockerfile.bench
 /Dockerfile.bench.v2backups/
 
+# posture probe raw output
+posture-runs/
+
 # benchmark runner output (one dir per run)
 benchmark-results/
