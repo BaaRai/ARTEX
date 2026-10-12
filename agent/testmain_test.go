@@ -13,6 +13,10 @@ import (
 // agent test suite so cross-package DELETE cleanup races with db/server
 // packages are avoided when running `go test ./...`.
 func TestMain(m *testing.M) {
+	// Own database per package (#80): with separate databases, packages stop
+	// contending on shared tables and the advisory lock below stops
+	// serializing go test ./... across packages.
+	db.SuffixTestDatabase("agent")
 	dsn, _, err := db.DSN()
 	if err != nil {
 		os.Exit(m.Run())
