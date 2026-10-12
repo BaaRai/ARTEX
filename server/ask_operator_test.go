@@ -68,3 +68,15 @@ func TestAskOperatorActivityShape(t *testing.T) {
 		t.Fatalf("unexpected detail payload: %+v", parsed)
 	}
 }
+
+// The tool description must tell agents what to do on environmental blocks:
+// hand the operator one copy-pastable command instead of retrying or hunting
+// for bypasses. Pattern adapted from bug-bounty-hunting-prompts (MIT).
+func TestAskOperatorEnvHandoffGuidance(t *testing.T) {
+	desc := (&Server{}).toolAskOperator().Description()
+	for _, marker := range []string{"copy-pastable", "do not retry or work around"} {
+		if !strings.Contains(desc, marker) {
+			t.Errorf("ask_operator description missing env-handoff marker %q", marker)
+		}
+	}
+}
