@@ -818,6 +818,8 @@ export interface ProfileUsage {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  // EUR cost from the profile's stored prices; absent when the profile has no price set.
+  cost_eur?: number | null;
 }
 
 // One (profile, UTC day) token bucket for the dashboard's daily chart (new source).
@@ -1045,6 +1047,11 @@ export interface LLMProfile {
   pool_exclude?: boolean;
   // true (default) = streaming (SSE) | false = genuinely non-streaming (stream:false, one-shot response).
   streaming?: boolean;
+  // Cost ledger: EUR per 1M tokens (0/absent = unset).
+  price_input_per_m?: number;
+  price_output_per_m?: number;
+  price_cache_read_per_m?: number;
+  price_cache_write_per_m?: number;
   // Output cap per reply (tokens). 0 = do not send the field; the server default decides.
   // Note the distinction from context_window_k: that is the model's total capacity, used locally only for the compression threshold.
   max_tokens?: number;
