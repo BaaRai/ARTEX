@@ -25,13 +25,13 @@ var askOperatorImageExt = map[string]bool{".png": true, ".jpg": true, ".jpeg": t
 // resumes the run with the answer as the next input (#41).
 func (s *Server) toolAskOperator() actool.CoreTool {
 	return wrTool("ask_operator",
-		"Ask the human operator for input you cannot obtain yourself (a captcha solution, an email/SMS OTP code, a 2FA answer, a decision). The question appears in this intent's chat for the operator, optionally with a screenshot, and this intent then pauses; the operator's reply resumes this run with the answer as your next input. Ask precisely, and only when you are genuinely blocked.",
+		"Ask the human operator for input you cannot obtain yourself (a captcha solution, an email/SMS OTP code, a 2FA answer, a decision, or an action only they can perform). The question appears in this intent's chat for the operator, optionally with a screenshot, and this intent then pauses; the operator's reply resumes this run with the answer as your next input. Ask precisely, and only when you are genuinely blocked. When the block is environmental (a sandboxed or filtered network path, a missing binary or key, a proxy or TLS failure this runtime cannot fix), do not retry or work around it: include in the question the exact single command the operator should run in their own terminal, as one copy-pastable line, plus what to paste back, then wait.",
 		map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"question": map[string]any{
 					"type":        "string",
-					"description": "What you need from the operator, precisely (e.g. 'enter the 6-digit code sent to x@y', 'solve the captcha in the attached screenshot').",
+					"description": "What you need from the operator, precisely (e.g. 'enter the 6-digit code sent to x@y', 'solve the captcha in the attached screenshot'). For environmental blocks: the exact single command they should run in their own terminal (one line, copy-pastable) and what to paste back.",
 				},
 				"image_path": map[string]any{
 					"type":        "string",
