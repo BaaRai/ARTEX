@@ -526,6 +526,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     parent_ref     TEXT,
     timeout_seconds INTEGER NOT NULL DEFAULT 0,
     plan_heartbeat_seconds INTEGER NOT NULL DEFAULT 300,
+    plan_quiet_mode BOOLEAN NOT NULL DEFAULT true,
     coverage_enabled BOOLEAN NOT NULL DEFAULT true,
     pinned_at      TIMESTAMPTZ,
     first_run_at   TIMESTAMPTZ,
@@ -543,6 +544,7 @@ CREATE TRIGGER trg_tasks_upd BEFORE UPDATE ON tasks
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 -- planner heartbeat trigger interval (seconds); backfills old databases. Default 300s (5min). See docs/planner-trigger-impl-plan.md
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS plan_heartbeat_seconds INTEGER NOT NULL DEFAULT 300;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS plan_quiet_mode BOOLEAN NOT NULL DEFAULT true;
 -- Concurrency-limit hold state; backfills old databases. true=queued due to the concurrency limit, auto-starts when a slot frees up.
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queued BOOLEAN NOT NULL DEFAULT false;
 -- Asset coverage feature switch; backfills old databases. true (default)=compute/show test coverage, auto-accumulate test scope,

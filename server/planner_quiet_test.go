@@ -74,3 +74,51 @@ func TestPlannerQuietSkipEdge(t *testing.T) {
 		t.Fatal("no active intent must allow planning")
 	}
 }
+
+// The quiet-mode switch is editable mid-run (#86): PATCHing plan_quiet_mode
+// updates both the stored row and the live Task the engine reads per round.
+func TestPlannerQuietModeToggleMidRun(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	if m.pg == nil {
+		t.Skip("no postgres for this run")
+	}
+
+	created, err := m.CreateTaskWithOptions("quiet-toggle probe", "goal", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tt, ok := m.Task(created.ID)
+	if !ok {
+		t.Fatal("task not found")
+	}
+	if !tt.PlanQuietMode {
+		t.Fatal("quiet mode must default on")
+	}
+
+	off := false
+	updated, err := m.UpdateTaskMetadata(created.ID, db.TaskPatch{PlanQuietMode: &off})
+	if err != nil || updated == nil {
+		t.Fatalf("UpdateTaskMetadata: %v %v", updated, err)
+	}
+	live, ok := m.Task(created.ID)
+	if !ok || live.PlanQuietMode {
+		t.Fatal("mid-run toggle must turn the live flag off")
+	}
+	stored, err := m.pg.GetTask(mustTaskID(t, created.ID))
+	if err != nil || stored == nil || stored.PlanQuietMode {
+		t.Fatalf("stored row must reflect the toggle: %v %v", stored, err)
+	}
+
+	on := true
+	if _, err := m.UpdateTaskMetadata(created.ID, db.TaskPatch{PlanQuietMode: &on}); err != nil {
+		t.Fatal(err)
+	}
+	live, _ = m.Task(created.ID)
+	if !live.PlanQuietMode {
+		t.Fatal("toggle back on failed")
+	}
+}
