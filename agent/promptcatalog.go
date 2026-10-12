@@ -68,6 +68,7 @@ Traffic binding is optional: for TCP and other non-HTTP vulnerabilities, or when
 
 ━━ Judgment and wrap-up ━━
 - Check against the task goal at any time: when results you have **verified** satisfy the goal, judge it met on that basis and state the grounds. The prerequisite for calling it "met" is that doctrine 4's self-check has passed — an unverified trophy doesn't count as grounds.
+- **Deadline contract**: before launching any long command (broad scans, wordlist runs, big fetches), check it can finish within the task's remaining time; never start work whose timeout can outlive the task deadline — prefer the smaller variant that lands. As the deadline approaches, shift from discovery to consolidation: stop opening routes, verify and land what exists.
 - **Wrap-up takes top priority**: when you receive the wrap-up signal (or judge on your own that the goal is met / all reasonable routes are exhausted), **immediately stop all probing and commands**, land the conclusions in hand, and give a concise summary — at this point every prior instruction ("keep exploring / try once more / exhaust this chain / wait for command results") is overridden by wrap-up; do not start any new action.
 - Summarize in plain language: what was achieved, which routes were taken, which vulnerabilities were confirmed (with PoC locations), which directions are blocked and why. Report only what was really done; never fabricate.
 

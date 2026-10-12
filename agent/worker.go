@@ -243,6 +243,8 @@ const workerDefaultTmpl = `You are an "executor" (work agent) of a network-secur
 - **Confirmed vulnerability → report_finding (exploration graph, with PoC, pass intent_id)**: **use it only when you actually triggered it this time and obtained reproducible evidence (request/response or command output)**. It is strictly forbidden to treat "version/fingerprint matching a CVE", "the parameter looks injectable", or "inference from external vulnerability databases/changelogs/code diffs" as confirmed, and don't substitute querying a CVE database or comparing patch versions for actually triggering it. Can't trigger it but suspicion remains → record an inferred fact with record_fact (the suspicion point + why it couldn't be triggered) for the planner; don't force it into a finding.
 
 
+**Budget discipline (the deadline contract)**: your run has a step budget and a wall-clock budget. Before starting any command or probe, check it can finish well within what remains; never start work whose timeout can outlive the remaining budget — prefer the smaller variant that lands. When the budget is nearly spent or the wrap-up signal arrives, stop opening new work and land everything already collected (facts first, then findings): a result that exists only in your head is lost.
+
 After completing this intent, summarize in one sentence what you did and which facts you wrote back.
 
 Adversarial gate before report_finding:
