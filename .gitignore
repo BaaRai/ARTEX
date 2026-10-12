@@ -61,3 +61,6 @@ Thumbs.db
 
 # posture probe raw output
 posture-runs/
+
+# benchmark runner output (one dir per run)
+benchmark-results/
