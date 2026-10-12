@@ -6,17 +6,32 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/Autumn-27/artex/db"
 )
 
 func TestInheritedActivityDetailAndRelationDeletion(t *testing.T) {
-	m, err := NewManager(t.TempDir(), "")
+	// #78: t.TempDir() cleanup raced with background writers that outlive
+	// m.Close (TempDir RemoveAll: directory not empty, under CI load). Use a
+	// manual dir with a tolerated cleanup, and close the manager via t.Cleanup
+	// registered FIRST so it runs LAST (LIFO): the DeleteTask cleanups below
+	// then execute while the database is still open instead of racing a closed
+	// one ("sql: database is closed" teardown noise).
+	dir, err := os.MkdirTemp("", "inherited-activity-*")
 	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewManager(dir, "")
+	if err != nil {
+		_ = os.RemoveAll(dir)
 		t.Skipf("postgres unavailable (%v) - skipping", err)
 	}
-	defer m.Close()
+	t.Cleanup(func() {
+		_ = m.Close()
+		_ = os.RemoveAll(dir) // tolerated: a late background writer may still hold it
+	})
 
 	source, err := m.CreateTaskWithOptions("detail source", "source goal", db.TaskCreateOptions{})
 	if err != nil {
