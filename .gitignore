@@ -58,3 +58,6 @@ Thumbs.db
 /bench/
 /Dockerfile.bench
 /Dockerfile.bench.v2backups/
+
+# posture probe raw output
+posture-runs/
