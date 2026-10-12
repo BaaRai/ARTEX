@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -160,6 +161,10 @@ ORDER BY is_default DESC, priority DESC, id ASC`)
 
 // SaveProfile inserts (id==0) or updates a profile. Empty apiKey on update keeps existing.
 func (d *DB) SaveProfile(p *LLMProfile) (int64, error) {
+	// Pasted keys can carry surrounding whitespace; every reader that goes
+	// through ConfigFrom trims, so store the trimmed form or the raw value
+	// leaks into paths that assign it directly (the llm/test fallback).
+	p.APIKey = strings.TrimSpace(p.APIKey)
 	hint := p.APIKeyHint
 	if len(p.APIKey) >= 4 {
 		hint = "…" + p.APIKey[len(p.APIKey)-4:]
