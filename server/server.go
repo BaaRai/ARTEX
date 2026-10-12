@@ -1385,6 +1385,41 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	// A stored profile must be tested AS STORED: the list-view test button
+	// sends only profile_id, and ConfigFrom's defaults for an empty
+	// provider/base_url point at the canonical provider endpoint, sending this
+	// profile's key to the wrong host (the stored-key 401s). Fill whatever the
+	// form left empty from the row first; explicit form values still win.
+	var stored *db.LLMProfile
+	if req.ProfileID != nil {
+		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
+			stored = p
+		}
+	}
+	if stored != nil {
+		if strings.TrimSpace(req.Provider) == "" {
+			req.Provider = stored.Format
+		}
+		if strings.TrimSpace(req.Model) == "" {
+			req.Model = stored.Model
+		}
+		if strings.TrimSpace(req.BaseURL) == "" {
+			req.BaseURL = stored.BaseURL
+		}
+		if strings.TrimSpace(req.Proxy) == "" {
+			req.Proxy = stored.Proxy
+		}
+		if req.Streaming == nil {
+			st := stored.Streaming
+			req.Streaming = &st
+		}
+		if strings.TrimSpace(req.ThinkingType) == "" {
+			req.ThinkingType = stored.ThinkingType
+		}
+		if strings.TrimSpace(req.ReasoningEffort) == "" {
+			req.ReasoningEffort = stored.ReasoningEffort
+		}
+	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
@@ -1402,17 +1437,15 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// API key resolution precedence: form input > the named profile's stored key > the global config's key.
 	// A stored profile's key is never sent back to the browser, so the form is empty when testing a stored profile and the key comes from the DB.
 	// Same for the session header name: when the form omits it, the stored profile's value is the fallback.
-	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
-		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			// Trim like ConfigFrom does for form values: a key stored with
-			// surrounding whitespace runs fine in conversations (the runtime
-			// path re-trims) but would be sent raw here and fail auth.
-			if cfg.APIKey == "" {
-				cfg.APIKey = strings.TrimSpace(p.APIKey)
-			}
-			if cfg.SessionHeaderKey == "" {
-				cfg.SessionHeaderKey = strings.TrimSpace(p.SessionHeaderKey)
-			}
+	if stored != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
+		// Trim like ConfigFrom does for form values: a key stored with
+		// surrounding whitespace runs fine in conversations (the runtime
+		// path re-trims) but would be sent raw here and fail auth.
+		if cfg.APIKey == "" {
+			cfg.APIKey = strings.TrimSpace(stored.APIKey)
+		}
+		if cfg.SessionHeaderKey == "" {
+			cfg.SessionHeaderKey = strings.TrimSpace(stored.SessionHeaderKey)
 		}
 	}
 	if cfg.APIKey == "" {
