@@ -1192,6 +1192,28 @@ WHERE exploration_id=$1 AND kind='goal' AND state='open')`, s.expID).Scan(&exist
 	return exists, err
 }
 
+// OpenGoalFingerprint returns a stable fingerprint of the open-goal set: the
+// sorted goal ids joined by commas, "" when none. Planner quiet-mode (#79) uses
+// it to tell "the goal set changed since the last planning round" apart from
+// "nothing the plan depends on changed".
+func (s *ExplorationStore) OpenGoalFingerprint() (string, error) {
+	rows, err := s.db.Query(`SELECT id FROM exploration_nodes
+WHERE exploration_id=$1 AND kind='goal' AND state='open' ORDER BY id`, s.expID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return "", err
+		}
+		ids = append(ids, strconv.FormatInt(id, 10))
+	}
+	return strings.Join(ids, ","), rows.Err()
+}
+
 // ClaimIntent atomically moves an open intent to running. Returns true if claimed.
 func (s *ExplorationStore) ClaimIntent(id int64, owner string) (bool, error) {
 	res, err := s.db.Exec(`UPDATE exploration_nodes SET state='running', owner=$1

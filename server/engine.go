@@ -99,6 +99,10 @@ type Engine struct {
 	started  sync.Map // taskID -> bool, so Run is idempotent per task
 	lastAct  sync.Map // taskID -> int64 unix, last planner/worker activity (heartbeat)
 	llmCalls sync.Map // taskID -> *int64, actual planner/worker/main-agent LLM calls
+	// quiet-mode (#79): open-goal fingerprint recorded at the end of the last
+	// completed planning round, per task. Edge-triggered rounds are skipped
+	// while it is unchanged and work is still in flight.
+	goalFP   sync.Map // taskID -> string (sorted open-goal ids joined)
 	paused   sync.Map // taskID -> bool, user-paused (planner + workers idle but loops alive)
 	deleting sync.Map // taskID -> bool, delete barrier (no new task-owned writes)
 	dropCnt  sync.Map // taskID -> *int64, running count of dropped (unpersistable) activity records
@@ -797,6 +801,22 @@ func resetPlannerTimer(timer *time.Timer, d time.Duration) {
 	timer.Reset(d)
 }
 
+// quietSkipEdge reports whether an edge-triggered planning round should be
+// dropped (#79): the open-goal set is unchanged since the last completed round
+// AND active work exists (open or running intents). Fails open (false) on any
+// store error: when in doubt, plan, preserving the pre-quiet-mode behavior.
+func (e *Engine) quietSkipEdge(t *Task) bool {
+	fp, err := t.Store.OpenGoalFingerprint()
+	if err != nil {
+		return false
+	}
+	if last, ok := e.goalFP.Load(t.ID); !ok || last != fp {
+		return false
+	}
+	active, err := t.Store.HasActiveIntent()
+	return err == nil && active
+}
+
 func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 	interval := plannerHeartbeatInterval(t)
 	// Arming the heartbeat timer at loop entry = counting from the task start: even a
@@ -856,6 +876,17 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			}
 			return // the goalless branch never enters planner.Plan
 		}
+		// quiet-mode (#79): an edge round is redundant while work is in flight
+		// and the open-goal set is unchanged since the last completed round —
+		// there is no new decision for the plan to make. Drain the triggers so
+		// they do not accumulate and let the heartbeat supervise; the next edge
+		// after a goal opens or closes, or once the frontier drains and all
+		// workers are idle, plans for real.
+		if src == "edge" && e.quietSkipEdge(t) {
+			t.drainTriggers()
+			log.Printf("[planner] task %s quiet: work in flight, goals unchanged, edge round skipped", t.ID)
+			return
+		}
 		if !e.beginTaskOperation(t.ID) {
 			return
 		}
@@ -894,6 +925,12 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			e.cancelExec(t.ID, agent.AbortGoalMet)
 		default:
 			log.Printf("[planner] task %s planning finished", t.ID)
+		}
+		// Record the post-round open-goal fingerprint for quiet-mode (#79):
+		// goals opened or closed by this round change it, so a later edge can
+		// tell "nothing changed" apart from "the plan input changed".
+		if fp, err := t.Store.OpenGoalFingerprint(); err == nil {
+			e.goalFP.Store(t.ID, fp)
 		}
 		e.touch(t.ID)
 	}
