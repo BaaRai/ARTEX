@@ -92,3 +92,64 @@ func TestLLMTestFallbackMatchesRuntimeNormalization(t *testing.T) {
 		t.Fatalf("ConfigFrom trims: %q", runtime.APIKey)
 	}
 }
+
+// The stored-profile test must reach the profile's own endpoint: an empty form
+// (the list-view test button) fills provider/model/base_url from the row, so
+// the key lands on the configured host instead of the canonical default one.
+func TestLLMTestStoredProfileUsesProfileEndpoint(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.Close() })
+	if m.pg == nil {
+		t.Skip("no postgres for this run")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+
+	var hits atomic.Int32
+	var gotKey atomic.Value
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		gotKey.Store(r.Header.Get("x-api-key"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"m","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	t.Cleanup(fake.Close)
+
+	pid, err := m.pg.SaveProfile(&db.LLMProfile{
+		Name: "stored-ep", Format: "anthropic", Model: "claude-x",
+		BaseURL: fake.URL, APIKey: "k1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = m.pg.Exec("DELETE FROM llm_profiles WHERE id=$1", pid) })
+
+	// Empty form on purpose: no provider, model, base_url, or streaming.
+	body, _ := json.Marshal(map[string]any{"profile_id": pid, "api_key": ""})
+	req := httptest.NewRequest(http.MethodPost, "/api/llm/test", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.testLLM(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handler status %d", rec.Code)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("stored-profile test must hit the profile endpoint exactly once, hits=%d", hits.Load())
+	}
+	if k, _ := gotKey.Load().(string); k != "k1" {
+		t.Fatalf("test request must send the stored key, header was %q", k)
+	}
+	var resp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !resp.OK {
+		t.Fatalf("stored-profile round-trip not ok: %s", resp.Error)
+	}
+}
