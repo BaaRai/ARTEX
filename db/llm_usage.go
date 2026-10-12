@@ -371,7 +371,15 @@ func applyCostEur(d *DB, out []ProfileUsage) error {
 		if !ok || (pr.in == 0 && pr.outp == 0 && pr.cr == 0 && pr.cw == 0) {
 			continue
 		}
-		cost := float64(out[i].InputTokens)/1e6*pr.in + float64(out[i].OutputTokens)/1e6*pr.outp +
+		// InputTokens includes the cached subset (Anthropic and OpenAI usage
+		// semantics), so the fresh share is input minus cache reads; charging
+		// both buckets at full input price double-counts the cache. Clamped at
+		// zero for gateways that report the buckets disjointly.
+		fresh := out[i].InputTokens - out[i].CacheReadTokens
+		if fresh < 0 {
+			fresh = 0
+		}
+		cost := float64(fresh)/1e6*pr.in + float64(out[i].OutputTokens)/1e6*pr.outp +
 			float64(out[i].CacheReadTokens)/1e6*pr.cr + float64(out[i].CacheWriteTokens)/1e6*pr.cw
 		c := cost
 		out[i].CostEur = &c
