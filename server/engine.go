@@ -882,7 +882,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		// they do not accumulate and let the heartbeat supervise; the next edge
 		// after a goal opens or closes, or once the frontier drains and all
 		// workers are idle, plans for real.
-		if src == "edge" && e.quietSkipEdge(t) {
+		if src == "edge" && t.PlanQuietMode && e.quietSkipEdge(t) {
 			t.drainTriggers()
 			log.Printf("[planner] task %s quiet: work in flight, goals unchanged, edge round skipped", t.ID)
 			return
