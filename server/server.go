@@ -1404,11 +1404,14 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// Same for the session header name: when the form omits it, the stored profile's value is the fallback.
 	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
+			// Trim like ConfigFrom does for form values: a key stored with
+			// surrounding whitespace runs fine in conversations (the runtime
+			// path re-trims) but would be sent raw here and fail auth.
 			if cfg.APIKey == "" {
-				cfg.APIKey = p.APIKey
+				cfg.APIKey = strings.TrimSpace(p.APIKey)
 			}
 			if cfg.SessionHeaderKey == "" {
-				cfg.SessionHeaderKey = p.SessionHeaderKey
+				cfg.SessionHeaderKey = strings.TrimSpace(p.SessionHeaderKey)
 			}
 		}
 	}
