@@ -117,6 +117,8 @@ type ProfileUsage struct {
 	OutputTokens     int    `json:"output_tokens"`
 	CacheReadTokens  int    `json:"cache_read_tokens"`
 	CacheWriteTokens int    `json:"cache_write_tokens"`
+	// CostEur is set only when the profile carries at least one price; nil = not priced.
+	CostEur *float64 `json:"cost_eur,omitempty"`
 }
 
 // UsageByProfile returns global token spend grouped by profile name, most-used
@@ -170,6 +172,9 @@ ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC`)
 	out = out[:0]
 	for _, current := range byName {
 		out = append(out, current)
+	}
+	if err := applyCostEur(d, out); err != nil {
+		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool {
 		left := out[i].InputTokens + out[i].OutputTokens
@@ -331,4 +336,45 @@ func ParseExpID(s string) int64 {
 		return 0
 	}
 	return n
+}
+
+// applyCostEur fills CostEur on each profile bucket from the stored per-profile
+// prices (EUR per 1M tokens). Profiles without any price keep CostEur nil. The
+// join is by profile name (llm_usage records the name, not the id); the first
+// matching profile wins, and duplicate names are a configuration error the
+// operator sees as a weird number, not a crash.
+func applyCostEur(d *DB, out []ProfileUsage) error {
+	rows, err := d.Query(`SELECT name, COALESCE(price_input_per_m,0), COALESCE(price_output_per_m,0), COALESCE(price_cache_read_per_m,0), COALESCE(price_cache_write_per_m,0) FROM llm_profiles`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type prices struct{ in, outp, cr, cw float64 }
+	byName := map[string]prices{}
+	seen := map[string]bool{}
+	for rows.Next() {
+		var n string
+		var pr prices
+		if err := rows.Scan(&n, &pr.in, &pr.outp, &pr.cr, &pr.cw); err != nil {
+			return err
+		}
+		if !seen[n] {
+			byName[n] = pr
+			seen[n] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range out {
+		pr, ok := byName[out[i].ProfileName]
+		if !ok || (pr.in == 0 && pr.outp == 0 && pr.cr == 0 && pr.cw == 0) {
+			continue
+		}
+		cost := float64(out[i].InputTokens)/1e6*pr.in + float64(out[i].OutputTokens)/1e6*pr.outp +
+			float64(out[i].CacheReadTokens)/1e6*pr.cr + float64(out[i].CacheWriteTokens)/1e6*pr.cw
+		c := cost
+		out[i].CostEur = &c
+	}
+	return nil
 }
