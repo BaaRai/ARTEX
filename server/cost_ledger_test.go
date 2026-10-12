@@ -54,7 +54,7 @@ func TestCostLedgerEurOnUsage(t *testing.T) {
 	if got == nil {
 		t.Fatal("priced profile has no cost_eur")
 	}
-	want := 2.0*1.5 + 0.5*4.0 + 1.0*0.15 // 3.0 + 2.0 + 0.15 = 5.15
+	want := 1.0*1.5 + 0.5*4.0 + 1.0*0.15 // fresh input 1M (2M incl. 1M cached) + 0.5M out + 1M cache-read = 3.65
 	if d := *got - want; d > 0.001 || d < -0.001 {
 		t.Fatalf("cost_eur = %v, want %v", *got, want)
 	}
