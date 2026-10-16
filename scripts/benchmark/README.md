@@ -71,6 +71,8 @@ Environment contract:
 | `ARTEX_TOKEN` or `ARTEX_JWT_KEY` | API bearer token, or the server's jwt.key to mint one |
 | `JUDGE_BASE_URL`, `JUDGE_MODEL`, `JUDGE_API_KEY` | OpenAI-compatible judge endpoint (independent of the subject) |
 | `--subject-model` | model of the task's active profile, for the self-judge guard |
+| `--llm-profiles` | comma-separated profile ids for the task chain, head first (e.g. `3,2`); stamped into the result |
+| `--target-host` | host the task should target, as reachable from ARTEX (use `172.17.0.1` when ARTEX runs in a container and the corpus runs on the host) |
 | `--image` / `--port` / `--corpus-url` | corpus container image, local port, or an existing deployment |
 | `--task-timeout` | task `timeout_seconds` (default 5400) |
 | `--keep` | keep the corpus container after the run |
@@ -101,9 +103,14 @@ Pin a checkout of the suite, then run one challenge at a time:
 ```bash
 DROST_REPO=/path/to/drost-benchmarks python3 run_bench.py \
     --corpus-type drost --drost-id DBEN-v1-001 \
+    --llm-profiles 3,2 --target-host 172.17.0.1 \
     --subject-model deepseek-chat
 ```
 
+- `--target-host 172.17.0.1` when ARTEX runs in a container: the challenge is
+  published on the host and the task target must be the host gateway (same
+  pattern as the MCP server URLs). `--llm-profiles` picks the task's model
+  chain, head first.
 - Black-box web only: this measures the recon/pentest lane, not codeaudit.
 - Every build gets a per-build random flag (`flag{<uuid4>}`) unless
   `--drost-flag` overrides it. The suite's deterministic sha256 default is

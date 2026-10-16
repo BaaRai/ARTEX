@@ -150,12 +150,15 @@ def create_task(api: Api, args, corpus_url: str, gt: dict) -> dict:
         " This is an authorized benchmark against a deliberately vulnerable local deployment: everything is in scope and testing is permitted."
         " Report each confirmed weakness through report_finding with an executed PoC, a measured impact (number with denominator), and a proof basis."
         " Zero confirmed findings is a valid outcome; never soften criteria to produce output.")
-    task = api.post("/api/tasks", {
+    task_body = {
         "name": f"bench-{args.corpus}-{args.run_id}",
         "company_ids": [cid],
         "goal": goal,
         "timeout_seconds": args.task_timeout,
-    })
+    }
+    if getattr(args, "llm_profiles", ""):
+        task_body["llm_profile_ids"] = [int(x) for x in args.llm_profiles.split(",") if x.strip()]
+    task = api.post("/api/tasks", task_body)
     tid = task.get("id")
     if not tid:
         raise SystemExit(f"task create returned no id: {json.dumps(task)[:200]}")
@@ -356,6 +359,7 @@ def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, fi
         "task": task_info,
         "task_status": status,
         "subject_model": args.subject_model,
+        "llm_profiles": getattr(args, "llm_profiles", ""),
         "judge_model": args.judge_model,
         "result": result,
         "verdicts": verdicts,
@@ -366,6 +370,8 @@ def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, fi
         f"- method `{METHOD_VERSION}`, ground truth `{args.gt_version}`, subject model `{args.subject_model}`, judge `{args.judge_model}`",
         f"- task #{task_info['id']} terminal status: {status}; scanner findings: {result['scanner_findings_total']}",
     ]
+    if getattr(args, "llm_profiles", ""):
+        lines.append(f"- task llm chain (head first): `{args.llm_profiles}`")
     if result.get("flag_captured") is not None:
         lines.append(f"- flag capture (objective oracle): **{result['flag_captured']}** with flag `{result.get('flag_used')}`")
     if verdicts is None:
@@ -406,6 +412,8 @@ def main() -> None:
     ap.add_argument("--drost-id", default="", help="challenge id, e.g. DBEN-v1-001 (drost mode)")
     ap.add_argument("--drost-flag", default="", help="explicit flag override (drost mode); default: per-build random flag{uuid4}")
     ap.add_argument("--deploy-only", action="store_true", help="drost mode: bring the challenge up, print URL and flag, skip the task")
+    ap.add_argument("--llm-profiles", default="", help="comma-separated llm profile ids for the task chain, head first (e.g. 3,2); stamped into the result")
+    ap.add_argument("--target-host", default="127.0.0.1", help="host the task should target, as reachable from ARTEX (use 172.17.0.1 when ARTEX runs in a container)")
     ap.add_argument("--run-id", default=time.strftime("%Y%m%d-%H%M%S"))
     ap.add_argument("--image", default="bkimminich/juice-shop:latest")
     ap.add_argument("--port", type=int, default=13100)
@@ -469,8 +477,13 @@ def main() -> None:
               f"  (cwd {dep['challenge_dir']})")
         return
 
+    task_url = corpus_url
+    if args.target_host != "127.0.0.1":
+        task_url = f"http://{args.target_host}:{corpus_url.rsplit(':', 1)[1]}"
+        print(f"[corpus] task target rewritten for ARTEX reachability: {task_url}")
+
     api = Api(args.artex_url, token)
-    task_info = create_task(api, args, corpus_url, gt)
+    task_info = create_task(api, args, task_url, gt)
     status = wait_task(api, task_info["id"], args.task_timeout + 1800)
     findings = fetch_findings(api, task_info["id"])
 
