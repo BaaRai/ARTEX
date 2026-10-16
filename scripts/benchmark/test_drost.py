@@ -73,6 +73,10 @@ class GroundTruthTests(unittest.TestCase):
             self.assertTrue(gt["version"].startswith("DBEN-v1-001@"))
             self.assertIn("Sign petitions", gt["task_goal_template"])
             self.assertIn("flag", gt["task_goal_template"].lower())
+            # the URL placeholder must survive into the template: create_task
+            # replaces it with the task target. Without it the task goal names
+            # no target and agents wander to unrelated assets (seen live).
+            self.assertIn("{url}", gt["task_goal_template"])
             entry = gt["findings"][0]
             self.assertEqual(entry["id"], "GT-FLAG")
             self.assertEqual(entry["classes"], ["csrf"])
