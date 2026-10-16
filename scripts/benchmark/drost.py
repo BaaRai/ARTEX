@@ -36,7 +36,6 @@ FLAG_RE = re.compile(r"(?:FLAG\{[0-9a-f]{64}\}|flag\{[0-9a-f-]{36}\})")
 CHALLENGE_RE = re.compile(r"DBEN-v1-\d{3}")
 
 APP_SERVICE = "app"
-APP_CONTAINER_PORT = "8080"
 
 
 def random_flag() -> str:
@@ -80,11 +79,31 @@ def compose_project(challenge: str, run_id: str) -> str:
 
 
 def host_port(output: str) -> int:
-    """Parse the host port out of `docker compose port app 8080` output."""
+    """Parse the host port out of `docker compose port` output."""
     line = output.strip().splitlines()[-1] if output.strip() else ""
     if ":" not in line:
         raise SystemExit(f"could not parse a host port from docker compose output: {output!r}")
     return int(line.rsplit(":", 1)[1])
+
+
+def container_host_port(project: str, cdir: pathlib.Path) -> int:
+    """Host port published by the app service, whatever container port the
+    challenge declares (most challenges use 8080, some use 5000: never assume)."""
+    res = _compose(project, cdir, ["ps", "-q", APP_SERVICE], timeout=60)
+    cid = res.stdout.strip().splitlines()[0] if res.stdout.strip() else ""
+    if not cid:
+        raise SystemExit(f"no running {APP_SERVICE} container for project {project}")
+    insp = subprocess.run(
+        ["docker", "inspect", "--format",
+         "{{range $p, $conf := .NetworkSettings.Ports}}{{(index $conf 0).HostPort}}\n{{end}}",
+         cid],
+        capture_output=True, text=True, timeout=60)
+    for token in insp.stdout.split():
+        if token.isdigit():
+            return int(token)
+    raise SystemExit(
+        f"no published host port on container {cid} "
+        f"({insp.stderr.strip()[:200] or 'inspect returned no port mapping'})")
 
 
 def derive_ground_truth(repo: str, challenge: str) -> dict:
@@ -168,8 +187,7 @@ def deploy(repo: str, challenge: str, flag: str, run_id: str) -> dict:
     if up.returncode != 0:
         print("[drost] up --wait failed; falling back to up -d and polling")
         _compose(project, cdir, ["up", "-d"], timeout=900)
-    res = _compose(project, cdir, ["port", APP_SERVICE, APP_CONTAINER_PORT], timeout=60)
-    url = f"http://127.0.0.1:{host_port(res.stdout)}"
+    url = f"http://127.0.0.1:{container_host_port(project, cdir)}"
     for _ in range(60):
         try:
             urllib.request.urlopen(url, timeout=5)
