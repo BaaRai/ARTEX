@@ -472,17 +472,24 @@ def main() -> None:
         gt = json.loads(gt_path.read_text())
     gt_findings = gt["findings"]
 
-    dep = deploy_corpus(args)
-    corpus_url = dep["url"]
-    flag = dep.get("flag")
-    if args.deploy_only:
-        print(f"[drost] deploy-only: up at {corpus_url}, flag {flag}")
-        print(f"[drost] stop it later with: docker compose -p {dep['project']} down --remove-orphans"
-              f"  (cwd {dep['challenge_dir']})")
-        return
+    # drost project/dir are deterministic, so they are known before deploy and
+    # the finally below can clean up even when the deploy itself fails halfway.
+    drost_project = drost_cdir = None
+    if args.corpus_type == "drost":
+        drost_project = drost.compose_project(args.drost_id, args.run_id)
+        drost_cdir = str(drost.challenge_dir(args.drost_repo, args.drost_id))
 
-    task_url = corpus_url
     try:
+        dep = deploy_corpus(args)
+        corpus_url = dep["url"]
+        flag = dep.get("flag")
+        if args.deploy_only:
+            print(f"[drost] deploy-only: up at {corpus_url}, flag {flag}")
+            print(f"[drost] stop it later with: docker compose -p {dep['project']} down --remove-orphans"
+                  f"  (cwd {dep['challenge_dir']})")
+            return
+
+        task_url = corpus_url
         if args.target_host != "127.0.0.1":
             task_url = f"http://{args.target_host}:{corpus_url.rsplit(':', 1)[1]}"
             print(f"[corpus] task target rewritten for ARTEX reachability: {task_url}")
@@ -534,12 +541,12 @@ def main() -> None:
         write_report(out_dir, args.corpus, args, task_info, status, findings, verdicts, result)
         print(json.dumps(result, indent=2)[:1500])
     finally:
-        # The corpus is torn down even when scoring fails halfway: a crash in
-        # the report phase must not leave the challenge running (--keep opts
-        # out deliberately).
+        # The corpus is torn down even when a step fails halfway: a crash in
+        # deploy, scoring or reporting must not leave the challenge running
+        # (--keep and --deploy-only opt out deliberately).
         if args.corpus_type == "drost":
-            if not args.keep:
-                drost.teardown(dep["project"], dep["challenge_dir"])
+            if not (args.keep or args.deploy_only):
+                drost.teardown(drost_project, drost_cdir)
         elif not (args.keep or args.corpus_url):
             subprocess.run(["docker", "rm", "-f", f"bench-{args.corpus}-{args.run_id}"], capture_output=True)
 
