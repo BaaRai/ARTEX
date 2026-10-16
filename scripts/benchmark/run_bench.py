@@ -189,18 +189,21 @@ def fetch_findings(api: Api, tid) -> list[dict]:
     out = []
     for f in items:
         fid = f.get("id") or f.get("node_id")
+        # The detail route keys on finding_id (the findings-table row), not on
+        # the exploration node id the list also carries; asking with the node
+        # id 404s. Fall back to the node id so older payloads still resolve.
+        did = f.get("finding_id") or fid
         detail = {}
         try:
-            detail = api.get(f"/api/exploration/findings/{fid}")
-        except SystemExit:
-            raise
-        except Exception:
-            pass
+            detail = api.get(f"/api/exploration/findings/{did}")
+        except (SystemExit, Exception):
+            pass  # a missing detail must not kill the run; list fields remain
         report = detail.get("report") or f.get("report") or ""
         summary = f.get("summary") or detail.get("summary") or ""
         name = f.get("name") or f.get("title") or summary[:80]
         out.append({
             "id": fid,
+            "finding_id": str(f.get("finding_id") or ""),
             "name": str(name)[:200],
             "severity": str(f.get("severity") or detail.get("severity") or "?"),
             "summary": str(summary)[:600],
@@ -217,13 +220,14 @@ def deep_evidence_texts(api: Api, tid, findings: list[dict]) -> list[str]:
     common path."""
     texts = []
     for f in findings:
+        did = f.get("finding_id") or f.get("id")
         try:
-            texts.append(json.dumps(api.get(f"/api/exploration/findings/{f['id']}")))
-        except Exception:
+            texts.append(json.dumps(api.get(f"/api/exploration/findings/{did}")))
+        except (SystemExit, Exception):
             continue
     try:
         texts.append(json.dumps(api.get(f"/api/exploration/nodes?task={tid}&kind=fact&size=200")))
-    except Exception:
+    except (SystemExit, Exception):
         pass
     try:
         r = urllib.request.Request(f"{api.base}/api/report?task={tid}")
@@ -478,62 +482,66 @@ def main() -> None:
         return
 
     task_url = corpus_url
-    if args.target_host != "127.0.0.1":
-        task_url = f"http://{args.target_host}:{corpus_url.rsplit(':', 1)[1]}"
-        print(f"[corpus] task target rewritten for ARTEX reachability: {task_url}")
+    try:
+        if args.target_host != "127.0.0.1":
+            task_url = f"http://{args.target_host}:{corpus_url.rsplit(':', 1)[1]}"
+            print(f"[corpus] task target rewritten for ARTEX reachability: {task_url}")
 
-    api = Api(args.artex_url, token)
-    task_info = create_task(api, args, task_url, gt)
-    status = wait_task(api, task_info["id"], args.task_timeout + 1800)
-    findings = fetch_findings(api, task_info["id"])
+        api = Api(args.artex_url, token)
+        task_info = create_task(api, args, task_url, gt)
+        status = wait_task(api, task_info["id"], args.task_timeout + 1800)
+        findings = fetch_findings(api, task_info["id"])
 
-    invalid_ids = [f["id"] for f in findings if not (f["summary"].strip() or f["report"].strip())]
-    usable = [f for f in findings if f["id"] not in invalid_ids]
+        invalid_ids = [f["id"] for f in findings if not (f["summary"].strip() or f["report"].strip())]
+        usable = [f for f in findings if f["id"] not in invalid_ids]
 
-    flag_captured = None
-    if flag:
-        # Objective oracle first pass over the already-fetched fields; the deep
-        # scan (full details, facts, report) runs only before declaring a miss.
-        flag_captured = drost.flag_in_texts(flag, drost.finding_texts(findings))
-        if not flag_captured:
-            flag_captured = drost.flag_in_texts(flag, deep_evidence_texts(api, task_info["id"], findings))
-        print(f"[flag] captured: {flag_captured}")
+        flag_captured = None
+        if flag:
+            # Objective oracle first pass over the already-fetched fields; the deep
+            # scan (full details, facts, report) runs only before declaring a miss.
+            flag_captured = drost.flag_in_texts(flag, drost.finding_texts(findings))
+            if not flag_captured:
+                flag_captured = drost.flag_in_texts(flag, deep_evidence_texts(api, task_info["id"], findings))
+            print(f"[flag] captured: {flag_captured}")
 
-    if judge_enabled:
-        if not usable:
-            print("[judge] no usable findings; scoring zeros")
-            verdicts = [{"gt_id": g["id"], "detected": False, "matched_finding_id": None,
-                         "gates": {"component": False, "class": False, "keywords": False, "proof": False},
-                         "reason": "no usable scanner findings"} for g in gt_findings]
+        if judge_enabled:
+            if not usable:
+                print("[judge] no usable findings; scoring zeros")
+                verdicts = [{"gt_id": g["id"], "detected": False, "matched_finding_id": None,
+                             "gates": {"component": False, "class": False, "keywords": False, "proof": False},
+                             "reason": "no usable scanner findings"} for g in gt_findings]
+            else:
+                print("[judge] running falsification battery")
+                judge_battery(args)
+                print("[judge] grading")
+                verdicts = run_judge(args, gt_findings, usable)
+            result = tally(gt_findings, verdicts, findings, invalid_ids)
         else:
-            print("[judge] running falsification battery")
-            judge_battery(args)
-            print("[judge] grading")
-            verdicts = run_judge(args, gt_findings, usable)
-        result = tally(gt_findings, verdicts, findings, invalid_ids)
-    else:
-        print("[judge] flag-only run: no judge configured, analysis gates not measured")
-        verdicts = None
-        result = {
-            "mode": "flag-only",
-            "scanner_findings_total": len(findings),
-            "invalid_findings_excluded": invalid_ids,
-            "discovery_candidates": [{"id": f["id"], "name": f["name"]} for f in usable],
-            "note": "analysis gates not measured: no judge configured",
-        }
-    if flag:
-        result["flag_captured"] = flag_captured
-        result["flag_used"] = flag
+            print("[judge] flag-only run: no judge configured, analysis gates not measured")
+            verdicts = None
+            result = {
+                "mode": "flag-only",
+                "scanner_findings_total": len(findings),
+                "invalid_findings_excluded": invalid_ids,
+                "discovery_candidates": [{"id": f["id"], "name": f["name"]} for f in usable],
+                "note": "analysis gates not measured: no judge configured",
+            }
+        if flag:
+            result["flag_captured"] = flag_captured
+            result["flag_used"] = flag
 
-    out_dir = pathlib.Path("benchmark-results") / args.corpus / args.run_id
-    write_report(out_dir, args.corpus, args, task_info, status, findings, verdicts, result)
-    print(json.dumps(result, indent=2)[:1500])
-
-    if args.corpus_type == "drost":
-        if not args.keep:
-            drost.teardown(dep["project"], dep["challenge_dir"])
-    elif not (args.keep or args.corpus_url):
-        subprocess.run(["docker", "rm", "-f", f"bench-{args.corpus}-{args.run_id}"], capture_output=True)
+        out_dir = pathlib.Path("benchmark-results") / args.corpus / args.run_id
+        write_report(out_dir, args.corpus, args, task_info, status, findings, verdicts, result)
+        print(json.dumps(result, indent=2)[:1500])
+    finally:
+        # The corpus is torn down even when scoring fails halfway: a crash in
+        # the report phase must not leave the challenge running (--keep opts
+        # out deliberately).
+        if args.corpus_type == "drost":
+            if not args.keep:
+                drost.teardown(dep["project"], dep["challenge_dir"])
+        elif not (args.keep or args.corpus_url):
+            subprocess.run(["docker", "rm", "-f", f"bench-{args.corpus}-{args.run_id}"], capture_output=True)
 
 
 if __name__ == "__main__":
