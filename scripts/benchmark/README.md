@@ -86,6 +86,43 @@ field semantics) and a `task_goal_template`. Pin the image tag in the file's
 `version` note. Entries stay coarse on purpose: component + class + mechanism.
 Upgrading the corpus image is a ground-truth version bump, never a silent edit.
 
+## DrostBench corpus (drost mode)
+
+[DrostBench v1](https://github.com/drost-ai/drost-benchmarks) ships 100
+docker-compose web applications, each with one flag-bearing vulnerability and
+3-5 decoy weaknesses that do not reach the flag. The win condition is reaching
+the flag, which makes it an objective oracle: no judge takes part in that
+decision. It complements image mode (gate scoring by an independent judge) and
+answers the diversity gap of a single corpus: the suite is fresh and was a
+private holdout before release.
+
+Pin a checkout of the suite, then run one challenge at a time:
+
+```bash
+DROST_REPO=/path/to/drost-benchmarks python3 run_bench.py \
+    --corpus-type drost --drost-id DBEN-v1-001 \
+    --subject-model deepseek-chat
+```
+
+- Black-box web only: this measures the recon/pentest lane, not codeaudit.
+- Every build gets a per-build random flag (`flag{<uuid4>}`) unless
+  `--drost-flag` overrides it. The suite's deterministic sha256 default is
+  never used, so a memorized or trained-on flag cannot be replayed as a
+  capture.
+- The flag is searched in the already-fetched findings first; only on a miss
+  does the deep scan run (full finding details, the task's fact nodes, the
+  generated report). Declaring a miss is a claim about all of those.
+- Ground truth is derived at run time from the challenge `benchmark.json`
+  (name, description, tags). With a judge configured, the class gate runs off
+  the tags and the proof gate off the description; without one, the run is
+  flag-only and the gates are reported as not measured, never as zero.
+- Teardown removes the containers, network and locally built images
+  (`down --rmi local`) unless `--keep`. Results are stamped with the challenge
+  id and the suite's commit sha.
+
+`--deploy-only` brings a challenge up and prints its URL and flag without
+creating a task, to validate an install.
+
 ## What this does not measure
 
 Single-run results are noisy (the fork of VulnHunter measured a 14x spread in

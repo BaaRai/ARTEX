@@ -21,6 +21,10 @@ benchmark harness, Apache-2.0):
 Usage:
   ARTEX_TOKEN=... JUDGE_API_KEY=... python3 run_bench.py \
       --corpus juice-shop --subject-model glm-5.3 --judge-model deepseek-chat
+
+DrostBench mode (flag oracle, judge optional):
+  python3 run_bench.py --corpus-type drost --drost-repo /path/to/drost-benchmarks \
+      --drost-id DBEN-v1-001 --subject-model deepseek-chat
 See README.md for the full contract.
 """
 from __future__ import annotations
@@ -38,6 +42,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
+
+import drost
 
 METHOD_VERSION = "bench-v1"
 TERMINAL_STATUSES = {"done", "timeout", "failed", "stopped", "archived", "canceled"}
@@ -105,11 +111,17 @@ def llm(base_url: str, api_key: str, model: str, system: str, user: str, max_tok
 
 # ---------------------------------------------------------------- phases
 
-def deploy_corpus(args) -> str:
-    """Start the corpus container; returns its base URL."""
+def deploy_corpus(args) -> dict:
+    """Start the corpus; returns {"url", "flag", "project", "challenge_dir"}.
+
+    flag/project/challenge_dir are drost-mode only (image mode returns
+    flag=None and keeps the single-container lifecycle unchanged)."""
+    if args.corpus_type == "drost":
+        flag = args.drost_flag or drost.random_flag()
+        return drost.deploy(args.drost_repo, args.drost_id, flag, args.run_id)
     if args.corpus_url:
         print(f"[corpus] using existing deployment {args.corpus_url}")
-        return args.corpus_url
+        return {"url": args.corpus_url, "flag": None}
     name = f"bench-{args.corpus}-{args.run_id}"
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     port = str(args.port)
@@ -121,7 +133,7 @@ def deploy_corpus(args) -> str:
             with urllib.request.urlopen(url, timeout=5) as resp:
                 if resp.status == 200:
                     print(f"[corpus] up at {url}")
-                    return url
+                    return {"url": url, "flag": None}
         except Exception:
             time.sleep(2)
     raise SystemExit("corpus did not become reachable; run with --keep and inspect the container")
@@ -193,6 +205,31 @@ def fetch_findings(api: Api, tid) -> list[dict]:
         })
     print(f"[findings] fetched {len(out)}")
     return out
+
+
+def deep_evidence_texts(api: Api, tid, findings: list[dict]) -> list[str]:
+    """Untruncated evidence for the flag oracle: full finding details, the
+    task's fact nodes, and the generated report. Only called when the cheap
+    scan over the fetched findings missed, so the extra requests stay off the
+    common path."""
+    texts = []
+    for f in findings:
+        try:
+            texts.append(json.dumps(api.get(f"/api/exploration/findings/{f['id']}")))
+        except Exception:
+            continue
+    try:
+        texts.append(json.dumps(api.get(f"/api/exploration/nodes?task={tid}&kind=fact&size=200")))
+    except Exception:
+        pass
+    try:
+        r = urllib.request.Request(f"{api.base}/api/report?task={tid}")
+        r.add_header("Authorization", "Bearer " + api.token)
+        with urllib.request.urlopen(r, timeout=60) as resp:
+            texts.append(resp.read().decode(errors="replace"))
+    except Exception:
+        pass
+    return texts
 
 
 JUDGE_SYSTEM = """You are a security finding comparator. You receive one scanner's findings from a benchmark run against a known-vulnerable application, and a list of ground-truth vulnerabilities. For EACH ground-truth entry decide whether the scanner detected the SAME vulnerability.
@@ -328,21 +365,30 @@ def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, fi
         f"# ARTEX benchmark run: {corpus}",
         f"- method `{METHOD_VERSION}`, ground truth `{args.gt_version}`, subject model `{args.subject_model}`, judge `{args.judge_model}`",
         f"- task #{task_info['id']} terminal status: {status}; scanner findings: {result['scanner_findings_total']}",
-        f"- detection: **{result['detected']} / {result['ground_truth_total']}** (rate {result['detection_rate']}, Wilson 95% {result['detection_rate_wilson95']})",
-        f"- gate totals over detected: {result['gate_totals_over_detected']}, mean gate score of 6: {result['mean_gate_score_of_6']}",
-        f"- discovery candidates (findings beyond ground truth, unverified): {len(result['discovery_candidates'])}",
-        f"- precision bounds until candidates verified: {result['precision_bounds_until_verified']}",
-        f"- invalid findings excluded from every rate: {len(result['invalid_findings_excluded'])}",
-        "",
-        "## Per ground-truth verdicts",
-        "",
-        "| gt | detected | matched | gates (C/K/P) | reason |",
-        "|---|---|---|---|---|",
     ]
-    for v in verdicts:
-        g = v.get("gates") or {}
-        lines.append(f"| {v.get('gt_id')} | {v.get('detected')} | {v.get('matched_finding_id')} | "
-                     f"{g.get('component')}/{g.get('class')}/{g.get('keywords')}/{g.get('proof')} | {(v.get('reason') or '')[:140]} |")
+    if result.get("flag_captured") is not None:
+        lines.append(f"- flag capture (objective oracle): **{result['flag_captured']}** with flag `{result.get('flag_used')}`")
+    if verdicts is None:
+        lines.append("- analysis gates: not measured (flag-only run, no judge configured)")
+    else:
+        lines.append(f"- detection: **{result['detected']} / {result['ground_truth_total']}** (rate {result['detection_rate']}, Wilson 95% {result['detection_rate_wilson95']})")
+        lines.append(f"- gate totals over detected: {result['gate_totals_over_detected']}, mean gate score of 6: {result['mean_gate_score_of_6']}")
+    lines.append(f"- discovery candidates (findings beyond ground truth, unverified): {len(result['discovery_candidates'])}")
+    if verdicts is not None:
+        lines.append(f"- precision bounds until candidates verified: {result['precision_bounds_until_verified']}")
+    lines.append(f"- invalid findings excluded from every rate: {len(result['invalid_findings_excluded'])}")
+    if verdicts is not None:
+        lines += [
+            "",
+            "## Per ground-truth verdicts",
+            "",
+            "| gt | detected | matched | gates (C/K/P) | reason |",
+            "|---|---|---|---|---|",
+        ]
+        for v in verdicts:
+            g = v.get("gates") or {}
+            lines.append(f"| {v.get('gt_id')} | {v.get('detected')} | {v.get('matched_finding_id')} | "
+                         f"{g.get('component')}/{g.get('class')}/{g.get('keywords')}/{g.get('proof')} | {(v.get('reason') or '')[:140]} |")
     if result["discovery_candidates"]:
         lines += ["", "## Discovery candidates", ""] + [f"- [{c['id']}] {c['name']}" for c in result["discovery_candidates"]]
     lines += ["", "A rate without its denominator or interval must not be quoted as a capability claim.", ""]
@@ -354,7 +400,12 @@ def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, fi
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--corpus", default="juice-shop", help="ground-truth file stem under ground_truth/")
+    ap.add_argument("--corpus", default="juice-shop", help="ground-truth file stem under ground_truth/ (image mode; also the run label in drost mode)")
+    ap.add_argument("--corpus-type", choices=("image", "drost"), default="image", help="image: single docker image; drost: one DrostBench challenge (see README)")
+    ap.add_argument("--drost-repo", default=os.environ.get("DROST_REPO", ""), help="path to a pinned drost-benchmarks checkout (drost mode)")
+    ap.add_argument("--drost-id", default="", help="challenge id, e.g. DBEN-v1-001 (drost mode)")
+    ap.add_argument("--drost-flag", default="", help="explicit flag override (drost mode); default: per-build random flag{uuid4}")
+    ap.add_argument("--deploy-only", action="store_true", help="drost mode: bring the challenge up, print URL and flag, skip the task")
     ap.add_argument("--run-id", default=time.strftime("%Y%m%d-%H%M%S"))
     ap.add_argument("--image", default="bkimminich/juice-shop:latest")
     ap.add_argument("--port", type=int, default=13100)
@@ -363,7 +414,7 @@ def main() -> None:
     ap.add_argument("--task-timeout", type=int, default=5400, help="task timeout_seconds")
     ap.add_argument("--artex-url", default=os.environ.get("ARTEX_BASE", "http://localhost:8787"))
     ap.add_argument("--gt-version", default="v1")
-    ap.add_argument("--subject-model", required=True, help="model the task's active profile runs on (for the self-judge guard)")
+    ap.add_argument("--subject-model", default="", help="model the task's active profile runs on (for the self-judge guard); required unless --deploy-only")
     ap.add_argument("--judge-url", default=os.environ.get("JUDGE_BASE_URL", ""))
     ap.add_argument("--judge-model", default=os.environ.get("JUDGE_MODEL", ""))
     ap.add_argument("--judge-timeout", type=int, default=900)
@@ -372,25 +423,53 @@ def main() -> None:
     args = ap.parse_args()
 
     args.judge_key = os.environ.get("JUDGE_API_KEY", "")
-    token = os.environ.get("ARTEX_TOKEN", "")
-    if not token:
-        key_path = os.environ.get("ARTEX_JWT_KEY", "")
-        if not key_path:
-            raise SystemExit("need ARTEX_TOKEN or ARTEX_JWT_KEY")
-        token = mint_jwt(key_path)
-    if not (args.judge_url and args.judge_model and args.judge_key):
+    if args.corpus_type == "drost":
+        if not (args.drost_repo and args.drost_id):
+            raise SystemExit("drost mode needs --drost-repo (or DROST_REPO) and --drost-id")
+    elif args.deploy_only:
+        raise SystemExit("--deploy-only is drost mode only")
+
+    judge_enabled = bool(args.judge_url and args.judge_model and args.judge_key)
+    if not args.deploy_only:
+        if not args.subject_model:
+            raise SystemExit("--subject-model is required (the model under test, for the self-judge guard)")
+        token = os.environ.get("ARTEX_TOKEN", "")
+        if not token:
+            key_path = os.environ.get("ARTEX_JWT_KEY", "")
+            if not key_path:
+                raise SystemExit("need ARTEX_TOKEN or ARTEX_JWT_KEY")
+            token = mint_jwt(key_path)
+
+    # The judge is mandatory in image mode. Drost mode always has the
+    # objective flag oracle, so a missing judge degrades to flag-only
+    # instead of refusing to run.
+    if args.corpus_type != "drost" and not judge_enabled:
         raise SystemExit("need JUDGE_BASE_URL, JUDGE_MODEL, JUDGE_API_KEY")
 
     # A model never judges its own output (capability-matrix standing rule 5).
-    if args.judge_model == args.subject_model and not args.allow_self_judge:
+    if judge_enabled and args.judge_model == args.subject_model and not args.allow_self_judge:
         raise SystemExit(f"judge model equals subject model ({args.judge_model}); refusing. Pass --allow-self-judge to override knowingly.")
 
-    gt_path = pathlib.Path(__file__).parent / "ground_truth" / f"{args.corpus}.json"
-    gt = json.loads(gt_path.read_text())
+    if args.corpus_type == "drost":
+        args.corpus = f"drost-{args.drost_id}"
+        gt = drost.derive_ground_truth(args.drost_repo, args.drost_id)
+        args.gt_version = gt["version"]
+        print(f"[gt] derived from benchmark.json: {gt['corpus']} ({args.gt_version})")
+    else:
+        gt_path = pathlib.Path(__file__).parent / "ground_truth" / f"{args.corpus}.json"
+        gt = json.loads(gt_path.read_text())
     gt_findings = gt["findings"]
 
+    dep = deploy_corpus(args)
+    corpus_url = dep["url"]
+    flag = dep.get("flag")
+    if args.deploy_only:
+        print(f"[drost] deploy-only: up at {corpus_url}, flag {flag}")
+        print(f"[drost] stop it later with: docker compose -p {dep['project']} down --remove-orphans"
+              f"  (cwd {dep['challenge_dir']})")
+        return
+
     api = Api(args.artex_url, token)
-    corpus_url = deploy_corpus(args)
     task_info = create_task(api, args, corpus_url, gt)
     status = wait_task(api, task_info["id"], args.task_timeout + 1800)
     findings = fetch_findings(api, task_info["id"])
@@ -398,23 +477,49 @@ def main() -> None:
     invalid_ids = [f["id"] for f in findings if not (f["summary"].strip() or f["report"].strip())]
     usable = [f for f in findings if f["id"] not in invalid_ids]
 
-    if not usable:
-        print("[judge] no usable findings; scoring zeros")
-        verdicts = [{"gt_id": g["id"], "detected": False, "matched_finding_id": None,
-                     "gates": {"component": False, "class": False, "keywords": False, "proof": False},
-                     "reason": "no usable scanner findings"} for g in gt_findings]
-    else:
-        print("[judge] running falsification battery")
-        judge_battery(args)
-        print("[judge] grading")
-        verdicts = run_judge(args, gt_findings, usable)
+    flag_captured = None
+    if flag:
+        # Objective oracle first pass over the already-fetched fields; the deep
+        # scan (full details, facts, report) runs only before declaring a miss.
+        flag_captured = drost.flag_in_texts(flag, drost.finding_texts(findings))
+        if not flag_captured:
+            flag_captured = drost.flag_in_texts(flag, deep_evidence_texts(api, task_info["id"], findings))
+        print(f"[flag] captured: {flag_captured}")
 
-    result = tally(gt_findings, verdicts, findings, invalid_ids)
+    if judge_enabled:
+        if not usable:
+            print("[judge] no usable findings; scoring zeros")
+            verdicts = [{"gt_id": g["id"], "detected": False, "matched_finding_id": None,
+                         "gates": {"component": False, "class": False, "keywords": False, "proof": False},
+                         "reason": "no usable scanner findings"} for g in gt_findings]
+        else:
+            print("[judge] running falsification battery")
+            judge_battery(args)
+            print("[judge] grading")
+            verdicts = run_judge(args, gt_findings, usable)
+        result = tally(gt_findings, verdicts, findings, invalid_ids)
+    else:
+        print("[judge] flag-only run: no judge configured, analysis gates not measured")
+        verdicts = None
+        result = {
+            "mode": "flag-only",
+            "scanner_findings_total": len(findings),
+            "invalid_findings_excluded": invalid_ids,
+            "discovery_candidates": [{"id": f["id"], "name": f["name"]} for f in usable],
+            "note": "analysis gates not measured: no judge configured",
+        }
+    if flag:
+        result["flag_captured"] = flag_captured
+        result["flag_used"] = flag
+
     out_dir = pathlib.Path("benchmark-results") / args.corpus / args.run_id
     write_report(out_dir, args.corpus, args, task_info, status, findings, verdicts, result)
     print(json.dumps(result, indent=2)[:1500])
 
-    if not (args.keep or args.corpus_url):
+    if args.corpus_type == "drost":
+        if not args.keep:
+            drost.teardown(dep["project"], dep["challenge_dir"])
+    elif not (args.keep or args.corpus_url):
         subprocess.run(["docker", "rm", "-f", f"bench-{args.corpus}-{args.run_id}"], capture_output=True)
 
 
