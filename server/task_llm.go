@@ -586,6 +586,9 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	// (agentsForTask) is exactly what the engine actually drives through the authoritative
 	// resolver, so the Compactor must hook in here. The planner provider goes through task routing (§4: same model as the agent, resolved with the task's LLM chain); compaction uses Complete to generate the body in one shot.
 	pl.SetCompactor(agent.NewCompactor(plannerRuntime, "task-router"))
+	// RSI shadow mode: select evidence-backed lessons for this task. Off by
+	// default; shadow logs what would be shown, inject appends the block.
+	s.wireTaskLessons(t, wk, pl)
 	main := agent.NewMainAgent(mainRuntime, "task-router", s.m.dir, tx, mainRuntime.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	main.SetFindingRecorder(s.evidenceStore())
 	main.SetCompactionWindowResolver(mainRuntime.CompactionWindow)

@@ -685,6 +685,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/task-templates/{id}", s.pgDeleteTaskTemplate)
 	mux.HandleFunc("GET /api/tasks/{id}", s.getTask)
 	mux.HandleFunc("GET /api/tasks/{id}/outcome", s.taskOutcome)
+	mux.HandleFunc("GET /api/tasks/{id}/lessons", s.taskLessons)
+	mux.HandleFunc("POST /api/tasks/{id}/lessons/extract", s.extractTaskLessons)
 	mux.HandleFunc("PATCH /api/tasks/{id}", s.updateTaskMetadata)
 	mux.HandleFunc("PATCH /api/tasks/{id}/category", s.updateTaskCategory)
 	// task-level asset interception/allow rules

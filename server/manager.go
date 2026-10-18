@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -1411,6 +1412,7 @@ func (m *Manager) SetTaskStatusGuarded(id, status string) (won bool, err error) 
 		})
 	}
 	m.mu.Unlock()
+	m.extractLessons(n)
 	return true, nil
 }
 
@@ -1442,7 +1444,20 @@ func (m *Manager) SetTaskStatus(id, status string) error {
 		})
 	}
 	m.mu.Unlock()
+	if pgdb.IsTerminal(status) {
+		m.extractLessons(n)
+	}
 	return nil
+}
+
+// extractLessons derives RSI candidate lessons from a task that just reached a
+// terminal status. It is best-effort: a lesson failure must never fail a status
+// update. The extraction is idempotent (evidence unique key), so a restart or a
+// manual backfill cannot inflate support.
+func (m *Manager) extractLessons(taskID int64) {
+	if _, err := m.pg.ExtractLessonsForTask(context.Background(), taskID); err != nil {
+		log.Printf("[rsi] lesson extraction failed for task %d: %v", taskID, err)
+	}
 }
 
 // DeleteTask removes a task and optionally its related global data. Traffic has

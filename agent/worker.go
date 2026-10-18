@@ -87,6 +87,10 @@ type Worker struct {
 	// maxTokensFn resolves the per-reply output cap in tokens, on the same
 	// per-run basis. nil or 0 = send no cap and let the endpoint decide.
 	maxTokensFn func() int
+	// lessonsBlock is the code-owned RSI evidence block appended verbatim after
+	// the rendered system prompt. Empty = off. It is data, not instructions:
+	// the server renders it from outcome records and sets it before the run.
+	lessonsBlock string
 }
 
 // WorkerSessionID returns the stable transcript key used by a worker intent.
@@ -139,6 +143,11 @@ func (w *Worker) maxTokens() int {
 // SetConstraintInject wires a resolver deciding whether this task's operation
 // constraints get injected into the worker system prompt. nil = inject (default).
 func (w *Worker) SetConstraintInject(fn func() bool) { w.injectConstraints = fn }
+
+// SetLessonsBlock sets the code-owned RSI evidence block appended after the
+// rendered system prompt. Empty disables it. The block is rendered by the
+// server from outcome records and is never editable through the prompt UI.
+func (w *Worker) SetLessonsBlock(block string) { w.lessonsBlock = block }
 
 // wantConstraints reports whether constraint injection is enabled (default yes).
 func (w *Worker) wantConstraints() bool { return w.injectConstraints == nil || w.injectConstraints() }
@@ -432,7 +441,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData())
-	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir)
+	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir) + w.lessonsBlock
 	if w.wantConstraints() {
 		sysBody += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
 	}
