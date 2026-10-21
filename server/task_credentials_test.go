@@ -20,7 +20,7 @@ func TestTaskCredentialsFlow(t *testing.T) {
 	}
 	resp := request("POST", "/api/tasks", `{
 		"description": "credential flow test",
-		"goal": "verify task credentials",
+		"goal": "Verify credential handling against the lab target at http://127.0.0.1:9/v1 and record the outcome.",
 		"credentials": [
 			{"domain": "target.example.com", "username": "alias@test", "password": "s3cret!", "note": "program alias account"},
 			{"domain": "target.example.com", "username": "", "password": ""}
@@ -32,7 +32,7 @@ func TestTaskCredentialsFlow(t *testing.T) {
 
 	resp = request("POST", "/api/tasks", `{
 		"description": "credential flow test",
-		"goal": "verify task credentials",
+		"goal": "Verify credential handling against the lab target at http://127.0.0.1:9/v1 and record the outcome.",
 		"credentials": [
 			{"domain": "target.example.com", "username": "alias@test", "password": "s3cret!", "note": "program alias account"},
 			{"domain": "app.target.example.com", "username": "agent-account", "password": ""}

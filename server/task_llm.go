@@ -120,6 +120,14 @@ func noteLLMCallFailure(taskID string, profileID int64) bool {
 	return false
 }
 
+// resetLLMFailStreaksForTest clears every streak; test isolation only (the
+// escalation counter is package-global in-memory state).
+func resetLLMFailStreaksForTest() {
+	llmFailStreaks.Lock()
+	llmFailStreaks.m = map[string]int{}
+	llmFailStreaks.Unlock()
+}
+
 func resetLLMFailStreak(taskID string, profileID int64) {
 	llmFailStreaks.Lock()
 	defer llmFailStreaks.Unlock()

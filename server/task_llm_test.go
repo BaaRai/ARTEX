@@ -350,6 +350,7 @@ func TestTaskLLMStreamDoesNotSwitchForOrdinaryErrors(t *testing.T) {
 	}
 	for _, message := range tests {
 		t.Run(message, func(t *testing.T) {
+			resetLLMFailStreaksForTest() // package-global streaks must not leak across subtests
 			provider := &scriptedLLMProvider{err: errors.New(message)}
 			exhausted := 0
 			hooks := taskLLMStreamHooks{

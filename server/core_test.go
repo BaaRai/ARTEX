@@ -62,7 +62,7 @@ func TestCoreTaskLifecyclePG(t *testing.T) {
 	}
 
 	// create a task → 201, returns PG task (string id + exploration_id)
-	code, out := doRetry("POST", "/api/tasks", map[string]string{"description": "smoke", "goal": "test SQLi/XSS"})
+	code, out := doRetry("POST", "/api/tasks", map[string]string{"description": "smoke", "goal": "Probe the lab target at http://127.0.0.1:9/v1 for unauthenticated data exposure; record one record as evidence and stop."})
 	if code != 201 {
 		t.Fatalf("create task: %d (%v)", code, out)
 	}

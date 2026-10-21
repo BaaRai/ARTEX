@@ -21,7 +21,7 @@ func (f *failingProvider) Complete(ctx context.Context, req llm.CompletionReques
 }
 
 func TestEscalationAdvancesAfterConsecutiveFailures(t *testing.T) {
-	resetAllLLMFailStreaksForTest()
+	resetLLMFailStreaksForTest()
 	prov := &failingProvider{err: errors.New("boom: upstream 500")}
 	profile := int64(7)
 	nextProfile := int64(8)
@@ -78,8 +78,3 @@ func TestEscalationAdvancesAfterConsecutiveFailures(t *testing.T) {
 	}
 }
 
-func resetAllLLMFailStreaksForTest() {
-	llmFailStreaks.Lock()
-	llmFailStreaks.m = map[string]int{}
-	llmFailStreaks.Unlock()
-}
