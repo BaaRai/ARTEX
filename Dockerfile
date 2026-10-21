@@ -21,6 +21,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+# Web-recon toolbox (drost-community take 1, #100): pinned release binaries installed
+# into /usr/local/bin so hunt workers can run them directly through their Bash tool.
+# Versions pinned per tool; upgrade deliberately. sqlmap is a python checkout (no
+# release binaries) symlinked into PATH.
+ARG NUCLEI_VERSION=v3.11.1
+ARG HTTPX_VERSION=v1.12.0
+ARG SUBFINDER_VERSION=v2.17.0
+ARG KATANA_VERSION=v1.8.0
+ARG FFUF_VERSION=v2.3.0
+ARG DALFOX_VERSION=v3.2.4
+RUN set -eux; \
+    base="https://github.com"; \
+    pd_fetch() { repo="$1"; ver="$2"; name="$3"; nov="${ver#v}"; \
+      curl -fsSL "$base/$repo/releases/download/$ver/${name}_${nov}_linux_${TARGETARCH}.zip" -o /tmp/t.zip \
+      && unzip -o -q /tmp/t.zip -d /tmp/td \
+      && find /tmp/td -type f -name "$name" -exec install -m 0755 {} /usr/local/bin/ \; \
+      && rm -rf /tmp/t.zip /tmp/td; }; \
+    case "$TARGETARCH" in amd64) FFUF_ARCH=amd64; DALFOX_ARCH=x86_64;; arm64) FFUF_ARCH=arm64; DALFOX_ARCH=aarch64;; esac; \
+    pd_fetch projectdiscovery/nuclei "$NUCLEI_VERSION" nuclei; \
+    pd_fetch projectdiscovery/httpx "$HTTPX_VERSION" httpx; \
+    pd_fetch projectdiscovery/subfinder "$SUBFINDER_VERSION" subfinder; \
+    pd_fetch projectdiscovery/katana "$KATANA_VERSION" katana; \
+    curl -fsSL "$base/ffuf/ffuf/releases/download/$FFUF_VERSION/ffuf_${FFUF_VERSION#v}_linux_${FFUF_ARCH}.tar.gz" \
+      | tar -xz -C /usr/local/bin ffuf; \
+    curl -fsSL "$base/hahwul/dalfox/releases/download/$DALFOX_VERSION/dalfox-${DALFOX_VERSION}-linux-${DALFOX_ARCH}-musl.tar.gz" \
+      | tar -xz -C /usr/local/bin dalfox; \
+    chmod +x /usr/local/bin/ffuf /usr/local/bin/dalfox; \
+    git clone --depth 1 https://github.com/sqlmapproject/sqlmap /opt/sqlmap; \
+    ln -s /opt/sqlmap/sqlmap.py /usr/local/bin/sqlmap; \
+    nuclei -version >/dev/null; httpx -version; subfinder -version; katana -version; \
+    ffuf -V >/dev/null; dalfox version >/dev/null; sqlmap --version >/dev/null
+
 # Preinstall Playwright MCP and CLI (globally) so no npx network download is needed at runtime.
 # @playwright/mcp: browser MCP runs directly via `npx @playwright/mcp` (installed globally, no -y/@latest needed).
 # @playwright/cli: provides playwright-cli, verified with --help right after install.
