@@ -246,7 +246,7 @@ func TestTaskLLMStreamRetriesPreStreamQuotaOnNextProfile(t *testing.T) {
 	active := int64(11)
 	transitions := 0
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			if active == 11 {
 				return taskLLMSelection{profileID: 11, provider: first}, nil
 			}
@@ -288,7 +288,7 @@ func TestTaskLLMStreamRetriesAfterNonContentStartEvent(t *testing.T) {
 	}}
 	active := int64(11)
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			if active == 11 {
 				return taskLLMSelection{profileID: 11, provider: first}, nil
 			}
@@ -319,7 +319,7 @@ func TestTaskLLMStreamRetriesStalePreStreamFailureAgainstReplacementChain(t *tes
 	second := &scriptedLLMProvider{events: []llm.StreamEvent{{Type: llm.SETextDelta, Text: "replacement"}}}
 	current := first
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			profileID := int64(11)
 			if current == second {
 				profileID = 22
@@ -353,7 +353,7 @@ func TestTaskLLMStreamDoesNotSwitchForOrdinaryErrors(t *testing.T) {
 			provider := &scriptedLLMProvider{err: errors.New(message)}
 			exhausted := 0
 			hooks := taskLLMStreamHooks{
-				current: func() (taskLLMSelection, error) {
+				current: func(ctx context.Context) (taskLLMSelection, error) {
 					return taskLLMSelection{profileID: 11, provider: provider}, nil
 				},
 				exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
@@ -382,7 +382,7 @@ func TestTaskLLMStreamAdvancesAfterMidStreamQuotaWithoutReplay(t *testing.T) {
 	second := &scriptedLLMProvider{events: []llm.StreamEvent{{Type: llm.SETextDelta, Text: "next-call"}}}
 	active := int64(11)
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			if active == 11 {
 				return taskLLMSelection{profileID: 11, provider: first}, nil
 			}
@@ -418,7 +418,7 @@ func TestTaskLLMStreamMarkFailureAfterToolStartSkipsWorkerReplay(t *testing.T) {
 		err:    quota,
 	}
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			return taskLLMSelection{profileID: 11, provider: provider}, nil
 		},
 		exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
@@ -467,7 +467,7 @@ func TestTaskLLMStreamRetriesTransientPreCommitOnSameProvider(t *testing.T) {
 	}
 	exhausted := 0
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			return taskLLMSelection{profileID: 11, provider: provider}, nil
 		},
 		exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
@@ -499,7 +499,7 @@ func TestTaskLLMStreamSurfacesTransientAfterRetriesExhausted(t *testing.T) {
 		failErr:   errors.New("dial tcp: connection reset by peer"),
 	}
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			return taskLLMSelection{profileID: 11, provider: provider}, nil
 		},
 		exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
@@ -524,7 +524,7 @@ func TestTaskLLMStreamDoesNotRetryDeterministicRejection(t *testing.T) {
 		failErr:   errors.New("anthropic: status 400: messages.1: invalid request"),
 	}
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			return taskLLMSelection{profileID: 11, provider: provider}, nil
 		},
 		exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
@@ -620,7 +620,7 @@ func TestTaskLLMStreamStopsWhenChainExhausted(t *testing.T) {
 	provider := &scriptedLLMProvider{err: errors.New("billing_not_active")}
 	transitions := 0
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			return taskLLMSelection{profileID: 11, provider: provider}, nil
 		},
 		exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {

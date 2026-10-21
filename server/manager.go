@@ -51,6 +51,10 @@ type Task struct {
 	ActiveLLMProfileID *int64  `json:"active_llm_profile_id,omitempty"`
 	LLMChainRevision   int64   `json:"-"`
 	LLMFailoverState   string  `json:"llm_failover_state,omitempty"`
+	// LLMRotate (#85): per-intent round-robin over the task's LLM chain heads.
+	LLMRotate  bool `json:"llm_rotate,omitempty"`
+	rotateMu   sync.Mutex
+	rotateNext int
 	LLMFailoverReason  string  `json:"llm_failover_reason,omitempty"`
 	SourceTaskIDs      []int64 `json:"source_task_ids,omitempty"`
 	CompanyIDs         []int64 `json:"company_ids,omitempty"`
@@ -176,6 +180,22 @@ func (t *Task) llmStateSnapshot() taskLLMState {
 		FailoverState:  t.LLMFailoverState,
 		FailoverReason: t.LLMFailoverReason,
 	}
+}
+
+// nextRotatedProfile returns the chain head for the NEXT claimed worker
+// intent under per-intent rotation (#85): strict round-robin over the task's
+// chain. The active head stays authoritative for every non-worker role and for
+// failover ordering; rotation only distributes worker lanes across heads.
+func (t *Task) nextRotatedProfile() (int64, bool) {
+	t.rotateMu.Lock()
+	defer t.rotateMu.Unlock()
+	ids := t.LLMProfileIDs
+	if len(ids) == 0 {
+		return 0, false
+	}
+	pick := ids[t.rotateNext%len(ids)]
+	t.rotateNext++
+	return pick, true
 }
 
 func (t *Task) setLLMState(profileID, activeID *int64, profileIDs []int64, revision int64, state, reason string) bool {
@@ -840,7 +860,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		QueuedAt: unixNanoOrZero(pt.QueuedAt), QueueMode: pt.QueueMode,
 		CompletedAt: unixOrZero(pt.CompletedAt), Status: pt.Status, ParentRef: pt.ParentRef,
 		LLMProfileID:  pt.LLMProfileID,
-		LLMProfileIDs: append([]int64(nil), pt.LLMProfileIDs...), ActiveLLMProfileID: pt.ActiveLLMProfileID,
+		LLMProfileIDs: append([]int64(nil), pt.LLMProfileIDs...), ActiveLLMProfileID: pt.ActiveLLMProfileID, LLMRotate: pt.LLMRotate,
 		LLMChainRevision: pt.LLMChainRevision,
 		LLMFailoverState: pt.LLMFailoverState, LLMFailoverReason: pt.LLMFailoverReason,
 		SourceTaskIDs:  append([]int64(nil), pt.SourceTaskIDs...),
