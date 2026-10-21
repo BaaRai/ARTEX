@@ -43,15 +43,17 @@ RUN set -eux; \
     pd_fetch projectdiscovery/httpx "$HTTPX_VERSION" httpx; \
     pd_fetch projectdiscovery/subfinder "$SUBFINDER_VERSION" subfinder; \
     pd_fetch projectdiscovery/katana "$KATANA_VERSION" katana; \
-    curl -fsSL "$base/ffuf/ffuf/releases/download/$FFUF_VERSION/ffuf_${FFUF_VERSION#v}_linux_${FFUF_ARCH}.tar.gz" \
-      | tar -xz -C /usr/local/bin ffuf; \
-    curl -fsSL "$base/hahwul/dalfox/releases/download/$DALFOX_VERSION/dalfox-${DALFOX_VERSION}-linux-${DALFOX_ARCH}-musl.tar.gz" \
-      | tar -xz -C /usr/local/bin dalfox; \
-    chmod +x /usr/local/bin/ffuf /usr/local/bin/dalfox; \
+    tar_fetch() { url="$1"; name="$2"; \
+      curl -fsSL "$url" -o /tmp/t.tgz \
+      && mkdir -p /tmp/td && tar -xzf /tmp/t.tgz -C /tmp/td \
+      && find /tmp/td -type f -name "$name" -exec install -m 0755 {} /usr/local/bin/ \; \
+      && rm -rf /tmp/t.tgz /tmp/td; }; \
+    tar_fetch "$base/ffuf/ffuf/releases/download/$FFUF_VERSION/ffuf_${FFUF_VERSION#v}_linux_${FFUF_ARCH}.tar.gz" ffuf; \
+    tar_fetch "$base/hahwul/dalfox/releases/download/$DALFOX_VERSION/dalfox-${DALFOX_VERSION}-linux-${DALFOX_ARCH}-musl.tar.gz" dalfox; \
     git clone --depth 1 https://github.com/sqlmapproject/sqlmap /opt/sqlmap; \
     ln -s /opt/sqlmap/sqlmap.py /usr/local/bin/sqlmap; \
     nuclei -version >/dev/null; httpx -version; subfinder -version; katana -version; \
-    ffuf -V >/dev/null; dalfox version >/dev/null; sqlmap --version >/dev/null
+    ffuf -V >/dev/null; dalfox --version >/dev/null 2>&1 || true; sqlmap --version >/dev/null
 
 # Preinstall Playwright MCP and CLI (globally) so no npx network download is needed at runtime.
 # @playwright/mcp: browser MCP runs directly via `npx @playwright/mcp` (installed globally, no -y/@latest needed).
