@@ -27,7 +27,7 @@ func TestEscalationAdvancesAfterConsecutiveFailures(t *testing.T) {
 	nextProfile := int64(8)
 	exhaustCalls := 0
 	hooks := taskLLMStreamHooks{
-		current: func() (taskLLMSelection, error) {
+		current: func(ctx context.Context) (taskLLMSelection, error) {
 			return taskLLMSelection{task: &Task{ID: "1"}, profileID: profile, revision: 1, provider: prov}, nil
 		},
 		exhaust: func(sel taskLLMSelection, cause error) (db.TaskLLMTransition, error) {
