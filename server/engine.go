@@ -1017,6 +1017,14 @@ func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker
 // must already hold one task-operation admission for the whole sequence so a delete
 // cannot observe quiescence between the LLM return and the final DB writes.
 func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *agent.Worker, intent *db.Node, requestID, message string) bool {
+	// Per-intent LLM rotation (#85): each claimed worker intent runs on the
+	// next chain head. The pin travels through the run context into the
+	// provider resolver; non-worker roles and failover keep the active head.
+	if t.LLMRotate {
+		if head, ok := t.nextRotatedProfile(); ok {
+			ctx = withLLMProfilePin(ctx, head)
+		}
+	}
 	hasChatMessage := message != ""
 	e.stampFirstRun(t) // first real execution → stamp first_run_at + compute the deadline (only for tasks with a timeout)
 	e.touch(t.ID)

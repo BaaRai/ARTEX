@@ -144,8 +144,25 @@ type taskLLMSelection struct {
 	retry agent.RetryConfig
 }
 
+// llmProfilePin carries a per-run chain-head override through the call stack
+// (#85 per-intent rotation). The engine sets it when launching a worker run;
+// resolution stays within the task's chain and never bypasses failover state.
+type llmProfilePinKey struct{}
+
+func withLLMProfilePin(ctx context.Context, profileID int64) context.Context {
+	return context.WithValue(ctx, llmProfilePinKey{}, profileID)
+}
+
+func llmProfilePinFrom(ctx context.Context) (int64, bool) {
+	if ctx == nil {
+		return 0, false
+	}
+	id, ok := ctx.Value(llmProfilePinKey{}).(int64)
+	return id, ok
+}
+
 type taskLLMStreamHooks struct {
-	current    func() (taskLLMSelection, error)
+	current    func(context.Context) (taskLLMSelection, error)
 	exhaust    func(taskLLMSelection, error) (db.TaskLLMTransition, error)
 	transition func(taskLLMSelection, db.TaskLLMTransition, error)
 }
@@ -157,6 +174,14 @@ type taskLLMStreamHooks struct {
 // to the task chain, and to the global configuration when the chain is empty.
 // The returned profile id is non-zero only on the task-chain path — streamTaskLLM uses it to decide whether a quota error should advance the task's failover state (binding/global paths leave the chain state untouched, preserving existing semantics).
 func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
+	return r.currentFor(context.Background())
+}
+
+// currentFor resolves like current, honoring a per-run profile pin set by the
+// engine for per-intent rotation (#85). A pin is only a dispatch preference:
+// the chain must still be in a ready state (an exhausted chain with no active
+// head stays exhausted) and the pinned id must belong to the task's chain.
+func (r *taskLLMRuntime) currentFor(ctx context.Context) (taskLLMSelection, error) {
 	taskNum, err := parseTaskID(r.taskID)
 	if err != nil {
 		return taskLLMSelection{}, err
@@ -180,6 +205,14 @@ func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
 			return sel, &taskLLMError{taskID: r.taskID, chainExhausted: true, cause: errors.New("all selected profiles are quota exhausted")}
 		}
 		sel.profileID = *pt.ActiveLLMProfileID
+		if pin, ok := llmProfilePinFrom(ctx); ok && pin != sel.profileID {
+			for _, id := range pt.LLMProfileIDs {
+				if id == pin {
+					sel.profileID = pin
+					break
+				}
+			}
+		}
 		prov, cfg, ok := r.s.providerForProfile(sel.profileID)
 		if !ok {
 			return sel, fmt.Errorf("LLM profile #%d is missing or invalid", sel.profileID)
@@ -250,7 +283,7 @@ func parseTaskID(id string) (int64, error) {
 // exhausted, and how to emit a failover transition.
 func (r *taskLLMRuntime) streamHooks() taskLLMStreamHooks {
 	return taskLLMStreamHooks{
-		current: r.current,
+		current: func(ctx context.Context) (taskLLMSelection, error) { return r.currentFor(ctx) },
 		exhaust: func(selection taskLLMSelection, cause error) (db.TaskLLMTransition, error) {
 			taskNum, _ := parseTaskID(r.taskID)
 			transition, err := r.s.m.pg.MarkTaskLLMProfileQuotaExhaustedAtRevision(taskNum, selection.profileID, selection.revision, cause.Error())
@@ -285,7 +318,7 @@ func (r *taskLLMRuntime) Complete(ctx context.Context, req llm.CompletionRequest
 
 func completeTaskLLM(ctx context.Context, taskID string, req llm.CompletionRequest, hooks taskLLMStreamHooks) (llm.Message, string, llm.Usage, error) {
 	for {
-		selection, err := hooks.current()
+		selection, err := hooks.current(ctx)
 		if err != nil {
 			return llm.Message{}, "", llm.Usage{}, err
 		}
@@ -356,7 +389,7 @@ func completeTaskLLM(ctx context.Context, taskID string, req llm.CompletionReque
 func streamTaskLLM(ctx context.Context, taskID string, req llm.CompletionRequest, hooks taskLLMStreamHooks) iter.Seq2[llm.StreamEvent, error] {
 	return func(yield func(llm.StreamEvent, error) bool) {
 		for {
-			selection, err := hooks.current()
+			selection, err := hooks.current(ctx)
 			if err != nil {
 				yield(llm.StreamEvent{}, err)
 				return
