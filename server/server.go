@@ -1541,6 +1541,10 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	if err := goalGateCheck(req.Goal); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if req.TimeoutSeconds < 0 {
 		req.TimeoutSeconds = 0
 	}
