@@ -1434,3 +1434,49 @@ ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS price_input_per_m NUMERIC(12,6
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS price_output_per_m NUMERIC(12,6);
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS price_cache_read_per_m NUMERIC(12,6);
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS price_cache_write_per_m NUMERIC(12,6);
+
+-- =====================================================================
+-- RSI lesson library (shadow mode)
+-- Deterministic, evidence-gated lessons extracted from closed tasks. A
+-- lesson exists only when it has a cue, an action, and at least one
+-- evidence row; support is the number of distinct evidence sources, so
+-- re-running extraction is idempotent. Pattern from harness2 (Google
+-- Research, Apache-2.0, arXiv 2610.14224): no lesson without evidence.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS rsi_lessons (
+    id          BIGSERIAL PRIMARY KEY,
+    dedupe_key  TEXT NOT NULL UNIQUE,
+    -- positive = a confirmed outcome worth reusing; negative = do not repeat;
+    -- caution = recheck before reporting (version or retest sensitive).
+    kind        TEXT NOT NULL CHECK (kind IN ('positive','negative','caution')),
+    cue         TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    category_id BIGINT REFERENCES task_categories(id) ON DELETE SET NULL,
+    company_id  BIGINT REFERENCES companies(id) ON DELETE SET NULL,
+    status      TEXT NOT NULL DEFAULT 'candidate'
+                CHECK (status IN ('candidate','adopted','retired')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rsi_lessons_scope ON rsi_lessons(company_id, category_id, status);
+CREATE INDEX IF NOT EXISTS idx_rsi_lessons_kind  ON rsi_lessons(kind, updated_at DESC);
+
+-- One row per (lesson, source). The primary key makes extraction idempotent:
+-- a second run for the same task adds nothing and cannot inflate support.
+CREATE TABLE IF NOT EXISTS rsi_lesson_evidence (
+    lesson_id   BIGINT NOT NULL REFERENCES rsi_lessons(id) ON DELETE CASCADE,
+    source_kind TEXT NOT NULL,
+    source_id   BIGINT NOT NULL,
+    detail      TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (lesson_id, source_kind, source_id)
+);
+
+-- What was shown to which task, and in which mode (shadow = logged but not
+-- injected; inject = appended to the planner/worker system prompt).
+CREATE TABLE IF NOT EXISTS rsi_lesson_usage (
+    lesson_id BIGINT NOT NULL REFERENCES rsi_lessons(id) ON DELETE CASCADE,
+    task_id   BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    mode      TEXT NOT NULL CHECK (mode IN ('shadow','inject')),
+    shown_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (lesson_id, task_id, mode)
+);

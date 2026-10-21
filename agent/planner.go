@@ -39,6 +39,9 @@ type Planner struct {
 	noaEnabledFn      func() bool                            // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn       func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
 	compactor         *Compactor                             // cold-node compaction (§7); nil = disabled
+	// lessonsBlock is the code-owned RSI evidence block appended after the
+	// rendered system prompt. Empty = off. Rendered by the server as data.
+	lessonsBlock string
 
 	// todos keeps ONE plan-scratchpad per task (keyed by exploration id) so the
 	// planner's multi-step plan survives across wake-ups — each Plan() is a fresh
@@ -99,6 +102,11 @@ func (p *Planner) SetWebSearch(o WebSearchOpts) { p.webSearch = o }
 // constraints get injected into the planner system prompt. Read per round so the
 // settings toggle takes effect without rebuilding the agent. nil = inject (default).
 func (p *Planner) SetConstraintInject(fn func() bool) { p.injectConstraints = fn }
+
+// SetLessonsBlock sets the code-owned RSI evidence block appended after the
+// rendered system prompt. Empty disables it. The server renders it from
+// outcome records; it is never editable through the prompt UI.
+func (p *Planner) SetLessonsBlock(block string) { p.lessonsBlock = block }
 
 // wantConstraints reports whether constraint injection is enabled (default yes).
 func (p *Planner) wantConstraints() bool { return p.injectConstraints == nil || p.injectConstraints() }
@@ -399,7 +407,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// This task's work dir <workDir>/tasks/<taskID>; create it first.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
-	sysBody := plannerSystem(goal, p.workDir, taskDir)
+	sysBody := plannerSystem(goal, p.workDir, taskDir) + p.lessonsBlock
 	if p.wantConstraints() {
 		sysBody += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt, bounding exploration
 	}
