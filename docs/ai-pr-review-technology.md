@@ -1,6 +1,6 @@
 # AI PR Review: REA Analysis and ARTEX Integration Plan
 
-Status: research + design. No source code, prompts, or proprietary assets from the reference product are reproduced here. The analysis is based on a public client bundle observed with REA, the authenticated UI of a trial organization, and the vendor's public documentation. Field and enum names below come from generated client schemas and are evidence of the wire/data model, not a copy of server code.
+Status: research + design. No source code, prompts, or proprietary assets from the reference product are reproduced here. The analysis is based on a public client bundle observed with REA, the authenticated UI of a trial organization, and the vendor's public documentation and marketing pages. Field and enum names below come from generated client schemas and are evidence of the wire/data model, not a copy of server code.
 
 Date: 2026-10-22
 Target: the reference web application
@@ -20,6 +20,18 @@ The reference PR check is not a single "LLM reviews the diff" prompt. The client
 
 For ARTEX, the highest-value additions are the **PR eligibility/diff layer**, **code-context index + taint candidates**, **validator pass**, **dedup/triage lifecycle**, and **check-run publisher**. The autonomous pentest graph and existing finding/retest machinery can be reused rather than duplicated.
 
+### 1.1 Platform context
+
+The vendor's public homepage markets three offerings. The PR check is only the first; the other two matter because they share the finding, triage, and verification model.
+
+| Area | Offering | What is public |
+| --- | --- | --- |
+| Code security | PR review | Reviews every PR/MR, validates vulnerabilities before merge, inline comments and checks. This document reconstructs it. |
+| Product security | Whitebox pentest | Combines repository context with active testing against target URLs and auth instructions; one free retest; heavier use of dynamic verification. |
+| Organization security | Continuous red teaming | "Simulate a persistent adversary." Advertised as a product area, but no public technical documentation describes scheduling, scope, agents, or output. |
+
+The homepage also markets two cross-product loops: auto-triage/autofix to verify findings and prepare tested fixes, and self-improving threat models based on triage feedback. Both are consistent with the client schemas and the remediation workflow below, but the red-teaming internals are not observable from public evidence.
+
 ## 2. Evidence and confidence
 
 | Evidence | What it establishes |
@@ -29,12 +41,13 @@ For ARTEX, the highest-value additions are the **PR eligibility/diff layer**, **
 | Generated protobuf-es parsers/serializers in `_nuxt/ba334sRx.js` | Full client-side wire model for findings, scans, PR checks, fixes, validation, and repo indexing |
 | Public docs: `code-review/overview`, `code-review/config`, `code-review/rules`, `code-review/findings-feedback`, `platform/automations/remediation`, `white-box-pentest/overview`, `api-reference/scans/create-scan` | Trigger behavior, gating semantics, review limits, remediation phases, scan request fields |
 | Authenticated UI copy | Empty-state wording, settings, triage/fix/retest actions, auth-instruction handling |
+| Vendor marketing homepage (EN/FR) | Three product areas, including continuous red teaming; cross-product auto-triage/autofix and self-improving threat-model claims; no red-team internals |
 
 **Proven:** route and field existence; enums and state names; PR check/comment/gating behavior as documented; remediation phases; 500-file limit; config/rules behavior; validation/dynamic-verification fields.
 
 **Inferred:** the exact ordering and implementation of static taint analysis, LLM prompting, and validation; whether every PR scan performs dynamic testing; which parsing/static-analysis engines are used server-side.
 
-**Unknown:** server implementation, model providers, prompt text, rule engine internals, and the internal scoring/ranking formula. The client exposes only `Default` / `Legacy` model sets and cost/token accounting, not provider names.
+**Unknown:** server implementation, model providers, prompt text, rule engine internals, the internal scoring/ranking formula, and the continuous red-teaming pipeline (scheduling, scope, agent topology, output). The client exposes only `Default` / `Legacy` model sets and cost/token accounting, not provider names.
 
 ## 3. What the PR check does
 
@@ -66,6 +79,12 @@ Triage updates the check immediately: marking a gated finding `false_positive` o
 - Findings posted as PR comments; when source-control comments are off, findings stay in the platform while scans and check statuses still update.
 - For public repositories, outside-diff findings hide sensitive details (title, description, PoC, file locations); inline findings on changed code remain visible.
 - The scan record tracks `pr_number`, `pr_url`, `pr_lines_added`, `pr_lines_removed`, `scan_type` (`pr` or `full`).
+
+### 3.4 Relation to the other product areas
+
+- **Whitebox pentest** uses the same finding and verification vocabulary (`scan_type: full`, target URLs, auth instructions, `dynamic_verdict`, `dynamic_evidence`, retest). The PR check can be treated as the continuous, diff-scoped path through the same platform.
+- **Continuous red teaming** is marketed as "simulate a persistent adversary" but has no public technical documentation. It may share the finding, triage, and threat-model model, but that is unverified; do not assume its scanner or scheduling model in an implementation.
+- The shared loop is finding -> triage feedback -> threat-model update -> better review/pentest signal. The client exposes threat-model timestamps and triage activity, not the update algorithm.
 
 ## 4. Reconstructed vulnerability-detection pipeline
 
@@ -370,6 +389,7 @@ Target URLs + auth instructions, browser verification, dynamic verdict/evidence,
 - What is the exact ranking/scoring formula for PR risk? Only `riskRating`, `severityCounts`, and review narrative are exposed.
 - How does dynamic verification authenticate to customer apps? `auth_instructions` (max 2,000 chars) and `auth_verification_status` are exposed; the browser automation is not.
 - What are the model providers behind `Default`/`Legacy`? Not present in the client bundle.
+- How does continuous red teaming schedule runs, choose scope, and hand findings into triage? The homepage advertises it, but no public documentation or client surface explains it.
 
 ## 10. Sources
 
@@ -379,4 +399,4 @@ Target URLs + auth instructions, browser verification, dynamic verdict/evidence,
 
 ## 11. License and use
 
-This document is original analysis for interoperability and research. The reference product is proprietary; do not copy its code, prompts, or assets. The reconstructed field names are factual observations of a public client schema. Any ARTEX implementation should be written independently against this behavioral specification and reviewed for license/legal compatibility before redistribution.
+This document is original analysis for interoperability and research. The reference product is proprietary; do not copy its code, prompts, or assets. The reconstructed field names are factual observations of a public client schema. Any ARTEX implementation should be written independently against this behavioral specification and reviewed for license/legal compatibility before redistribution. Continuous red teaming is advertised as a third offering but has no public technical documentation; this document treats its internals as unknown and out of scope.
