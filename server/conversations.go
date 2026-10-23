@@ -103,7 +103,7 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LLMProfileID != nil {
 		if _, ok := s.loadProfileConfig(*req.LLMProfileID); !ok {
-			writeErr(w, 400, "The specified LLM profile does not exist or has no API Key set")
+			writeErr(w, 400, "The specified LLM profile does not exist or is not usable (no API key for the key-requiring formats)")
 			return
 		}
 	}
@@ -136,7 +136,7 @@ func (s *Server) pgUpdateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LLMProfileID != nil {
 		if _, ok := s.loadProfileConfig(*req.LLMProfileID); !ok {
-			writeErr(w, 400, "The specified LLM profile does not exist or has no API Key set")
+			writeErr(w, 400, "The specified LLM profile does not exist or is not usable (no API key for the key-requiring formats)")
 			return
 		}
 	}

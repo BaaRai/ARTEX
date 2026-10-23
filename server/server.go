@@ -335,7 +335,8 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
+	// Ollama profiles run keyless (local server); the other formats need a key.
+	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		return cfg, false
 	}
 	s.cfgMu.Lock()
@@ -491,7 +492,8 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 }
 
 // loadProfileConfig builds an agent.Config from a specific profile id (with its key).
-// ok=false when the profile is missing or has no api key.
+// ok=false when the profile is missing or unusable (no api key for the key-requiring
+// formats).
 func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	p, err := s.m.pg.ProfileByID(id)
 	if err != nil || p == nil {
@@ -506,7 +508,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		return cfg, false
 	}
 	return cfg, true
@@ -1343,12 +1345,13 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg.ContextWindowK = k
 	}
-	if cfg.APIKey == "" {
+	// Keyless formats (Ollama) need no key; the others keep/require one.
+	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
 		s.cfgMu.Unlock()
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		writeErr(w, 400, "api_key required")
 		return
 	}
@@ -1441,28 +1444,30 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// see TestConnection). Endpoints like opencode zen that mandate x-opencode-session return
 	// 400 without it, so the test path must send it too — otherwise "chat works, test 400s".
 	cfg.SessionHeaderKey = req.SessionHeaderKey
-	// API key resolution precedence: form input > the named profile's stored key > the global config's key.
-	// A stored profile's key is never sent back to the browser, so the form is empty when testing a stored profile and the key comes from the DB.
-	// Same for the session header name: when the form omits it, the stored profile's value is the fallback.
-	if stored != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
-		// Trim like ConfigFrom does for form values: a key stored with
-		// surrounding whitespace runs fine in conversations (the runtime
-		// path re-trims) but would be sent raw here and fail auth.
-		if cfg.APIKey == "" {
+	// The custom session header name follows that profile regardless of format:
+	// when the form omits it, the stored profile's value is the fallback.
+	if stored != nil && cfg.SessionHeaderKey == "" {
+		cfg.SessionHeaderKey = strings.TrimSpace(stored.SessionHeaderKey)
+	}
+	// Keyless formats (Ollama) skip the key resolution entirely.
+	if cfg.NeedsAPIKey() {
+		// API key resolution precedence: form input > the named profile's stored key > the global config's key.
+		// A stored profile's key is never sent back to the browser, so the form is empty when testing a stored profile and the key comes from the DB.
+		if stored != nil && cfg.APIKey == "" {
+			// Trim like ConfigFrom does for form values: a key stored with
+			// surrounding whitespace runs fine in conversations (the runtime
+			// path re-trims) but would be sent raw here and fail auth.
 			cfg.APIKey = strings.TrimSpace(stored.APIKey)
 		}
-		if cfg.SessionHeaderKey == "" {
-			cfg.SessionHeaderKey = strings.TrimSpace(stored.SessionHeaderKey)
+		if cfg.APIKey == "" {
+			s.cfgMu.Lock()
+			cfg.APIKey = s.llmCfg.APIKey
+			s.cfgMu.Unlock()
 		}
-	}
-	if cfg.APIKey == "" {
-		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey
-		s.cfgMu.Unlock()
-	}
-	if cfg.APIKey == "" {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "no API key provided"})
-		return
+		if cfg.APIKey == "" {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "no API key provided"})
+			return
+		}
 	}
 	// Retry params do [not] go into the connection test: the test has a 30s hard timeout, and stacking the configured retry counts/long intervals on top
 	// would only turn a perfectly usable endpoint into a "timeout failure". The test asks "does this endpoint work at all"; retry pacing
@@ -1621,7 +1626,7 @@ func (s *Server) validateTaskProfileIDs(ids []int64) error {
 		}
 		seen[id] = true
 		if _, ok := s.loadProfileConfig(id); !ok {
-			return fmt.Errorf("LLM profile #%d not found or has no API key set", id)
+			return fmt.Errorf("LLM profile #%d not found or not usable (no API key for the key-requiring formats)", id)
 		}
 	}
 	return nil

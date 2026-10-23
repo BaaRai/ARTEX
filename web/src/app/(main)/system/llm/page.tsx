@@ -49,13 +49,18 @@ const MAX_TOKENS_FIELDS: { value: string; label: string }[] = [
   { value: NONE, label: "max_tokens (default)" },
   { value: "max_completion_tokens", label: "max_completion_tokens" },
 ];
-// The other two formats hard-code their field names, so the option is meaningless for them; the hint texts spell this out.
+// The other formats hard-code their field names, so the option is meaningless for them; the hint texts spell this out.
 const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
   openai:
     "Which key carries the cap. max_tokens is the default and the vast majority of compatible gateways only accept it; OpenAI's official reasoning models (the o series / GPT-5) conversely only accept max_completion_tokens and fail outright with unsupported_parameter when they receive max_tokens.",
   anthropic: "Only selectable for the openai format. Anthropic's field name is fixed as max_tokens.",
   "openai-responses": "Only selectable for the openai format. The Responses API's field name is fixed as max_output_tokens.",
+  ollama: "Only selectable for the openai format. Ollama's field name is fixed as max_tokens.",
 };
+// LLM profile formats. The default in the create form is "anthropic"; "ollama" is the
+// keyless local-server format (base URL defaults to http://127.0.0.1:11434/v1).
+type ProfileFormat = "anthropic" | "openai" | "openai-responses" | "ollama";
+const OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1";
 const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: NONE, label: "Not sent (default)" },
   { value: "low", label: "low" },
@@ -72,10 +77,11 @@ function cooldownText(secs: number) {
 }
 
 // The "healthy or not" badge a profile shows on its card. A profile without a Key cannot send any request at all — say that before the breaker;
-// the other states come from the pool's breaker records (with polling off no new records appear, so "healthy" = no known failure).
+// the exception is Ollama, a keyless local server that IS callable without a key. The other states come from the pool's breaker
+// records (with polling off no new records appear, so "healthy" = no known failure).
 type Health = { label: string; cls: string; hint?: string };
 function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
-  if (!p.api_key_hint) {
+  if (!p.api_key_hint && p.format !== "ollama") {
     return {
       label: "No Key configured",
       cls: "border-muted-foreground/40 text-muted-foreground",
@@ -215,7 +221,8 @@ function PoolSheet({
                 </div>
                 {inChain.length < 2 && (
                   <p className="text-muted-foreground text-xs">
-                    Only {inChain.length} usable profile(s) right now, so the pool has no effect — at least 2 profiles with an API Key set and pool participation are required.
+                    Only {inChain.length} usable profile(s) right now, so the pool has no effect — at least 2 usable profiles (API Key set, or Ollama) with pool participation are
+                    required.
                   </p>
                 )}
                 {chain.map((m) => {
@@ -311,7 +318,7 @@ function ProfileSheet({
 }) {
   const isNew = !profile;
   const [name, setName] = React.useState("");
-  const [format, setFormat] = React.useState<"anthropic" | "openai" | "openai-responses">("anthropic");
+  const [format, setFormat] = React.useState<ProfileFormat>("anthropic");
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [proxy, setProxy] = React.useState("");
@@ -340,7 +347,11 @@ function ProfileSheet({
   React.useEffect(() => {
     if (!open) return;
     setName(profile?.name ?? "");
-    setFormat(profile?.format === "openai" || profile?.format === "openai-responses" ? profile.format : "anthropic");
+    setFormat(
+      profile?.format === "openai" || profile?.format === "openai-responses" || profile?.format === "ollama"
+        ? profile.format
+        : "anthropic",
+    );
     setModel(profile?.model ?? "");
     setBaseUrl(profile?.base_url ?? "");
     setProxy(profile?.proxy ?? "");
@@ -457,6 +468,13 @@ function ProfileSheet({
     }
   }
 
+  let keyPlaceholder = "sk-…";
+  if (format === "ollama") {
+    keyPlaceholder = "optional — a local Ollama server runs keyless";
+  } else if (keyHint) {
+    keyPlaceholder = `Set (${keyHint}); leave empty to keep it`;
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -492,7 +510,7 @@ function ProfileSheet({
             </div>
             <div className="grid gap-2">
               <Label>Format</Label>
-              <Select value={format} onValueChange={(v) => setFormat(v as "anthropic" | "openai" | "openai-responses")}>
+              <Select value={format} onValueChange={(v) => setFormat(v as ProfileFormat)}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select a format" />
                 </SelectTrigger>
@@ -500,6 +518,7 @@ function ProfileSheet({
                   <SelectItem value="anthropic">Anthropic</SelectItem>
                   <SelectItem value="openai">OpenAI (Chat Completions)</SelectItem>
                   <SelectItem value="openai-responses">OpenAI (Responses API)</SelectItem>
+                  <SelectItem value="ollama">Ollama (local, no key needed)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -511,7 +530,7 @@ function ProfileSheet({
               <Input
                 id="p-model"
                 className="font-mono"
-                placeholder="claude-opus-4-8"
+                placeholder={format === "ollama" ? "llama3.2" : "claude-opus-4-8"}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
@@ -557,7 +576,7 @@ function ProfileSheet({
             <Input
               id="p-base-url"
               className="font-mono"
-              placeholder="https://api.openai.com/v1"
+              placeholder={format === "ollama" ? OLLAMA_DEFAULT_BASE_URL : "https://api.openai.com/v1"}
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
             />
@@ -595,11 +614,13 @@ function ProfileSheet({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="p-api-key">API Key</Label>
+            <Label htmlFor="p-api-key">
+              {format === "ollama" ? "API Key (optional for Ollama)" : "API Key"}
+            </Label>
             <Input
               id="p-api-key"
               type="password"
-              placeholder={keyHint ? `Set (${keyHint}); leave empty to keep it` : "sk-…"}
+              placeholder={keyPlaceholder}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />

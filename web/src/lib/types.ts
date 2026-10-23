@@ -1028,7 +1028,7 @@ export interface NotificationDelivery {
 export interface LLMProfile {
   id: string;
   name: string;
-  format: "openai" | "anthropic" | "openai-responses";
+  format: "openai" | "anthropic" | "openai-responses" | "ollama";
   base_url?: string;
   proxy?: string;
   model: string;

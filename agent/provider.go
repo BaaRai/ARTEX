@@ -3,8 +3,10 @@
 // §4.3 (planner) and §4.4 (work agent).
 //
 // Provider configuration is read from the environment so the system runs with
-// any Anthropic- or OpenAI-format endpoint. If no key is configured, FromEnv
-// returns ok=false and the exploration engine stays idle (an LLM is required).
+// any Anthropic-, OpenAI- or Ollama-format endpoint (the last being keyless).
+// If no usable configuration is found — a key for the cloud formats, a base
+// URL for keyless Ollama — FromEnv returns ok=false and the exploration engine
+// stays idle (an LLM is required).
 package agent
 
 import (
@@ -125,6 +127,30 @@ const (
 	maxWindowK     = 1000 // cap at 1M tokens (user request)
 )
 
+// FormatOllama marks a LOCAL Ollama server profile. Ollama exposes an
+// OpenAI-compatible Chat Completions endpoint (/v1), so on the wire it speaks
+// llm.FormatOpenAI; the distinct sentinel matters everywhere a profile must be
+// treated as usable WITHOUT an API key — Ollama runs keyless on localhost/LAN.
+// See NeedsAPIKey and NewProvider (which maps it onto FormatOpenAI while
+// forcing our base-URL/key defaults so an empty key never falls back to
+// OpenAI's public endpoint).
+const FormatOllama llm.Format = "ollama"
+
+// DefaultOllamaBaseURL is the base of Ollama's OpenAI-compatible endpoint the
+// provider appends /chat/completions to. Must never end up empty: with an
+// empty BaseURL, the SDK would fall back to OpenAI's public endpoint.
+const DefaultOllamaBaseURL = "http://127.0.0.1:11434/v1"
+
+// ollamaPlaceholderKey is sent as the Bearer token when no key is configured.
+// Ollama ignores authorization, but a concrete value keeps the SDK from
+// falling back to OPENAI_API_KEY (which would silently ship a real cloud key
+// to the local server) and keeps the header stable.
+const ollamaPlaceholderKey = "ollama"
+
+// NeedsAPIKey reports whether this provider format requires an API key to be
+// usable. Ollama (local server) is keyless; every cloud format needs one.
+func (c Config) NeedsAPIKey() bool { return c.Format != FormatOllama }
+
 // CompactionWindow returns the model context window in TOKENS for compaction
 // thresholds, resolved from the user-configured size (ContextWindowK). 0/unset →
 // a 200K default; otherwise clamped to [32K, 1M] so compaction stays effective.
@@ -154,11 +180,11 @@ func compactionConfig(windowTokens int) *compaction.Config {
 
 // FromEnv resolves the LLM provider config:
 //
-//	ARTEX_LLM_PROVIDER = anthropic|openai (default: inferred from keys)
+//	ARTEX_LLM_PROVIDER = anthropic|openai|openai-responses|ollama (default: inferred from keys)
 //	ARTEX_LLM_MODEL    = model id        (default: per provider)
-//	ARTEX_LLM_BASE_URL = endpoint        (optional)
+//	ARTEX_LLM_BASE_URL = endpoint        (optional; ollama defaults to localhost:11434/v1)
 //	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
-//	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials
+//	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials (unused for ollama)
 func FromEnv() (Config, bool) {
 	prov := os.Getenv("ARTEX_LLM_PROVIDER")
 	anthKey := os.Getenv("ANTHROPIC_API_KEY")
@@ -196,6 +222,15 @@ func FromEnv() (Config, bool) {
 		if c.Model == "" {
 			c.Model = "gpt-5"
 		}
+	case "ollama":
+		c.Format = FormatOllama
+		c.APIKey = oaiKey // optional; a local Ollama server is usable keyless
+		if c.BaseURL == "" {
+			c.BaseURL = DefaultOllamaBaseURL
+		}
+		if c.Model == "" {
+			c.Model = "llama3.2"
+		}
 	default:
 		c.Format = llm.FormatAnthropic
 		c.APIKey = anthKey
@@ -203,7 +238,8 @@ func FromEnv() (Config, bool) {
 			c.Model = "claude-opus-4-8"
 		}
 	}
-	if c.APIKey == "" {
+	// Ollama runs without a key: only the cloud formats gate on one.
+	if c.APIKey == "" && c.NeedsAPIKey() {
 		return Config{}, false
 	}
 	return c, true
@@ -236,6 +272,19 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		if c.Model == "" {
 			c.Model = "gpt-5"
 		}
+	case "ollama":
+		c.Format = FormatOllama
+		// Ollama's OpenAI-compatible endpoint lives at /v1 and the provider
+		// appends "/chat/completions"; tolerate a full endpoint URL. Never leave
+		// it empty: an empty BaseURL would let the SDK fall back to OpenAI's
+		// public endpoint with this profile's request.
+		c.BaseURL = strings.TrimRight(strings.TrimSuffix(c.BaseURL, "/chat/completions"), "/")
+		if c.BaseURL == "" {
+			c.BaseURL = DefaultOllamaBaseURL
+		}
+		if c.Model == "" {
+			c.Model = "llama3.2"
+		}
 	default:
 		c.Format = llm.FormatAnthropic
 		// provider appends "/v1/messages".
@@ -257,13 +306,16 @@ func isFalsy(s string) bool {
 	return false
 }
 
-// Provider returns the short provider name ("anthropic"/"openai").
+// Provider returns the short provider name
+// ("anthropic"/"openai"/"openai-responses"/"ollama").
 func (c Config) Provider() string {
 	switch c.Format {
 	case llm.FormatOpenAI:
 		return "openai"
 	case llm.FormatOpenAIResponses:
 		return "openai-responses"
+	case FormatOllama:
+		return "ollama"
 	}
 	return "anthropic"
 }
@@ -276,10 +328,26 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	wireFormat := c.Format
+	baseURL := c.BaseURL
+	apiKey := c.APIKey
+	// Ollama speaks OpenAI's Chat Completions on the wire. Bundle the keyless
+	// defaults here so an Ollama config can never leak toward the SDK's env-
+	// driven fallbacks: BaseURL to OpenAI's public endpoint, APIKey to
+	// OPENAI_API_KEY.
+	if wireFormat == FormatOllama {
+		wireFormat = llm.FormatOpenAI
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = DefaultOllamaBaseURL
+		}
+		if strings.TrimSpace(apiKey) == "" {
+			apiKey = ollamaPlaceholderKey
+		}
+	}
 	lc := llm.Config{
-		Format:     c.Format,
-		BaseURL:    c.BaseURL,
-		APIKey:     c.APIKey,
+		Format:     wireFormat,
+		BaseURL:    baseURL,
+		APIKey:     apiKey,
 		Model:      c.Model,
 		HTTPClient: client,
 	}

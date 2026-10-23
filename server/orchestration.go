@@ -293,7 +293,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			var pin *int64
 			if id := parseProfileID(a.LLMProfileID); id > 0 {
 				if _, ok := s.loadProfileConfig(id); !ok {
-					return actool.Errorf(fmt.Sprintf("LLM profile #%d not found or has no API key set", id)), nil
+					return actool.Errorf(fmt.Sprintf("LLM profile #%d not found or not usable (no API key for the key-requiring formats)", id)), nil
 				}
 				pin = &id
 			} else if a.ParentRef != "" {

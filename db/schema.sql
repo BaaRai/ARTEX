@@ -363,7 +363,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS llm_profiles (
     id               BIGSERIAL PRIMARY KEY,
     name             TEXT NOT NULL UNIQUE,
-    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses')),
+    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses','ollama')),
     base_url         TEXT,
     proxy            TEXT,
     model            TEXT NOT NULL,
@@ -416,11 +416,12 @@ ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS priority     INTEGER NOT NULL 
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS pool_exclude BOOLEAN NOT NULL DEFAULT false;
 -- Streaming toggle; backfills old databases. Default true = keep existing streaming behavior; old configs upgrade transparently.
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS streaming    BOOLEAN NOT NULL DEFAULT true;
--- Relax the format constraint to allow openai-responses (OpenAI Responses API); backfills old databases.
--- Runs at every startup, idempotent: drop the old CHECK first, then create the new three-value CHECK.
+-- Relax the format constraint to allow openai-responses (OpenAI Responses API) and
+-- ollama (local Ollama server, keyless OpenAI-compatible endpoint); backfills old databases.
+-- Runs at every startup, idempotent: drop the old CHECK first, then create the new four-value CHECK.
 ALTER TABLE llm_profiles DROP CONSTRAINT IF EXISTS llm_profiles_format_check;
 ALTER TABLE llm_profiles ADD  CONSTRAINT llm_profiles_format_check
-    CHECK (format IN ('openai','anthropic','openai-responses'));
+    CHECK (format IN ('openai','anthropic','openai-responses','ollama'));
 
 -- Output cap and its field name; backfills old databases. Defaults 0 / '' = send no cap and keep the max_tokens field name;
 -- old configs behave exactly as before.

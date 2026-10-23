@@ -2037,12 +2037,13 @@ func (s *Server) pgLLMPoolReset(w http.ResponseWriter, r *http.Request) {
 }
 
 // pgListModels fetches available models from the provider's API endpoint.
-// Supports OpenAI-format (GET /models) and Anthropic-format (GET /v1/models); for
+// Supports OpenAI-format (GET /models), Anthropic-format (GET /v1/models) and
+// Ollama (keyless OpenAI-compatible GET /v1/models on the local server); for
 // Anthropic-compatible third parties (e.g. DeepSeek) whose model list lives only on
 // the OpenAI path, it falls back to the OpenAI endpoint at the stripped root.
 func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider  string `json:"provider"` // "openai" | "anthropic"
+		Provider  string `json:"provider"` // "openai" | "anthropic" | "ollama"
 		BaseURL   string `json:"base_url"`
 		APIKey    string `json:"api_key"`
 		Proxy     string `json:"proxy"`
@@ -2059,13 +2060,14 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 			apiKey = p.APIKey
 		}
 	}
-	if apiKey == "" {
+	provider := strings.TrimSpace(req.Provider)
+	// Ollama serves its model list keyless on the local server: no key gate.
+	if apiKey == "" && provider != "ollama" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "no API Key provided"})
 		return
 	}
 
 	baseURL := strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
-	provider := strings.TrimSpace(req.Provider)
 
 	// Candidate endpoints to try in order. Some Anthropic-compatible providers
 	// (e.g. DeepSeek) implement /v1/messages under an /anthropic path but expose
@@ -2097,6 +2099,22 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		}
 		b := strings.TrimRight(strings.TrimSuffix(strings.TrimSuffix(baseURL, "/chat/completions"), "/responses"), "/")
 		candidates = append(candidates, candidate{b + "/models", bearerHdr()})
+	case "ollama":
+		// OpenAI-compatible list at {base}/v1/models. Tolerate base URLs with or
+		// without the /v1 suffix (and a full endpoint URL). No auth needed; when a
+		// key was provided anyway, send it as Bearer (Ollama ignores it).
+		if baseURL == "" {
+			baseURL = "http://127.0.0.1:11434/v1"
+		}
+		b := strings.TrimSuffix(baseURL, "/chat/completions")
+		if !strings.HasSuffix(b, "/v1") {
+			b += "/v1"
+		}
+		hdr := http.Header{}
+		if apiKey != "" {
+			hdr.Set("Authorization", "Bearer "+apiKey)
+		}
+		candidates = append(candidates, candidate{b + "/models", hdr})
 	default: // anthropic
 		if baseURL == "" {
 			baseURL = "https://api.anthropic.com"
