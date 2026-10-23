@@ -98,36 +98,28 @@ jobs:
           generate_release_notes: false
           body: "See CHANGELOG.md for the list of changes in this release."
 
-  # ④ Multi-arch image → push to Docker Hub (reuses the Linux binaries built by the
-  #    binaries job; the image only installs tools + ships the binary; arm64 only needs
-  #    to emulate the apt layer, so builds are much faster)
-  # Publishing the image needs Docker Hub credentials and a namespace we own, so the
-  # job stays skipped unless the repository defines DOCKERHUB_ENABLED (set it to true
-  # and provide DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets plus DOCKERHUB_IMAGE).
+  # ④ Multi-arch image → push to GHCR (built from source by the Dockerfile)
   docker:
     needs: binaries
-    if: ${{ vars.DOCKERHUB_ENABLED == 'true' }}
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4 # fetch the Dockerfile and skills/
-      - uses: actions/download-artifact@v4
-        with:
-          name: bin-linux-amd64
-          path: dist/amd64
-      - uses: actions/download-artifact@v4
-        with:
-          name: bin-linux-arm64
-          path: dist/arm64
+      - uses: actions/checkout@v4 # fetch the Dockerfile, source, and skills/
+      - name: Resolve lowercase image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ${{ vars.DOCKERHUB_IMAGE }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=ref,event=tag
             type=raw,value=latest

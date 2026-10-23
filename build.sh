@@ -173,10 +173,9 @@ package_binary() {
   rm -rf "$package_root" "$archive"
   mkdir -p "$package_root"
   cp "$binary" "$package_root/"
-  # The guardian start script is the official entry point: the page's one-click
-  # update relies on it to relaunch the process after it exits; running the artex
-  # binary directly means it never comes back up after an update. Ship only the one
-  # matching the target OS.
+  # The start script is the official entry point: it relaunches the process after
+  # a crash. Running the artex binary directly means it is not restarted. Ship only
+  # the one matching the target OS.
   if [ "$goos" = "windows" ]; then
     cp start.bat "$package_root/"
   else
