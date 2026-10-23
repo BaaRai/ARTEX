@@ -664,13 +664,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
 	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
 
-	// One-click page update. These go through the default JWT auth (auth.go only exempts /api/auth/* and
-	// /api/health), so the endpoints that modify the program itself naturally require a login.
-	mux.HandleFunc("GET /api/update/check", s.updateCheck)
-	mux.HandleFunc("POST /api/update/apply", s.updateApply)
-	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
-	mux.HandleFunc("GET /api/update/stream", s.updateStream)
-
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
 	mux.HandleFunc("GET /api/skill-gaps", s.skillGaps)

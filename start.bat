@@ -10,11 +10,7 @@ rem
 rem It does exactly one thing: run artex.exe and, once the process exits, decide by exit code whether to relaunch it.
 rem
 rem   0      user stopped normally -> exit the loop
-rem   75     program requested a restart -> rerun immediately ("one-click update" or "rollback" was clicked in the web UI)
 rem   other  crash             -> rerun after backoff (1->2->4... up to 60 seconds)
-rem
-rem Download, SHA256 verification, and the swap are NOT done here; artex does all of them itself at startup
-rem (the selfupdate package). The script stays dumb; see the notes at the top of start.sh.
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -25,7 +21,6 @@ if not exist "%BIN%" (
 	exit /b 1
 )
 
-set "RESTART_CODE=75"
 set "MAX_DELAY=60"
 set /a delay=1
 
@@ -36,13 +31,6 @@ set "code=!ERRORLEVEL!"
 if "!code!"=="0" (
 	echo [artex] exited normally
 	exit /b 0
-)
-
-if "!code!"=="%RESTART_CODE%" (
-	rem Update/rollback is ready: after the rerun, artex completes the swap at startup.
-	echo [artex] restart requested (applying new version)...
-	set /a delay=1
-	goto loop
 )
 
 echo [artex] abnormal exit ^(code=!code!^), restarting in !delay!s 1>&2

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Removed
+
+- **In-app self-update and the automatic version check**: removed the `selfupdate` package, the `/api/update/*` endpoints, the top-bar update badge, and the "Version & Updates" settings card. The update source was hard-coded to a repository that no longer exists, and its checksums were unsigned. `start.sh` / `start.bat` now only restart the process after a crash. Use `update.sh` or the release archives to upgrade.
+
 ## [0.3.15] - 2026-10-07
 
 ### Interception

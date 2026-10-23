@@ -115,7 +115,7 @@ cp config.example.json config.json   # fill in the database connection
 ./start.sh                           # → http://localhost:8787
 ```
 
-> Please start with `start.sh` / `start.bat` instead of running `./artex` directly. It is a daemon script: after the program exits it decides whether to relaunch based on the exit code, and **the in-page [one-click update](#option-1-one-click-update-from-the-page-recommended) relies on it to swap the binary**. If you run `./artex` directly, it will not be relaunched after an update.
+> Please start with `start.sh` / `start.bat` instead of running `./artex` directly. It is a daemon script: if the process crashes, it restarts it after a backoff.
 > To keep it running in the background: `nohup ./start.sh >artex.log 2>&1 &`.
 
 ### Option 4: build the single binary from source
@@ -175,20 +175,7 @@ Daily cron example (03:20, operator crontab):
 
 > Upgrading only swaps the program and never touches data: the Postgres volume `pgdata`, `./data` (jwt.key / SQLite, etc.), and `./skills` are all preserved. **No manual database migration is needed**: `artex` idempotently re-runs `schema.sql` on every start (with `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`), i.e. "restart equals migrate". It is still recommended to back up `./data` and the database before upgrading.
 
-### Option 1: one-click update from the page (recommended)
-
-On the **System Settings** page (sidebar "System Settings" → `/system/settings`), the **Version & Updates** card lets you check for and install new versions directly, without logging into the server.
-
-After clicking "Update": it downloads the release package for the current platform → verifies it against the release's `SHA256SUMS` → smoke-tests the new binary with `-h` → stages it as `artex.new` → the program exits and is relaunched by `start.sh` / `start.bat`, which completes the swap. The page automatically waits for the new version to come online, then refreshes.
-
-- **A failure never leaves a broken program**: if verification or the smoke test fails, the staged file is discarded and the current version keeps running; if the swapped-in new version fails to start 3 times in a row, it automatically rolls back to `artex.old` (the failed one is kept as `artex.failed` for troubleshooting).
-- **Rollback anytime**: the previous version is kept as `artex.old`, and the card has "Roll back to previous version". Note that the database schema is not rolled back.
-- **Updating interrupts running tasks**: updating means restarting, so do it when the system is idle.
-- **Dev builds can't update**: updating is disabled when the version is `dev` or a `git describe` output with a suffix, preventing a release from overwriting your local debug binary.
-- **Under Docker, only the program is swapped, not the image**: toolchains inside the image like playwright / nmap are not upgraded along with it, and recreating the container with `docker compose up -d` reverts to the version bundled in the image. To upgrade the image as well, still use `docker compose pull artex && docker compose up -d artex`.
-- If accessing GitHub requires a proxy, configure the **global proxy** on the same page and the update chain will use it. Updates only download from GitHub domains and enforce HTTPS.
-
-### Option 2: one-click update script
+### Option 1: one-click update script
 
 ```bash
 cd ARTEX
@@ -200,7 +187,7 @@ The script first optionally `git pull`s the latest code, then lets you choose **
 - **① Docker**: you can specify a target image tag (press Enter to keep `.env`'s `ARTEX_TAG`, default `latest`) → `docker compose pull` → `docker compose up -d` (restarting with the new image migrates automatically).
 - **② Local**: rebuild the frontend static assets → recompile `./artex` (restart the process for it to take effect).
 
-### Option 3: Docker Compose (manual)
+### Option 2: Docker Compose (manual)
 
 ```bash
 cd ARTEX
@@ -211,7 +198,7 @@ docker compose up -d artex     # restart with the new image → schema migrates 
 docker image prune -f          # clean up old images (optional)
 ```
 
-### Option 4: prebuilt binaries (Releases)
+### Option 3: prebuilt binaries (Releases)
 
 Download the new version's zip from [Releases](https://github.com/BaaRai/ARTEX/releases), stop the old process, then overwrite `artex` and `skills/` (keep your `config.json` and `data/`), and restart:
 
@@ -220,7 +207,7 @@ cp -r <extracted dir>/skills ./ && cp <extracted dir>/artex ./
 ./start.sh
 ```
 
-### Option 5: build from source
+### Option 4: build from source
 
 ```bash
 git pull

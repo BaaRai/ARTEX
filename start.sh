@@ -9,13 +9,7 @@
 # It does exactly one thing: run artex and, once the process exits, decide by exit code whether to relaunch it.
 #
 #   0      user stopped normally  -> exit the loop
-#   75     program requested a restart -> rerun immediately ("one-click update" or "rollback" was clicked in the web UI)
 #   other  crash               -> rerun after backoff (1→2→4... up to 60 seconds)
-#
-# Download, SHA256 verification, and the swap are deliberately not done here: that logic would need two implementations in sh and bat,
-# and it is precisely the step that must never fail — once an unrunnable binary is swapped in, this script would faithfully relaunch it
-# forever, and the user could only fix it on the machine by hand. So all verification/swap logic stays in Go (the selfupdate package),
-# done by artex itself at startup, keeping the script dumb.
 set -u
 
 cd "$(dirname "$0")" || exit 1
@@ -23,7 +17,6 @@ cd "$(dirname "$0")" || exit 1
 BIN=./artex
 [ -x "$BIN" ] || { echo "[artex] executable $BIN not found" >&2; exit 1; }
 
-RESTART_CODE=75
 MAX_DELAY=60
 
 child=0
@@ -66,11 +59,6 @@ while :; do
 		0)
 			echo "[artex] exited normally"
 			exit 0
-			;;
-		"$RESTART_CODE")
-			# Update/rollback is ready: after the rerun, artex completes the swap at startup (see selfupdate.Bootstrap).
-			echo "[artex] restart requested (applying new version)…"
-			delay=1
 			;;
 		*)
 			echo "[artex] abnormal exit (code=$code), restarting in ${delay}s" >&2

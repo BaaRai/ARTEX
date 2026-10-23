@@ -85,8 +85,7 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
 WORKDIR /app
 # pre-built binary for the matching architecture (dist/amd64/artex or dist/arm64/artex)
 COPY dist/${TARGETARCH}/artex /app/artex
-# Daemon startup script: decides whether to relaunch the process based on its exit code;
-# the in-page one-click update relies on it to swap the binary. It also forwards SIGTERM
+# Daemon startup script: relaunches the process after a crash and forwards SIGTERM
 # to artex — docker stop only signals PID 1; without forwarding, artex never receives it,
 # cannot shut down gracefully, and is hard-killed by SIGKILL after 10 seconds.
 COPY start.sh /app/start.sh

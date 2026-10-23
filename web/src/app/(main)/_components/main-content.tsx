@@ -14,7 +14,6 @@ import { AccountSwitcher } from "./sidebar/account-switcher";
 import { LayoutControls } from "./sidebar/layout-controls";
 import { SearchDialog } from "./sidebar/search-dialog";
 import { ThemeSwitcher } from "./sidebar/theme-switcher";
-import { UpdateBadge } from "./update-badge";
 
 // Task detail pages stay as-is: they bring their own header/Tabs and padding, so no extra global header or padding is stacked here.
 function isFullBleed(pathname: string) {
@@ -68,7 +67,6 @@ export function MainContent({ children }: { children: ReactNode }) {
             {version && (
               <span className="font-medium text-muted-foreground text-xs tabular-nums">Version · {version}</span>
             )}
-            <UpdateBadge />
             <LayoutControls />
             <ThemeSwitcher />
             <AccountSwitcher users={[currentUser]} />

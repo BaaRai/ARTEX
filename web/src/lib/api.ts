@@ -102,7 +102,6 @@ import type {
   TrafficEvidenceRole,
   TrafficHost,
   TrafficResp,
-  UpdateCheck,
   UsageStats,
   WorkspaceFile,
   WorkspaceListing,
@@ -1310,15 +1309,4 @@ export const api = {
   // ledger, exact per call, covering per-agent bindings / pooling / interrupted spend).
   tokensByModel: (task: string) =>
     get<{ models: ModelTokenStat[] }>(`/llm/records/by-model?task=${encodeURIComponent(task)}`),
-
-  // ---- One-click update ----
-  // The backend arbitrates update checks: it does the downloading, and "the browser reaches
-  // GitHub but the server cannot" is common (server on an intranet, proxy configured only in
-  // the browser) — clicking update would inevitably fail then. The backend caches GitHub
-  // query results for 30 minutes (the unauthenticated GitHub API allows 60 requests/hour/IP;
-  // the top bar queries on every full page load and would burn the quota fast without caching). force=true bypasses the cache, reserved for the user's explicit "Check for updates" click.
-  checkUpdate: (force = false) => get<UpdateCheck>(`/update/check${force ? "?force=1" : ""}`),
-  // Returns 202 immediately; the download runs in the background, progress via /api/update/stream.
-  applyUpdate: () => post<{ ok: boolean; target: string }>(`/update/apply`),
-  rollbackUpdate: () => post<{ ok: boolean }>(`/update/rollback`),
 };

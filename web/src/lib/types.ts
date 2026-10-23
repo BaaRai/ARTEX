@@ -1591,47 +1591,6 @@ export interface FindingTrafficDetail {
   response: EvidenceBodyPreview;
 }
 
-/** GET /api/update/check — comparison of the current version against the latest GitHub stable release. */
-export interface UpdateCheck {
-  /** The currently running version; development builds are "dev" or a suffixed git describe form. */
-  current: string;
-  /** Runtime form. Under docker the swap only touches the container writable layer; rebuilding the container reverts to the image version. */
-  mode: "docker" | "binary";
-  os: string;
-  arch: string;
-  repo: string;
-  /** Whether a previous version exists to roll back to (artex.old). */
-  has_backup: boolean;
-  /** Conclusion of the self-update bootstrap at this startup (swap failed / rolled back, etc.); empty when nothing happened. */
-  boot_notice?: string;
-  rolled_back?: boolean;
-  /** Reason given when the GitHub query fails; the fields below are absent then. */
-  error?: string;
-  latest?: string;
-  notes?: string;
-  html_url?: string;
-  published_at?: string;
-  /** The release asset name for the current platform, and whether that Release actually carries it. */
-  asset?: string;
-  asset_available?: boolean;
-  size?: number;
-  has_update?: boolean;
-  /** Whether the two version numbers are comparable; false for development builds, which disables one-click update. */
-  comparable?: boolean;
-  /** Explanation shown when comparable is false. */
-  reason?: string;
-}
-
-/** One update progress event pushed by /api/update/stream. */
-export interface UpdateProgress {
-  phase: "idle" | "downloading" | "verifying" | "extracting" | "staged" | "failed";
-  /** Meaningful only during the downloading phase (0-100); -1 otherwise. */
-  percent: number;
-  message: string;
-  version?: string;
-  error?: string;
-}
-
 // Original execution selected from an approval, never submitted to the reviewer.
 export interface InterceptExecution {
   conversation_id: number | null;
