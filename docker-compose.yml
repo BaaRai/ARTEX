@@ -15,7 +15,11 @@ services:
     restart: unless-stopped
 
   artex:
-    image: autumn27/artex:${ARTEX_TAG:-latest}
+    build:
+      context: .
+      args:
+        ARTEX_VERSION: ${ARTEX_VERSION:-dev}
+    image: artex:local
     depends_on:
       postgres:
         condition: service_healthy

@@ -84,7 +84,7 @@ cd ARTEX
 
 The script will: detect / auto-install Docker → then let you choose **① all-Docker** or **② local build and run**:
 
-- **① All-Docker**: enter a Postgres password (press Enter for a random one) → auto-writes `.env` → `docker compose up -d`.
+- **① All-Docker**: enter a Postgres password (press Enter for a random one) → auto-writes `.env` → `docker compose up -d --build`.
 - **② Local run**: choose a database (connect to an existing one / start one with Docker) → generates `config.json` → `go` builds the embedded single binary → starts.
 
 Once installed, open **http://localhost:8787** (on first entry, `/setup` sets the admin password).
@@ -95,11 +95,13 @@ Once installed, open **http://localhost:8787** (on first entry, `/setup` sets th
 git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 cp .env.example .env          # set POSTGRES_PASSWORD, optionally ANTHROPIC_API_KEY
-docker compose up -d          # pulls the autumn27/artex image + postgres
+docker compose up -d --build  # builds the artex image from source + starts postgres
 # → http://localhost:8787
 ```
 
-The image already includes common tools (ripgrep/curl/vim/npm/nmap…); `./skills` and `./data` are persisted via bind mounts.
+The image is built locally and already includes common tools (ripgrep/curl/vim/npm/nmap…); `./skills` and `./data` are persisted via bind mounts.
+
+A multi-arch image is also published to `ghcr.io/baarai/artex`. To use it instead of building, replace the `build:` block in `docker-compose.yml` with `image: ghcr.io/baarai/artex:latest` and run `docker compose pull`.
 
 For remote MCP, you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse`, then receive JSON-RPC requests via the
@@ -197,16 +199,15 @@ cd ARTEX
 
 The script first optionally `git pull`s the latest code, then lets you choose **① Docker update** or **② local build update** (matching `install.sh`):
 
-- **① Docker**: you can specify a target image tag (press Enter to keep `.env`'s `ARTEX_TAG`, default `latest`) → `docker compose pull` → `docker compose up -d` (restarting with the new image migrates automatically).
+- **① Docker**: rebuild the image from the pulled source (`docker compose build --pull artex`) → `docker compose up -d artex` (restarting with the new image migrates automatically).
 - **② Local**: rebuild the frontend static assets → recompile `./artex` (restart the process for it to take effect).
 
 ### Option 3: Docker Compose (manual)
 
 ```bash
 cd ARTEX
-git pull                       # update compose / scripts (optional)
-# pin a version: set ARTEX_TAG=v0.2.0 in .env; otherwise latest is used
-docker compose pull artex
+git pull                       # update the source
+docker compose build --pull artex
 docker compose up -d artex     # restart with the new image → schema migrates automatically
 docker image prune -f          # clean up old images (optional)
 ```
