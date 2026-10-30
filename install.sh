@@ -45,9 +45,8 @@ install_docker(){
   else
     info "reusing existing .env"
   fi
-  info "pulling images and starting..."
-  docker compose pull || true
-  docker compose up -d
+  info "building the image and starting..."
+  docker compose up -d --build
   ok "started → http://localhost:8787"
   info "view logs: docker compose logs -f artex"
 }
