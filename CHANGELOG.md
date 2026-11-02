@@ -14,7 +14,7 @@ First release of this fork. The engine underneath is still upstream's, but this 
 
 ### Added
 
-- **Recon toolbox in the image**: pinned nuclei, httpx, subfinder, katana, ffuf, dalfox and a sqlmap checkout, verified at build time, so hunt workers can call them directly (#112).
+- **Recon toolbox in the image**: nuclei, httpx, subfinder, katana, ffuf and dalfox installed at release-pinned versions, plus a sqlmap checkout that tracks the default branch, each smoke-tested at build time (run once, not checksum-verified), so hunt workers can call them directly (#112). Checksum verification arrives with #127.
 - **Recursive recon skill** (`bbot-recon`): bbot v3.0.2 in its own virtualenv with module dependencies preinstalled. Policy-gated modes (passive seeds-only when scanners are banned, active-safe, loud only on explicit permission) and JSONL ingestion into the facts graph (#118).
 - **php2shell skill**: turns a file-inclusion finding into verified RCE through the session.upload_progress chain, lab first and gated on program policy (#113).
 - **Code audit and reverse-engineering skills** (#55, #77).
@@ -34,9 +34,10 @@ First release of this fork. The engine underneath is still upstream's, but this 
 - **Planner quiet mode** for less narration during long runs (#81, #88).
 - **Findings discipline**: proof-basis gates, measured impact, adversarial verification and dedup rules decide what a finding must contain before it is reported (#51, #53, #63, #69).
 - **Prompt-injection hardening** on seed material and MCP tool descriptions (#49).
-- **Pause preserves the task timeout budget**, and paused time is frozen in the task clock (#2, #65, #110).
+- **Pause preserves the task timeout budget**, and paused time is frozen in the task clock (#2, #110).
+- **Deadline contract** in the executor seeds (#65).
 - **Task detail metrics and outcome cards** summarise a finished run (#92, #102).
-- **Skill-gap, loop-contract and shadow-lesson reporting** for the planner (#104, #106, #108).
+- **Skill-gap and loop-contract reporting** for the planner (#104, #106); the RSI notes land as documentation in #108.
 
 ### Removed
 
