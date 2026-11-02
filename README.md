@@ -84,7 +84,7 @@ cd ARTEX
 
 The script will: detect / auto-install Docker → then let you choose **① all-Docker** or **② local build and run**:
 
-- **① All-Docker**: enter a Postgres password (press Enter for a random one) → auto-writes `.env` → `docker compose up -d`.
+- **① All-Docker**: enter a Postgres password (press Enter for a random one) → auto-writes `.env` → `docker compose up -d --build` (the image is built from this checkout).
 - **② Local run**: choose a database (connect to an existing one / start one with Docker) → generates `config.json` → `go` builds the embedded single binary → starts.
 
 Once installed, open **http://localhost:8787** (on first entry, `/setup` sets the admin password).
@@ -95,9 +95,13 @@ Once installed, open **http://localhost:8787** (on first entry, `/setup` sets th
 git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 cp .env.example .env          # set POSTGRES_PASSWORD, optionally ANTHROPIC_API_KEY
-docker compose up -d          # pulls the autumn27/artex image + postgres
+# build the single binary first (frontend, then go build -tags embedui), see the Dockerfile header
+docker compose up -d --build  # builds artex from this checkout + starts postgres
 # → http://localhost:8787
 ```
+
+> The image is built locally. There is no published image to pull: the previous
+> default pointed at a third-party namespace that no longer hosts this project.
 
 The image already includes common tools (ripgrep/curl/vim/npm/nmap…); `./skills` and `./data` are persisted via bind mounts.
 
@@ -184,17 +188,16 @@ cd ARTEX
 
 The script first optionally `git pull`s the latest code, then lets you choose **① Docker update** or **② local build update** (matching `install.sh`):
 
-- **① Docker**: you can specify a target image tag (press Enter to keep `.env`'s `ARTEX_TAG`, default `latest`) → `docker compose pull` → `docker compose up -d` (restarting with the new image migrates automatically).
+- **① Docker**: rebuilds the image from this checkout → `docker compose build artex` → `docker compose up -d artex` (restarting migrates the schema automatically).
 - **② Local**: rebuild the frontend static assets → recompile `./artex` (restart the process for it to take effect).
 
 ### Option 2: Docker Compose (manual)
 
 ```bash
 cd ARTEX
-git pull                       # update compose / scripts (optional)
-# pin a version: set ARTEX_TAG=v0.2.0 in .env; otherwise latest is used
-docker compose pull artex
-docker compose up -d artex     # restart with the new image → schema migrates automatically
+git pull                       # update compose / scripts
+docker compose build artex     # rebuild the image from this checkout
+docker compose up -d artex     # recreate the container → schema migrates automatically
 docker image prune -f          # clean up old images (optional)
 ```
 

@@ -45,9 +45,11 @@ install_docker(){
   else
     info "reusing existing .env"
   fi
-  info "pulling images and starting..."
-  docker compose pull || true
-  docker compose up -d
+  info "building the image from this checkout and starting..."
+  if [ ! -f "dist/amd64/artex" ] && [ ! -f "dist/arm64/artex" ]; then
+    warn "no prebuilt binary under dist/ - build it first (frontend, then go build -tags embedui); see the Dockerfile header"
+  fi
+  docker compose up -d --build
   ok "started → http://localhost:8787"
   info "view logs: docker compose logs -f artex"
 }

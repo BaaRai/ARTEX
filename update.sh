@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ARTEX update script: (1) Docker update (pull new image and rebuild)  (2) local build update (rebuild the binary)
+# ARTEX update script: (1) Docker update (rebuild the image from this checkout)  (2) local build update (rebuild the binary)
 # Counterpart of install.sh: install handles the first-time setup, update upgrades to a new version.
 # No manual DB migration needed — artex idempotently re-runs schema.sql on every start (with ADD COLUMN/CREATE
 # INDEX IF NOT EXISTS), so "restart equals migrate". Data (pgdata volume, ./data, ./skills) is not affected.
@@ -17,7 +17,16 @@ sync_repo(){
   [ -d .git ] && command -v git >/dev/null 2>&1 || { warn "not a git working copy, skipping git pull"; return; }
   [ "$(ask 'Pull the latest code (git pull --ff-only)? (y/n)' y)" = y ] || return
   if ! git pull --ff-only; then
-    warn "git pull could not fast-forward (local changes or diverged branches) — resolve manually and retry; continuing with the current code"
+    # Continuing would rebuild the OLD tree and still print "Build complete":
+    # exactly the silent stale upgrade this script exists to prevent.
+    cat >&2 <<'RECOVER'
+[!] git pull could not fast-forward. This happens when the checkout has local
+    changes, or when it was cloned before the history rewrite of 2026-10-23.
+    Refusing to rebuild stale code. Recover, then rerun this script:
+      keep your changes:  git stash && git fetch origin && git reset --hard origin/main && git stash pop
+      discard them:       git fetch origin && git reset --hard origin/main
+RECOVER
+    die "aborting: nothing was rebuilt"
   fi
 }
 
@@ -27,23 +36,12 @@ update_docker(){
     || die "docker / docker compose not detected; install and deploy with ./install.sh first"
   [ -f .env ] || die ".env not found; run ./install.sh first to complete the initial deployment"
 
-  # Optional: upgrade to a specific version tag (empty = keep ARTEX_TAG from .env, default latest)
-  local tag; tag="$(ask 'Target image tag (press Enter to keep .env / latest)' '')"
-  if [ -n "$tag" ]; then
-    if grep -q '^ARTEX_TAG=' .env; then
-      sed -i.bak "s|^ARTEX_TAG=.*|ARTEX_TAG=${tag}|" .env && rm -f .env.bak
-    else
-      printf '\nARTEX_TAG=%s\n' "$tag" >> .env
-    fi
-    ok "ARTEX_TAG set to ${tag}"
-  fi
-
   # Touch only artex: postgres is pinned to 16-alpine and does not need upgrading along
   # (pulling it wastes bandwidth, and a major version bump risks compatibility). artex
   # declares depends_on postgres, so an up with the service name starts pg if needed and leaves a running one untouched.
-  info "Pulling new image (artex only)…"
-  docker compose pull artex
-  info "Rebuilding and starting (schema migrates automatically on artex restart)…"
+  info "Building the image from this checkout (artex only)…"
+  docker compose build artex
+  info "Recreating artex (schema migrates automatically on restart)…"
   docker compose up -d artex
   ok "Update complete → http://localhost:8787"
   info "View logs: docker compose logs -f artex"

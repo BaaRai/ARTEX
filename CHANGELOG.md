@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed
+
+- **The image is built from the checkout instead of pulled**: `docker-compose.yml` no longer references the `autumn27/artex` namespace, whose repository is gone and whose name its holder could republish at any time. `install.sh` and `update.sh` build the image locally.
+- **`update.sh` refuses to rebuild stale code**: when `git pull --ff-only` fails on a diverged clone (including every clone made before the 2026-10-23 history rewrite), it now stops with recovery commands instead of warning, rebuilding the old tree and printing "Build complete".
+
+### Fixed
+
+- **Ollama base URL on the environment path**: `ARTEX_LLM_BASE_URL=http://host:11434` is normalized to the `/v1` root the same way the saved-profile path already was, so a LAN Ollama server configured through the environment no longer answers 404 on chat.
+
 ### Added
 
 - **Ollama support**: an `ollama` LLM profile format for a local or LAN Ollama server. Keyless by design: no API key is needed, `OPENAI_API_KEY` is never inherited, the base URL defaults to `http://127.0.0.1:11434/v1` and is normalized to the `/v1` root, and the profile works in the failover pool, task LLM chains, model listing and connection tests. Contributed by @glauberportella (#128).
