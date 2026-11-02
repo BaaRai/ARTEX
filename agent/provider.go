@@ -147,6 +147,23 @@ const DefaultOllamaBaseURL = "http://127.0.0.1:11434/v1"
 // to the local server) and keeps the header stable.
 const ollamaPlaceholderKey = "ollama"
 
+// normalizeOllamaBaseURL maps whatever the operator typed onto the /v1 root the
+// OpenAI-compatible provider expects: it strips a pasted "/chat/completions"
+// suffix, an empty value becomes the local default, and a missing "/v1" is
+// appended so the natural "http://host:11434" also works. Shared by the saved
+// profile path (ConfigFrom) and the environment path (FromEnv): both used to
+// differ, and only the profile path normalized.
+func normalizeOllamaBaseURL(raw string) string {
+	b := strings.TrimRight(strings.TrimSuffix(strings.TrimSpace(raw), "/chat/completions"), "/")
+	if b == "" {
+		return DefaultOllamaBaseURL
+	}
+	if !strings.HasSuffix(b, "/v1") {
+		b += "/v1"
+	}
+	return b
+}
+
 // NeedsAPIKey reports whether this provider format requires an API key to be
 // usable. Ollama (local server) is keyless; every cloud format needs one.
 func (c Config) NeedsAPIKey() bool { return c.Format != FormatOllama }
@@ -224,13 +241,11 @@ func FromEnv() (Config, bool) {
 		}
 	case "ollama":
 		c.Format = FormatOllama
-		// Deliberately NOT inheriting OPENAI_API_KEY: Ollama ignores the bearer
-		// token, so the only thing the inheritance could do is ship a real cloud
-		// key to the local (or LAN) endpoint. An authenticated Ollama gateway can
-		// still be configured as a saved profile with an explicit key.
-		if c.BaseURL == "" {
-			c.BaseURL = DefaultOllamaBaseURL
-		}
+		// Deliberately NOT inheriting OPENAI_API_KEY: a local Ollama ignores the
+		// bearer token, so the only thing the inheritance could do is ship a real
+		// cloud key to the endpoint. A gateway that does require a key can still
+		// be configured as a saved profile with an explicit one.
+		c.BaseURL = normalizeOllamaBaseURL(c.BaseURL)
 		if c.Model == "" {
 			c.Model = "llama3.2"
 		}
@@ -278,16 +293,10 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 	case "ollama":
 		c.Format = FormatOllama
 		// Ollama's OpenAI-compatible endpoint lives at /v1 and the provider
-		// appends "/chat/completions"; tolerate a full endpoint URL and the
-		// natural Ollama URL without the /v1 suffix. Never leave it empty: an
-		// empty BaseURL would let the SDK fall back to OpenAI's public endpoint
-		// with this profile's request.
-		c.BaseURL = strings.TrimRight(strings.TrimSuffix(strings.TrimSpace(c.BaseURL), "/chat/completions"), "/")
-		if c.BaseURL == "" {
-			c.BaseURL = DefaultOllamaBaseURL
-		} else if !strings.HasSuffix(c.BaseURL, "/v1") {
-			c.BaseURL += "/v1"
-		}
+		// appends "/chat/completions". Never leave it empty: an empty BaseURL
+		// would let the SDK fall back to OpenAI's public endpoint with this
+		// profile's request.
+		c.BaseURL = normalizeOllamaBaseURL(c.BaseURL)
 		if c.Model == "" {
 			c.Model = "llama3.2"
 		}
@@ -340,7 +349,8 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	// Ollama speaks OpenAI's Chat Completions on the wire. Bundle the keyless
 	// defaults here so an Ollama config can never leak toward the SDK's env-
 	// driven fallbacks: BaseURL to OpenAI's public endpoint, APIKey to
-	// OPENAI_API_KEY.
+	// OPENAI_API_KEY. A local Ollama ignores the placeholder token; a gateway
+	// that requires one carries a real key in the profile.
 	if wireFormat == FormatOllama {
 		wireFormat = llm.FormatOpenAI
 		if strings.TrimSpace(baseURL) == "" {

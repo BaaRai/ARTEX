@@ -231,6 +231,30 @@ func TestOllamaListModels(t *testing.T) {
 	}
 }
 
+// The environment path must normalize the base URL too: ARTEX_LLM_BASE_URL is
+// the natural way to configure a LAN Ollama server, and it used to send chat to
+// /chat/completions instead of /v1/chat/completions.
+func TestOllamaFromEnvNormalizesBaseURL(t *testing.T) {
+	t.Setenv("ARTEX_LLM_PROVIDER", "ollama")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ARTEX_LLM_BASE_URL", "http://box:11434")
+	c, ok := agent.FromEnv()
+	if !ok {
+		t.Fatal("ollama env config must be usable")
+	}
+	if c.BaseURL != "http://box:11434/v1" {
+		t.Fatalf("env base URL not normalized: %q", c.BaseURL)
+	}
+	t.Setenv("ARTEX_LLM_BASE_URL", "http://box:11434/v1/chat/completions")
+	c, ok = agent.FromEnv()
+	if !ok {
+		t.Fatal("ollama env config must be usable")
+	}
+	if c.BaseURL != "http://box:11434/v1" {
+		t.Fatalf("full endpoint URL not normalized: %q", c.BaseURL)
+	}
+}
+
 // An Ollama config resolved from the environment must not inherit OPENAI_API_KEY:
 // Ollama ignores the bearer token, so inheritance would only ship the cloud key
 // to the local or LAN endpoint.
