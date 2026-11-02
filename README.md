@@ -179,6 +179,19 @@ Daily cron example (03:20, operator crontab):
 
 > Upgrading only swaps the program and never touches data: the Postgres volume `pgdata`, `./data` (jwt.key / SQLite, etc.), and `./skills` are all preserved. **No manual database migration is needed**: `artex` idempotently re-runs `schema.sql` on every start (with `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`), i.e. "restart equals migrate". It is still recommended to back up `./data` and the database before upgrading.
 
+### Upgrading from a clone made before 2026-10-23
+
+The repository history was rewritten that day to drop a personal email address from the commit metadata. A clone made before then cannot fast-forward, and `./update.sh` now stops instead of silently rebuilding stale code. Recover once, then upgrade normally:
+
+```bash
+git stash                 # only if you have local changes
+git fetch origin
+git reset --hard origin/main
+git stash pop             # only if you stashed
+```
+
+Your data is not affected: `./data`, the `pgdata` volume and `./skills` are not part of the git history.
+
 ### Option 1: one-click update script
 
 ```bash
