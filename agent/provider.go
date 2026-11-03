@@ -203,7 +203,9 @@ func compactionConfig(windowTokens int) *compaction.Config {
 //	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
 //	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials (unused for ollama)
 func FromEnv() (Config, bool) {
-	prov := os.Getenv("ARTEX_LLM_PROVIDER")
+	// Case- and space-insensitive: "Ollama" used to miss every case below and
+	// fall through to anthropic, sending ANTHROPIC_API_KEY to the Ollama base URL.
+	prov := strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_LLM_PROVIDER")))
 	anthKey := os.Getenv("ANTHROPIC_API_KEY")
 	oaiKey := os.Getenv("OPENAI_API_KEY")
 
