@@ -1466,19 +1466,38 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	if cfg.NeedsAPIKey() {
 		// API key resolution precedence: form input > the named profile's stored key > the global config's key.
 		// A stored profile's key is never sent back to the browser, so the form is empty when testing a stored profile and the key comes from the DB.
+		// A saved key is only sent to the endpoint it was saved for: base_url and
+		// provider come from the form, so without this check the test button sends
+		// the saved key to any host typed into the form.
+		withheld := false
 		if stored != nil && cfg.APIKey == "" {
-			// Trim like ConfigFrom does for form values: a key stored with
-			// surrounding whitespace runs fine in conversations (the runtime
-			// path re-trims) but would be sent raw here and fail auth.
-			cfg.APIKey = strings.TrimSpace(stored.APIKey)
+			if sameLLMEndpoint(req.Provider, req.BaseURL, stored.Format, stored.BaseURL) {
+				// Trim like ConfigFrom does for form values: a key stored with
+				// surrounding whitespace runs fine in conversations (the runtime
+				// path re-trims) but would be sent raw here and fail auth.
+				cfg.APIKey = strings.TrimSpace(stored.APIKey)
+			} else {
+				withheld = true
+			}
 		}
 		if cfg.APIKey == "" {
 			s.cfgMu.Lock()
-			cfg.APIKey = s.llmCfg.APIKey
+			global := s.llmCfg
 			s.cfgMu.Unlock()
+			if global.APIKey != "" {
+				if sameLLMEndpoint(req.Provider, req.BaseURL, global.Provider(), global.BaseURL) {
+					cfg.APIKey = global.APIKey
+				} else {
+					withheld = true
+				}
+			}
 		}
 		if cfg.APIKey == "" {
-			writeJSON(w, 200, map[string]any{"ok": false, "error": "no API key provided"})
+			msg := "no API key provided"
+			if withheld {
+				msg = "no API key provided: the saved key is only sent to the endpoint it was saved for; enter the key to test a different base URL or provider"
+			}
+			writeJSON(w, 200, map[string]any{"ok": false, "error": msg})
 			return
 		}
 	}
@@ -1494,6 +1513,16 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "latency_ms": lat.Milliseconds(), "model": cfg.Model, "reply": truncateReply(reply),
 	})
+}
+
+// sameLLMEndpoint reports whether two provider/base URL pairs resolve to the same
+// endpoint after ConfigFrom's normalization (trimmed, endpoint suffix stripped;
+// an empty base URL means the provider's canonical host). A saved API key may only
+// be sent when the request's endpoint matches the one it was saved for.
+func sameLLMEndpoint(provA, baseA, provB, baseB string) bool {
+	a := agent.ConfigFrom(provA, "", baseA, "", "")
+	b := agent.ConfigFrom(provB, "", baseB, "", "")
+	return a.Format == b.Format && a.BaseURL == b.BaseURL
 }
 
 // truncateReply clips a connection-test reply for display. A model told to answer
