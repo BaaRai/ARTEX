@@ -66,6 +66,11 @@ type Client struct {
 	mu        sync.Mutex
 	nextID    int
 	sessionID string
+	// initialized is set once initialize succeeds. Until then the
+	// MCP-Protocol-Version header is omitted: the spec requires it on requests
+	// after initialization, and the offered version already travels in the
+	// initialize body.
+	initialized bool
 
 	// legacySSE is the pre-2025 MCP SSE transport used by servers such as GSL5.
 	legacySSE    bool
@@ -252,7 +257,9 @@ func (c *Client) initialize(ctx context.Context) error {
 		versions = []string{legacySSEProtocolVersion}
 	}
 	for i, version := range versions {
+		c.mu.Lock()
 		c.protocol = version
+		c.mu.Unlock()
 		result, err := c.call(ctx, "initialize", map[string]any{
 			"protocolVersion": version,
 			"capabilities":    map[string]any{},
@@ -267,9 +274,12 @@ func (c *Client) initialize(ctx context.Context) error {
 		var negotiated struct {
 			ProtocolVersion string `json:"protocolVersion"`
 		}
+		c.mu.Lock()
 		if json.Unmarshal(result, &negotiated) == nil && negotiated.ProtocolVersion != "" {
 			c.protocol = negotiated.ProtocolVersion
 		}
+		c.initialized = true
+		c.mu.Unlock()
 		return c.notify(ctx, "notifications/initialized", map[string]any{})
 	}
 	return fmt.Errorf("mcp: no supported protocol version")
@@ -462,17 +472,16 @@ func (c *Client) roundTrip(ctx context.Context, body rpcRequest, expectResp bool
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	version := c.protocol
-	if version == "" {
-		version = protocolVersion
+	c.mu.Lock()
+	sid := c.sessionID
+	initialized, version := c.initialized, c.protocol
+	c.mu.Unlock()
+	if initialized && version != "" {
+		req.Header.Set("MCP-Protocol-Version", version)
 	}
-	req.Header.Set("MCP-Protocol-Version", version)
 	for k, v := range c.headers {
 		req.Header.Set(k, v)
 	}
-	c.mu.Lock()
-	sid := c.sessionID
-	c.mu.Unlock()
 	if sid != "" {
 		req.Header.Set("Mcp-Session-Id", sid)
 	}
