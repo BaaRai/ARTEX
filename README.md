@@ -88,6 +88,7 @@ The script will: detect / auto-install Docker → then let you choose **① all-
 - **② Local run**: choose a database (connect to an existing one / start one with Docker) → generates `config.json` → `go` builds the embedded single binary → starts.
 
 Once installed, open **http://localhost:8787** (on first entry, `/setup` sets the admin password).
+`/setup` asks for a one-time setup token: while no password is set, the backend prints it at startup in its log (`docker compose logs artex | grep "Setup token"`, or the terminal running `./start.sh`).
 
 ### Option 2: Docker Compose (manual)
 
