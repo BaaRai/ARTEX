@@ -4,7 +4,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -96,16 +98,23 @@ func Path() string {
 	return candidates[0]
 }
 
-// Load reads and parses the config file. A missing/unreadable file yields a zero
-// Config (so callers fall back to defaults) rather than an error.
-func Load() Config {
+// Load reads and parses the config file. A missing file yields a zero Config (so
+// callers fall back to defaults). A file that exists but cannot be read or parsed
+// is an error: ignoring it would run with defaults the operator did not choose.
+func Load() (Config, error) {
 	var c Config
-	b, err := os.ReadFile(Path())
-	if err != nil {
-		return c
+	path := Path()
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return c, nil
 	}
-	_ = json.Unmarshal(b, &c)
-	return c
+	if err != nil {
+		return c, fmt.Errorf("read config file %s: %w", path, err)
+	}
+	if err := json.Unmarshal(b, &c); err != nil {
+		return Config{}, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	return c, nil
 }
 
 // SkillDir returns the skill root directory with precedence:
@@ -113,17 +122,23 @@ func Load() Config {
 //	env ARTEX_SKILL_DIR  >  config file (skill_dir)  >  BaseDir()/skills
 //
 // The directory is created if it does not exist.
-func SkillDir() string {
+func SkillDir() (string, error) {
 	var d string
 	if v := strings.TrimSpace(os.Getenv("ARTEX_SKILL_DIR")); v != "" {
 		d = v
-	} else if v := strings.TrimSpace(Load().SkillDir); v != "" {
-		d = v
 	} else {
-		d = filepath.Join(BaseDir(), "skills")
+		c, err := Load()
+		if err != nil {
+			return "", err
+		}
+		if v := strings.TrimSpace(c.SkillDir); v != "" {
+			d = v
+		} else {
+			d = filepath.Join(BaseDir(), "skills")
+		}
 	}
 	_ = os.MkdirAll(d, 0o755)
-	return d
+	return d, nil
 }
 
 // PostgresDSN resolves the connection string with precedence:
@@ -138,7 +153,11 @@ func PostgresDSN() (dsn, source string, err error) {
 	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
 		return v, "environment variable ARTEX_PG_DSN", nil
 	}
-	db := Load().Database
+	c, err := Load()
+	if err != nil {
+		return "", "", err
+	}
+	db := c.Database
 	if d := strings.TrimSpace(db.DSN); d != "" {
 		return d, "config file " + Path() + " (database.dsn)", nil
 	}
