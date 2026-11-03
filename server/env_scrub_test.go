@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -32,5 +34,32 @@ func TestScrubSecretEnvHidesSecretsFromChildren(t *testing.T) {
 	}
 	if !strings.Contains(env, "\nARTEX_SCRUB_KEEP=kept\n") {
 		t.Errorf("non-secret variable did not reach the child process")
+	}
+}
+
+// New must apply the options it receives. An earlier version accepted
+// ...Option and never called them, so the binary kept the secrets in the
+// environment while the unit test above still passed.
+func TestNewAppliesSecretScrubOption(t *testing.T) {
+	// t.Setenv restores both after the test: the scrub unsets them for the rest
+	// of this process, and later tests still need the DSN.
+	if dsn := os.Getenv("ARTEX_PG_DSN"); dsn != "" {
+		t.Setenv("ARTEX_PG_DSN", dsn)
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "scrub-probe")
+	t.Setenv("OPENAI_API_KEY", "scrub-probe")
+
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("no manager: %v", err)
+	}
+	t.Cleanup(func() { m.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir(), WithSecretScrub())
+
+	if os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("OPENAI_API_KEY") != "" {
+		t.Fatal("New did not apply WithSecretScrub: the secrets are still in the environment")
 	}
 }
