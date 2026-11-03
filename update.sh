@@ -70,7 +70,7 @@ update_local(){
 
 echo "=============================="
 echo "  ARTEX Update"
-echo "  1) Docker update (pull new image and rebuild)"
+echo "  1) Docker update (rebuild the image from this checkout)"
 echo "  2) Local update (rebuild with go)"
 echo "=============================="
 case "$(ask 'Choose' 1)" in

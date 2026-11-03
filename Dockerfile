@@ -1,16 +1,34 @@
 # syntax=docker/dockerfile:1
 #
-# Runtime image (no compilation inside the image): install common tools only and ship
-# a **pre-built Linux single binary**. The binary is cross-compiled by the CI binaries
-# job (pure Go, no QEMU) and placed at dist/<TARGETARCH>/artex in the build context.
-# This way multi-arch builds only need to emulate the apt layer for arm64 instead of
-# emulating the Next/Go compilation, which is much faster.
-#
-# To build the image manually, prepare the binary yourself first:
-#   cd web && npm run build:static && cd ..
-#   cp -r web/out server/webui/dist
-#   CGO_ENABLED=0 GOARCH=amd64 go build -tags embedui -o dist/amd64/artex ./cmd/artex
-#   docker build -t artex:local .
+# Builds the whole image from this checkout: no prebuilt binary under dist/ is needed.
+#   docker build --build-arg ARTEX_VERSION=v0.4.0 -t artex:local .   (version defaults to dev)
+# The frontend and the Go binary are compiled in build stages with the same commands
+# as the release workflow (npm run build:static, then ./build.sh), so the image and the
+# release binaries are built the same way. Both stages run on the build host's
+# platform and cross-compile for TARGETARCH, so a multi-arch build only emulates the
+# runtime layers below.
+
+# Frontend static export (the release workflow's frontend job).
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build:static
+
+# Go binary with the embedded frontend (the release workflow's binaries job).
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=web /src/web/out ./server/webui/dist
+ARG TARGETARCH
+ARG ARTEX_VERSION=dev
+RUN ARTEX_SKIP_FRONTEND=1 ARTEX_COMPRESS=0 ARTEX_BUILD_VERSION="${ARTEX_VERSION}" \
+    ARTEX_OUTPUT=/out/artex ./build.sh --target "linux/${TARGETARCH}"
+
+# Runtime image.
 FROM python:3.12-slim-bookworm
 ARG TARGETARCH
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
@@ -83,8 +101,7 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# pre-built binary for the matching architecture (dist/amd64/artex or dist/arm64/artex)
-COPY dist/${TARGETARCH}/artex /app/artex
+COPY --from=build /out/artex /app/artex
 # Daemon startup script: relaunches the process after a crash and forwards SIGTERM
 # to artex — docker stop only signals PID 1; without forwarding, artex never receives it,
 # cannot shut down gracefully, and is hard-killed by SIGKILL after 10 seconds.
