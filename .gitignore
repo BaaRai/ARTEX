@@ -57,7 +57,10 @@ Thumbs.db
 # bench benchmark related (local artifacts, not committed)
 /bench/
 /Dockerfile.bench
-/Dockerfile.bench.v2backups/
+/Dockerfile.bench.v2
+
+# scripts/backup.sh output (database dumps, data archives)
+backups/
 
 # posture probe raw output
 posture-runs/
