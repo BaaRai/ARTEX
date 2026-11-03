@@ -31,7 +31,9 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
-case "$KEEP" in (*[!0-9]*|'') echo "--keep must be a positive integer" >&2; exit 2 ;; esac
+# 0* rejects 0, which would make prune delete the dump this run just wrote, and
+# leading zeros, which $((KEEP + 1)) would read as octal.
+case "$KEEP" in (*[!0-9]*|''|0*) echo "--keep must be a positive integer" >&2; exit 2 ;; esac
 
 # Compose reads .env for credentials; source it for the dump command too.
 if [ -f .env ]; then
