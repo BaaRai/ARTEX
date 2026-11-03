@@ -2053,17 +2053,27 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	// Resolve API key: form input > profile stored key.
+	// Resolve API key: form input > profile stored key. The stored key is only
+	// sent to the endpoint it was saved for, since base_url comes from the form.
 	apiKey := strings.TrimSpace(req.APIKey)
+	withheld := false
 	if apiKey == "" && req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			apiKey = p.APIKey
+			if sameLLMEndpoint(req.Provider, req.BaseURL, p.Format, p.BaseURL) {
+				apiKey = p.APIKey
+			} else {
+				withheld = p.APIKey != ""
+			}
 		}
 	}
 	provider := strings.TrimSpace(req.Provider)
 	// Ollama serves its model list keyless on the local server: no key gate.
 	if apiKey == "" && provider != "ollama" {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "no API Key provided"})
+		msg := "no API Key provided"
+		if withheld {
+			msg = "no API Key provided: the saved key is only sent to the endpoint it was saved for; enter the key to list models from a different base URL or provider"
+		}
+		writeJSON(w, 200, map[string]any{"ok": false, "error": msg})
 		return
 	}
 
