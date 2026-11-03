@@ -94,6 +94,7 @@ func run() int {
 	}
 	log.Printf("[config] skill directory: %s", skillDir)
 	srv := server.New(ctx, mgr, skillDir, *dataDir, config.BaseDir())
+	scrubSecretEnv()
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),
@@ -115,6 +116,19 @@ func run() int {
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
 	return 0
+}
+
+// secretEnv lists the credentials read from the environment only at startup:
+// ARTEX_PG_DSN by server.NewManager, the API keys by agent.FromEnv in server.New.
+var secretEnv = []string{"ARTEX_PG_DSN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
+
+// scrubSecretEnv removes secretEnv from the process environment once startup has
+// read it. Child processes (agent shells, custom tools, MCP stdio servers) copy
+// os.Environ() when they are spawned, so they no longer inherit these values.
+func scrubSecretEnv() {
+	for _, k := range secretEnv {
+		_ = os.Unsetenv(k)
+	}
 }
 
 // shutdownContext deliberately does not derive from signalCtx. If it did, the
