@@ -87,7 +87,7 @@ The script will: detect / auto-install Docker → then let you choose **① all-
 - **① All-Docker**: enter a Postgres password (press Enter for a random one) → auto-writes `.env` → `docker compose up -d --build` (the image is built from this checkout).
 - **② Local run**: choose a database (connect to an existing one / start one with Docker) → generates `config.json` → `go` builds the embedded single binary → starts.
 
-Once installed, open **http://localhost:8787** (on first entry, `/setup` sets the admin password).
+Once installed, open **http://localhost:8787** (on first entry, `/setup` sets the admin password; it asks for the one-time setup token the server prints to its log at startup, e.g. `docker compose logs artex | grep "Setup token"`).
 
 ### Option 2: Docker Compose (manual)
 

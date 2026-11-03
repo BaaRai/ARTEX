@@ -14,6 +14,7 @@ export default function SetupPage() {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -47,7 +48,7 @@ export default function SetupPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.initPassword(password);
+      const { token } = await api.initPassword(password, setupToken.trim());
       auth.setToken(token);
       router.replace("/function/tasks");
     } catch (err) {
@@ -80,7 +81,7 @@ export default function SetupPage() {
             <p className="mx-auto max-w-xl text-muted-foreground">
               {unavailable
                 ? "The backend or database is temporarily unavailable. To avoid overwriting a password already set on this instance, setup is temporarily closed — restore the service and try again."
-                : "First time using ARTEX? Set a login password for the account (at least 8 characters)"}
+                : "First time using ARTEX? Enter the setup token printed in the server log at startup, then set a login password for the account (at least 8 characters)"}
             </p>
           </div>
           {unavailable ? (
@@ -93,6 +94,17 @@ export default function SetupPage() {
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="space-y-1.5">
+                <Label htmlFor="setup-token">Setup token</Label>
+                <Input
+                  id="setup-token"
+                  value={setupToken}
+                  onChange={(e) => setSetupToken(e.target.value)}
+                  placeholder="From the server log, e.g. docker compose logs artex"
+                  autoFocus
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="password">New password</Label>
                 <Input
                   id="password"
@@ -100,7 +112,6 @@ export default function SetupPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="At least 8 characters"
-                  autoFocus
                   autoComplete="new-password"
                 />
               </div>
@@ -116,7 +127,7 @@ export default function SetupPage() {
                 />
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading || !password || !confirm}>
+              <Button type="submit" className="w-full" disabled={loading || !setupToken.trim() || !password || !confirm}>
                 {loading ? "Saving..." : "Set password and sign in"}
               </Button>
             </form>

@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"fmt"
 	"log"
 	"math/big"
@@ -154,7 +155,28 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"initialized": hash != ""})
 }
 
-// POST /api/auth/init — sets the password for the first time; rejected if already set.
+// initSetupToken arms POST /api/auth/init when no admin password is set yet: it
+// generates a one-time token and prints it to the server log. Without it, whoever
+// reached the port first could claim the instance. With a password already set, or
+// when the read fails, no token is issued and init stays closed until a restart.
+func (s *Server) initSetupToken() {
+	if s.m.pg == nil {
+		return
+	}
+	hash, _, err := s.m.pg.GetSetting(authPassKey)
+	if err != nil {
+		log.Printf("[auth] cannot check the admin password (%v): first-run setup stays closed until restart", err)
+		return
+	}
+	if hash != "" {
+		return
+	}
+	s.setupToken = rand.Text()
+	log.Printf("[auth] no admin password set. Setup token for the /setup page: %s", s.setupToken)
+}
+
+// POST /api/auth/init — sets the password for the first time; rejected if already set
+// or without the setup token printed to the server log at startup.
 func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -170,10 +192,15 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Password string `json:"password"`
+		Password   string `json:"password"`
+		SetupToken string `json:"setup_token"`
 	}
 	if err := decode(r, &req); err != nil || req.Password == "" {
 		writeErr(w, 400, "Password cannot be empty")
+		return
+	}
+	if s.setupToken == "" || subtle.ConstantTimeCompare([]byte(req.SetupToken), []byte(s.setupToken)) != 1 {
+		writeErr(w, 403, "Invalid setup token: copy it from the server log (restart the server if none was printed)")
 		return
 	}
 	if msg := validatePassword(req.Password); msg != "" {

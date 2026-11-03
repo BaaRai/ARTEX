@@ -62,6 +62,55 @@ func TestAuthInitFailsClosedWhenDataSourceUnavailable(t *testing.T) {
 	}
 }
 
+// Reaching the port is not enough to claim a fresh instance: authInit needs the
+// setup token that initSetupToken printed to the server log.
+func TestAuthInitRequiresSetupToken(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+	if hash, _, err := m.pg.GetSetting(authPassKey); err != nil || hash != "" {
+		t.Skipf("test database already has an admin password (err=%v); not touching it", err)
+	}
+	defer func() { _, _ = m.pg.Exec(`DELETE FROM settings WHERE key=$1`, authPassKey) }()
+
+	s := &Server{m: m, jwtKey: []byte(strings.Repeat("k", 32))}
+	s.initSetupToken()
+	if s.setupToken == "" {
+		t.Fatal("no setup token issued while the password is unset")
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		s.authInit(w, httptest.NewRequest("POST", "/api/auth/init", strings.NewReader(body)))
+		return w
+	}
+
+	for name, body := range map[string]string{
+		"missing token": `{"password":"correct horse battery"}`,
+		"wrong token":   `{"password":"correct horse battery","setup_token":"nope"}`,
+	} {
+		if w := post(body); w.Code != 403 || strings.Contains(w.Body.String(), `"token"`) {
+			t.Fatalf("%s: status=%d body=%s, want 403 without a token", name, w.Code, w.Body.String())
+		}
+	}
+	if hash, _, _ := m.pg.GetSetting(authPassKey); hash != "" {
+		t.Fatal("a rejected init must not set the password")
+	}
+
+	w := post(`{"password":"correct horse battery","setup_token":"` + s.setupToken + `"}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"token"`) {
+		t.Fatalf("with the setup token: status=%d body=%s, want 200 with a token", w.Code, w.Body.String())
+	}
+
+	// Once a password exists, a restart issues no token.
+	s2 := &Server{m: m}
+	s2.initSetupToken()
+	if s2.setupToken != "" {
+		t.Fatal("setup token issued although a password is set")
+	}
+}
+
 func TestValidatePassword(t *testing.T) {
 	for _, tc := range []struct {
 		name, pw string
