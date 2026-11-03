@@ -14,11 +14,12 @@
 FROM python:3.12-slim-bookworm
 ARG TARGETARCH
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
-# Node 20.x comes from NodeSource: bookworm's apt nodejs is 18, but Playwright requires >=20.
+# Node 22.x comes from NodeSource: bookworm's apt nodejs is 18, Playwright requires >=20,
+# and 20 is end-of-life. 22 matches the CI and release workflows.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 # Web-recon toolbox (drost-community take 1, #100): pinned release binaries installed
