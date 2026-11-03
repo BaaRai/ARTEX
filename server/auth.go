@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"math/big"
@@ -154,7 +156,34 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"initialized": hash != ""})
 }
 
+// initSetupToken generates the one-time setup token when no admin password is set
+// and writes it to the server log. Without it, anyone who can reach the port
+// before the operator could claim the instance through POST /api/auth/init.
+func (s *Server) initSetupToken() {
+	if s.m == nil || s.m.pg == nil {
+		return
+	}
+	if hash, _, err := s.m.pg.GetSetting(authPassKey); err == nil && hash != "" {
+		return
+	}
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		log.Fatalf("[auth] generate setup token: %v", err)
+	}
+	s.setupToken = hex.EncodeToString(buf)
+	log.Printf("[auth] no admin password is set. Setup token for the /setup page: %s", s.setupToken)
+}
+
+// checkSetupToken compares got with the active setup token in constant time.
+// It fails when no token is active.
+func (s *Server) checkSetupToken(got string) bool {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+	return s.setupToken != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.setupToken)) == 1
+}
+
 // POST /api/auth/init — sets the password for the first time; rejected if already set.
+// Requires the setup token from the server log.
 func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -170,10 +199,16 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Password string `json:"password"`
+		Password   string `json:"password"`
+		SetupToken string `json:"setup_token"`
 	}
 	if err := decode(r, &req); err != nil || req.Password == "" {
 		writeErr(w, 400, "Password cannot be empty")
+		return
+	}
+	// 403, not 401: the frontend treats any 401 as an expired session and redirects to /login.
+	if !s.checkSetupToken(req.SetupToken) {
+		writeErr(w, 403, "Invalid setup token. The server log prints it at startup while no password is set")
 		return
 	}
 	if msg := validatePassword(req.Password); msg != "" {
@@ -197,6 +232,9 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "Password is already set")
 		return
 	}
+	s.setupMu.Lock()
+	s.setupToken = ""
+	s.setupMu.Unlock()
 	tok, err := signJWT(s.jwtKey)
 	if err != nil {
 		writeErr(w, 500, "token generation failed")

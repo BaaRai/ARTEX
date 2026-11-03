@@ -62,6 +62,62 @@ func TestAuthInitFailsClosedWhenDataSourceUnavailable(t *testing.T) {
 	}
 }
 
+// While no password is set, authInit must reject a missing or wrong setup token
+// and accept the one generated at startup, once.
+func TestAuthInitRequiresSetupToken(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+	clearPassword := func() {
+		if _, err := m.pg.Exec(`DELETE FROM settings WHERE key=$1`, authPassKey); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clearPassword()
+	defer clearPassword()
+
+	s := &Server{m: m, jwtKey: []byte("0123456789abcdef0123456789abcdef")}
+	s.initSetupToken()
+	setupToken := s.setupToken
+	if setupToken == "" {
+		t.Fatal("no setup token generated while no password is set")
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		s.authInit(w, httptest.NewRequest("POST", "/api/auth/init", strings.NewReader(body)))
+		return w
+	}
+
+	for name, body := range map[string]string{
+		"missing": `{"password":"correct horse battery"}`,
+		"empty":   `{"password":"correct horse battery","setup_token":""}`,
+		"wrong":   `{"password":"correct horse battery","setup_token":"0000"}`,
+	} {
+		if w := post(body); w.Code != 403 || strings.Contains(w.Body.String(), `"token"`) {
+			t.Fatalf("%s setup token: status=%d want 403 without a token; body=%s", name, w.Code, w.Body.String())
+		}
+	}
+	if hash, _, err := m.pg.GetSetting(authPassKey); err != nil || hash != "" {
+		t.Fatalf("a rejected request changed the password state: hash set=%v err=%v", hash != "", err)
+	}
+
+	ok := `{"password":"correct horse battery","setup_token":"` + setupToken + `"}`
+	if w := post(ok); w.Code != 200 || !strings.Contains(w.Body.String(), `"token"`) {
+		t.Fatalf("right setup token: status=%d want 200 with a token; body=%s", w.Code, w.Body.String())
+	}
+	if hash, _, err := m.pg.GetSetting(authPassKey); err != nil || hash == "" {
+		t.Fatalf("password not stored: err=%v", err)
+	}
+
+	// The token is spent: even with the password row removed, it is refused.
+	clearPassword()
+	if w := post(ok); w.Code != 403 {
+		t.Fatalf("reused setup token: status=%d want 403; body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestValidatePassword(t *testing.T) {
 	for _, tc := range []struct {
 		name, pw string
