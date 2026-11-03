@@ -9,6 +9,16 @@ warn(){ printf '\033[33m[!]\033[0m %s\n' "$*"; }
 die(){  printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 ask(){  local p="$1" d="${2:-}" a; read -rp "$p${d:+ [$d]}: " a; echo "${a:-$d}"; }
 rand(){ head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24; }
+# json_str prints $1 as a JSON string literal: backslash, double quote and the
+# control characters read -r can return are escaped.
+json_str(){
+  local s="$1"
+  s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
+  s="${s//$'\t'/\\t}"; s="${s//$'\r'/\\r}"
+  printf '"%s"' "$s"
+}
+# sed_repl escapes $1 for the replacement side of s|...|...|: \, | and &.
+sed_repl(){ printf '%s' "$1" | sed 's/[\\|&]/\\&/g'; }
 
 # ── docker environment check / auto-install ───────────────────
 ensure_docker(){
@@ -38,8 +48,8 @@ install_docker(){
     local pw key
     pw="$(ask 'Postgres password (press Enter to generate randomly)' "$(rand)")"
     key="$(ask 'ANTHROPIC_API_KEY (may be empty, configure later in the UI)' '')"
-    sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pw}|" .env
-    sed -i.bak "s|^ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=${key}|" .env
+    sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(sed_repl "$pw")|" .env
+    sed -i.bak "s|^ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$(sed_repl "$key")|" .env
     rm -f .env.bak
     ok ".env generated (POSTGRES_PASSWORD set)"
   else
@@ -76,16 +86,17 @@ install_local(){
       DB_SSL="$(ask 'sslmode (disable/require)' disable)" ;;
   esac
 
-  # generate config.json
+  # generate config.json (string values JSON-escaped: a password may contain " or \)
+  case "$DB_PORT" in (*[!0-9]*|'') die "port must be a number: $DB_PORT" ;; esac
   cat > config.json <<JSON
 {
   "database": {
-    "host": "${DB_HOST}",
+    "host": $(json_str "$DB_HOST"),
     "port": ${DB_PORT},
-    "user": "${DB_USER}",
-    "password": "${DB_PASS}",
-    "dbname": "${DB_NAME}",
-    "sslmode": "${DB_SSL}"
+    "user": $(json_str "$DB_USER"),
+    "password": $(json_str "$DB_PASS"),
+    "dbname": $(json_str "$DB_NAME"),
+    "sslmode": $(json_str "$DB_SSL")
   }
 }
 JSON

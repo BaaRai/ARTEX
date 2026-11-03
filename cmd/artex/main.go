@@ -88,7 +88,11 @@ func run() int {
 	}
 	defer mgr.Close()
 
-	skillDir := config.SkillDir()
+	skillDir, err := config.SkillDir()
+	if err != nil {
+		log.Printf("[config] %v", err)
+		return 1
+	}
 	if abs, err := filepath.Abs(skillDir); err == nil {
 		skillDir = abs
 	}
