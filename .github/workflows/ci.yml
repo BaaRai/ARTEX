@@ -47,6 +47,11 @@ jobs:
       - name: go test -race
         # Race detector on the packages that pass under -race today. ./server is
         # left out until it has been checked with -race against postgres.
+        # Its own database: the plain run above leaves rows behind and the db tests
+        # are not idempotent across runs (duplicate llm_profiles names).
+        env:
+          ARTEX_PG_DSN: postgres://artex:testpass@localhost:5432/artextest_race?sslmode=disable
+
         run: >-
           go test -race -p 1 ./agent ./cmd/artex ./config ./db ./evidence ./guard
           ./intercept ./llmpool ./llmrec ./mcphttp ./notify ./sidequestion ./traffic
