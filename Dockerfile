@@ -1,16 +1,49 @@
 # syntax=docker/dockerfile:1
 #
-# Runtime image (no compilation inside the image): install common tools only and ship
-# a **pre-built Linux single binary**. The binary is cross-compiled by the CI binaries
-# job (pure Go, no QEMU) and placed at dist/<TARGETARCH>/artex in the build context.
-# This way multi-arch builds only need to emulate the apt layer for arm64 instead of
-# emulating the Next/Go compilation, which is much faster.
+# Multi-stage build: `docker compose up -d --build` (or `docker build .`) produces
+# the complete image from source. No prebuilt binary in the build context is needed,
+# so a fresh `git clone` builds — dist/ is git-ignored and is no longer required.
 #
-# To build the image manually, prepare the binary yourself first:
-#   cd web && npm run build:static && cd ..
-#   cp -r web/out server/webui/dist
-#   CGO_ENABLED=0 GOARCH=amd64 go build -tags embedui -o dist/amd64/artex ./cmd/artex
-#   docker build -t artex:local .
+#   frontend (web) -> Go binary with embedded UI (build) -> runtime image
+#
+# The Go binary is produced by build.sh with the same flags the release workflow's
+# binaries job uses, so the image binary and the published release binary come from
+# one source.
+
+# ---------------------------------------------------------------- frontend ---
+# Pinned to the Node 22 line the CI/release workflows use. On the build platform
+# only; the frontend static export is architecture-independent.
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY web/ ./
+RUN npm run build:static
+
+# ------------------------------------------------------------- Go binary ---
+# Pinned to the Go 1.26 line (matches go.mod and the release binaries job). The
+# binary is CGO-free, so this stage runs on the build platform and cross-compiles
+# to $TARGETARCH without QEMU.
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# Reuse the frontend built above; build.sh skips its own frontend step.
+COPY --from=web /src/web/out ./server/webui/dist
+ARG ARTEX_VERSION=dev
+ARG TARGETOS
+ARG TARGETARCH
+# Same flags as the release binaries job (ARTEX_COMPRESS=0, -trimpath,
+# -X main.version), driven through build.sh so there is one build path.
+RUN ARTEX_SKIP_FRONTEND=1 \
+    ARTEX_SKIP_NPM_CI=1 \
+    ARTEX_COMPRESS=0 \
+    ARTEX_OUTPUT=/out/artex \
+    ARTEX_BUILD_VERSION="${ARTEX_VERSION}" \
+    bash ./build.sh --target "${TARGETOS:-linux}/${TARGETARCH:-amd64}"
+
+# ---------------------------------------------------------------- runtime ---
 FROM python:3.12-slim-bookworm
 ARG TARGETARCH
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
@@ -84,8 +117,8 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# pre-built binary for the matching architecture (dist/amd64/artex or dist/arm64/artex)
-COPY dist/${TARGETARCH}/artex /app/artex
+# Binary compiled from source in the build stage above.
+COPY --from=build /out/artex /app/artex
 # Daemon startup script: relaunches the process after a crash and forwards SIGTERM
 # to artex — docker stop only signals PID 1; without forwarding, artex never receives it,
 # cannot shut down gracefully, and is hard-killed by SIGKILL after 10 seconds.
