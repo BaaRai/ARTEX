@@ -55,8 +55,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # shellcheck is preinstalled on the ubuntu runners.
-      - run: shellcheck install.sh update.sh start.sh scripts/backup.sh
+      # shellcheck is preinstalled on the ubuntu runners. -S warning: the scripts
+      # currently have only info-level notes (intentional A && B || C chains in
+      # update.sh, an unquoted glob in backup.sh's prune), so fail on warnings.
+      - run: shellcheck -S warning install.sh update.sh start.sh scripts/backup.sh
 
   web:
     runs-on: ubuntu-latest
