@@ -58,7 +58,7 @@ Standing rules, enforced by the runner:
 cd scripts/benchmark
 
 # against a locally deployed ARTEX, with an independent judge endpoint
-ARTEX_TOKEN=<jwt or mint via ARTEX_JWT_KEY=/app/jwt.key copy> \
+ARTEX_TOKEN=<jwt or mint via ARTEX_JWT_KEY=/app/keys/jwt.key copy> \
 JUDGE_BASE_URL=https://api.example.com JUDGE_MODEL=<other-model> JUDGE_API_KEY=... \
 python3 run_bench.py --corpus juice-shop --subject-model glm-5.3
 ```

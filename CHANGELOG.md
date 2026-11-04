@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+
+- **The JWT signing key survives container rebuilds**: the server wrote `jwt.key` to the executable's directory, `/app` in the image, so the key lived in the container's writable layer and recreating the container (for example `docker compose up -d --build`) generated a new key and signed every user out. The key directory is now set by `ARTEX_JWT_KEY_DIR` (default: the executable's directory, unchanged for non-Docker installs). `docker-compose.yml` sets it to `/app/keys` and bind-mounts `./keys` there, outside `./data`, which the file manager browses. On start, when `<key dir>/jwt.key` is missing, a key at `data/jwt.key`, then at the executable's directory, is copied there with mode 0600 and the old file is removed; otherwise a new key is generated. An existing key is never overwritten. Upgrading a Docker install signs every user out once, because the old key is in the container being replaced; to keep sessions, copy it out before recreating the container:
+
+  ```bash
+  mkdir -p keys
+  docker cp artex-artex-1:/app/jwt.key ./keys/jwt.key
+  ```
+
 ## [0.5.0] - 2026-11-04
 
 Ollama support, a setup token for the first-run claim, secret scrubbing for child processes, a Docker image that builds from a fresh clone, Go 1.26.10 and Node 22, and race and shellcheck runs in CI. Entries marked "direct commit" landed on `main` without a pull request.
@@ -43,7 +52,6 @@ Ollama support, a setup token for the first-run claim, secret scrubbing for chil
 
 ### Known issues
 
-- **The JWT signing key is not in the Docker volume**: the server writes `jwt.key` to the directory of the executable (`config.BaseDir()`), which is `/app` in the image, while the Dockerfile and `docker-compose.yml` comments say it lives in `/app/data`. The key therefore sits in the container's writable layer: recreating the container (for example `docker compose up -d --build` after an update) generates a new key and signs every user out. A key found at `data/jwt.key` is moved to `/app/jwt.key` on start and removed from the volume.
 - **The secret scrub has limits**: `os.Unsetenv` changes only the Go runtime's copy, so a process running as the same user can still read `/proc/<pid>/environ` of the server (and, in Docker, of PID 1, `start.sh`). Other variables that may carry credentials, such as `ARTEX_LLM_PROXY`, are not scrubbed.
 - **The LLM test and model-list endpoints still take `proxy` from the request**, so a saved key can travel through a request-supplied proxy when the base URL is plain HTTP.
 - **Postgres passwords with URL-special characters** (`@`, `/`, `#`, `?`) break the `ARTEX_PG_DSN` that `docker-compose.yml` builds by interpolation, and Compose interpolates `$` in `.env`.

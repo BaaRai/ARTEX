@@ -16,6 +16,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/Autumn-27/artex/config"
 )
 
 const (
@@ -47,28 +49,38 @@ func validatePassword(pw string) string {
 	return ""
 }
 
+// jwtLegacyBaseDir is the second legacy key location (the executable's directory,
+// where releases before ARTEX_JWT_KEY_DIR wrote the key). A var so tests can point it
+// at a temp dir.
+var jwtLegacyBaseDir = config.BaseDir
+
 // loadOrCreateJWTKey reads the 32-byte signing key from keyDir/jwt.key. keyDir is
-// the project base dir (next to the executable), NOT the browsable workspace root
-// (dataDir) — the signing key must never be listable/downloadable via the file
-// manager. Legacy installs kept it at dataDir/jwt.key; if present there and not yet
-// at the new location, it is migrated (key preserved, so sessions stay valid) and
-// the old file removed so it disappears from the workspace. On first run a random
-// key is generated and persisted.
+// ARTEX_JWT_KEY_DIR (the /app/keys volume in Docker) or the project base dir, NOT
+// the browsable workspace root (dataDir) — the signing key must never be
+// listable/downloadable via the file manager. When keyDir/jwt.key is missing, a key
+// at dataDir/jwt.key, then at BaseDir()/jwt.key, is migrated (key preserved, so
+// sessions stay valid) and the old file removed. Otherwise a random key is
+// generated. An existing key file is never overwritten.
 func loadOrCreateJWTKey(keyDir, dataDir string) ([]byte, error) {
+	if err := os.MkdirAll(keyDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create jwt key dir: %w", err)
+	}
 	path := filepath.Join(keyDir, jwtKeyFilename)
-	// one-time migration out of the old in-workspace location.
-	if legacy := filepath.Join(dataDir, jwtKeyFilename); legacy != path {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if data, rerr := os.ReadFile(legacy); rerr == nil {
-				if werr := os.WriteFile(path, data, 0o600); werr == nil {
-					_ = os.Remove(legacy)
-					log.Printf("[auth] JWT key migrated from %s to %s (moved out of the browsable workspace)", legacy, path)
-				}
-			}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if err := migrateJWTKey(path, dataDir); err != nil {
+			return nil, err
 		}
 	}
-	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) >= 32 {
-		return []byte(strings.TrimSpace(string(data))), nil
+	data, err := os.ReadFile(path)
+	if err == nil {
+		key := strings.TrimSpace(string(data))
+		if len(key) < 32 {
+			return nil, fmt.Errorf("jwt key %s is shorter than 32 bytes; fix or remove it (it is never overwritten)", path)
+		}
+		return []byte(key), nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read jwt key: %w", err)
 	}
 	buf := make([]byte, 32)
 	for i := range buf {
@@ -78,11 +90,69 @@ func loadOrCreateJWTKey(keyDir, dataDir string) ([]byte, error) {
 		}
 		buf[i] = keyChars[n.Int64()]
 	}
-	if err := os.WriteFile(path, buf, 0600); err != nil {
+	if err := writeNewJWTKey(path, buf); err != nil {
 		return nil, fmt.Errorf("write jwt key: %w", err)
 	}
 	log.Printf("[auth] new JWT key written to %s", path)
 	return buf, nil
+}
+
+// migrateJWTKey copies the first legacy key found (dataDir, then BaseDir) to dst
+// and removes the old file. Candidates equal to dst are skipped.
+func migrateJWTKey(dst, dataDir string) error {
+	for _, src := range []string{
+		filepath.Join(dataDir, jwtKeyFilename),
+		filepath.Join(jwtLegacyBaseDir(), jwtKeyFilename),
+	} {
+		if samePath(src, dst) {
+			continue
+		}
+		data, err := os.ReadFile(src)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			log.Printf("[auth] cannot read legacy JWT key %s: %v", src, err)
+			continue
+		}
+		if err := writeNewJWTKey(dst, data); err != nil {
+			return fmt.Errorf("migrate jwt key from %s: %w", src, err)
+		}
+		if err := os.Remove(src); err != nil {
+			log.Printf("[auth] JWT key copied to %s but the old file %s could not be removed: %v", dst, src, err)
+		}
+		log.Printf("[auth] JWT key migrated from %s to %s", src, dst)
+		return nil
+	}
+	return nil
+}
+
+// writeNewJWTKey creates path with mode 0600, failing if it already exists.
+func writeNewJWTKey(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+func samePath(a, b string) bool {
+	if absA, err := filepath.Abs(a); err == nil {
+		a = absA
+	}
+	if absB, err := filepath.Abs(b); err == nil {
+		b = absB
+	}
+	return a == b
 }
 
 // signJWT issues a 7-day HS256 token for user ARTEX.
