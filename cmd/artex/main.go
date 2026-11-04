@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -97,7 +98,17 @@ func run() int {
 		skillDir = abs
 	}
 	log.Printf("[config] skill directory: %s", skillDir)
-	srv := server.New(ctx, mgr, skillDir, *dataDir, config.BaseDir(), server.WithSecretScrub())
+	// JWT signing key directory: ARTEX_JWT_KEY_DIR (the Docker image points it at
+	// the /app/keys volume) or the base dir. Never the browsable data dir.
+	keyDir := strings.TrimSpace(os.Getenv("ARTEX_JWT_KEY_DIR"))
+	if keyDir == "" {
+		keyDir = config.BaseDir()
+	}
+	if abs, err := filepath.Abs(keyDir); err == nil {
+		keyDir = abs
+	}
+	log.Printf("[config] JWT key directory: %s", keyDir)
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub())
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),

@@ -123,10 +123,10 @@ COPY --from=build /out/artex /app/artex
 # to artex — docker stop only signals PID 1; without forwarding, artex never receives it,
 # cannot shut down gracefully, and is hard-killed by SIGKILL after 10 seconds.
 COPY start.sh /app/start.sh
-RUN chmod +x /app/artex /app/start.sh
+RUN chmod +x /app/artex /app/start.sh && mkdir -p /app/keys
 COPY skills/ /app/skills/
-# persistence point for data/ (SQLite + jwt.key)
-VOLUME ["/app/data"]
+# persistence points: data/ (SQLite, task files) and keys/ (jwt.key, via ARTEX_JWT_KEY_DIR)
+VOLUME ["/app/data", "/app/keys"]
 EXPOSE 8787 8788
 ENTRYPOINT ["/app/start.sh"]
 CMD ["-addr", ":8787", "-proxy", ":8788"]

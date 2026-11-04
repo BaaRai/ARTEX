@@ -44,7 +44,7 @@ type Server struct {
 	ctx    context.Context
 
 	skillDir string // root directory for skill subdirectories
-	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
+	jwtKey   []byte // HS256 signing key loaded from / generated into keyDir/jwt.key
 
 	scrubSecrets bool // drop ARTEX_PG_DSN and the API keys from the environment once read (binary only)
 
