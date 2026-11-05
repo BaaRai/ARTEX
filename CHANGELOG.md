@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed
+
+- **The binary listens on `127.0.0.1:8787` by default**: the `-addr` default was `:8787`, every interface. Running `artex` or `./start.sh` without `-addr` now accepts connections from the local machine only; pass `-addr :8787` to listen on every interface. Docker is unchanged: the image starts the server with `-addr :8787` inside the container, and `docker-compose.yml` already publishes it on `127.0.0.1` by default (`ARTEX_BIND_ADDR`).
+- **New passwords need at least 12 characters** (was 8), at first-run setup (`POST /api/auth/init` and the `/setup` page) and in `POST /api/auth/change-password`. Login does not check length, so a password set under the old minimum keeps working until it is changed. `reset-password.sh` enforces the same minimum.
+
 ### Fixed
 
 - **The JWT signing key survives container rebuilds**: the server wrote `jwt.key` to the executable's directory, `/app` in the image, so the key lived in the container's writable layer and recreating the container (for example `docker compose up -d --build`) generated a new key and signed every user out. The key directory is now set by `ARTEX_JWT_KEY_DIR` (default: the executable's directory, unchanged for non-Docker installs). `docker-compose.yml` sets it to `/app/keys` and bind-mounts `./keys` there, outside `./data`, which the file manager browses. On start, when `<key dir>/jwt.key` is missing, a key at `data/jwt.key`, then at the executable's directory, is copied there with mode 0600 and the old file is removed; otherwise a new key is generated. An existing key is never overwritten. Upgrading a Docker install signs every user out once, because the old key is in the container being replaced; to keep sessions, copy it out before recreating the container:
@@ -12,6 +17,11 @@ All notable changes to this project are documented in this file. The format is b
   mkdir -p keys
   docker cp artex-artex-1:/app/jwt.key ./keys/jwt.key
   ```
+
+### Security
+
+- **Login rate limit**: `POST /api/auth/login` allows 10 attempts per minute per client IP. The next attempt gets 429 with a `Retry-After` header (seconds) and a JSON error, and the IP is blocked for 1 minute. Each attempt while blocked, and each later block, doubles the wait, up to 15 minutes. A successful login clears the IP's count. There is no per-account lockout, so failing logins cannot lock the admin out from other addresses. The state is in memory: a restart clears it, an IP idle for 15 minutes is dropped, and at most 10,000 IPs are tracked (the least recently seen is dropped first). The IP is the TCP peer address, and `X-Forwarded-For` is ignored, unless the peer is listed in the new `ARTEX_TRUSTED_PROXIES` (comma-separated CIDRs, empty by default, passed through by `docker-compose.yml`). For a listed peer the header is read from the right and the first address that is not a trusted proxy is the client; entries the client added further left are never used. Behind a reverse proxy, set it: otherwise every client has the proxy's address and shares one budget, and an attacker failing logins through the proxy blocks the real users, admin included, for up to 15 minutes. The README nginx example now sends `X-Forwarded-For`.
+- **`GET /api/health` hides the version from anonymous callers**: without a valid token it answers `{"ok":true}` only. With a token (the web UI sends one for the version in its top bar) the answer is unchanged: `ok`, `service` and `version`.
 
 ## [0.5.0] - 2026-11-04
 

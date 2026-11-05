@@ -50,7 +50,7 @@ func main() {
 
 func run() int {
 	var (
-		addr    = flag.String("addr", ":8787", "HTTP listen address")
+		addr    = flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
 		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "data directory for SQLite stores (default: data/ next to the executable)")
 		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
 	)
@@ -108,7 +108,16 @@ func run() int {
 		keyDir = abs
 	}
 	log.Printf("[config] JWT key directory: %s", keyDir)
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub())
+	// Proxies whose X-Forwarded-For the login rate limit reads; empty trusts none.
+	trusted, err := server.ParseTrustedProxies(os.Getenv("ARTEX_TRUSTED_PROXIES"))
+	if err != nil {
+		log.Printf("[config] ARTEX_TRUSTED_PROXIES: %v", err)
+		return 1
+	}
+	if len(trusted) > 0 {
+		log.Printf("[config] trusted proxies: %v", trusted)
+	}
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted))
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),
