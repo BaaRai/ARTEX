@@ -289,7 +289,12 @@ server {
 }
 ```
 
-**Login rate limit behind a proxy**: login allows 10 attempts per minute per client IP. Behind a proxy every request comes from the proxy's address, so without further setup all users share one budget and an attacker who fails 10 logins blocks everyone, admin included, for up to 15 minutes. Set `ARTEX_TRUSTED_PROXIES` to the proxy's address as ARTEX sees it (comma-separated CIDRs, empty by default), for example `ARTEX_TRUSTED_PROXIES=127.0.0.1/32` for nginx on the same host as the binary. For a peer in that list, ARTEX reads `X-Forwarded-For` from the right and takes the first address that is not a trusted proxy; from any other peer the header is ignored. In Docker the connection does not arrive from `127.0.0.1` but from the Docker network's gateway (see `docker network inspect <project>_default`); set the variable in `.env`. Trust only addresses that are proxies you run: a trusted peer can claim any client address.
+**Login rate limit behind a proxy**: login allows 10 attempts per minute per client IP. Behind a proxy every request comes from the proxy's address, so without further setup all users share one budget and an attacker who fails 10 logins blocks everyone, admin included, for up to 15 minutes. To avoid that, keep the `X-Forwarded-For` line above and set `ARTEX_TRUSTED_PROXIES` (comma-separated CIDRs, empty by default) to the address ARTEX sees the proxy connect from:
+
+- **nginx and ARTEX both on the host** (binary, `./start.sh`): the peer is `127.0.0.1`. Start ARTEX with `ARTEX_TRUSTED_PROXIES=127.0.0.1/32`.
+- **nginx on the host, ARTEX in Docker** (`docker-compose.yml`): the connection reaches the container from the Docker bridge gateway (a `172.x` address), not from `127.0.0.1`. Find it with `docker network inspect artex_default --format '{{(index .IPAM.Config 0).Gateway}}'` (the network is `<project directory>_default`; `docker network ls` lists it), put `ARTEX_TRUSTED_PROXIES=<gateway>/32` in `.env`, and run `docker compose up -d`.
+
+For a peer in that list, ARTEX reads `X-Forwarded-For` from the right and takes the first address that is not a trusted proxy; from any other peer the header is ignored. Trust only addresses of proxies you run: a trusted peer can claim any client address.
 
 > Only when SSE needs a different origin from the page (e.g. a dedicated subdomain) should you set `NEXT_PUBLIC_SSE_BASE` **at build time** (this variable is baked into the static bundle during `next build`; setting it at container runtime has no effect).
 

@@ -63,7 +63,7 @@ jobs:
       # shellcheck is preinstalled on the ubuntu runners. -S warning: the scripts
       # currently have only info-level notes (intentional A && B || C chains in
       # update.sh, an unquoted glob in backup.sh's prune), so fail on warnings.
-      - run: shellcheck -S warning install.sh update.sh start.sh scripts/backup.sh
+      - run: shellcheck -S warning install.sh update.sh start.sh scripts/backup.sh reset-password.sh
 
   web:
     runs-on: ubuntu-latest
