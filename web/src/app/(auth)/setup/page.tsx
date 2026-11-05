@@ -41,8 +41,8 @@ export default function SetupPage() {
       setError("The two passwords do not match");
       return;
     }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
+    if (password.length < 12) {
+      setError("Password must be at least 12 characters");
       return;
     }
     setLoading(true);
@@ -81,7 +81,7 @@ export default function SetupPage() {
             <p className="mx-auto max-w-xl text-muted-foreground">
               {unavailable
                 ? "The backend or database is temporarily unavailable. To avoid overwriting a password already set on this instance, setup is temporarily closed — restore the service and try again."
-                : "First time using ARTEX? Enter the setup token from the server log, then set a login password for the account (at least 8 characters)"}
+                : "First time using ARTEX? Enter the setup token from the server log, then set a login password for the account (at least 12 characters)"}
             </p>
           </div>
           {unavailable ? (
@@ -111,7 +111,7 @@ export default function SetupPage() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 8 characters"
+                  placeholder="At least 12 characters"
                   autoComplete="new-password"
                 />
               </div>

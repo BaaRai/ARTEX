@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,7 +30,9 @@ const (
 	// The lower bound matches the setup page's frontend validation — validation that
 	// lives only in the frontend is as good as none: hitting the API directly bypasses
 	// it. The upper bound is bcrypt's hard limit: past 72 bytes GenerateFromPassword returns ErrPasswordTooLong; rejecting early beats a cryptic "password encryption failed".
-	minPasswordRunes = 8
+	// Both apply to new passwords only (init, change-password); login never checks
+	// length, so passwords set under the old 8-character minimum still log in.
+	minPasswordRunes = 12
 	maxPasswordBytes = 72
 )
 
@@ -372,6 +375,21 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
+	s.login(w, r, pg.GetSetting)
+}
+
+// login is authLogin past the data-source check; getSetting is pg.GetSetting,
+// a parameter so tests can run it without PostgreSQL. Every attempt counts
+// against the caller's IP (s.loginLimit) and a successful one clears it. There
+// is no per-account lockout and no password length check here.
+func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(string) (string, bool, error)) {
+	ip := peerIP(r)
+	if wait := s.loginLimit.allow(ip); wait > 0 {
+		secs := int((wait + time.Second - 1) / time.Second)
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		writeErr(w, 429, fmt.Sprintf("Too many login attempts, try again in %d seconds", secs))
+		return
+	}
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -384,7 +402,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "Incorrect username or password")
 		return
 	}
-	hash, ok, err := pg.GetSetting(authPassKey)
+	hash, ok, err := getSetting(authPassKey)
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -397,6 +415,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "Incorrect username or password")
 		return
 	}
+	s.loginLimit.reset(ip)
 	tok, err := signJWT(s.jwtKey)
 	if err != nil {
 		writeErr(w, 500, "token generation failed")

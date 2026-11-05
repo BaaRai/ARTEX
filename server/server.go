@@ -51,6 +51,8 @@ type Server struct {
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
 
+	loginLimit *loginLimiter // per-IP attempt limit on POST /api/auth/login
+
 	// concMu serializes concurrency-cap decisions (admission + reconcile) so a
 	// scheduler tick and an HTTP settings change / task creation can't both count
 	// free slots off the same snapshot and over-promote past the limit.
@@ -155,7 +157,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
-		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
+		loginLimit: newLoginLimiter(time.Now)}
 	for _, o := range opts {
 		o(s)
 	}
@@ -964,7 +967,14 @@ func (s *Server) Handler() http.Handler {
 
 // --- handlers ---
 
+// health answers without a token (requireAuth exempts it), but only a caller
+// with a valid token gets the service name and version; the web UI's top bar
+// reads the version, and sends its token.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	if !verifyJWT(extractToken(r), s.jwtKey) {
+		writeJSON(w, 200, map[string]any{"ok": true})
+		return
+	}
 	writeJSON(w, 200, map[string]any{"ok": true, "service": "artex", "version": BuildVersion})
 }
 
