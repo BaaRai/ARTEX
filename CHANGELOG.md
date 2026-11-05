@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.5.1] - 2026-11-05
+
+Login rate limiting per client IP with trusted-proxy support, a 12-character minimum for new passwords, a loopback-only default for the binary, and the JWT signing key in its own Docker volume.
 
 ### Changed
 
@@ -988,7 +990,8 @@ First release of this fork. The engine underneath is still upstream's, but this 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
 
-[Unreleased]: https://github.com/BaaRai/ARTEX/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/BaaRai/ARTEX/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/BaaRai/ARTEX/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/BaaRai/ARTEX/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/BaaRai/ARTEX/compare/v0.3.15...v0.4.0
 [0.3.10]: https://github.com/Autumn-27/ARTEX/compare/v0.3.9...v0.3.10
