@@ -95,7 +95,7 @@ PY
 }
 
 apply_config_fields() {
-  local line key val
+  local key val
   while IFS=$'\t' read -r key val; do
     [[ -z "$key" ]] && continue
     case "$key" in
