@@ -108,7 +108,16 @@ func run() int {
 		keyDir = abs
 	}
 	log.Printf("[config] JWT key directory: %s", keyDir)
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub())
+	// Proxies whose X-Forwarded-For the login rate limit reads; empty trusts none.
+	trusted, err := server.ParseTrustedProxies(os.Getenv("ARTEX_TRUSTED_PROXIES"))
+	if err != nil {
+		log.Printf("[config] ARTEX_TRUSTED_PROXIES: %v", err)
+		return 1
+	}
+	if len(trusted) > 0 {
+		log.Printf("[config] trusted proxies: %v", trusted)
+	}
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted))
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),

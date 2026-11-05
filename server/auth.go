@@ -380,10 +380,10 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 
 // login is authLogin past the data-source check; getSetting is pg.GetSetting,
 // a parameter so tests can run it without PostgreSQL. Every attempt counts
-// against the caller's IP (s.loginLimit) and a successful one clears it. There
-// is no per-account lockout and no password length check here.
+// against the caller's IP (s.loginLimit, keyed by clientIP) and a successful
+// one clears it. There is no per-account lockout and no password length check here.
 func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(string) (string, bool, error)) {
-	ip := peerIP(r)
+	ip := clientIP(r, s.trustedProxies)
 	if wait := s.loginLimit.allow(ip); wait > 0 {
 		secs := int((wait + time.Second - 1) / time.Second)
 		w.Header().Set("Retry-After", strconv.Itoa(secs))

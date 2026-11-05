@@ -1,8 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 )
@@ -114,13 +117,75 @@ func (l *loginLimiter) evictOldest() {
 	delete(l.entries, oldest)
 }
 
-// peerIP is the host part of the TCP peer address. X-Forwarded-For and similar
-// headers are ignored on purpose: the client sets them, so trusting them would
-// give an attacker a fresh bucket per request.
+// peerIP is the host part of the TCP peer address.
 func peerIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// clientIP is the address login attempts are counted against. It is the TCP
+// peer unless the peer is in trusted: then X-Forwarded-For is read from the
+// right, past trusted hops, and the first untrusted hop is the client. Entries
+// left of that hop come from the client itself and are never used, so a client
+// cannot pick its own bucket. With trusted empty the header is ignored.
+func clientIP(r *http.Request, trusted []netip.Prefix) string {
+	peer := peerIP(r)
+	addr, err := netip.ParseAddr(peer)
+	if err != nil || !isTrusted(addr, trusted) {
+		return peer
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+		if err != nil {
+			break // keep the last address a trusted proxy reported
+		}
+		addr = hop
+		if !isTrusted(addr, trusted) {
+			break
+		}
+	}
+	return addr.Unmap().WithZone("").String()
+}
+
+func isTrusted(a netip.Addr, trusted []netip.Prefix) bool {
+	a = a.Unmap().WithZone("")
+	for _, p := range trusted {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseTrustedProxies parses ARTEX_TRUSTED_PROXIES: comma-separated CIDRs (a
+// bare address means that one host). Empty means no trusted proxy.
+func ParseTrustedProxies(s string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, f := range strings.Split(s, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if p, err := netip.ParsePrefix(f); err == nil {
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(f)
+		if err != nil || a.Zone() != "" {
+			return nil, fmt.Errorf("%q is not a CIDR or an IP address", f)
+		}
+		a = a.Unmap()
+		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+	}
+	return out, nil
+}
+
+// WithTrustedProxies sets the proxies whose X-Forwarded-For the login rate
+// limit reads (see clientIP).
+func WithTrustedProxies(p []netip.Prefix) Option {
+	return func(s *Server) { s.trustedProxies = p }
 }
