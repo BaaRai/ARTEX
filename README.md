@@ -100,7 +100,6 @@ The web UI is published on `127.0.0.1` by default. To reach it from another mach
 git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 cp .env.example .env          # set POSTGRES_PASSWORD, optionally ANTHROPIC_API_KEY
-# build the single binary first (frontend, then go build -tags embedui), see the Dockerfile header
 docker compose up -d --build  # builds artex from this checkout + starts postgres
 # → http://localhost:8787
 ```
