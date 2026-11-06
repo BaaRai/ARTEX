@@ -28,7 +28,7 @@ import (
 	actool "github.com/Autumn-27/norma/tool"
 )
 
-const protocolVersion = "2025-06-18"
+const protocolVersion = "2025-11-25"
 const legacySSEProtocolVersion = "2024-11-05"
 
 // ToolName mirrors mcp.ToolName so remote tools share the mcp__server__tool scheme.
@@ -66,6 +66,11 @@ type Client struct {
 	mu        sync.Mutex
 	nextID    int
 	sessionID string
+	// initialized is set once initialize succeeds. Until then the
+	// MCP-Protocol-Version header is omitted: the spec requires it on requests
+	// after initialization, and the offered version already travels in the
+	// initialize body.
+	initialized bool
 
 	// legacySSE is the pre-2025 MCP SSE transport used by servers such as GSL5.
 	legacySSE    bool
@@ -247,18 +252,47 @@ func (c *Client) readLegacySSE(r *bufio.Reader) {
 }
 
 func (c *Client) initialize(ctx context.Context) error {
-	version := c.protocol
-	if version == "" {
-		version = protocolVersion
+	versions := []string{protocolVersion, "2025-06-18"}
+	if c.legacySSE {
+		versions = []string{legacySSEProtocolVersion}
 	}
-	if _, err := c.call(ctx, "initialize", map[string]any{
-		"protocolVersion": version,
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "artex", "version": "0.2"},
-	}); err != nil {
-		return err
+	for i, version := range versions {
+		c.mu.Lock()
+		c.protocol = version
+		c.mu.Unlock()
+		result, err := c.call(ctx, "initialize", map[string]any{
+			"protocolVersion": version,
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "artex", "version": "0.2"},
+		})
+		if err != nil {
+			if i+1 < len(versions) && isUnsupportedVersion(err) {
+				continue
+			}
+			return err
+		}
+		var negotiated struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		c.mu.Lock()
+		if json.Unmarshal(result, &negotiated) == nil && negotiated.ProtocolVersion != "" {
+			c.protocol = negotiated.ProtocolVersion
+		}
+		c.initialized = true
+		c.mu.Unlock()
+		return c.notify(ctx, "notifications/initialized", map[string]any{})
 	}
-	return c.notify(ctx, "notifications/initialized", map[string]any{})
+	return fmt.Errorf("mcp: no supported protocol version")
+}
+
+// isUnsupportedVersion reports whether err is a server rejecting the offered
+// protocol version: the spec's "Unsupported protocol version" (JSON-RPC -32602,
+// or an HTTP 400 on the MCP-Protocol-Version header) or the
+// UNSUPPORTED_PROTOCOL_VERSION code some servers return instead.
+func isUnsupportedVersion(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unsupported protocol version") ||
+		strings.Contains(msg, "unsupported_protocol_version")
 }
 
 // Tools lists the server's tools and adapts them to CoreTools.
@@ -438,17 +472,16 @@ func (c *Client) roundTrip(ctx context.Context, body rpcRequest, expectResp bool
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	version := c.protocol
-	if version == "" {
-		version = protocolVersion
+	c.mu.Lock()
+	sid := c.sessionID
+	initialized, version := c.initialized, c.protocol
+	c.mu.Unlock()
+	if initialized && version != "" {
+		req.Header.Set("MCP-Protocol-Version", version)
 	}
-	req.Header.Set("MCP-Protocol-Version", version)
 	for k, v := range c.headers {
 		req.Header.Set(k, v)
 	}
-	c.mu.Lock()
-	sid := c.sessionID
-	c.mu.Unlock()
 	if sid != "" {
 		req.Header.Set("Mcp-Session-Id", sid)
 	}
