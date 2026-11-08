@@ -81,6 +81,44 @@ func TestLLMTestGlobalKeyOnlyForGlobalEndpoint(t *testing.T) {
 	}
 }
 
+// The connection test applies the same User-Agent rule as saving a profile: a
+// value with a control character is a 400 before any request leaves, and a
+// printable value reaches the wire exactly as given.
+func TestLLMTestValidatesUserAgent(t *testing.T) {
+	var hits atomic.Int32
+	var gotUA atomic.Value
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		gotUA.Store(r.Header.Get("User-Agent"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"m","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	t.Cleanup(fake.Close)
+	s := &Server{}
+	post := func(ua string) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(map[string]any{
+			"provider": "anthropic", "model": "m", "base_url": fake.URL, "api_key": "k", "streaming": false, "user_agent": ua,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/llm/test", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.testLLM(rec, req)
+		return rec
+	}
+
+	if rec := post("good/1.0\r\nX-Injected: 1"); rec.Code != http.StatusBadRequest || hits.Load() != 0 {
+		t.Fatalf("control character in user_agent: status %d hits=%d body=%s", rec.Code, hits.Load(), rec.Body.String())
+	}
+
+	const want = "MyTool/1.0 (contact-free)"
+	if rec := post("  " + want + "  "); rec.Code != http.StatusOK {
+		t.Fatalf("printable user_agent: status %d body=%s", rec.Code, rec.Body.String())
+	}
+	if ua, _ := gotUA.Load().(string); hits.Load() != 1 || ua != want {
+		t.Fatalf("test request User-Agent = %q (hits=%d), want %q", ua, hits.Load(), want)
+	}
+}
+
 // A stored profile's key goes only to that profile's base URL, for both the
 // connection test and the model listing.
 func TestStoredProfileKeyOnlyForStoredEndpoint(t *testing.T) {
