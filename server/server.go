@@ -1488,6 +1488,14 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	if stored != nil && cfg.UserAgent == "" {
 		cfg.UserAgent = strings.TrimSpace(stored.UserAgent)
 	}
+	// Same rule as saving a profile: a value with control characters or over the
+	// length cap never reaches the wire, not even from the test button.
+	ua, err := agent.ValidateUserAgent(cfg.UserAgent)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	cfg.UserAgent = ua
 	// Keyless formats (Ollama) skip the key resolution entirely.
 	if cfg.NeedsAPIKey() {
 		// API key resolution precedence: form input > the named profile's stored key > the global config's key.

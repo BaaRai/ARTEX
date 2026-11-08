@@ -52,6 +52,29 @@ func TestValidateUserAgentRejectsNewline(t *testing.T) {
 	}
 }
 
+// The rule is "no control character at all" (r < 0x20 or r == 0x7f), so the
+// non-newline controls are rejected too, TAB included: a header value is one
+// printable token, not something to lay out with tabs.
+func TestValidateUserAgentRejectsControlCharacters(t *testing.T) {
+	for name, in := range map[string]string{
+		"NUL": "good/1.0\x00",
+		"US":  "good/1.0\x1f",
+		"DEL": "good/1.0\x7f",
+		"TAB": "good/1.0\tX",
+	} {
+		if _, err := ValidateUserAgent(in); err == nil {
+			t.Errorf("%s: expected a user agent containing %q to be rejected", name, in)
+		}
+	}
+}
+
+func TestValidateUserAgentAcceptsPrintableToken(t *testing.T) {
+	const want = "MyTool/1.0 (contact-free)"
+	if ua, err := ValidateUserAgent("  " + want + "  "); err != nil || ua != want {
+		t.Fatalf("printable value: got (%q, %v), want (%q, nil)", ua, err, want)
+	}
+}
+
 func TestValidateUserAgentRejectsTooLong(t *testing.T) {
 	if _, err := ValidateUserAgent(strings.Repeat("a", MaxUserAgentLen+1)); err == nil {
 		t.Fatalf("expected a user agent longer than %d to be rejected", MaxUserAgentLen)
