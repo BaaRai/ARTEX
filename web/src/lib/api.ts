@@ -949,6 +949,7 @@ export const api = {
     profile_id?: number,
     streaming = true, // test with the profile's real streaming mode so "streaming works, non-streaming does not" never leaks into conversations
     session_header_key = "", // non-empty = the test request also carries this custom session header (value is a one-off session id)
+    user_agent = "", // non-empty = the test overrides the User-Agent header with this value
   ) =>
     // reply = the model's actual reply (truncated); the backend marks a profile that replies with nothing as failed
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string; reply?: string }>("/llm/test", {
@@ -962,6 +963,7 @@ export const api = {
       profile_id,
       streaming,
       session_header_key,
+      user_agent,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
@@ -983,6 +985,7 @@ export const api = {
     max_tokens?: number; // output cap per reply; 0 = not sent, the server default decides
     max_tokens_field?: string; // ""=max_tokens (default) | "max_completion_tokens" (openai format only)
     session_header_key?: string; // non-empty = send this HTTP header on every request, value = the current session id; "" = not sent
+    user_agent?: string; // non-empty = override the User-Agent header on every request; "" = keep the default UA
     retry?: LLMRetryOverride; // this profile's retry override; all zeros = follow the global retry policy
   }) => post<{ id: number }>("/llm/profiles", p),
   deleteLLMProfile: (id: string) => del<{ deleted: number }>(`/llm/profiles/${id}`),
