@@ -255,14 +255,12 @@ const approvalDecisionSource = `COALESCE(NULLIF(ip.decision_source,''), CASE
  WHEN ip.rule_id IS NOT NULL THEN 'rule'
  WHEN lower(ip.reason) LIKE '` + ModelReasonPrefix + `%' OR ip.reason LIKE '` + legacyModelReasonPrefix + `%' THEN 'model' ELSE 'unknown' END)`
 
-// Rows decided before decided_by existed keep it empty; show their decision
-// source instead of rewriting history. A pending row has no deciding actor yet,
-// so its empty value is returned as is.
-const approvalDecidedBy = `CASE WHEN ip.decided_by<>'' OR ip.status='pending' THEN ip.decided_by ELSE ` + approvalDecisionSource + ` END`
-
+// decided_by is returned exactly as stored, never merged with decision_source:
+// rows decided before the column existed keep it empty, so the displayed value
+// is always the one the decided_by filter matches.
 const approvalRowColumns = `ip.id, ip.rule_id, ip.conversation_id, ip.task_id, ip.agent_name,
        ip.tool_name, ip.tool_input, ip.status, ip.reason, ip.decided_at, ip.created_at, ` + approvalDecisionSource + `,
-       ` + approvalDecidedBy + `,
+       ip.decided_by,
        COALESCE(c.title,'') AS conv_title,
        COALESCE(c.agent_key,'') AS conv_agent_key,
        COALESCE(ir.name,'') AS rule_name`
@@ -374,8 +372,9 @@ func (d *DB) listInterceptsPage(taskID string, page, size int, filter InterceptA
 	add("ip.task_id", taskID)
 	add("ip.status", filter.Status)
 	add(approvalDecisionSource, filter.DecisionSource)
-	// Stored actor only: the legacy display fallback would let decided_by=model
-	// match human decisions and timeouts recorded before the column existed.
+	// Stored actor only, the same value the rows display: deriving it from
+	// decision_source would let decided_by=model match human decisions and
+	// timeouts recorded before the column existed.
 	add("ip.decided_by", filter.DecidedBy)
 	where := ""
 	if len(conditions) > 0 {

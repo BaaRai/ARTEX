@@ -129,22 +129,41 @@ func TestInterceptDecidedBy(t *testing.T) {
 		}
 	}
 
-	// Rows decided before the column existed: displayed through decision_source,
-	// never rewritten, and not matched by the stored-actor filter.
+	// Rows decided before the column existed: decided_by stays empty everywhere it
+	// is read, decision_source keeps its own column, nothing is rewritten, and no
+	// decided_by filter matches them.
 	if _, err := d.Exec(`UPDATE intercept_pending SET decided_by='' WHERE id IN ($1,$2,$3)`, ruleID, modelID, timeoutID); err != nil {
 		t.Fatal(err)
 	}
-	for id, source := range map[int64]string{ruleID: "rule", modelID: "model", timeoutID: "model"} {
+	legacy := map[int64]string{ruleID: "rule", modelID: "model", timeoutID: "model"}
+	for id, source := range legacy {
 		detail, err := d.GetInterceptDetail(id)
-		if err != nil || detail.DecidedBy != source || detail.DecisionSource != source {
-			t.Fatalf("legacy fallback for %d: %+v err=%v, want %q", id, detail, err, source)
+		if err != nil || detail == nil || detail.DecidedBy != "" || detail.DecisionSource != source {
+			t.Fatalf("legacy detail for %d: %+v err=%v, want decided_by \"\" and decision_source %q", id, detail, err, source)
 		}
 		stored, err := d.GetInterceptPending(id)
-		if err != nil || stored.DecidedBy != "" {
+		if err != nil || stored == nil || stored.DecidedBy != "" {
 			t.Fatalf("legacy row %d rewritten: %+v err=%v", id, stored, err)
 		}
 	}
-	if got := filtered(InterceptApprovalFilter{DecidedBy: "model"}); len(got) != 0 {
-		t.Fatalf("legacy rows matched decided_by=model: %v", got)
+	rows, err = d.ListTaskIntercepts(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if source, ok := legacy[r.ID]; ok && (r.DecidedBy != "" || r.DecisionSource != source) {
+			t.Fatalf("legacy list row %d: decided_by=%q decision_source=%q, want \"\" and %q", r.ID, r.DecidedBy, r.DecisionSource, source)
+		}
+	}
+	for _, actor := range []string{"human", "rule", "model", "system"} {
+		for _, id := range filtered(InterceptApprovalFilter{DecidedBy: actor}) {
+			if _, ok := legacy[id]; ok {
+				t.Fatalf("legacy row %d matched decided_by=%s", id, actor)
+			}
+		}
+	}
+	// decision_source still finds them through its own filter.
+	if got := filtered(InterceptApprovalFilter{DecisionSource: "rule"}); !slices.Contains(got, ruleID) {
+		t.Fatalf("legacy rule row missing from decision_source=rule: %v", got)
 	}
 }

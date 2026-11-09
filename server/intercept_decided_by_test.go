@@ -207,13 +207,25 @@ func TestInterceptDecidedByHTTP(t *testing.T) {
 		}
 	}
 
-	// A row decided before the column existed falls back to decision_source.
+	// A row decided before the column existed keeps an empty decided_by; its
+	// decision_source stays in its own field and no decided_by filter returns it.
 	if _, err := d.Exec(`UPDATE intercept_pending SET decided_by='' WHERE id=$1`, ruleID); err != nil {
 		t.Fatal(err)
 	}
 	rec := do(http.MethodGet, fmt.Sprintf("/api/intercept/history/%d", ruleID), "")
-	var legacy item
-	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &legacy) != nil || legacy.DecidedBy == nil || *legacy.DecidedBy != "rule" {
+	var legacy struct {
+		DecidedBy      *string `json:"decided_by"`
+		DecisionSource string  `json:"decision_source"`
+	}
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &legacy) != nil ||
+		legacy.DecidedBy == nil || *legacy.DecidedBy != "" || legacy.DecisionSource != "rule" {
 		t.Fatalf("legacy detail: %d %s", rec.Code, rec.Body.String())
+	}
+	if items, total := list(task + "?decided_by=rule"); total != 0 || len(items) != 0 {
+		t.Fatalf("legacy row matched decided_by=rule: %+v", items)
+	}
+	items, _ = list(task + "?decision_source=rule")
+	if len(items) != 1 || items[0].ID != ruleID || *items[0].DecidedBy != "" {
+		t.Fatalf("legacy row under decision_source=rule: %+v", items)
 	}
 }

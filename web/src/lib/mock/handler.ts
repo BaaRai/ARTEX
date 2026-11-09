@@ -2431,16 +2431,19 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     const decisionSource = q.get("decision_source") || "";
     if (status && !["pending", "allowed", "denied", "timeout"].includes(status)) throw new Error("invalid approval status");
     if (decisionSource && !["model", "rule", "unknown"].includes(decisionSource)) throw new Error("invalid decision source");
+    const decidedBy = q.get("decided_by") || "";
+    if (decidedBy && !["human", "rule", "model", "system"].includes(decidedBy)) throw new Error("invalid decided_by");
     const filtered = mockInterceptHistory.filter((row) => {
       const source =
         row.decision_source || (row.rule_id ? "rule" : row.reason?.startsWith("[model]") ? "model" : "unknown");
       return (
         (seg[1] !== "task" || row.task_id === decodeURIComponent(seg[2])) &&
         (!status || row.status === status) &&
-        (!decisionSource || source === decisionSource)
+        (!decisionSource || source === decisionSource) &&
+        (!decidedBy || row.decided_by === decidedBy)
       );
     });
-    if (!q.has("page") && !q.has("size") && !status && !decisionSource)
+    if (!q.has("page") && !q.has("size") && !status && !decisionSource && !decidedBy)
       return { items: filtered, total: filtered.length };
     const page = Math.max(1, Number(q.get("page")) || 1);
     const size = Math.min(100, Math.max(1, Number(q.get("size")) || 20));

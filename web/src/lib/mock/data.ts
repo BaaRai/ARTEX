@@ -3496,6 +3496,7 @@ interceptHistory.unshift({
   tool_input: { path: "reports/summary.md", content: "# Check summary\n\nThis round of verification is complete; existing evidence and follow-up suggestions are organized." },
   status: "allowed",
   decision_source: "model",
+  decided_by: "model",
   reason: "[model] Write the existing check conclusions into a local report without modifying business data.",
   created_at: T("2026-07-26T08:00:00Z"),
   decided_at: T("2026-07-26T08:00:02Z"),
