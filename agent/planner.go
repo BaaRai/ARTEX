@@ -457,6 +457,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		Settlement:   settle,
 		NonStreaming: p.nonStreaming(), // when this profile selects non-streaming, use Provider.Complete
 		MaxTokens:    p.maxTokens(),    // 0 = send no cap; the server default decides
+
+		// Opt-in via ARTEX_UNTRUSTED_BOUNDARY (default off): nonce-frame tool output as untrusted data.
+		UntrustedOutputBoundary: untrustedBoundaryEnabled(),
 	}
 	if p.tx != nil { // persist raw LLM conversation; one accumulating file per task's planner
 		opts.Transcript = p.tx
