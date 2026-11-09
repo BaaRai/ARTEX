@@ -481,6 +481,10 @@ export type FindingStatus =
   | "duplicate"
   | "risk_accepted";
 
+// Verification status (S1): the automated proof-of-exploitation outcome, distinct from the
+// human triage status above. "blocked" is produced by no path yet but is displayed when present.
+export type VerificationStatus = "verified" | "unverified" | "blocked" | "not_assessed" | "false_positive";
+
 // FindingAsset is an asset bound to a vulnerability (label pre-rendered by the backend).
 export interface FindingAsset {
   id: string;
@@ -493,6 +497,9 @@ export interface Finding {
   evidence_version?: number;
   report_evidence_version?: number;
   report_stale?: boolean;
+  poe_level?: number; // proof-of-exploitation level (3 or 4 when verified); 0 = none declared
+  verification_status?: VerificationStatus; // automated verification outcome (S1)
+  verification_note?: string; // why the status was reached; empty when verified
   id: string;
   finding_id?: string; // row id in the standalone findings table, the handle for status updates (may be missing for old in-task nodes)
   vulnclass: string;
@@ -575,6 +582,7 @@ export interface FindingQuery {
   pageSize: number;
   severity?: "all" | Severity;
   status?: "all" | FindingStatus;
+  verificationStatus?: "all" | VerificationStatus;
   vulnclass?: string;
   task?: string; // task id; "all"/empty = no task filter
   query?: string;

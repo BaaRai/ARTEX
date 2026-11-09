@@ -36,8 +36,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { statusMeta } from "@/lib/status";
-import type { ActiveFindingRetest, Finding, FindingStatus, Severity } from "@/lib/types";
+import { statusMeta, type Tone, toneClasses } from "@/lib/status";
+import type { ActiveFindingRetest, Finding, FindingStatus, Severity, VerificationStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
@@ -53,6 +53,45 @@ export const FINDING_STATUSES: FindingStatus[] = [
   "duplicate",
   "risk_accepted",
 ];
+
+export const VERIFICATION_STATUSES: VerificationStatus[] = [
+  "verified",
+  "unverified",
+  "blocked",
+  "not_assessed",
+  "false_positive",
+];
+
+// Verification outcome → label/tone, on the same tone tokens StatusBadge uses.
+export const VERIFICATION_META: Record<VerificationStatus, { label: string; tone: Tone }> = {
+  verified: { label: "Verified", tone: "green" },
+  unverified: { label: "Unverified", tone: "slate" },
+  blocked: { label: "Blocked", tone: "amber" },
+  not_assessed: { label: "Not assessed", tone: "red" },
+  false_positive: { label: "False positive", tone: "neutral" },
+};
+
+// VerificationBadge shows the automated verification outcome ("Verified L3" when a
+// proof-of-exploitation level is declared). It renders nothing when the finding carries
+// no verification status (in-task nodes, payloads from before the column existed).
+export function VerificationBadge({ finding }: { finding: Pick<Finding, "verification_status" | "poe_level"> }) {
+  const meta = finding.verification_status ? VERIFICATION_META[finding.verification_status] : undefined;
+  if (!meta) return null;
+  const label =
+    finding.verification_status === "verified" && finding.poe_level
+      ? `${meta.label} L${finding.poe_level}`
+      : meta.label;
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center whitespace-nowrap rounded-md border px-2 py-0.5 font-medium text-xs",
+        toneClasses[meta.tone],
+      )}
+    >
+      {label}
+    </span>
+  );
+}
 
 export const UNASSIGNED_TASK = "__unassigned__";
 
@@ -213,7 +252,10 @@ export function FindingsTable({
                       <span className="truncate font-medium">{f.name || f.vulnclass || "Uncategorized"}</span>
                     )}
                     <span className="truncate text-xs text-muted-foreground">{f.summary}</span>
-                    <Badge variant="outline">Traffic evidence: {f.traffic_count ?? 0}</Badge>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Badge variant="outline">Traffic evidence: {f.traffic_count ?? 0}</Badge>
+                      <VerificationBadge finding={f} />
+                    </div>
                   </div>
                 </TableCell>
                 <TableCell>

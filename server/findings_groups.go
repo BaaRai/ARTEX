@@ -29,9 +29,10 @@ func findingPaginationParam(raw string, fallback, upperBound int) int {
 // query string. The list / grouping / asset tree / export all share one parsing path; new filter options only change here.
 func findingFilterFromQuery(q url.Values) db.FindingFilter {
 	return db.FindingFilter{
-		Severity:  normFilter(q.Get("severity")),
-		Status:    normFilter(q.Get("status")),
-		VulnClass: normFilter(q.Get("vulnclass")),
+		Severity:           normFilter(q.Get("severity")),
+		Status:             normFilter(q.Get("status")),
+		VerificationStatus: normFilter(q.Get("verification_status")),
+		VulnClass:          normFilter(q.Get("vulnclass")),
 		// task_id (independent of the task param, which switches to the per-task-node branch): filters the global table by task.
 		TaskID:     normFilter(q.Get("task_id")),
 		Query:      q.Get("q"),

@@ -25,6 +25,7 @@ import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingStatus, Severity } from "@/lib/types";
 
+import { VerificationBadge } from "../_components/findings-table";
 import { FindingLineageView } from "./lineage";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
@@ -147,6 +148,7 @@ function FindingDetailInner() {
           <Separator orientation="vertical" className="mx-1 h-4" />
           <StatusBadge domain="severity" value={finding.severity} dot />
           <StatusBadge domain="finding" value={finding.status} dot />
+          <VerificationBadge finding={finding} />
           {finding.inherited && finding.source_task_id && (
             <Badge variant="outline">Source task #{finding.source_task_id} · read-only</Badge>
           )}
@@ -271,6 +273,18 @@ function FindingDetailInner() {
                     </Select>
                   )}
                 </FieldRow>
+
+                {/* Verification: automated outcome; the note explains any state other than verified */}
+                {finding.verification_status && (
+                  <FieldRow label="Verification">
+                    <VerificationBadge finding={finding} />
+                    {finding.verification_status !== "verified" && finding.verification_note?.trim() && (
+                      <p className="whitespace-pre-wrap break-words text-muted-foreground text-xs">
+                        {finding.verification_note}
+                      </p>
+                    )}
+                  </FieldRow>
+                )}
 
                 {/* Vulnerability type */}
                 <FieldRow label="Vulnerability type">
