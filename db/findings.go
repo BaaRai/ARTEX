@@ -154,12 +154,13 @@ func (d *DB) ListFindings(limit int) ([]*DBFinding, error) {
 // filter on that column". Sort is "severity" (severity desc, then newest) or
 // anything else (newest first).
 type FindingFilter struct {
-	Severity  string // high | medium | low
-	Status    string // pending | false_positive | ignored | resolved
-	VulnClass string
-	TaskID    string // task id (in string form; empty/invalid = do not filter by task)
-	Query     string // fuzzy search keyword over name/class/summary/evidence/report body
-	Sort      string // "severity" | "time"
+	Severity           string // high | medium | low
+	Status             string // pending | false_positive | ignored | resolved
+	VerificationStatus string // verified | unverified | blocked | not_assessed | false_positive
+	VulnClass          string
+	TaskID             string // task id (in string form; empty/invalid = do not filter by task)
+	Query              string // fuzzy search keyword over name/class/summary/evidence/report body
+	Sort               string // "severity" | "time"
 	// AssetScope is a node key of the asset tree (a:<id> / c:<id> / r:<domain> /
 	// __none__); selecting a node means selecting its whole subtree.
 	// Empty = do not filter by asset.
@@ -192,6 +193,7 @@ func (f FindingFilter) where() (string, []any) {
 	}
 	add("severity", f.Severity)
 	add("status", f.Status)
+	add("verification_status", f.VerificationStatus)
 	add("vulnclass", f.VulnClass)
 	// task_id is a bigint column, compared as an integer (it cannot go through
 	// the text add above); empty/invalid values are ignored.

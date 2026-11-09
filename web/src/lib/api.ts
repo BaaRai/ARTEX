@@ -218,6 +218,7 @@ function findingFilterParams(q: Omit<FindingQuery, "page" | "pageSize">): URLSea
   const p = new URLSearchParams();
   if (q.severity && q.severity !== "all") p.set("severity", q.severity);
   if (q.status && q.status !== "all") p.set("status", q.status);
+  if (q.verificationStatus && q.verificationStatus !== "all") p.set("verification_status", q.verificationStatus);
   if (q.vulnclass && q.vulnclass !== "all") p.set("vulnclass", q.vulnclass);
   if (q.task && q.task !== "all") p.set("task_id", q.task);
   if (q.query?.trim()) p.set("q", q.query.trim());
