@@ -37,7 +37,7 @@ type InterceptPending struct {
 	ToolInput      json.RawMessage `json:"tool_input"`
 	Status         string          `json:"status"`
 	DecisionSource string          `json:"decision_source"`
-	Reason         string          `json:"reason"` // rule message or model decision reason (prefixed with [Model])
+	Reason         string          `json:"reason"` // rule message or model decision reason (prefixed with ModelReasonPrefix)
 	DecidedAt      *time.Time      `json:"decided_at"`
 	CreatedAt      time.Time       `json:"created_at"`
 }
@@ -225,10 +225,26 @@ func scanInterceptApprovalRow(rows interface{ Scan(...any) error }, r *Intercept
 	)
 }
 
+// ModelReasonPrefix starts every reason written by the LLM fallback judge
+// (intercept.JudgeReason); readers derive decision_source='model' from it.
+const ModelReasonPrefix = "[model]"
+
+// legacyModelReasonPrefix is what the judge wrote before the UI translation (e233c02).
+const legacyModelReasonPrefix = "[模型]"
+
+// isModelReason reports whether reason was written by the model judge. The
+// comparison ignores case: readers used to expect "[Model]" while the writer
+// produced "[model]", so stored rows may carry either spelling.
+func isModelReason(reason string) bool {
+	return strings.HasPrefix(strings.ToLower(reason), ModelReasonPrefix) ||
+		strings.HasPrefix(reason, legacyModelReasonPrefix)
+}
+
 // Keep legacy rows without decision_source consistent with their displayed source.
+// Mirrors isModelReason; PostgreSQL LIKE is case-sensitive and '[' is literal.
 const approvalDecisionSource = `COALESCE(NULLIF(ip.decision_source,''), CASE
  WHEN ip.rule_id IS NOT NULL THEN 'rule'
- WHEN ip.reason LIKE '[Model]%' THEN 'model' ELSE 'unknown' END)`
+ WHEN lower(ip.reason) LIKE '` + ModelReasonPrefix + `%' OR ip.reason LIKE '` + legacyModelReasonPrefix + `%' THEN 'model' ELSE 'unknown' END)`
 
 const approvalRowColumns = `ip.id, ip.rule_id, ip.conversation_id, ip.task_id, ip.agent_name,
        ip.tool_name, ip.tool_input, ip.status, ip.reason, ip.decided_at, ip.created_at, ` + approvalDecisionSource + `,
@@ -248,7 +264,7 @@ func interceptSource(ruleID int64, reason string) string {
 	if ruleID != 0 {
 		return "rule"
 	}
-	if strings.HasPrefix(reason, "[Model]") {
+	if isModelReason(reason) {
 		return "model"
 	}
 	return "unknown"
