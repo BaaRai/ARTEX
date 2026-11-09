@@ -312,6 +312,9 @@ type FindingDTO struct {
 	ReportEvidenceVersion int64                      `json:"report_evidence_version"`
 	ReportStale           bool                       `json:"report_stale"`
 	TrafficBindings       []db.FindingTrafficBinding `json:"traffic_bindings,omitempty"`
+	PoELevel              int                        `json:"poe_level"`
+	VerificationStatus    string                     `json:"verification_status"`
+	VerificationNote      string                     `json:"verification_note"`
 
 	ID        string `json:"id"`
 	FindingID string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
@@ -452,6 +455,7 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 		FindingID:    i64s(f.ID),
 		TrafficCount: f.TrafficCount, EvidenceVersion: f.EvidenceVersion, ReportEvidenceVersion: f.ReportEvidenceVersion,
 		ReportStale: f.Report != "" && f.EvidenceVersion != f.ReportEvidenceVersion, TrafficBindings: f.TrafficBindings,
+		PoELevel: f.PoELevel, VerificationStatus: f.VerificationStatus, VerificationNote: f.VerificationNote,
 		VulnClass: f.VulnClass,
 		Name:      f.Name,
 		Severity:  f.Severity,

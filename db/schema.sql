@@ -1177,6 +1177,12 @@ CREATE TRIGGER trg_conversation_retest_delete BEFORE DELETE ON conversations
 
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS evidence_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS report_evidence_version BIGINT NOT NULL DEFAULT 0;
+-- Machine-checked proof state (S1). Separate from status (human disposition). Existing rows stay
+-- unverified / POE 0: history is never auto-verified. Values validated server-side, no CHECK.
+-- verification_status: verified / unverified / blocked / not_assessed / false_positive.
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS poe_level SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unverified';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_note TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS traffic_evidence_snapshots (
     id TEXT PRIMARY KEY,
