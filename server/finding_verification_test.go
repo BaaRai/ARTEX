@@ -140,7 +140,7 @@ func TestVerificationUnreadableStoreNotAssessedReportSaved(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(s.m.dir, "evidence")); err != nil {
 		t.Fatal(err)
 	}
-	msg, isErr := updateReport(t, s, f.NodeID, `,"poe_level":3,"evidence_quotes":["x7"]`)
+	msg, isErr := updateReport(t, s, f.NodeID, `,"poe_level":3,"evidence_quotes":["user admin:  x7"]`)
 	if isErr || !strings.Contains(msg, "verification: not_assessed") {
 		t.Fatalf("unexpected result: err=%v %q", isErr, msg)
 	}
