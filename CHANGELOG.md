@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file. The format is b
 
 - **Optional custom User-Agent for LLM requests**: an LLM profile can set a `User-Agent` value that overrides the header on every outbound LLM request; left empty, the default User-Agent is unchanged. The value is trimmed and rejected if it contains control characters or exceeds 256 bytes. Part of #154 (the fixed-full-URL mode is not included).
 
+### Docs
+
+- **LLM base URL note in the README**: for the Anthropic format, enter the host without a `/v1` suffix (the provider appends `/v1/messages`, so a `/v1` base becomes `/v1/v1/messages`); OpenAI-format providers append `/chat/completions`, so their base does end in `/v1`. Follow-up to #154.
+
 ## [0.5.1] - 2026-11-05
 
 Login rate limiting per client IP with trusted-proxy support, a 12-character minimum for new passwords, a loopback-only default for the binary, and the JWT signing key in its own Docker volume.
