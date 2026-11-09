@@ -884,7 +884,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             <SelectContent>
               <SelectGroup>
                 <SelectItem value="all">All actors</SelectItem>
-                <SelectItem value="model">AI-approved only</SelectItem>
+                <SelectItem value="model">AI-decided</SelectItem>
                 <SelectItem value="human">Human</SelectItem>
                 <SelectItem value="rule">Rule</SelectItem>
                 <SelectItem value="system">System</SelectItem>
