@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -55,7 +56,7 @@ func (d *DB) GetInterceptDetail(id int64) (*InterceptDetail, error) {
 	err := d.QueryRow(approvalRowSelectWithAudit+` WHERE ip.id=$1`, id).Scan(
 		&out.ID, &out.RuleID, &out.ConversationID, &out.TaskID, &out.AgentName,
 		&out.ToolName, &out.ToolInput, &out.Status, &out.Reason, &out.DecidedAt, &out.CreatedAt,
-		&out.DecisionSource, &out.ConvTitle, &out.ConvAgentKey, &out.RuleName, &raw,
+		&out.DecisionSource, &out.DecidedBy, &out.ConvTitle, &out.ConvAgentKey, &out.RuleName, &raw,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -73,7 +74,14 @@ func (d *DB) GetInterceptDetail(id int64) (*InterceptDetail, error) {
 
 // ResolveIntercept atomically settles a pending request. A timeout cannot
 // overwrite a human decision and repeat decisions cannot rewrite history.
-func (d *DB) ResolveIntercept(id int64, status, action, reason string) (bool, error) {
+// decidedBy records the settling actor (human | rule | model | system); it is
+// supplied by the caller because status alone cannot tell them apart.
+func (d *DB) ResolveIntercept(id int64, status, action, reason, decidedBy string) (bool, error) {
+	switch decidedBy {
+	case "human", "rule", "model", "system":
+	default:
+		return false, fmt.Errorf("decided_by must be human, rule, model or system, got %q", decidedBy)
+	}
 	execution := "not_executed"
 	if action == "allow" {
 		execution = "awaiting_result"
@@ -84,11 +92,11 @@ func (d *DB) ResolveIntercept(id int64, status, action, reason string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	r, err := d.Exec(`UPDATE intercept_pending SET status=$2, decided_at=NOW(),
+	r, err := d.Exec(`UPDATE intercept_pending SET status=$2, decided_at=NOW(), decided_by=$5,
 		audit=CASE WHEN audit IS NULL THEN NULL ELSE audit || $3::jsonb ||
         CASE WHEN $4='allow' AND audit->>'correlation' IS DISTINCT FROM 'exact'
         THEN '{"execution_status":"unknown"}'::jsonb ELSE '{}'::jsonb END END
-        WHERE id=$1 AND status='pending'`, id, status, patch, action)
+        WHERE id=$1 AND status='pending'`, id, status, patch, action, decidedBy)
 	if err != nil {
 		return false, err
 	}
