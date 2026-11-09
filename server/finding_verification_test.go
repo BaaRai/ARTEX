@@ -109,6 +109,19 @@ func TestVerificationProofPOE3ExactQuoteVerified(t *testing.T) {
 	}
 }
 
+func TestVerificationShortQuoteUnverified(t *testing.T) {
+	s, f, _ := verificationFixture(t, "proof")
+	// "x7" is present in the body but below verificationMinQuoteRunes: it must not count.
+	msg, isErr := updateReport(t, s, f.NodeID, `,"poe_level":3,"evidence_quotes":["x7"]`)
+	if isErr || !strings.Contains(msg, "verification: unverified - evidence quote too short") {
+		t.Fatalf("unexpected result: err=%v %q", isErr, msg)
+	}
+	status, _, note, _ := storedVerification(t, s, f.FindingID)
+	if status != db.VerificationUnverified || note != "evidence quote too short" {
+		t.Fatalf("stored: status=%s note=%q", status, note)
+	}
+}
+
 func TestVerificationOldStyleCallUnverifiedWithoutError(t *testing.T) {
 	s, f, _ := verificationFixture(t, "proof")
 	msg, isErr := updateReport(t, s, f.NodeID, "")

@@ -20,9 +20,10 @@ import (
 // bodies. Anything else is unverified, blocked or not_assessed, with a note.
 
 const (
-	verificationMinPOE       = 3
-	verificationReadCap      = 4 << 20 // bytes read per bound body; a quote beyond this cannot be confirmed
-	verificationNoteQuoteLen = 60
+	verificationMinPOE        = 3
+	verificationMinQuoteRunes = 8       // shorter normalized quotes are ignored: "x7" proves nothing
+	verificationReadCap       = 4 << 20 // bytes read per bound body; a quote beyond this cannot be confirmed
+	verificationNoteQuoteLen  = 60
 )
 
 // boundBody is one bound response body, read through the evidence store and
@@ -91,6 +92,15 @@ func (s *Server) assessFindingVerification(ctx context.Context, findingID int64,
 	if len(quotes) == 0 {
 		return db.VerificationUnverified, "no evidence quotes provided"
 	}
+	var checked []string
+	for _, q := range quotes {
+		if utf8.RuneCountInString(normalizeEvidenceText(q)) >= verificationMinQuoteRunes {
+			checked = append(checked, q)
+		}
+	}
+	if len(checked) == 0 {
+		return db.VerificationUnverified, "evidence quote too short"
+	}
 	store := s.evidenceStore()
 	bodies := make([]boundBody, 0, len(proofs))
 	for _, b := range proofs {
@@ -101,7 +111,7 @@ func (s *Server) assessFindingVerification(ctx context.Context, findingID int64,
 		}
 		bodies = append(bodies, bb)
 	}
-	for _, q := range quotes {
+	for _, q := range checked {
 		nq := normalizeEvidenceText(q)
 		if nq != "" && quoteInBodies(nq, bodies) {
 			continue
