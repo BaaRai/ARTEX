@@ -76,6 +76,9 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 	if has["update_finding_report"] && has["bind_finding_traffic"] && has["get_finding_traffic"] {
 		guidance += "\n\n**Auto-link traffic before reporting (enabled)**: you are responsible for verifying and binding traffic for the vulnerability that triggered this run, then writing the report. First obtain the unambiguous finding_id and finding_node_id from the report_finding return JSON or get_task_node_detail / list_task_findings. Read the vulnerability details, the corresponding intent's execution records, and the existing evidence list, preferring the real IDs handed off by the reporter. If this verification is HTTP and the traffic tools are available, use traffic_search to filter candidates, then traffic_get to verify item by item that the request/response truly supports the vulnerability; domains and times are only for filtering and do not prove attribution. Bind the confirmed evidence in reproduction order via bind_finding_traffic(finding_id, traffic_refs), choosing baseline / proof / verification / supporting and stating the purpose. Operate only on this vulnerability — do not recreate vulnerabilities or re-probe the target. After a successful bind, call get_finding_traffic again for the latest version, read the bodies you need, then pass the version you actually read as evidence_version to update_finding_report (whose finding_id parameter still takes finding_node_id). Do not re-append existing bindings. For TCP, no-capture, unavailable tools, or no exact match, skip auto-binding, write the report from textual/command evidence with the reason stated, and never guess to force traffic in. Do not claim success when binding fails; keep the existing evidence and explain in the report why nothing was bound."
 	}
+	if has["update_finding_report"] {
+		guidance += findingVerificationGuidance
+	}
 	if guidance != "" || has["get_finding_traffic"] || has["update_finding_report"] {
 		guidance += findingIDGuidance
 	}
@@ -126,3 +129,8 @@ func (t *ToolSet) findingRefsFromHint(hintID int64, explicit []db.TrafficRef) ([
 	}
 	return db.NormalizeTrafficRefs(append(append([]db.TrafficRef{}, explicit...), payload.Refs...))
 }
+
+// findingVerificationGuidance tells the report writer how to declare proof
+// (S1). The server downgrades any finding whose declaration does not hold up,
+// so the agent must never state a level or quote it cannot read in the bound body.
+const findingVerificationGuidance = "\n\n**Verification (S1)**: when you call update_finding_report, also declare poe_level (0-4) and evidence_quotes. poe_level 1 = error, timing or response variation; 2 = structural manipulation (boolean, UNION, parser difference); 3 = actual data extracted; 4 = critical impact (admin credentials, code execution). L3 is the minimum for a verified finding. evidence_quotes must be exact lines copied from a bound proof or verification response body (read it with get_finding_traffic first), never from memory or from the report text; the server checks each quote verbatim after whitespace normalization. If you cannot quote the proof, omit the quotes: the finding then stays unverified, which is acceptable. Do not raise poe_level to get a verified status."
