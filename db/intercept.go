@@ -27,6 +27,8 @@ type InterceptRule struct {
 }
 
 // InterceptPending is one row of intercept_pending.
+// DecidedBy is the actor that settled the request: "" while pending, otherwise
+// human | rule | model | system (timeouts and cancellations).
 type InterceptPending struct {
 	ID             int64           `json:"id"`
 	RuleID         *int64          `json:"rule_id"`
@@ -37,6 +39,7 @@ type InterceptPending struct {
 	ToolInput      json.RawMessage `json:"tool_input"`
 	Status         string          `json:"status"`
 	DecisionSource string          `json:"decision_source"`
+	DecidedBy      string          `json:"decided_by"`
 	Reason         string          `json:"reason"` // rule message or model decision reason (prefixed with ModelReasonPrefix)
 	DecidedAt      *time.Time      `json:"decided_at"`
 	CreatedAt      time.Time       `json:"created_at"`
@@ -163,19 +166,25 @@ func (d *DB) CreateDecidedIntercept(ruleID, convID int64, taskID, agentName, too
 	if ruleID != 0 {
 		ruleIDPtr = &ruleID
 	}
+	// Rows logged here were settled without a human: by the matching rule, or by
+	// the model judge when no rule owns the decision.
+	decidedBy := "model"
+	if ruleID != 0 {
+		decidedBy = "rule"
+	}
 	var id int64
 	err := d.QueryRow(`
-INSERT INTO intercept_pending(rule_id, conversation_id, task_id, agent_name, tool_name, tool_input, status, reason, decided_at, decision_source, audit)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10) RETURNING id`,
-		ruleIDPtr, convIDPtr, taskIDPtr, agentName, toolName, raw, status, reason, interceptSource(ruleID, reason), firstAudit(audits)).Scan(&id)
+INSERT INTO intercept_pending(rule_id, conversation_id, task_id, agent_name, tool_name, tool_input, status, reason, decided_at, decision_source, audit, decided_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, $11) RETURNING id`,
+		ruleIDPtr, convIDPtr, taskIDPtr, agentName, toolName, raw, status, reason, interceptSource(ruleID, reason), firstAudit(audits), decidedBy).Scan(&id)
 	return id, err
 }
 
-const interceptPendingCols = `id, rule_id, conversation_id, task_id, agent_name, tool_name, tool_input, status, reason, decided_at, created_at, decision_source`
+const interceptPendingCols = `id, rule_id, conversation_id, task_id, agent_name, tool_name, tool_input, status, reason, decided_at, created_at, decision_source, decided_by`
 
 func scanInterceptPending(s interface{ Scan(...any) error }, p *InterceptPending) error {
 	return s.Scan(&p.ID, &p.RuleID, &p.ConversationID, &p.TaskID, &p.AgentName,
-		&p.ToolName, &p.ToolInput, &p.Status, &p.Reason, &p.DecidedAt, &p.CreatedAt, &p.DecisionSource)
+		&p.ToolName, &p.ToolInput, &p.Status, &p.Reason, &p.DecidedAt, &p.CreatedAt, &p.DecisionSource, &p.DecidedBy)
 }
 
 // ListPendingIntercepts returns all unresolved approval requests, newest first.
@@ -221,7 +230,7 @@ func scanInterceptApprovalRow(rows interface{ Scan(...any) error }, r *Intercept
 	return rows.Scan(
 		&r.ID, &r.RuleID, &r.ConversationID, &r.TaskID, &r.AgentName,
 		&r.ToolName, &r.ToolInput, &r.Status, &r.Reason, &r.DecidedAt, &r.CreatedAt,
-		&r.DecisionSource, &r.ConvTitle, &r.ConvAgentKey, &r.RuleName,
+		&r.DecisionSource, &r.DecidedBy, &r.ConvTitle, &r.ConvAgentKey, &r.RuleName,
 	)
 }
 
@@ -246,8 +255,12 @@ const approvalDecisionSource = `COALESCE(NULLIF(ip.decision_source,''), CASE
  WHEN ip.rule_id IS NOT NULL THEN 'rule'
  WHEN lower(ip.reason) LIKE '` + ModelReasonPrefix + `%' OR ip.reason LIKE '` + legacyModelReasonPrefix + `%' THEN 'model' ELSE 'unknown' END)`
 
+// decided_by is returned exactly as stored, never merged with decision_source:
+// rows decided before the column existed keep it empty, so the displayed value
+// is always the one the decided_by filter matches.
 const approvalRowColumns = `ip.id, ip.rule_id, ip.conversation_id, ip.task_id, ip.agent_name,
        ip.tool_name, ip.tool_input, ip.status, ip.reason, ip.decided_at, ip.created_at, ` + approvalDecisionSource + `,
+       ip.decided_by,
        COALESCE(c.title,'') AS conv_title,
        COALESCE(c.agent_key,'') AS conv_agent_key,
        COALESCE(ir.name,'') AS rule_name`
@@ -300,11 +313,12 @@ func (d *DB) ListAllIntercepts(limit int) ([]InterceptApprovalRow, error) {
 	return out, rows.Err()
 }
 
-// InterceptApprovalFilter combines exact status and decision-source filters.
-// Empty fields include all values.
+// InterceptApprovalFilter combines exact status, decision-source and
+// deciding-actor filters. Empty fields include all values.
 type InterceptApprovalFilter struct {
 	Status         string
 	DecisionSource string
+	DecidedBy      string
 }
 
 // ListAllInterceptsPage returns one 1-based page and the total matching count.
@@ -358,6 +372,10 @@ func (d *DB) listInterceptsPage(taskID string, page, size int, filter InterceptA
 	add("ip.task_id", taskID)
 	add("ip.status", filter.Status)
 	add(approvalDecisionSource, filter.DecisionSource)
+	// Stored actor only, the same value the rows display: deriving it from
+	// decision_source would let decided_by=model match human decisions and
+	// timeouts recorded before the column existed.
+	add("ip.decided_by", filter.DecidedBy)
 	where := ""
 	if len(conditions) > 0 {
 		where = " WHERE " + strings.Join(conditions, " AND ")

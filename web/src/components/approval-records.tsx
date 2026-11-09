@@ -108,6 +108,23 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant={variant}>{labels[status] ?? status}</Badge>;
 }
 
+const decidedByLabels: Record<string, string> = { human: "Human", rule: "Rule", model: "Model", system: "System" };
+
+// decided_by is shown exactly as stored, so a row always sits under the
+// "Decided by" filter option matching its badge. A decided row without an actor
+// predates the column: it reads "Legacy" and matches no option.
+function DecidedByBadge({ row }: { row: InterceptApprovalRow }) {
+  if (row.status === "pending") return <span className="text-muted-foreground">—</span>;
+  if (!row.decided_by) {
+    return (
+      <Badge variant="outline" className="text-muted-foreground">
+        Legacy
+      </Badge>
+    );
+  }
+  return <Badge variant="outline">{decidedByLabels[row.decided_by] ?? row.decided_by}</Badge>;
+}
+
 function MatchCell({ row, showReason = true }: { row: InterceptApprovalRow; showReason?: boolean }) {
   const reason = row.reason?.replace(/^\[model\]\s*/, "");
   return (
@@ -383,6 +400,10 @@ export function ApprovalDetail({
             <dd>{fmtTime(row.created_at)}</dd>
             <dt className="text-muted-foreground">Decided at</dt>
             <dd>{fmtTime(current.decided_at)}</dd>
+            <dt className="text-muted-foreground">Decided by</dt>
+            <dd>
+              <DecidedByBadge row={current} />
+            </dd>
             {audit?.rule_name ? (
               <>
                 <dt className="text-muted-foreground">Rule snapshot</dt>
@@ -527,10 +548,10 @@ function subscribeColumns(onChange: () => void) {
 }
 function visibleColumnCount() {
   const matches = approvalBreakpoints.map((query) => window.matchMedia(query).matches);
-  return 3 + Number(matches[0]) + Number(matches[1]) + 2 * Number(matches[2]) + 2 * Number(matches[3]);
+  return 3 + Number(matches[0]) + Number(matches[1]) + 3 * Number(matches[2]) + 2 * Number(matches[3]);
 }
 function serverColumnCount() {
-  return 9;
+  return 10;
 }
 
 function ApprovalTable({
@@ -570,6 +591,7 @@ function ApprovalTable({
           <TableHead className="hidden lg:table-cell">Matched rule</TableHead>
           <TableHead className="hidden xl:table-cell">Arguments</TableHead>
           <TableHead className="w-24">Status</TableHead>
+          <TableHead className="hidden w-24 lg:table-cell">Decided by</TableHead>
           <TableHead className="hidden w-36 lg:table-cell">Requested at</TableHead>
           <TableHead className="hidden w-36 xl:table-cell">Decided at</TableHead>
         </TableRow>
@@ -623,6 +645,9 @@ function ApprovalTable({
                 <TableCell>
                   <StatusBadge status={row.status} />
                 </TableCell>
+                <TableCell className="hidden lg:table-cell">
+                  <DecidedByBadge row={row} />
+                </TableCell>
                 <TableCell className="hidden text-muted-foreground text-xs lg:table-cell">
                   {fmtTime(row.created_at)}
                 </TableCell>
@@ -663,7 +688,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
   const request = React.useRef(0);
   const decisionLock = React.useRef(false);
   const filterID = React.useId();
-  const filtered = Boolean(filter.status || filter.decision_source);
+  const filtered = Boolean(filter.status || filter.decision_source || filter.decided_by);
 
   // A task can stay mounted while the user switches between task details.
   // Reset the cursor so the new scope always starts at its newest records.
@@ -749,7 +774,9 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       // Optimistically drop the decided item from the independent pending queue
       // for instant feedback; the re-fetch below reconciles with server truth.
       setRows((prev) =>
-        prev.map((row) => (row.id === id ? { ...row, status: decision, decided_at: new Date().toISOString() } : row)),
+        prev.map((row) =>
+          row.id === id ? { ...row, status: decision, decided_by: "human", decided_at: new Date().toISOString() } : row,
+        ),
       );
       setPendingRows((prev) => prev.filter((row) => row.id !== id));
       setRevision((v) => v + 1);
@@ -840,6 +867,31 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             </SelectContent>
           </Select>
         </Field>
+        <Field className="w-full sm:w-40">
+          <FieldLabel htmlFor={`${filterID}-decided-by`}>Decided by</FieldLabel>
+          <Select
+            value={filter.decided_by ?? "all"}
+            onValueChange={(value) =>
+              changeFilter({
+                ...filter,
+                decided_by: value === "all" ? undefined : (value as InterceptApprovalFilter["decided_by"]),
+              })
+            }
+          >
+            <SelectTrigger id={`${filterID}-decided-by`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="all">All actors</SelectItem>
+                <SelectItem value="model">AI-decided</SelectItem>
+                <SelectItem value="human">Human</SelectItem>
+                <SelectItem value="rule">Rule</SelectItem>
+                <SelectItem value="system">System</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
         {filtered ? (
           <Button variant="ghost" size="sm" onClick={() => changeFilter({})}>
             Clear filters
@@ -885,7 +937,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
               <EmptyTitle>{filtered ? "No approval records match the filters" : "No approval records"}</EmptyTitle>
               <EmptyDescription>
                 {filtered
-                  ? "Adjust the approval status or decision source, or clear the filters to see all records."
+                  ? "Adjust the approval status, decision source or deciding actor, or clear the filters to see all records."
                   : "Records will appear here once a rule or model makes an approval decision."}
               </EmptyDescription>
             </EmptyHeader>

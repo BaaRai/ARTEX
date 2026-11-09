@@ -637,7 +637,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		case allowed := <-ch:
 			return allowed
 		case <-ctx.Done():
-			_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", "work cancelled")
+			_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", "work cancelled", "system")
 			_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", "work cancelled before execution", false)
 			return false
 		}
@@ -658,7 +658,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		if allowed {
 			action = "allow"
 		}
-		resolved, err := i.db.ResolveIntercept(pendingID, "timeout", action, "approval timed out, applying timeout policy")
+		resolved, err := i.db.ResolveIntercept(pendingID, "timeout", action, "approval timed out, applying timeout policy", "system")
 		if err != nil {
 			return false
 		}
@@ -668,7 +668,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		}
 		return allowed
 	case <-ctx.Done():
-		_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", "work cancelled")
+		_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", "work cancelled", "system")
 		_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", "work cancelled before execution", false)
 		return false
 	}
@@ -686,7 +686,7 @@ func (i *Interceptor) Decide(pendingID int64, allowed bool) error {
 	if allowed {
 		action, reason = "allow", "user approved execution"
 	}
-	resolved, err := i.db.ResolveIntercept(pendingID, status, action, reason)
+	resolved, err := i.db.ResolveIntercept(pendingID, status, action, reason, "human")
 	if err != nil {
 		return err
 	}

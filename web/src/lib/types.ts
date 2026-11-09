@@ -1347,6 +1347,9 @@ export interface AssetInterceptRule {
 
 export interface InterceptPending {
   decision_source?: "rule" | "model" | "unknown" | "";
+  // Actor that settled the request, exactly as stored: "" while pending and on
+  // rows decided before the column existed (shown as "Legacy").
+  decided_by?: "human" | "rule" | "model" | "system" | "";
   id: number;
   rule_id?: number;
   conversation_id?: number;
@@ -1391,6 +1394,7 @@ export interface JudgeUsage {
 export interface InterceptApprovalFilter {
   status?: InterceptPending["status"];
   decision_source?: "rule" | "model" | "unknown";
+  decided_by?: "human" | "rule" | "model" | "system";
 }
 
 // InterceptApprovalRow enriches InterceptPending with conversation/task and rule context.

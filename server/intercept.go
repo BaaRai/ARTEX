@@ -321,7 +321,7 @@ func (s *Server) interceptHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func interceptFilterParams(q url.Values) (db.InterceptApprovalFilter, error) {
-	filter := db.InterceptApprovalFilter{Status: q.Get("status"), DecisionSource: q.Get("decision_source")}
+	filter := db.InterceptApprovalFilter{Status: q.Get("status"), DecisionSource: q.Get("decision_source"), DecidedBy: q.Get("decided_by")}
 	switch filter.Status {
 	case "", "pending", "allowed", "denied", "timeout":
 	default:
@@ -331,6 +331,11 @@ func interceptFilterParams(q url.Values) (db.InterceptApprovalFilter, error) {
 	case "", "model", "rule", "unknown":
 	default:
 		return filter, fmt.Errorf("decision_source must be model, rule or unknown")
+	}
+	switch filter.DecidedBy {
+	case "", "human", "rule", "model", "system":
+	default:
+		return filter, fmt.Errorf("decided_by must be human, rule, model or system")
 	}
 	return filter, nil
 }

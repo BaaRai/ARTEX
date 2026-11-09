@@ -1108,6 +1108,10 @@ UPDATE intercept_pending SET decision_source=CASE WHEN rule_id IS NOT NULL THEN 
 UPDATE intercept_pending SET decision_source='model'
  WHERE decision_source='unknown' AND rule_id IS NULL
    AND (reason LIKE '[model]%' OR reason LIKE '[模型]%');
+-- Actor that settled the request: '' (pending, or decided before this column
+-- existed) | human | rule | model | system. No backfill: readers fall back to
+-- decision_source for legacy rows instead of rewriting history.
+ALTER TABLE intercept_pending ADD COLUMN IF NOT EXISTS decided_by TEXT NOT NULL DEFAULT '';
 
 -- =====================================================================
 -- L. Finding persistence
