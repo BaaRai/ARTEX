@@ -12,6 +12,19 @@ import (
 
 const FindingRetestAgentKey = "retester"
 
+// retestNoteSummaryRunes caps the retest summary copied into verification_note.
+const retestNoteSummaryRunes = 200
+
+// truncateRunes returns s trimmed to at most n runes, with an ellipsis when cut.
+func truncateRunes(s string, n int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 var ErrRetestNotRunning = errors.New("this retest has ended or has not started; please start a new retest from the finding details")
 
 // FindingRetest is an immutable historical test once its conversation turn ends.
@@ -225,16 +238,28 @@ func (d *DB) FinishFindingRetest(id int64, status, reason string) error {
 	if err != nil {
 		return err
 	}
-	var finalStatus, verdict string
+	var finalStatus, verdict, summary string
 	err = tx.QueryRow(`UPDATE finding_retests SET
 	status=CASE WHEN $2='completed' AND verdict='' THEN 'failed' ELSE $2 END,
 	error=CASE WHEN $2='completed' AND verdict='' THEN 'Agent did not save the retest conclusion; please review the conversation and retest again' ELSE $3 END,
-	finished_at=now() WHERE id=$1 AND status IN ('pending','running') RETURNING status,verdict`, id, status, reason).Scan(&finalStatus, &verdict)
+	finished_at=now() WHERE id=$1 AND status IN ('pending','running') RETURNING status,verdict,summary`, id, status, reason).Scan(&finalStatus, &verdict, &summary)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil // A replay must not overwrite a later manual triage decision.
 	}
 	if err != nil {
 		return err
+	}
+	// A completed reproduced/fixed retest is an independent proof: it upgrades the
+	// machine verification state, but only from unverified / not_assessed / blocked.
+	// A verified finding keeps its POE level and note. An inconclusive, failed or
+	// stopped retest never downgrades anything; its verdict stays in finding_retests.
+	// The human disposition (status) is not touched here.
+	if finalStatus == "completed" && (verdict == "reproduced" || verdict == "fixed") {
+		note := fmt.Sprintf("retest #%d: %s — %s", id, verdict, truncateRunes(summary, retestNoteSummaryRunes))
+		if _, err := tx.Exec(`UPDATE findings SET verification_status='verified', verification_note=$2
+			WHERE id=$1 AND verification_status IN ('unverified','not_assessed','blocked')`, findingID, note); err != nil {
+			return err
+		}
 	}
 	if finalStatus == "completed" && verdict == "fixed" {
 		// Go through the notifying version, sharing the same semantics as a
