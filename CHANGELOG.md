@@ -10,7 +10,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Docs
 
-- **LLM base URL note in the README**: for the Anthropic format, enter the host without a `/v1` suffix (the provider appends `/v1/messages`, so a `/v1` base becomes `/v1/v1/messages`); OpenAI-format providers append `/chat/completions`, so their base does end in `/v1`. Follow-up to #154.
+- **LLM base URL note in the README**: for the Anthropic format, enter the host without a `/v1` suffix (the provider appends `/v1/messages`, so a `/v1` base becomes `/v1/v1/messages`); OpenAI-format providers append `/chat/completions` (or `/responses` for the `openai-responses` format), so their base does end in `/v1`. Follow-up to #154.
 
 ## [0.5.1] - 2026-11-05
 

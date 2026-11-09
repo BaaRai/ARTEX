@@ -256,7 +256,7 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 **LLM**: `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`); you can also fill it in on the UI's "LLM Configuration" page — which can add a local Ollama server as a keyless provider (format "Ollama", base URL default `http://127.0.0.1:11434/v1`, models loaded from the server).
 Optional: `ARTEX_LLM_PROVIDER` (anthropic | openai | openai-responses | ollama) / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY`.
 
-**Base URL**: for the Anthropic format, enter the host **without** a `/v1` suffix (e.g. `https://api.anthropic.com`) — the provider appends `/v1/messages` itself, so a base ending in `/v1` becomes `https://api.anthropic.com/v1/v1/messages`. OpenAI-format providers append `/chat/completions`, so their base **does** end in `/v1` (e.g. `https://api.openai.com/v1`).
+**Base URL**: for the Anthropic format, enter the host **without** a `/v1` suffix (e.g. `https://api.anthropic.com`) — the provider appends `/v1/messages` itself, so a base ending in `/v1` becomes `https://api.anthropic.com/v1/v1/messages`. OpenAI-format providers append `/chat/completions` (or `/responses` for the `openai-responses` format), so their base **does** end in `/v1` (e.g. `https://api.openai.com/v1`).
 
 **Concurrency**: the number of work agents per task is configured in "System Settings" (default 3).
 
