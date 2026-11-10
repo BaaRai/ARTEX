@@ -201,6 +201,13 @@ ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS delete_reason TEXT;
 -- a node most recently went from "has a live downstream branch" to none (NULL = hot).
 ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS content_version  INT    NOT NULL DEFAULT 0;
 ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS cold_since_round BIGINT;
+-- Intent claim lease: unclaim_token is the fencing token of the current claim (fresh
+-- per claim, cleared when the claim is settled or taken over); last_heartbeat_at is
+-- the claimer's latest heartbeat. A running intent whose heartbeat is older than
+-- db.IntentClaimTTL may be taken over. Both are NULL on rows claimed before these
+-- columns existed, which counts as expired.
+ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ;
+ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS unclaim_token     TEXT;
 -- ck_node_kind: existing installs predate the 'digest' kind — recreate to allow it.
 DO $$
 BEGIN
