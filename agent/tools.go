@@ -351,8 +351,16 @@ func pidList(raw []json.RawMessage) []int64 {
 
 func obj(props map[string]any, required ...string) map[string]any {
 	m := map[string]any{"type": "object", "properties": props}
-	if len(required) > 0 {
-		m["required"] = required
+	// Blank names are dropped, and "required" is omitted when nothing is left:
+	// strict providers reject "required": [""] and fail every run carrying the tool.
+	req := make([]string, 0, len(required))
+	for _, r := range required {
+		if strings.TrimSpace(r) != "" {
+			req = append(req, r)
+		}
+	}
+	if len(req) > 0 {
+		m["required"] = req
 	}
 	return m
 }

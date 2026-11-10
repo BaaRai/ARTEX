@@ -103,6 +103,96 @@ func TestWireTools(t *testing.T) {
 	}
 }
 
+// TestHealListTaskCredentialsSchema: a list_task_credentials row seeded by an older
+// build carries "required": [""]. The startup heal drops that key, leaves the rest of
+// the row alone, changes nothing on a second run, and touches no other tool.
+func TestHealListTaskCredentialsSchema(t *testing.T) {
+	dsn, _, err := db.DSN()
+	if err != nil {
+		t.Skipf("no database config (%v) — skipping", err)
+	}
+	pg, err := db.Open(dsn)
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { pg.Close() })
+	s := &Server{m: &Manager{pg: pg}}
+
+	const key = "list_task_credentials"
+	// Other tools the heal must never touch: a normal required list, and the same
+	// malformed value under a different key.
+	const probeRequired, probeBlank = "heal_probe_required", "heal_probe_blank"
+	const broken = `{"type":"object","properties":{},"required":[""]}`
+
+	// The package test DB is shared: put back whatever it held for the real key.
+	old, err := pg.GetTool(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if old == nil {
+			pg.Exec(`DELETE FROM tools WHERE key=$1`, key)
+		} else {
+			pg.Exec(`UPDATE tools SET schema=$2::jsonb WHERE key=$1`, key, string(old.Schema))
+		}
+		pg.Exec(`DELETE FROM tools WHERE key IN ($1,$2)`, probeRequired, probeBlank)
+	})
+	for k, schema := range map[string]string{
+		key:           broken,
+		probeRequired: `{"type":"object","properties":{"x":{"type":"string"}},"required":["x"]}`,
+		probeBlank:    broken,
+	} {
+		if _, err := pg.Exec(`INSERT INTO tools(key, description, schema, agents) VALUES ($1, 'legacy row', $2::jsonb, '["worker"]')
+ON CONFLICT (key) DO UPDATE SET schema=EXCLUDED.schema`, k, schema); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	type row struct {
+		schema, description, agents, updatedAt string
+		enabled                                bool
+	}
+	read := func(k string) row {
+		t.Helper()
+		var r row
+		if err := pg.QueryRow(`SELECT schema::text, description, agents::text, updated_at::text, enabled FROM tools WHERE key=$1`, k).
+			Scan(&r.schema, &r.description, &r.agents, &r.updatedAt, &r.enabled); err != nil {
+			t.Fatalf("read %s: %v", k, err)
+		}
+		return r
+	}
+	before, beforeRequired, beforeBlank := read(key), read(probeRequired), read(probeBlank)
+
+	s.healListTaskCredentialsSchema()
+
+	healed := read(key)
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(healed.schema), &schema); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := schema["required"]; ok {
+		t.Fatalf("required survived the heal: %s", healed.schema)
+	}
+	if schema["type"] != "object" || schema["properties"] == nil {
+		t.Errorf("heal dropped more than required: %s", healed.schema)
+	}
+	if healed.description != before.description || healed.agents != before.agents || healed.enabled != before.enabled {
+		t.Errorf("heal changed description/bindings/enabled: %+v -> %+v", before, healed)
+	}
+
+	s.healListTaskCredentialsSchema()
+
+	if again := read(key); again != healed {
+		t.Errorf("second heal changed the row: %+v -> %+v", healed, again)
+	}
+	if got := read(probeRequired); got != beforeRequired {
+		t.Errorf("heal touched a tool with a non-empty required: %+v -> %+v", beforeRequired, got)
+	}
+	if got := read(probeBlank); got != beforeBlank {
+		t.Errorf("heal touched another tool key: %+v -> %+v", beforeBlank, got)
+	}
+}
+
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b

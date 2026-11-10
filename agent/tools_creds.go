@@ -64,7 +64,7 @@ func (t *ToolSet) listTaskCredentials() actool.CoreTool {
 	return writeTool(
 		"list_task_credentials",
 		"List this task's test accounts: user-declared accounts (e.g. program-provided aliases; a user-declared entry with an empty password means: register an account on that domain with a strong password, then record it via save_task_credential) plus accounts recorded by earlier runs. Check this BEFORE registering a new account, and use matching entries for authenticated testing.",
-		obj(map[string]any{}, ""),
+		obj(map[string]any{}),
 		func(_ context.Context, _ json.RawMessage) (actool.Result, error) {
 			if t.ts == nil {
 				return actool.Errorf("list_task_credentials is not enabled: task store is not initialized"), nil
