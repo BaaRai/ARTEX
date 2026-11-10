@@ -2,6 +2,9 @@ package server
 
 import (
 	"bytes"
+	"compress/flate"
+	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,8 +43,60 @@ func normalizeEvidenceText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// decodeEvidenceBody undoes the HTTP Content-Encoding declared in respHead on a
+// captured response body, returning at most limit decoded bytes. Only identity
+// and one layer of gzip or deflate are handled. Any other coding, a stacked
+// coding or a stream that does not decode is an error: the raw bytes are never
+// returned in place of a failed decode.
+func decodeEvidenceBody(respHead string, raw []byte, limit int) (out []byte, truncated bool, err error) {
+	coding := ""
+	for _, line := range strings.Split(respHead, "\n") {
+		name, value, ok := strings.Cut(line, ":")
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), "Content-Encoding") {
+			continue
+		}
+		for _, v := range strings.Split(value, ",") {
+			switch v = strings.ToLower(strings.TrimSpace(v)); v {
+			case "", "identity":
+			case "gzip", "deflate":
+				if coding != "" {
+					return nil, false, fmt.Errorf("unsupported content-encoding: more than one compressed layer")
+				}
+				coding = v
+			default:
+				return nil, false, fmt.Errorf("unsupported content-encoding: %q", v)
+			}
+		}
+	}
+	if coding == "" || len(raw) == 0 {
+		return raw, false, nil
+	}
+	var zr io.Reader
+	switch {
+	case coding == "gzip":
+		zr, err = gzip.NewReader(bytes.NewReader(raw))
+	case len(raw) >= 2 && raw[0]&0x0f == 8 && raw[0]>>4 <= 7 && (uint(raw[0])<<8|uint(raw[1]))%31 == 0:
+		// HTTP "deflate" is the zlib format (RFC 9110); some servers send a bare
+		// deflate stream instead, told apart by the zlib header.
+		zr, err = zlib.NewReader(bytes.NewReader(raw))
+	default:
+		zr = flate.NewReader(bytes.NewReader(raw))
+	}
+	if err == nil {
+		out, err = io.ReadAll(io.LimitReader(zr, int64(limit)+1))
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("%s body: %w", coding, err)
+	}
+	if len(out) > limit {
+		return out[:limit], true, nil
+	}
+	return out, false, nil
+}
+
 // readBoundResponse reads the response side of a bound snapshot through the
-// evidence store (same bytes the UI shows), capped at verificationReadCap.
+// evidence store (same bytes the UI shows), capped at verificationReadCap, and
+// decodes its Content-Encoding under the same cap.
 func readBoundResponse(store *evidence.Store, snap db.TrafficEvidenceSnapshot) (boundBody, error) {
 	f, _, err := store.OpenBody(snap, "response")
 	if err != nil {
@@ -56,6 +111,15 @@ func readBoundResponse(store *evidence.Store, snap db.TrafficEvidenceSnapshot) (
 	if len(raw) > verificationReadCap {
 		bb.truncated = true
 		raw = raw[:verificationReadCap]
+	}
+	raw, cut, err := decodeEvidenceBody(snap.RespHead, raw, verificationReadCap)
+	if err != nil {
+		return boundBody{}, err
+	}
+	if cut {
+		bb.truncated = true
+	}
+	if bb.truncated {
 		// The cap may cut a multi-byte rune: drop at most UTFMax-1 trailing bytes.
 		for i := 0; i < utf8.UTFMax-1 && !utf8.Valid(raw) && len(raw) > 0; i++ {
 			raw = raw[:len(raw)-1]
