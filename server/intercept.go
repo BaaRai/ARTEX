@@ -328,9 +328,9 @@ func interceptFilterParams(q url.Values) (db.InterceptApprovalFilter, error) {
 		return filter, fmt.Errorf("status must be pending, allowed, denied or timeout")
 	}
 	switch filter.DecisionSource {
-	case "", "model", "rule", "unknown":
+	case "", "model", "rule", "target", "unknown":
 	default:
-		return filter, fmt.Errorf("decision_source must be model, rule or unknown")
+		return filter, fmt.Errorf("decision_source must be model, rule, target or unknown")
 	}
 	switch filter.DecidedBy {
 	case "", "human", "rule", "model", "system":
@@ -372,7 +372,9 @@ func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "decision must be allowed or denied")
 		return
 	}
-	if err := s.m.interceptor.Decide(id, req.Decision == "allowed"); err != nil {
+	// On a target request "allowed" pins the addresses the request displayed.
+	// Every human decision records who took it and from where.
+	if err := s.m.interceptor.Decide(id, req.Decision == "allowed", s.approver(r), clientIP(r, s.trustedProxies)); err != nil {
 		if errors.Is(err, intercept.ErrAlreadyDecided) {
 			writeErr(w, 409, err.Error())
 			return
@@ -381,6 +383,84 @@ func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// --- target pins (hosts a human approved for one task or one conversation) ---
+
+// taskPinScope resolves {id} to the pin scope of an existing task.
+func (s *Server) taskPinScope(w http.ResponseWriter, r *http.Request) (db.TargetScopeRef, bool) {
+	id, ok := pathInt(r, "id")
+	if !ok || id <= 0 {
+		writeErr(w, 400, "bad task id")
+		return db.TargetScopeRef{}, false
+	}
+	if _, ok := s.m.Task(strconv.FormatInt(id, 10)); !ok {
+		writeErr(w, 404, "task not found")
+		return db.TargetScopeRef{}, false
+	}
+	return db.TargetScopeRef{TaskID: id}, true
+}
+
+func (s *Server) taskListTargetPins(w http.ResponseWriter, r *http.Request) {
+	if scope, ok := s.taskPinScope(w, r); ok {
+		s.listTargetPins(w, scope)
+	}
+}
+
+func (s *Server) taskRevokeTargetPin(w http.ResponseWriter, r *http.Request) {
+	if scope, ok := s.taskPinScope(w, r); ok {
+		s.revokeTargetPin(w, r, scope)
+	}
+}
+
+func (s *Server) convListTargetPins(w http.ResponseWriter, r *http.Request) {
+	if _, c, ok := s.convByID(w, r); ok {
+		s.listTargetPins(w, db.TargetScopeRef{ConversationID: c.ID})
+	}
+}
+
+func (s *Server) convRevokeTargetPin(w http.ResponseWriter, r *http.Request) {
+	if _, c, ok := s.convByID(w, r); ok {
+		s.revokeTargetPin(w, r, db.TargetScopeRef{ConversationID: c.ID})
+	}
+}
+
+// listTargetPins returns every pin of the scope, in any state, newest first.
+func (s *Server) listTargetPins(w http.ResponseWriter, scope db.TargetScopeRef) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	pins, err := pg.ListTargetPins(scope)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"pins": pins})
+}
+
+// revokeTargetPin revokes pin {pid} of the scope. The next call to that host
+// asks again. Revoking a pin that is no longer active changes nothing.
+func (s *Server) revokeTargetPin(w http.ResponseWriter, r *http.Request, scope db.TargetScopeRef) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	pid, ok := pathInt(r, "pid")
+	if !ok {
+		writeErr(w, 400, "bad pin id")
+		return
+	}
+	pin, err := pg.RevokeTargetPin(scope, pid)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if pin == nil {
+		writeErr(w, 404, "pin not found")
+		return
+	}
+	writeJSON(w, 200, pin)
 }
 
 // --- tool-config (global tool interception scope) ---

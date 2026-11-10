@@ -178,6 +178,28 @@ func verifyJWT(tokenStr string, key []byte) bool {
 	return err == nil && t.Valid
 }
 
+// jwtSubject returns the subject of tokenStr when it is a valid, non-expired
+// HS256 token, and "" otherwise.
+func jwtSubject(tokenStr string, key []byte) string {
+	var claims jwt.RegisteredClaims
+	t, err := jwt.ParseWithClaims(tokenStr, &claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return key, nil
+	})
+	if err != nil || !t.Valid {
+		return ""
+	}
+	return claims.Subject
+}
+
+// approver is who a human decision is recorded for: the subject of the
+// request's session token.
+func (s *Server) approver(r *http.Request) string {
+	return jwtSubject(extractToken(r), s.jwtKey)
+}
+
 // extractToken reads the JWT from Authorization: Bearer header,
 // artex_token cookie, or ?token= query param (for SSE connections).
 func extractToken(r *http.Request) string {

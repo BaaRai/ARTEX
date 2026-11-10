@@ -114,8 +114,11 @@ func (d *DB) CreateFindingRetest(ctx context.Context, findingID int64, notes str
 	if runes := []rune(title); len(runes) > 100 {
 		title = string(runes[:100])
 	}
-	c, err := scanConv(tx.QueryRowContext(ctx, `INSERT INTO conversations(agent_key,title) VALUES ($1,$2) RETURNING `+convCols,
-		FindingRetestAgentKey, fmt.Sprintf("Retest #%d · %s", findingID, title)))
+	// The retest conversation takes the target-gate opt-in of the finding's task.
+	// Pins are never copied: a pin belongs to the scope it was approved in.
+	c, err := scanConv(tx.QueryRowContext(ctx, `INSERT INTO conversations(agent_key,title,target_gate) VALUES ($1,$2,
+	COALESCE((SELECT t.target_gate FROM findings f JOIN tasks t ON t.id=f.task_id WHERE f.id=$3), false)) RETURNING `+convCols,
+		FindingRetestAgentKey, fmt.Sprintf("Retest #%d · %s", findingID, title), findingID))
 	if err != nil {
 		return nil, nil, false, err
 	}

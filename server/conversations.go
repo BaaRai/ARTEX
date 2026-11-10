@@ -79,6 +79,7 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 		AgentKey     string `json:"agent_key"`
 		Title        string `json:"title"`
 		LLMProfileID *int64 `json:"llm_profile_id"`
+		TargetGate   bool   `json:"target_gate"` // approval gate for asset targets, opt-in
 	}
 	if !decodeConversationRequest(w, r, &req) {
 		return
@@ -115,7 +116,7 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Sprintf("Title must be at most %d characters", maxConversationTitleRunes))
 		return
 	}
-	c, err := pg.CreateConversation(req.AgentKey, title, req.LLMProfileID)
+	c, err := pg.CreateConversationGated(req.AgentKey, title, req.LLMProfileID, req.TargetGate)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -176,14 +177,15 @@ func (s *Server) pgRenameConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Title  *string `json:"title"`
-		Pinned *bool   `json:"pinned"`
+		Title      *string `json:"title"`
+		Pinned     *bool   `json:"pinned"`
+		TargetGate *bool   `json:"target_gate"`
 	}
 	if !decodeConversationRequest(w, r, &req) {
 		return
 	}
-	if req.Title == nil && req.Pinned == nil {
-		writeErr(w, 400, "Provide at least title or pinned")
+	if req.Title == nil && req.Pinned == nil && req.TargetGate == nil {
+		writeErr(w, 400, "Provide at least title, pinned or target_gate")
 		return
 	}
 	if req.Title != nil {
@@ -198,7 +200,7 @@ func (s *Server) pgRenameConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Title = &title
 	}
-	updated, err := pg.UpdateConversation(c.ID, db.ConversationPatch{Title: req.Title, Pinned: req.Pinned})
+	updated, err := pg.UpdateConversation(c.ID, db.ConversationPatch{Title: req.Title, Pinned: req.Pinned, TargetGate: req.TargetGate})
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -559,8 +561,11 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 		}
 	}
 	// Approval scope of this turn's tool calls for the target gate (chat and retester).
-	// Conversations have no opt-in flag yet, so Enabled stays nil: the gate is off.
-	gctx := intercept.WithTargetScope(ctx, intercept.TargetScope{ConversationID: c.ID, WaitBound: intercept.DefaultTargetWaitBound})
+	// The conversation's opt-in flag is the one read when the turn started: a
+	// switch through the API applies from the next turn.
+	gate := c.TargetGate
+	gctx := intercept.WithTargetScope(ctx, intercept.TargetScope{ConversationID: c.ID, Enabled: func() bool { return gate },
+		WaitBound: intercept.DefaultTargetWaitBound, Interceptor: s.m.interceptor})
 	// On a manual stop ctx is cancelled; Chat already emits a clean "stopped by the user"
 	// step, so skip the raw-error entry — only surface genuine failures.
 	if _, err := ca.Chat(gctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit); err != nil {

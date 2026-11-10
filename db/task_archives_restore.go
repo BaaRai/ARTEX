@@ -766,6 +766,13 @@ WHERE archive.id=$1 FOR UPDATE OF archive,task`, archiveID).Scan(&taskID, &expID
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
+	// As in DeleteTaskCascadePrepared: pins stay as revoked history.
+	if err := revokeTaskPins(tx, taskID); err != nil {
+		return err
+	}
+	if err := settleTaskTargetRequests(tx, taskID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM tasks WHERE id=$1 AND archived_at IS NOT NULL`, taskID); err != nil {
 		return err
 	}

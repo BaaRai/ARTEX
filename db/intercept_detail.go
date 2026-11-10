@@ -43,6 +43,35 @@ type InterceptAudit struct {
 	Output           string                  `json:"output,omitempty"`
 	OutputTruncated  bool                    `json:"output_truncated,omitempty"`
 	ExecutionEndedAt *time.Time              `json:"execution_ended_at,omitempty"`
+	// Targets is set on target approval requests only (target_key IS NOT NULL).
+	Targets []InterceptTarget `json:"targets,omitempty"`
+	// MergedAsk marks a target request that also carries the ask of a rule or of
+	// the judge: one row, one decision for both.
+	MergedAsk bool `json:"merged_ask,omitempty"`
+	// Approver and ApproverAddr identify the human behind a decision: the subject
+	// of the session token and the remote address of the request. decided_by keeps
+	// the actor class (human).
+	Approver     string `json:"approver,omitempty"`
+	ApproverAddr string `json:"approver_addr,omitempty"`
+}
+
+// InterceptTarget is one asset target of a target approval request: what was
+// asked for, the addresses shown to the human, and the pin it relates to.
+type InterceptTarget struct {
+	Host        string    `json:"host"`
+	Port        int       `json:"port"` // 0 = port not declared
+	Kind        string    `json:"kind,omitempty"`
+	ResolvedIPs []string  `json:"resolved_ips"`
+	Resolver    string    `json:"resolver,omitempty"`
+	ResolvedAt  time.Time `json:"resolved_at"`
+	PinID       int64     `json:"pin_id,omitempty"`
+	PinVersion  int       `json:"pin_version,omitempty"`
+	PinnedIPs   []string  `json:"pinned_ips,omitempty"`
+	Reason      string    `json:"reason,omitempty"` // no_pin | new_ip | revoked
+	Outcome     string    `json:"outcome"`          // requested | pinned | denied
+	// NameOnlyEffective: requested while the upstream egress proxy was set; a pin
+	// created from this request covers the name only.
+	NameOnlyEffective bool `json:"name_only_effective,omitempty"`
 }
 
 type InterceptDetail struct {
@@ -77,6 +106,14 @@ func (d *DB) GetInterceptDetail(id int64) (*InterceptDetail, error) {
 // decidedBy records the settling actor (human | rule | model | system); it is
 // supplied by the caller because status alone cannot tell them apart.
 func (d *DB) ResolveIntercept(id int64, status, action, reason, decidedBy string) (bool, error) {
+	return d.ResolveInterceptBy(id, status, action, reason, decidedBy, "", "")
+}
+
+// ResolveInterceptBy is ResolveIntercept for a decision whose author is known:
+// approver (subject of the session token) and remoteAddr (address of the
+// request) are recorded in the row's audit when non-empty. A row without an
+// audit keeps none.
+func (d *DB) ResolveInterceptBy(id int64, status, action, reason, decidedBy, approver, remoteAddr string) (bool, error) {
 	switch decidedBy {
 	case "human", "rule", "model", "system":
 	default:
@@ -86,9 +123,16 @@ func (d *DB) ResolveIntercept(id int64, status, action, reason, decidedBy string
 	if action == "allow" {
 		execution = "awaiting_result"
 	}
-	patch, err := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"effective_action": action, "decision_reason": reason, "execution_status": execution,
-	})
+	}
+	if approver != "" {
+		fields["approver"] = approver
+	}
+	if remoteAddr != "" {
+		fields["approver_addr"] = remoteAddr
+	}
+	patch, err := json.Marshal(fields)
 	if err != nil {
 		return false, err
 	}
