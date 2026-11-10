@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +27,12 @@ const (
 	settingNotifyPublicBaseURL = "notify_public_base_url"
 	// settingNotifyDigestMinutes is the digest-mode period (minutes).
 	settingNotifyDigestMinutes = "notify_digest_interval_min"
+	// settingNotifySummaryMaxRunes is how many characters the summary of a single
+	// push is cut to, and settingNotifyAssetsMaxShown how many asset names a
+	// message lists. 0 means no truncation; unset means the notify package
+	// defaults (120 / 3).
+	settingNotifySummaryMaxRunes = "notify_summary_max_runes"
+	settingNotifyAssetsMaxShown  = "notify_assets_max_shown"
 )
 
 const (
@@ -43,6 +51,10 @@ const (
 	notifyFanOutPerTick = 200
 	// notifyDefaultDigestMinutes is the default digest period.
 	notifyDefaultDigestMinutes = 30
+	// notifySummaryMaxRunesCap / notifyAssetsMaxShownCap are the upper bounds the
+	// settings API accepts for the two render limits.
+	notifySummaryMaxRunesCap = 4000
+	notifyAssetsMaxShownCap  = 50
 	// notifyUnlimitedBurstPerTick is the per-tick delivery cap when a channel has
 	// no rate limit configured. It exists to prevent "one channel configured as
 	// unlimited + a single scan finding thousands of vulnerabilities" from dragging
@@ -223,8 +235,9 @@ func (n *Notifier) stepRealtime(ctx context.Context, ch *db.NotificationChannel,
 		_ = n.pg.FailDeliveries(ctx, deliveryIDs(deliveries), fmt.Sprintf("channel type %q is not registered", ch.Kind))
 		return
 	}
+	limits := notifyLimits(n.pg)
 	for _, dl := range deliveries {
-		msg, err := n.renderSingle(ctx, dl, baseURL)
+		msg, err := n.renderSingle(ctx, dl, baseURL, limits)
 		if err != nil {
 			// A render failure is a local data problem; retrying will not help.
 			_ = n.pg.FailDeliveries(ctx, []int64{dl.ID}, err.Error())
@@ -259,7 +272,7 @@ func (n *Notifier) stepDigest(ctx context.Context, ch *db.NotificationChannel, a
 		_ = n.pg.FailDeliveries(ctx, deliveryIDs(deliveries), fmt.Sprintf("channel type %q is not registered", ch.Kind))
 		return
 	}
-	msg, included, err := n.renderBatch(ctx, deliveries, baseURL, int(window.Minutes()))
+	msg, included, err := n.renderBatch(ctx, deliveries, baseURL, int(window.Minutes()), notifyLimits(n.pg))
 	if err != nil {
 		_ = n.pg.FailDeliveries(ctx, deliveryIDs(deliveries), err.Error())
 		return
@@ -423,7 +436,7 @@ func (n *Notifier) adapt(ch *db.NotificationChannel) (notify.Channel, map[string
 }
 
 // renderSingle renders a single-vulnerability message.
-func (n *Notifier) renderSingle(ctx context.Context, dl *db.NotificationDelivery, baseURL string) (notify.Message, error) {
+func (n *Notifier) renderSingle(ctx context.Context, dl *db.NotificationDelivery, baseURL string, limits notify.Limits) (notify.Message, error) {
 	snap, err := parseSnapshot(dl)
 	if err != nil {
 		return notify.Message{}, err
@@ -432,7 +445,7 @@ func (n *Notifier) renderSingle(ctx context.Context, dl *db.NotificationDelivery
 	if err != nil {
 		return notify.Message{}, err
 	}
-	return notify.Message{Items: []notify.Item{item}, HomeURL: baseURL}, nil
+	return notify.Message{Items: []notify.Item{item}, HomeURL: baseURL, Limits: &limits}, nil
 }
 
 // renderBatch renders a digest message. Snapshots are parsed one by one — a
@@ -446,7 +459,7 @@ func (n *Notifier) renderSingle(ctx context.Context, dl *db.NotificationDelivery
 // entry that should have failed would be marked sent, and a good entry would be
 // misjudged as undelivered. The broken ones are marked failed explicitly by the
 // caller, see stepDigest.
-func (n *Notifier) renderBatch(ctx context.Context, deliveries []*db.NotificationDelivery, baseURL string, windowMinutes int) (notify.Message, []*db.NotificationDelivery, error) {
+func (n *Notifier) renderBatch(ctx context.Context, deliveries []*db.NotificationDelivery, baseURL string, windowMinutes int, limits notify.Limits) (notify.Message, []*db.NotificationDelivery, error) {
 	items := make([]notify.Item, 0, len(deliveries))
 	included := make([]*db.NotificationDelivery, 0, len(deliveries))
 	for _, dl := range deliveries {
@@ -473,6 +486,7 @@ func (n *Notifier) renderBatch(ctx context.Context, deliveries []*db.Notificatio
 		Batch:         true,
 		WindowMinutes: windowMinutes,
 		HomeURL:       baseURL,
+		Limits:        &limits,
 	}, included, nil
 }
 
@@ -580,6 +594,30 @@ func (n *Notifier) digestInterval() time.Duration {
 		return time.Duration(notifyDefaultDigestMinutes) * time.Minute
 	}
 	return time.Duration(m) * time.Minute
+}
+
+// notifyLimits reads the summary/asset render limits from the settings.
+func notifyLimits(pg *db.DB) notify.Limits {
+	summary, sOK, _ := pg.GetSetting(settingNotifySummaryMaxRunes)
+	assets, aOK, _ := pg.GetSetting(settingNotifyAssetsMaxShown)
+	return notify.Limits{
+		SummaryRunes: notifyLimitValue(summary, sOK, notify.DefaultMaxSummaryRunes, notifySummaryMaxRunesCap),
+		AssetsShown:  notifyLimitValue(assets, aOK, notify.DefaultMaxAssetsShown, notifyAssetsMaxShownCap),
+	}
+}
+
+// notifyLimitValue resolves one stored render limit: def when the key is unset,
+// unparseable, or outside [0, max]. 0 is a valid value (no truncation), which is
+// why "unset" is carried by ok and not by the number.
+func notifyLimitValue(v string, ok bool, def, max int) int {
+	if !ok {
+		return def
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 || n > max {
+		return def
+	}
+	return n
 }
 
 // parseSnapshot parses the snapshot of the event a delivery corresponds to.

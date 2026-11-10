@@ -9,16 +9,16 @@ import (
 // (DingTalk, WeCom). Feishu uses card JSON, Telegram uses HTML, and email uses
 // HTML; each renders in its own adapter.
 
-// maxAssetsShown is the maximum number of assets listed in a message. A
-// vulnerability can be anchored to dozens of assets; listing them all would blow
-// up the message with no informational value — nobody reads the 4th domain
-// onwards in an IM.
-const maxAssetsShown = 3
+// DefaultMaxAssetsShown is the default maximum number of assets listed in a
+// message (Limits.AssetsShown). A vulnerability can be anchored to dozens of
+// assets; listing them all would blow up the message with no informational
+// value — nobody reads the 4th domain onwards in an IM.
+const DefaultMaxAssetsShown = 3
 
-// maxSummaryRunes is how many characters the summary is compressed to. An IM
-// message is a "go look at the details" hint, not the report itself; the full
-// content lives on the platform.
-const maxSummaryRunes = 120
+// DefaultMaxSummaryRunes is the default number of characters the summary is
+// compressed to (Limits.SummaryRunes). An IM message is a "go look at the
+// details" hint, not the report itself; the full content lives on the platform.
+const DefaultMaxSummaryRunes = 120
 
 // markdownReservedBytes is reserved for the message header (digest line +
 // severity distribution + possible truncation notice) and footer (platform
@@ -114,7 +114,7 @@ func markdownBody(m Message, maxBytes int) (string, int) {
 			return "", 0
 		}
 		var b strings.Builder
-		writeItem(&b, m.Items[0], "", true)
+		writeItem(&b, m.Items[0], "", true, m.limits())
 		// A single message is sent even if oversized (with final truncation as
 		// the backstop): partial information about one vulnerability is better
 		// than sending nothing at all.
@@ -127,7 +127,7 @@ func markdownBody(m Message, maxBytes int) (string, int) {
 	}
 	kept := packItemCount(m.Items, maxBytes, markdownReservedBytes, footer, byteSize, func(it Item, idx int) string {
 		var b strings.Builder
-		writeItem(&b, it, fmt.Sprintf("%d. ", idx+1), false)
+		writeItem(&b, it, fmt.Sprintf("%d. ", idx+1), false, m.limits())
 		return b.String()
 	})
 
@@ -135,7 +135,7 @@ func markdownBody(m Message, maxBytes int) (string, int) {
 	var b strings.Builder
 	b.WriteString(markdownBatchIntro(m, items, len(m.Items)))
 	for i, it := range items {
-		writeItem(&b, it, fmt.Sprintf("%d. ", i+1), false)
+		writeItem(&b, it, fmt.Sprintf("%d. ", i+1), false, m.limits())
 	}
 	b.WriteString(footer)
 	return TruncateBytes(b.String(), maxBytes), kept
@@ -191,13 +191,13 @@ func markdownBatchIntro(m Message, items []Item, total int) string {
 // markdownText: single-lining + escaping. The backlink is built from the
 // admin-configured public_base_url, is not untrusted content, and must be a
 // clickable link, so it is emitted as-is.
-func writeItem(b *strings.Builder, it Item, prefix string, single bool) {
+func writeItem(b *strings.Builder, it Item, prefix string, single bool, lim Limits) {
 	line := fmt.Sprintf("%s**%s · %s**", prefix, SeverityLabel(it.Severity), markdownText(it.Title(), 0))
 	if !single {
 		// Digest mode: single-line presentation, with assets and summary
 		// compressed and appended.
 		var extras []string
-		if a := assetLine(it.Assets, maxAssetsShown); a != "" {
+		if a := assetLine(it.Assets, lim.AssetsShown); a != "" {
 			extras = append(extras, markdownText(a, 0))
 		}
 		if it.Summary != "" {
@@ -217,11 +217,11 @@ func writeItem(b *strings.Builder, it Item, prefix string, single bool) {
 	if it.VulnClass != "" && it.VulnClass != it.Title() {
 		fmt.Fprintf(b, "**Type**: %s\n", markdownText(it.VulnClass, 0))
 	}
-	if a := assetLine(it.Assets, maxAssetsShown); a != "" {
+	if a := assetLine(it.Assets, lim.AssetsShown); a != "" {
 		fmt.Fprintf(b, "**Assets**: %s\n", markdownText(a, 0))
 	}
 	if it.Summary != "" {
-		if s := markdownText(it.Summary, maxSummaryRunes); s != "" {
+		if s := markdownText(it.Summary, lim.SummaryRunes); s != "" {
 			fmt.Fprintf(b, "**Summary**: %s\n", s)
 		}
 	}

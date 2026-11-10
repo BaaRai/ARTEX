@@ -178,7 +178,7 @@ func TestMarkdownEscapesUntrustedContent(t *testing.T) {
 			// writeItem in single mode is the rendering path shared by all three
 			// markdown channels.
 			var b strings.Builder
-			writeItem(&b, tc.item, "", true)
+			writeItem(&b, tc.item, "", true, m.limits())
 			got := b.String()
 			for _, want := range tc.must {
 				if !strings.Contains(got, want) {

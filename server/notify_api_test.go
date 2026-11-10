@@ -700,6 +700,108 @@ func TestNotifyMetaAndSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestNotifyLimitSettingsRoundTrip covers the two render-limit keys through the
+// settings API and the settings table: unset reads as the 120 / 3 defaults, a
+// stored 0 reads back as 0 (no truncation) and not as the default, and
+// out-of-range values are rejected without touching the stored value.
+func TestNotifyLimitSettingsRoundTrip(t *testing.T) {
+	f := newNotifyFixture(t)
+	clear := func() {
+		f.pg.Exec(`DELETE FROM settings WHERE key IN ($1,$2)`, settingNotifySummaryMaxRunes, settingNotifyAssetsMaxShown)
+	}
+	clear()
+	t.Cleanup(clear)
+	expect := func(step string, summary, assets int) {
+		t.Helper()
+		payload := f.s.settingsPayload()
+		if payload["notify_summary_max_runes"] != summary || payload["notify_assets_max_shown"] != assets {
+			t.Fatalf("%s: settings payload should report %d / %d, got %v / %v", step, summary, assets,
+				payload["notify_summary_max_runes"], payload["notify_assets_max_shown"])
+		}
+		if got := notifyLimits(f.pg); got != (notify.Limits{SummaryRunes: summary, AssetsShown: assets}) {
+			t.Fatalf("%s: the delivery engine should read %d / %d, got %+v", step, summary, assets, got)
+		}
+	}
+	expect("unset", notify.DefaultMaxSummaryRunes, notify.DefaultMaxAssetsShown)
+
+	for _, tc := range []struct{ summary, assets int }{{500, 10}, {0, 0}, {4000, 50}} {
+		body := fmt.Sprintf(`{"notify_summary_max_runes":%d,"notify_assets_max_shown":%d}`, tc.summary, tc.assets)
+		if r := f.request("PUT", "/api/settings", body); r.Code != 200 {
+			t.Fatalf("%s failed %d: %s", body, r.Code, r.Body)
+		}
+		expect(body, tc.summary, tc.assets)
+		for key, want := range map[string]int{settingNotifySummaryMaxRunes: tc.summary, settingNotifyAssetsMaxShown: tc.assets} {
+			if v, ok, err := f.pg.GetSetting(key); err != nil || !ok || v != strconv.Itoa(want) {
+				t.Fatalf("%s: settings row %s should hold %d, got %q (ok=%v err=%v)", body, key, want, v, ok, err)
+			}
+		}
+	}
+
+	for _, body := range []string{
+		`{"notify_summary_max_runes":-1}`,
+		`{"notify_summary_max_runes":4001}`,
+		`{"notify_assets_max_shown":-1}`,
+		`{"notify_assets_max_shown":51}`,
+	} {
+		if r := f.request("PUT", "/api/settings", body); r.Code != 400 {
+			t.Errorf("%s should return 400, got %d", body, r.Code)
+		}
+	}
+	expect("after rejected writes", 4000, 50)
+}
+
+// TestNotifySummaryLimitReachesDelivery is the end-to-end evidence that the
+// stored limit reaches the message actually sent: with the key unset the summary
+// is cut at 120 characters as before, and once it is set to 0 the same summary
+// goes out whole.
+func TestNotifySummaryLimitReachesDelivery(t *testing.T) {
+	f := newNotifyFixture(t)
+	clear := func() { f.pg.Exec(`DELETE FROM settings WHERE key=$1`, settingNotifySummaryMaxRunes) }
+	clear()
+	t.Cleanup(clear)
+	hook := newFakeWebhook(t)
+	chID := f.createChannel(t, map[string]any{
+		"name":   "summary limit",
+		"kind":   notify.KindDingTalk,
+		"config": map[string]any{"webhook": hook.URL},
+	})
+	summary := strings.Repeat("Z", 300)
+	record := func(name string) {
+		t.Helper()
+		if _, err := f.s.evidenceStore().Record(context.Background(), db.RecordFindingInput{
+			TaskID:        f.taskID,
+			ExplorationID: f.expID,
+			Worker:        "test",
+			VulnClass:     name,
+			Name:          name,
+			Severity:      "high",
+			Summary:       summary,
+			Evidence:      "poc",
+		}, nil); err != nil {
+			t.Fatalf("failed to record finding: %v", err)
+		}
+	}
+
+	record("summary limit unset")
+	f.deliver(t, chID, "")
+	text := markdownText(t, hook.last(t))
+	if !strings.Contains(text, strings.Repeat("Z", 119)+"…") || strings.Contains(text, strings.Repeat("Z", 120)) {
+		t.Fatalf("with the key unset the summary should be cut at 120 characters:\n%s", text)
+	}
+
+	if r := f.request("PUT", "/api/settings", `{"notify_summary_max_runes":0}`); r.Code != 200 {
+		t.Fatalf("failed to write settings %d: %s", r.Code, r.Body)
+	}
+	record("summary limit zero")
+	f.deliver(t, chID, "")
+	if hook.count() != 2 {
+		t.Fatalf("expected 2 messages sent, got %d", hook.count())
+	}
+	if text := markdownText(t, hook.last(t)); !strings.Contains(text, summary) {
+		t.Fatalf("with the limit at 0 the whole summary should be sent:\n%s", text)
+	}
+}
+
 // TestNotifyDeepLinkUsesPublicBaseURL covers back-link building: when
 // public_base_url is configured, single messages must use the ActionCard with a
 // button, and the link must point to the vulnerability detail page.
@@ -1006,5 +1108,32 @@ func TestNotifyTickBudgetFitsWithinLease(t *testing.T) {
 			" (notifyMaxSendsPerChannelPerTick=%d × notifySendTimeout=%v) — "+
 			"changing any of these three constants requires checking the other two",
 			worst, notifyLease, notifyMaxSendsPerChannelPerTick, notifySendTimeout)
+	}
+}
+
+// TestNotifyLimitValue pins how a stored render limit is resolved. The case that
+// matters is "0": it is a real value (no truncation) and must not be read as
+// "unset", while anything unparseable or outside the bounds falls back to the
+// default instead of reaching the renderer.
+func TestNotifyLimitValue(t *testing.T) {
+	const def, max = 120, 4000
+	cases := []struct {
+		v    string
+		ok   bool
+		want int
+	}{
+		{"", false, def},
+		{"0", true, 0},
+		{" 500 ", true, 500},
+		{"4000", true, max},
+		{"4001", true, def},
+		{"-1", true, def},
+		{"abc", true, def},
+		{"", true, def},
+	}
+	for _, tc := range cases {
+		if got := notifyLimitValue(tc.v, tc.ok, def, max); got != tc.want {
+			t.Errorf("notifyLimitValue(%q, %v) = %d, want %d", tc.v, tc.ok, got, tc.want)
+		}
 	}
 }
