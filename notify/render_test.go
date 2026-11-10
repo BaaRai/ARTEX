@@ -113,11 +113,13 @@ func TestAssetLineOmitsExcess(t *testing.T) {
 	if got := assetLine([]string{"a", "b"}, 3); got != "a, b" {
 		t.Fatalf("within the limit everything should be listed, got %q", got)
 	}
-	// Over the limit the total must be noted, otherwise readers cannot tell how
-	// many assets were left out.
-	got := assetLine([]string{"a", "b", "c", "d", "e"}, 2)
-	if !strings.Contains(got, "and 5 more") {
-		t.Fatalf("the total of 5 should be noted, got %q", got)
+	// Over the limit the number of omitted assets must be noted, otherwise
+	// readers cannot tell how many assets were left out.
+	if got := assetLine([]string{"a", "b", "c", "d", "e"}, 2); got != "a, b and 3 more" {
+		t.Fatalf("5 assets with limit 2 should note the 3 omitted, got %q", got)
+	}
+	if got := assetLine([]string{"a", "b", "c", "d", "e", "f", "g", "h"}, 3); got != "a, b, c and 5 more" {
+		t.Fatalf("8 assets with limit 3 should note the 5 omitted, got %q", got)
 	}
 }
 
