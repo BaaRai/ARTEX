@@ -957,6 +957,9 @@ export interface Settings {
   notify_enabled?: boolean; // master push switch, on by default; one-click kill switch for maintenance windows
   notify_public_base_url?: string; // external base URL for vulnerability detail links; empty = messages carry no link
   notify_digest_interval_min?: number; // digest mode period (minutes), default 30
+  // Render limits of IM messages; 0 = no truncation. The backend answers 400 outside the bounds.
+  notify_summary_max_runes?: number; // summary characters per finding, 0-4000, default 120
+  notify_assets_max_shown?: number; // asset names listed per finding, 0-50, default 3
 }
 
 // ---- Vulnerability IM push ----
