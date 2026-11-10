@@ -32,6 +32,18 @@ import { ConfigField, FilterSummary } from "./_components/channel-form";
 import { DeliveryList } from "./_components/delivery-list";
 import { formatBacklog, StatTile } from "./_components/stat-tile";
 
+// Upper bounds of the two message render limits. They mirror the backend, which answers 400 outside [0, max].
+const SUMMARY_LIMIT_MAX = 4000;
+const ASSETS_LIMIT_MAX = 50;
+
+// limitInvalid reports whether a limit input holds anything other than a whole number in [0, max].
+// Empty is valid: it is not submitted, so the stored value stays as it is.
+function limitInvalid(raw: string, max: number): boolean {
+  if (raw.trim() === "") return false;
+  const n = Number(raw);
+  return !Number.isInteger(n) || n < 0 || n > max;
+}
+
 // This page only orchestrates: loading data, holding form state, calling the API.
 // Field definitions and parsing live in _components/channel-fields.ts, controls and the filter summary in
 // _components/channel-form.tsx, and the delivery log in _components/delivery-list.tsx —
@@ -50,6 +62,8 @@ export default function NotifyPage() {
   const [globalSaving, setGlobalSaving] = React.useState(false);
   const [baseURL, setBaseURL] = React.useState("");
   const [digestMin, setDigestMin] = React.useState("");
+  const [summaryMax, setSummaryMax] = React.useState("");
+  const [assetsMax, setAssetsMax] = React.useState("");
 
   const load = React.useCallback(() => {
     api
@@ -60,6 +74,14 @@ export default function NotifyPage() {
         setDigestMin(m.digest_interval_min);
       })
       .catch((e) => toast.error("Failed to load notification settings: " + (e as Error).message));
+    // The two render limits are not part of /notify/meta; they are only exposed through /api/settings.
+    api
+      .settings()
+      .then((s) => {
+        setSummaryMax(String(s.notify_summary_max_runes ?? ""));
+        setAssetsMax(String(s.notify_assets_max_shown ?? ""));
+      })
+      .catch((e) => toast.error(`Failed to load message limits: ${(e as Error).message}`));
     // Channel-list load failures must be reported: failing silently would render as "no channels at all",
     // and users would think their config was lost — scarier than a straight-up error.
     api
@@ -244,11 +266,23 @@ export default function NotifyPage() {
   }
 
   async function saveGlobal() {
+    // Checked before anything is sent: the backend applies the fields of one PUT in order,
+    // so a 400 on a limit would leave the URL and digest interval already saved.
+    if (limitInvalid(summaryMax, SUMMARY_LIMIT_MAX)) {
+      toast.error(`Summary length must be a whole number between 0 and ${SUMMARY_LIMIT_MAX}`);
+      return;
+    }
+    if (limitInvalid(assetsMax, ASSETS_LIMIT_MAX)) {
+      toast.error(`Assets listed must be a whole number between 0 and ${ASSETS_LIMIT_MAX}`);
+      return;
+    }
     setGlobalSaving(true);
     try {
       const patch: Record<string, unknown> = { notify_public_base_url: baseURL.trim() };
       const n = Number(digestMin);
       if (Number.isFinite(n) && n > 0) patch.notify_digest_interval_min = n;
+      if (summaryMax.trim() !== "") patch.notify_summary_max_runes = Number(summaryMax);
+      if (assetsMax.trim() !== "") patch.notify_assets_max_shown = Number(assetsMax);
       await api.setSettings(patch);
       toast.success("Saved");
       load();
@@ -330,6 +364,40 @@ export default function NotifyPage() {
               onChange={(e) => setDigestMin(e.target.value)}
             />
             <p className="text-muted-foreground text-xs">Only applies to channels in "digest" mode.</p>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="n-summary-max">Summary length (characters)</Label>
+            <Input
+              id="n-summary-max"
+              type="number"
+              min={0}
+              max={SUMMARY_LIMIT_MAX}
+              step={1}
+              placeholder="120"
+              value={summaryMax}
+              onChange={(e) => setSummaryMax(e.target.value)}
+              aria-invalid={limitInvalid(summaryMax, SUMMARY_LIMIT_MAX)}
+            />
+            <p className="text-muted-foreground text-xs">
+              Longest finding summary shown in a message, 0–{SUMMARY_LIMIT_MAX}. 0 = no truncation.
+            </p>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="n-assets-max">Assets listed per finding</Label>
+            <Input
+              id="n-assets-max"
+              type="number"
+              min={0}
+              max={ASSETS_LIMIT_MAX}
+              step={1}
+              placeholder="3"
+              value={assetsMax}
+              onChange={(e) => setAssetsMax(e.target.value)}
+              aria-invalid={limitInvalid(assetsMax, ASSETS_LIMIT_MAX)}
+            />
+            <p className="text-muted-foreground text-xs">
+              Most asset names listed for a finding, 0–{ASSETS_LIMIT_MAX}. 0 = no truncation (all assets listed).
+            </p>
           </div>
           <div className="sm:col-span-2">
             <Button onClick={saveGlobal} disabled={globalSaving}>
