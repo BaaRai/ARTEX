@@ -222,3 +222,64 @@ func TestDecodeBoundResponseBadGzipIsAnError(t *testing.T) {
 		t.Fatalf("br: got %+v err=%v, want unsupported content-encoding", bb, err)
 	}
 }
+
+// A response captured with Content-Encoding: gzip and no body at all (HEAD,
+// 304) is not a decode failure: it stays an empty body, without error.
+func TestDecodeEvidenceBodyEmptyBodyWithEncodingStaysEmpty(t *testing.T) {
+	for _, head := range []string{
+		decodeGzipHead,
+		"HTTP 304\r\nCONTENT-ENCODING: GZIP\r\n",
+		"HTTP 200\nContent-Encoding: deflate\n",
+	} {
+		for _, raw := range [][]byte{nil, {}} {
+			out, truncated, err := decodeEvidenceBody(head, raw, verificationReadCap)
+			if err != nil || truncated || len(out) != 0 {
+				t.Fatalf("head %q: out=%q truncated=%v err=%v, want an empty body and no error", head, out, truncated, err)
+			}
+		}
+	}
+}
+
+// An empty bound body, compressed or not, is read without error but can never
+// satisfy a quote. In assessFindingVerification a quote that matches no body
+// only leads to unverified or not_assessed, never verified, so this is what
+// keeps an empty response (HEAD, 304) from verifying a finding.
+func TestDecodeBoundResponseEmptyBodyNeverMatchesQuote(t *testing.T) {
+	cases := []struct {
+		name string
+		head string
+		raw  []byte
+	}{
+		{"gzip header, no bytes", decodeGzipHead, nil},
+		{"deflate header, no bytes", "HTTP 200\nContent-Encoding: deflate\n", nil},
+		{"identity header, no bytes", "HTTP 200\nContent-Encoding: identity\n", nil},
+		{"no encoding header, no bytes", "HTTP 304\nContent-Type: text/html\n", nil},
+		{"gzip stream of an empty payload", decodeGzipHead, gzipBody(t, nil)},
+	}
+	quotes := []string{
+		decodeQuote,
+		"x",
+		// Present in the response head: the head is not searchable text.
+		"Content-Encoding: gzip",
+		"HTTP 200",
+	}
+	for _, c := range cases {
+		store, snap := decodeSnapshot(t, c.head, c.raw)
+		bb, err := readBoundResponse(store, snap)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if bb.text != "" || bb.nonText || bb.truncated {
+			t.Fatalf("%s: got %+v, want an empty text body", c.name, bb)
+		}
+		for _, q := range quotes {
+			nq := normalizeEvidenceText(q)
+			if nq == "" {
+				t.Fatalf("quote %q normalizes to nothing", q)
+			}
+			if quoteInBodies(nq, []boundBody{bb}) {
+				t.Fatalf("%s: quote %q matched an empty body", c.name, q)
+			}
+		}
+	}
+}
