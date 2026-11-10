@@ -149,7 +149,7 @@ func byteSize(s string) int { return len(s) }
 func runeSize(s string) int { return utf8.RuneCountInString(s) }
 
 // assetLine renders an asset list into one line of display text; when there are
-// more than limit assets, the rest are omitted and the total is noted. A
+// more than limit assets, the rest are omitted and their count is noted. A
 // vulnerability can be anchored to dozens of assets, and listing them all would
 // blow up the message.
 func assetLine(assets []string, limit int) string {
@@ -159,7 +159,7 @@ func assetLine(assets []string, limit int) string {
 	if limit <= 0 || len(assets) <= limit {
 		return strings.Join(assets, ", ")
 	}
-	return strings.Join(assets[:limit], ", ") + " and " + itoa(len(assets)) + " more"
+	return strings.Join(assets[:limit], ", ") + " and " + itoa(len(assets)-limit) + " more"
 }
 
 // itoa is a short alias for strconv.Itoa, used only for assembling display text,
