@@ -503,6 +503,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedWorkerReadToolsUnbind()  // list_facts/list_companies/list_worker_traces unbound from worker's defaults (one-time)
 	s.seedWorkerReadbackRebind()   // repairs an old migration's wrong removal: re-binds search_all_worker_traces/get_worker_trace/node_detail back onto worker (one-time)
 	s.seedTaskCredentialBindings() // save/list_task_credential onto worker + pentest (one-time, #3)
+	s.healListTaskCredentialsSchema()
 	s.seedAutoReportFindingBinding()
 	s.unbindGoalMetDefault()
 	s.reseedGoalsPrompt()             // goals prompt gains the "extract operation constraints" step → old DBs append a new default version (one-time)
@@ -908,6 +909,19 @@ func (s *Server) seedTaskCredentialBindings() {
 		}
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
+}
+
+// healListTaskCredentialsSchema repairs the list_task_credentials row seeded by
+// older builds, whose schema carried "required": [""] — strict providers reject
+// it, which fails every worker run. SeedTool is first-insert-only, so the code fix
+// alone never reaches an already-seeded row. Only that exact malformed value on
+// that one key matches, and only the "required" key is dropped: the rest of the
+// schema, the description, bindings and enabled flag are untouched. A healed row
+// no longer matches, so this needs no settings flag and is a no-op afterwards.
+func (s *Server) healListTaskCredentialsSchema() {
+	if _, err := s.m.pg.Exec(`UPDATE tools SET schema = schema - 'required', updated_at=now() WHERE key='list_task_credentials' AND schema->'required' = '[""]'::jsonb`); err != nil {
+		log.Printf("[tools] heal list_task_credentials schema failed: %v", err)
+	}
 }
 
 func (s *Server) seedWorkerReadbackRebind() {
