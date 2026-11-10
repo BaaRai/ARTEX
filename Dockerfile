@@ -89,6 +89,14 @@ RUN set -eux; \
     nuclei -version >/dev/null; httpx -version; subfinder -version; katana -version; \
     ffuf -V >/dev/null; dalfox --version >/dev/null 2>&1 || true; sqlmap --version >/dev/null
 
+# bbot's bundled Chrome is x86_64-only (chromium-browser-snapshots Linux_x64), so
+# its download is unusable on arm64. gowitness falls back to a chromium found on
+# PATH, so provide Debian's arm64 build. amd64 keeps upstream behavior.
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends chromium \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # bbot recursive recon orchestrator (#117): blacklanternsecurity/bbot, AGPL-3.0
 # (same license as ARTEX; standalone CLI dependency, not linked code). Pinned
 # version, own venv to isolate from the image python. Module dependencies are
