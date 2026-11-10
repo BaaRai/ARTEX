@@ -103,6 +103,7 @@ func TestOllamaProviderWiresOpenAIProtocol(t *testing.T) {
 // loadProfileConfig accepts it, the task chain validates it, the failover pool
 // includes it, and the connection test completes against a fake Ollama.
 func TestOllamaKeylessProfileLifecycle(t *testing.T) {
+	skipWithoutDSN(t)
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +181,7 @@ func TestOllamaKeylessProfileLifecycle(t *testing.T) {
 // Model listing for an Ollama server works without an API key and tolerates a
 // base URL with or without the /v1 suffix.
 func TestOllamaListModels(t *testing.T) {
+	skipWithoutDSN(t)
 	var calls atomic.Value // []string paths
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

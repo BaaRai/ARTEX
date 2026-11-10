@@ -10,6 +10,7 @@ import (
 // open-goal fingerprint is unchanged since the last completed round AND active
 // work exists (open or running intents). Every other combination plans.
 func TestPlannerQuietSkipEdge(t *testing.T) {
+	skipWithoutDSN(t)
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +79,7 @@ func TestPlannerQuietSkipEdge(t *testing.T) {
 // The quiet-mode switch is editable mid-run (#86): PATCHing plan_quiet_mode
 // updates both the stored row and the live Task the engine reads per round.
 func TestPlannerQuietModeToggleMidRun(t *testing.T) {
+	skipWithoutDSN(t)
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
