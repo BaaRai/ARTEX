@@ -18,6 +18,7 @@ import (
 // assigned raw, so a key saved with surrounding whitespace ran fine in
 // conversations but 401'd the connection test.
 func TestLLMTestStoredKeyFallbackIsTrimmed(t *testing.T) {
+	skipWithoutDSN(t)
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +98,7 @@ func TestLLMTestFallbackMatchesRuntimeNormalization(t *testing.T) {
 // (the list-view test button) fills provider/model/base_url from the row, so
 // the key lands on the configured host instead of the canonical default one.
 func TestLLMTestStoredProfileUsesProfileEndpoint(t *testing.T) {
+	skipWithoutDSN(t)
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)

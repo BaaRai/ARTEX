@@ -32,3 +32,13 @@ func TestMain(m *testing.M) {
 	defer conn.Exec(`SELECT pg_advisory_unlock(7337741002)`) //nolint:errcheck
 	os.Exit(m.Run())
 }
+
+// skipWithoutDSN skips the test when neither ARTEX_PG_DSN nor a config file
+// supplies a database, so fixtures that t.Fatal on a NewManager error skip
+// instead of failing. A configured database that cannot be reached still fails.
+func skipWithoutDSN(t *testing.T) {
+	t.Helper()
+	if _, _, err := db.DSN(); err != nil {
+		t.Skipf("no database config (%v) — skipping", err)
+	}
+}

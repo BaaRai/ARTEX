@@ -9,6 +9,7 @@ import (
 // The cost ledger: profile prices (EUR per 1M tokens) turn token buckets into
 // EUR on the usage aggregation; unpriced profiles stay nil.
 func TestCostLedgerEurOnUsage(t *testing.T) {
+	skipWithoutDSN(t)
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
