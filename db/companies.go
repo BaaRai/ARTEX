@@ -633,14 +633,20 @@ LIMIT $1`, malformedIPAssetsSampled)
 	if total == 0 {
 		return "", nil
 	}
+	return malformedIPAssetWarningText(total, samples), nil
+}
+
+// malformedIPAssetWarningText words the warning for total offending assets, of
+// which only samples are named; the ones left out are counted in the suffix.
+func malformedIPAssetWarningText(total int, samples []string) string {
 	warning := fmt.Sprintf(
 		"%d assets have an ip field that is not a valid IP; skipped for IP/CIDR scope matching (these assets will not be attributed to a company by subnet rules): %s",
 		total, strings.Join(samples, ", "),
 	)
 	if total > len(samples) {
-		warning += fmt.Sprintf(" and %d more", total)
+		warning += fmt.Sprintf(" and %d more", total-len(samples))
 	}
-	return warning, nil
+	return warning
 }
 
 // UpdateScope replaces all scope rules for a company and reattributes.
