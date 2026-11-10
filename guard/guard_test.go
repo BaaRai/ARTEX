@@ -37,10 +37,11 @@ func TestPreToolUsePassthrough(t *testing.T) {
 	}
 }
 
-// The target-only guard (planner, main agent) runs the target-gate seam and
-// nothing else: no intercept rule, no fallback judge, no audit-ring entry. Its
-// interceptor has no database behind it, so any read or write through it would
-// panic — passing proves the seam allows every call without touching the store.
+// The target-only guard (planner, main agent) runs the target gate and nothing
+// else: no intercept rule, no fallback judge, no audit-ring entry. Here the gate
+// is off (no scope, or a scope without the flag). Its interceptor has no database
+// behind it, so any read or write through it would panic — passing proves that
+// with the gate off every call is allowed without touching the store.
 func TestTargetOnlyGuardSkipsRules(t *testing.T) {
 	calls := []struct {
 		tool  string

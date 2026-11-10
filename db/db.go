@@ -320,6 +320,9 @@ ON CONFLICT (name) DO NOTHING`,
 	if err := d.seedDefaultAssetInterceptRules(); err != nil {
 		return fmt.Errorf("seed asset intercept rules: %w", err)
 	}
+	if err := d.seedTargetGateExemptions(); err != nil {
+		return fmt.Errorf("seed target-gate exemptions: %w", err)
+	}
 	return nil
 }
 

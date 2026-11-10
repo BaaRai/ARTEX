@@ -922,3 +922,172 @@ func TestResolveInterceptByRecordsApprover(t *testing.T) {
 		t.Fatalf("a system decision recorded an approver: %s", raw)
 	}
 }
+
+// An approval never pins zero addresses. A request that displays none cannot
+// be approved, whether the key has a pin or not: the row stays pending, the
+// pin of the key stays as it is, and the request can still be denied.
+func TestTargetPinRefusesEmptyAddressList(t *testing.T) {
+	d := openTargetDB(t)
+	scope := TargetScopeRef{TaskID: targetTask(t, d, TaskCreateOptions{}).ID}
+	const host = "no-address.example.com"
+
+	for name, ips := range map[string][]string{"nil": nil, "empty": {}, "blank": {"", ""}} {
+		id, created := openTargetRequest(t, d, scope, host, 443, ips...)
+		if !created {
+			t.Fatalf("%s: the request was not created", name)
+		}
+		pin, ok, err := d.ResolveTargetRequest(id, true, "ARTEX", "198.51.100.9")
+		if !errors.Is(err, ErrTargetPinEmpty) || ok || pin != nil {
+			t.Fatalf("%s: approval of an empty address list: pin=%+v ok=%v err=%v, want ErrTargetPinEmpty", name, pin, ok, err)
+		}
+		row, err := d.GetInterceptPending(id)
+		if err != nil || row == nil || row.Status != "pending" {
+			t.Fatalf("%s: row after the refused approval = %+v, %v; want still pending", name, row, err)
+		}
+		if pins, err := d.ListTargetPins(scope); err != nil || len(pins) != 0 {
+			t.Fatalf("%s: pins after the refused approval = %+v, %v; want none", name, pins, err)
+		}
+		if _, ok, err := d.ResolveTargetRequest(id, false, "ARTEX", "198.51.100.9"); err != nil || !ok {
+			t.Fatalf("%s: denying the request: ok=%v err=%v", name, ok, err)
+		}
+	}
+
+	// The key has a pin with addresses: an empty request does not re-issue it.
+	v1 := approveTarget(t, d, scope, host, 443, "203.0.113.7")
+	id, _ := openTargetRequest(t, d, scope, host, 443)
+	if pin, ok, err := d.ResolveTargetRequest(id, true, "ARTEX", "198.51.100.9"); !errors.Is(err, ErrTargetPinEmpty) || ok || pin != nil {
+		t.Fatalf("empty request on a pinned key: pin=%+v ok=%v err=%v, want ErrTargetPinEmpty", pin, ok, err)
+	}
+	pins, err := d.ListTargetPins(scope)
+	if err != nil || len(pins) != 1 || pins[0].ID != v1.ID || pins[0].Status != TargetPinActive || pins[0].Version != 1 {
+		t.Fatalf("pins = %+v, %v; want v1 active and untouched", pins, err)
+	}
+	// Blank entries are dropped from a list that has addresses.
+	if _, ok, err := d.ResolveTargetRequest(id, false, "ARTEX", "198.51.100.9"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	v2 := approveTarget(t, d, scope, host, 443, "", "203.0.113.8")
+	if v2.Version != 2 || !slices.Equal(v2.PinnedIPs, []string{"203.0.113.7", "203.0.113.8"}) {
+		t.Fatalf("v2 = %+v, want both addresses and no blank entry", v2)
+	}
+}
+
+// The exemption list is seeded once with the package sources of the runtime
+// image, and belongs to the operator afterwards: a start never restores an
+// entry they removed. Every change is appended to the log with its previous value.
+func TestTargetGateExemptionSeedAndLog(t *testing.T) {
+	d := openTargetDB(t)
+	seeded := []TargetExemption{
+		{Host: "pypi.org", Port: 443, Note: "[built-in] Python package index"},
+		{Host: "files.pythonhosted.org", Port: 443, Note: "[built-in] Python package files"},
+		{Host: "registry.npmjs.org", Port: 443, Note: "[built-in] npm registry"},
+		{Host: "deb.debian.org", Port: 80, Note: "[built-in] Debian packages"},
+		{Host: "deb.debian.org", Port: 443, Note: "[built-in] Debian packages"},
+	}
+	// Start from the state of a new database, and put the list back afterwards.
+	original, _, err := d.TargetExemptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.ReplaceTargetExemptions(original, "test", "restore") })
+	if _, err := d.Exec(`DELETE FROM settings WHERE key IN ($1, 'target_gate_exempt_seed_v1')`, SettingTargetExemptHosts); err != nil {
+		t.Fatal(err)
+	}
+	if list, raw, err := d.TargetExemptions(); err != nil || list != nil || raw != "" {
+		t.Fatalf("unset list = %+v, %q, %v", list, raw, err)
+	}
+	if err := d.seedTargetGateExemptions(); err != nil {
+		t.Fatal(err)
+	}
+	list, raw, err := d.TargetExemptions()
+	if err != nil || !slices.Equal(list, seeded) || raw == "" {
+		t.Fatalf("seeded list = %+v, %v; want the package sources", list, err)
+	}
+
+	// The operator replaces the list; the next start does not seed again.
+	changesBefore, err := d.ListTargetExemptionLog(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := []TargetExemption{{Host: "mirror.example.org", Port: 443, Note: "internal mirror"}}
+	if err := d.ReplaceTargetExemptions(own, "alice", "digest-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.seedTargetGateExemptions(); err != nil {
+		t.Fatal(err)
+	}
+	if list, _, err := d.TargetExemptions(); err != nil || !slices.Equal(list, own) {
+		t.Fatalf("list after a second seed = %+v, %v; want the list of the operator", list, err)
+	}
+	// An emptied list stays empty, and is stored as [] rather than null.
+	if err := d.ReplaceTargetExemptions(nil, "bob", "digest-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.seedTargetGateExemptions(); err != nil {
+		t.Fatal(err)
+	}
+	if list, raw, err := d.TargetExemptions(); err != nil || len(list) != 0 || raw != "[]" {
+		t.Fatalf("emptied list = %+v, %q, %v", list, raw, err)
+	}
+
+	changes, err := d.ListTargetExemptionLog(1000)
+	if err != nil || len(changes) != len(changesBefore)+2 {
+		t.Fatalf("%d log rows added (err=%v), want 2", len(changes)-len(changesBefore), err)
+	}
+	decode := func(raw json.RawMessage) []TargetExemption {
+		t.Helper()
+		var out []TargetExemption
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("log value %q: %v", raw, err)
+		}
+		return out
+	}
+	second, first := changes[0], changes[1]
+	if first.ChangedBy != "alice" || first.Digest != "digest-1" || !slices.Equal(decode(first.Before), seeded) || !slices.Equal(decode(first.After), own) {
+		t.Fatalf("first change = %+v", first)
+	}
+	if second.ChangedBy != "bob" || second.Digest != "digest-2" || !slices.Equal(decode(second.Before), own) || len(decode(second.After)) != 0 || second.ID <= first.ID {
+		t.Fatalf("second change = %+v", second)
+	}
+	// The log is append-only: a change never rewrites an earlier row.
+	if again, err := d.ListTargetExemptionLog(1000); err != nil || len(again) != len(changes) || again[1].ID != first.ID || string(again[1].After) != string(first.After) {
+		t.Fatalf("log changed between two reads: %+v, %v", again, err)
+	}
+}
+
+// A decision of the gate that no human took is a decided row of the scope:
+// decided by the system, source target, never a request and never a pin.
+func TestLogTargetDecision(t *testing.T) {
+	d := openTargetDB(t)
+	task := targetTask(t, d, TaskCreateOptions{})
+	conv := targetConversation(t, d)
+	for name, scope := range map[string]TargetScopeRef{"task": {TaskID: task.ID}, "conversation": {ConversationID: conv.ID}} {
+		id, err := d.LogTargetDecision(TargetDecision{Scope: scope, AgentName: "planner", ToolName: "WebFetch",
+			ToolInput: []byte(`{"url":"https://app.example.com/"}`), Status: "denied", Reason: "TARGET_RESOLVE_FAILED: no such host",
+			Audit: &InterceptAudit{Correlation: "unavailable", EffectiveAction: "deny", ExecutionStatus: "not_executed",
+				Targets: []InterceptTarget{{Host: "app.example.com", Port: 443, Kind: "domain", Outcome: "resolve_failed"}}}})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		row, err := d.GetInterceptDetail(id)
+		if err != nil || row == nil {
+			t.Fatalf("%s: row=%+v err=%v", name, row, err)
+		}
+		if row.Status != "denied" || row.DecidedBy != "system" || row.DecisionSource != "target" || row.DecidedAt == nil || row.RuleID != nil ||
+			row.AgentName != "planner" || row.Audit == nil || row.Audit.Targets[0].Outcome != "resolve_failed" {
+			t.Fatalf("%s: row = %+v audit=%+v", name, row.InterceptApprovalRow, row.Audit)
+		}
+		if (row.TaskID != nil) != (scope.TaskID != 0) || (row.ConversationID != nil) != (scope.ConversationID != 0) {
+			t.Fatalf("%s: row scope = task %v conversation %v", name, row.TaskID, row.ConversationID)
+		}
+		if key, err := d.TargetRequestKey(id); err != nil || key != "" {
+			t.Fatalf("%s: target key = %q, %v; a decided row is not a request", name, key, err)
+		}
+		if n := pendingTargetRows(t, d, scope); n != 0 {
+			t.Fatalf("%s: %d open requests, want none", name, n)
+		}
+	}
+	if _, err := d.LogTargetDecision(TargetDecision{Status: "denied"}); err == nil {
+		t.Fatal("a decision without a scope was accepted")
+	}
+}

@@ -382,7 +382,7 @@ func TestFinalPlannerRoundHasZeroWait(t *testing.T) {
 	}
 }
 
-// The gate seam is a no-op: through the task's target-only hooks a call is
+// With the gate off (the task default) the target-only hooks are a no-op: a call is
 // allowed and nothing is written — no intercept row, no audit-ring entry. The
 // control runs the same call through the task's full Guard, where a deny rule
 // blocks it and logs a row, so the rule and the row count are known to be live.

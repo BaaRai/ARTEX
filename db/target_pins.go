@@ -334,6 +334,10 @@ WHERE id=$1 AND status='pending' AND target_key IS NOT NULL FOR UPDATE`, id).Sca
 	return pin, true, nil
 }
 
+// ErrTargetPinEmpty refuses an approval whose request displayed no address: a
+// pin never holds zero addresses, whatever the previous pin of the key holds.
+var ErrTargetPinEmpty = errors.New("the target request lists no resolved address; an approval never pins an empty address list")
+
 // writeTargetPin inserts the pin an approved request creates and fills the
 // request's target with what was pinned. The only writer of target_pins rows.
 func writeTargetPin(tx *sql.Tx, scope TargetScopeRef, interceptID int64, t *InterceptTarget, approver, remoteAddr string) (*TargetPin, error) {
@@ -349,7 +353,12 @@ WHERE `+targetPinScope+` AND host=$3 AND port=$4`, scope.TaskID, scope.Conversat
 	}
 	ips := map[string]bool{}
 	for _, ip := range t.ResolvedIPs {
-		ips[ip] = true
+		if ip != "" {
+			ips[ip] = true
+		}
+	}
+	if len(ips) == 0 {
+		return nil, ErrTargetPinEmpty
 	}
 	prev, err := scanTargetPin(tx.QueryRow(`SELECT `+targetPinCols+` FROM target_pins
 WHERE `+targetPinScope+` AND host=$3 AND port=$4 AND status='active' FOR UPDATE`, scope.TaskID, scope.ConversationID, t.Host, t.Port))
@@ -390,4 +399,155 @@ RETURNING `+targetPinCols,
 	}
 	t.Outcome, t.PinID, t.PinVersion, t.PinnedIPs = "pinned", pin.ID, pin.Version, pin.PinnedIPs
 	return pin, nil
+}
+
+// TargetDecision is an outcome of the target gate that no human took: a block,
+// or the first use of an exemption or of a pin version.
+type TargetDecision struct {
+	Scope     TargetScopeRef
+	AgentName string
+	ToolName  string
+	ToolInput []byte
+	Status    string // allowed | denied
+	Reason    string
+	Audit     *InterceptAudit
+}
+
+// LogTargetDecision records a target-gate outcome as an already-decided row
+// (decided_by = system, decision_source = target). It opens no request and
+// never pins.
+func (d *DB) LogTargetDecision(r TargetDecision) (int64, error) {
+	if err := r.Scope.check(); err != nil {
+		return 0, err
+	}
+	raw := json.RawMessage(r.ToolInput)
+	if len(raw) == 0 {
+		raw = json.RawMessage("{}")
+	}
+	taskID, convID := r.Scope.pendingScope()
+	var id int64
+	err := d.QueryRow(`
+INSERT INTO intercept_pending(conversation_id, task_id, agent_name, tool_name, tool_input, status, reason, decided_at, decision_source, audit, decided_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), 'target', $8, 'system') RETURNING id`,
+		convID, taskID, r.AgentName, r.ToolName, raw, r.Status, r.Reason, firstAudit([]*InterceptAudit{r.Audit})).Scan(&id)
+	return id, err
+}
+
+// SettingTargetExemptHosts is the settings key of the stored target-gate
+// exemption list: a JSON array of TargetExemption.
+const SettingTargetExemptHosts = "target_gate_exempt_hosts"
+
+// TargetExemption is one entry of the target-gate exemption list: an exact
+// host and port that needs no approval and no pin. It is configuration, not an
+// approval.
+type TargetExemption struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	Note string `json:"note,omitempty"`
+}
+
+// TargetExemptions returns the stored exemption list and its raw settings
+// value ("" when the list was never stored).
+func (d *DB) TargetExemptions() (list []TargetExemption, raw string, err error) {
+	raw, ok, err := d.GetSetting(SettingTargetExemptHosts)
+	if err != nil || !ok {
+		return nil, "", err
+	}
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return nil, raw, fmt.Errorf("stored target-gate exemption list: %w", err)
+	}
+	return list, raw, nil
+}
+
+// ReplaceTargetExemptions stores list as the exemption list and appends the
+// change to target_gate_exemption_log, in one transaction. digest identifies
+// the new list in the log and in the audit of the calls that use it.
+func (d *DB) ReplaceTargetExemptions(list []TargetExemption, changedBy, digest string) error {
+	if list == nil {
+		list = []TargetExemption{}
+	}
+	after, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var before *string
+	var stored string
+	switch err := tx.QueryRow(`SELECT value FROM settings WHERE key=$1 FOR UPDATE`, SettingTargetExemptHosts).Scan(&stored); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return err
+	case json.Valid([]byte(stored)):
+		before = &stored
+	}
+	if _, err := tx.Exec(`
+INSERT INTO settings(key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, SettingTargetExemptHosts, string(after)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO target_gate_exemption_log(changed_by, before, after, digest)
+VALUES ($1, $2::jsonb, $3::jsonb, $4)`, changedBy, before, string(after), digest); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// TargetExemptionChange is one row of target_gate_exemption_log.
+type TargetExemptionChange struct {
+	ID        int64           `json:"id"`
+	ChangedAt time.Time       `json:"changed_at"`
+	ChangedBy string          `json:"changed_by"`
+	Before    json.RawMessage `json:"before"`
+	After     json.RawMessage `json:"after"`
+	Digest    string          `json:"digest"`
+}
+
+// ListTargetExemptionLog returns the most recent changes of the exemption
+// list, newest first.
+func (d *DB) ListTargetExemptionLog(limit int) ([]TargetExemptionChange, error) {
+	rows, err := d.Query(`SELECT id, changed_at, changed_by, before, after, digest
+FROM target_gate_exemption_log ORDER BY id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TargetExemptionChange{}
+	for rows.Next() {
+		var c TargetExemptionChange
+		var before, after []byte
+		if err := rows.Scan(&c.ID, &c.ChangedAt, &c.ChangedBy, &before, &after, &c.Digest); err != nil {
+			return nil, err
+		}
+		c.Before, c.After = before, after
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// seedTargetGateExemptions stores the initial exemption list once: the package
+// sources of the runtime image, so that a package install does not ask for an
+// approval. Gated by a settings flag like the rule seeds: the list is owned by
+// the operator afterwards, and an entry they remove stays removed.
+func (d *DB) seedTargetGateExemptions() error {
+	if v, _, _ := d.GetSetting("target_gate_exempt_seed_v1"); v == "done" {
+		return nil
+	}
+	raw, err := json.Marshal([]TargetExemption{
+		{Host: "pypi.org", Port: 443, Note: "[built-in] Python package index"},
+		{Host: "files.pythonhosted.org", Port: 443, Note: "[built-in] Python package files"},
+		{Host: "registry.npmjs.org", Port: 443, Note: "[built-in] npm registry"},
+		{Host: "deb.debian.org", Port: 80, Note: "[built-in] Debian packages"},
+		{Host: "deb.debian.org", Port: 443, Note: "[built-in] Debian packages"},
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := d.InsertSettingIfAbsent(SettingTargetExemptHosts, string(raw)); err != nil {
+		return err
+	}
+	return d.SetSetting("target_gate_exempt_seed_v1", "done")
 }

@@ -10,7 +10,11 @@ package guard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +39,7 @@ type Guard struct {
 	reg         *hook.Registry
 	interceptor *intercept.Interceptor // optional; nil disables user-configured rules
 	targetOnly  bool                   // planner / main agent: target gate only, no rules, no judge, no audit ring
+	gate        targetGate             // the target gate; nil without an interceptor
 }
 
 // New creates a Guard without user-configured intercept rules (used for pentest
@@ -50,16 +55,26 @@ func NewWithInterceptor(ic *intercept.Interceptor) *Guard { return newGuard(ic) 
 // ring (which keeps the worker history of the task's main Guard).
 func NewTargetOnly(ic *intercept.Interceptor) *Guard {
 	g := &Guard{attrib: map[string]int{}, interceptor: ic, targetOnly: true}
+	g.setGate(ic)
 	g.reg = hook.NewRegistry().On(hook.PreToolUse, g.preToolUse)
 	return g
 }
 
 func newGuard(ic *intercept.Interceptor) *Guard {
 	g := &Guard{attrib: map[string]int{}, interceptor: ic}
+	g.setGate(ic)
 	g.reg = hook.NewRegistry().
 		On(hook.PreToolUse, g.preToolUse).
 		On(hook.PostToolUse, g.postToolUse)
 	return g
+}
+
+// setGate wires the interceptor in as the target gate. A nil interceptor leaves
+// the gate unset rather than set to an interface that holds a nil pointer.
+func (g *Guard) setGate(ic *intercept.Interceptor) {
+	if ic != nil {
+		g.gate = ic
+	}
 }
 
 // Hooks returns the hook registry to attach to an agent session.
@@ -93,45 +108,68 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 	return g.applyIntercept(ctx, ev)
 }
 
-// targetGate is the seam of the approval gate for asset targets. The gate is not
-// wired in yet: every call is allowed, and nothing is extracted, resolved, read
-// or written.
-func (g *Guard) targetGate(_ context.Context, _ hook.Event) hook.Result {
-	return hook.Result{}
+// targetGate is the approval gate for asset targets, as the guard uses it.
+// *intercept.Interceptor implements it.
+type targetGate interface {
+	CheckTargets(ctx context.Context, scope intercept.TargetScope, toolName string, input []byte) ([]intercept.TargetRequest, intercept.TargetResult)
+	RequestTargets(ctx context.Context, scope intercept.TargetScope, toolName string, input []byte, targets []intercept.TargetRequest, ask *intercept.Decision) intercept.TargetResult
 }
 
-// applyIntercept evaluates user-configured intercept rules against the tool call.
-// Both rules and the fallback judge receive the complete tool input.
+// targetPasses bounds the request-and-recheck loop of one call: a request that
+// was decided in between, or addresses that changed again after an approval,
+// send the call back to the pin lookup at most this many times.
+const targetPasses = 3
+
+// gateScope returns the target-gate scope of the session, and whether its gate
+// is on. With the gate off (the default) no call reaches the gate.
+func (g *Guard) gateScope(ctx context.Context) (intercept.TargetScope, bool) {
+	scope, ok := intercept.TargetScopeFromContext(ctx)
+	return scope, ok && g.gate != nil && scope.Enabled != nil && scope.Enabled()
+}
+
+// applyIntercept evaluates user-configured intercept rules against the tool call,
+// then the target gate. Both rules and the fallback judge receive the complete
+// tool input.
+//
+// The rules and the judge apply to the enabled tools of a full guard. The
+// target gate applies to every tool call of a session whose gate is on: a deny
+// blocks first, before any target request exists; an allow by a rule or by the
+// judge does not satisfy the gate; an ask and an unpinned target share one
+// approval request.
 func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
-	if g.targetOnly {
-		return g.targetGate(ctx, ev)
-	}
-	if g.interceptor == nil {
-		return hook.Result{}
-	}
-	if !g.interceptor.IsToolEnabled(ev.ToolName) {
+	scope, gated := g.gateScope(ctx)
+	rules := !g.targetOnly && g.interceptor != nil && g.interceptor.IsToolEnabled(ev.ToolName)
+	if !rules && !gated {
 		return hook.Result{}
 	}
 	ctx = intercept.WithCall(ctx, ev.ToolName, ev.Input)
-	dec, matched := g.interceptor.Match(ev.ToolName, ev.Input)
-	if !matched {
-		// No rule matched. Ask the LLM fallback judge (if enabled); when it is off
-		// or unwired, keep current behavior and allow.
-		d, judged := g.interceptor.Judge(ctx, ev.ToolName, ev.Input)
-		if !judged {
-			return hook.Result{}
+	var dec intercept.Decision
+	if rules {
+		var matched bool
+		dec, matched = g.interceptor.Match(ev.ToolName, ev.Input)
+		if !matched {
+			// No rule matched. Ask the LLM fallback judge (if enabled); when it is off
+			// or unwired, keep current behavior and allow.
+			dec, _ = g.interceptor.Judge(ctx, ev.ToolName, ev.Input)
 		}
-		dec = d
 	}
-	switch dec.Action {
-	case "deny":
+	if dec.Action == "deny" {
 		// Note: a deny hit does not block for approval; it directly logs a denied entry (visible on the history / task interception pages).
 		g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), dec, ev.ToolName, ev.Input, "denied")
 		return g.block(ev.ToolName, systemBlockMessage(dec.Message), "")
+	}
+	var unpinned []intercept.TargetRequest
+	if gated {
+		var res intercept.TargetResult
+		if unpinned, res = g.gate.CheckTargets(ctx, scope, ev.ToolName, ev.Input); res.Code != "" {
+			return g.block(ev.ToolName, targetBlockMessage(res), "")
+		}
+	}
+	var ask *intercept.Decision
+	switch dec.Action {
 	case "allow":
 		// Record explicit rule and model approvals so review details remain auditable.
 		g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), dec, ev.ToolName, ev.Input, "allowed")
-		return hook.Result{}
 	case "ask":
 		// If the worker context is already cancelled (task stopped / killed), block
 		// immediately without creating a pending record — avoids orphaned DB entries
@@ -139,13 +177,78 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		if ctx.Err() != nil {
 			return g.block(ev.ToolName, systemBlockMessage("work cancelled; platform safety controls blocked execution"), "")
 		}
+		ask = &dec
+	}
+	if len(unpinned) > 0 {
+		res, merged := g.requestTargets(ctx, scope, ev, unpinned, ask)
+		if res.Code != "" {
+			return g.block(ev.ToolName, targetBlockMessage(res), "")
+		}
+		if merged {
+			// The approval of the target request answered the ask as well.
+			ask = nil
+		}
+	}
+	if ask != nil {
 		convID := intercept.ConvIDFromContext(ctx)
 		if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
 			return g.block(ev.ToolName, systemBlockMessage("manual approval not granted (user rejected or approval timed out)"), "")
 		}
-		return hook.Result{}
 	}
 	return hook.Result{}
+}
+
+// requestTargets asks for the approval of the targets no pin covers, waits for
+// the decisions, and checks the call again: it runs only if every target is
+// covered then. A code in the result blocks the call. merged reports that the
+// ask was carried by a request this call created, so it needs no prompt of its
+// own.
+func (g *Guard) requestTargets(ctx context.Context, scope intercept.TargetScope, ev hook.Event, unpinned []intercept.TargetRequest, ask *intercept.Decision) (res intercept.TargetResult, merged bool) {
+	for pass := 0; pass < targetPasses; pass++ {
+		if res = g.gate.RequestTargets(ctx, scope, ev.ToolName, ev.Input, unpinned, ask); res.Code != "" {
+			return res, merged
+		}
+		if res.AskMerged {
+			merged, ask = true, nil
+		}
+		if unpinned, res = g.gate.CheckTargets(ctx, scope, ev.ToolName, ev.Input); res.Code != "" || len(unpinned) == 0 {
+			return res, merged
+		}
+	}
+	t := unpinned[0]
+	return intercept.TargetResult{Code: intercept.TargetApprovalPending, Host: t.Host, Port: t.Port,
+		Reason: fmt.Sprintf("the target is still not covered by a pin after %d approval rounds; its addresses changed again", targetPasses)}, merged
+}
+
+// targetGuidance tells the model what a target block means for its next step.
+var targetGuidance = map[string]string{
+	intercept.TargetApprovalPending: "The call was not executed. An approval by the operator is needed and may still arrive: retry the same call later. " +
+		"Do not rewrite the command, switch tools or substitute an IP address.",
+	intercept.TargetDenied: "The call was not executed. The operator did not approve this target: do not retry it and do not reach it another way.",
+	intercept.TargetResolveFailed: "The call was not executed and no approval was requested. " +
+		"This is a resolver failure on the platform side, not a block by the target. " +
+		"Do not rewrite the command, switch tools or substitute an IP address. Retry the same call later, or report the failure.",
+	intercept.TargetRuleBlocked: "The call was not executed and no approval was requested. " +
+		"The operator's rules exclude this target: do not reach it another way.",
+	intercept.TargetTooMany: "The call was not executed and no approval was requested. Name fewer new targets per call.",
+	intercept.TargetGateUnavailable: "The call was not executed. This is a failure on the platform side, not a block by the target. " +
+		"Retry the same call later, or report the failure.",
+}
+
+// targetBlockMessage is systemBlockMessage for the target gate: the block code,
+// the reason and the target, then what to do about it. A target block is not
+// always final (an approval can still arrive, a lookup can succeed later), so
+// it does not end with "This operation is forbidden."
+func targetBlockMessage(res intercept.TargetResult) string {
+	reason := res.Reason
+	if res.Host != "" && !strings.Contains(reason, res.Host) {
+		target := res.Host
+		if res.Port != 0 {
+			target = net.JoinHostPort(res.Host, strconv.Itoa(res.Port))
+		}
+		reason = "target " + target + ": " + reason
+	}
+	return "[ARTEX platform control, not target defense] " + res.Code + ": " + reason + ". " + targetGuidance[res.Code]
 }
 
 // systemBlockMessage frames an intercept block as an ARTEX platform-governance

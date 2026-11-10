@@ -40,6 +40,7 @@ type TargetRequest struct {
 	ResolvedAt  time.Time
 	Reason      string        // no_pin | new_ip | revoked
 	Pin         *db.TargetPin // the active pin an approval would extend (new_ip); nil otherwise
+	ExemptVoid  bool          // a stored exemption names the target and was void for this call
 }
 
 // TargetResult is the outcome of RequestTargets. Code is empty when every
@@ -104,6 +105,14 @@ func (i *Interceptor) RequestTargets(ctx context.Context, scope TargetScope, too
 	ref, err := scope.ref()
 	if err != nil {
 		return TargetResult{Code: TargetGateUnavailable, Reason: err.Error()}
+	}
+	// An approval pins the addresses the request displays, so a request without
+	// any is never opened: approving it would pin nothing.
+	for _, t := range targets {
+		if len(t.ResolvedIPs) == 0 {
+			return TargetResult{Code: TargetResolveFailed, Host: t.Host, Port: t.Port,
+				Reason: "no address was resolved for " + targetName(t) + ", and an approval never pins an empty address list"}
+		}
 	}
 	if scope.WaitBound <= 0 {
 		// A call that never waits cannot own a call-bound row.
@@ -238,7 +247,7 @@ func (i *Interceptor) openTargetRequest(ctx context.Context, ref db.TargetScopeR
 	target := db.InterceptTarget{
 		Host: t.Host, Port: t.Port, Kind: t.Kind,
 		ResolvedIPs: t.ResolvedIPs, Resolver: t.Resolver, ResolvedAt: t.ResolvedAt,
-		Reason: t.Reason, Outcome: "requested", NameOnlyEffective: nameOnly,
+		Reason: t.Reason, Outcome: "requested", NameOnlyEffective: nameOnly, ExemptVoid: t.ExemptVoid,
 	}
 	if t.Pin != nil {
 		target.PinID, target.PinVersion, target.PinnedIPs = t.Pin.ID, t.Pin.Version, t.Pin.PinnedIPs

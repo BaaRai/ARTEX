@@ -379,6 +379,11 @@ func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 409, err.Error())
 			return
 		}
+		if errors.Is(err, db.ErrTargetPinEmpty) {
+			// Refused, not failed: the request stays open and nothing was pinned.
+			writeErr(w, 422, err.Error())
+			return
+		}
 		writeErr(w, 500, err.Error())
 		return
 	}
@@ -461,6 +466,61 @@ func (s *Server) revokeTargetPin(w http.ResponseWriter, r *http.Request, scope d
 		return
 	}
 	writeJSON(w, 200, pin)
+}
+
+// --- target-gate exemptions (hosts that need no target approval, global) ---
+
+// targetGateGetExemptions returns the stored exemption list with its digest,
+// and the exemptions derived from the configuration (LLM gateways, search
+// backend, platform proxies), which are computed and cannot be edited.
+func (s *Server) targetGateGetExemptions(w http.ResponseWriter, r *http.Request) {
+	list, digest, err := s.m.interceptor.Exemptions()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if list == nil {
+		list = []db.TargetExemption{}
+	}
+	writeJSON(w, 200, map[string]any{"exemptions": list, "digest": digest, "derived": s.m.interceptor.DerivedExemptions()})
+}
+
+// targetGateSetExemptions replaces the stored exemption list. Entries are an
+// exact host and port. The change is appended to the exemption log with the
+// approver of the session.
+func (s *Server) targetGateSetExemptions(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Exemptions []db.TargetExemption `json:"exemptions"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	list, digest, err := s.m.interceptor.SetExemptions(req.Exemptions, s.approver(r))
+	if err != nil {
+		if errors.Is(err, intercept.ErrInvalidExemption) {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"exemptions": list, "digest": digest})
+}
+
+// targetGateExemptionHistory returns the most recent changes of the exemption
+// list, newest first.
+func (s *Server) targetGateExemptionHistory(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	changes, err := pg.ListTargetExemptionLog(100)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"changes": changes})
 }
 
 // --- tool-config (global tool interception scope) ---
