@@ -70,7 +70,7 @@ func TestCaptureApprovalLifecycle(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				if err := ic.Decide(detail.ID, tc.approve); err != nil {
+				if err := ic.Decide(detail.ID, tc.approve, "", ""); err != nil {
 					t.Error(err)
 				}
 			})

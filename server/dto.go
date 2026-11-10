@@ -63,6 +63,7 @@ type TaskDTO struct {
 	CompanyIDs         []int64            `json:"company_ids"`
 	CoverageEnabled    bool               `json:"coverage_enabled"` // asset coverage feature switch (fixed at creation)
 	PlanQuietMode      bool               `json:"plan_quiet_mode"`  // planner quiet-mode switch (#86), editable mid-run
+	TargetGate         bool               `json:"target_gate"`      // approval gate for asset targets, opt-in, editable mid-run
 }
 
 // FindingSeverityDTO is the per-severity finding count shown in the task list (critical/high/medium/low).
@@ -138,6 +139,7 @@ func taskDTO(t *Task, status string) TaskDTO {
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
 		PlanQuietMode:      t.PlanQuietMode,
+		TargetGate:         t.targetGate.Load(),
 	}
 }
 

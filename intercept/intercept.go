@@ -87,11 +87,14 @@ const DefaultTargetWaitBound = 300 * time.Second
 // (TaskID) or one conversation (ConversationID), never both. Enabled reports the
 // scope's opt-in flag and is read on every gated call; nil means the gate is off.
 // WaitBound caps the wait for a human decision; 0 means never wait.
+// Interceptor is the one that owns the gate of this session, so that code
+// holding only a context (an HTTP redirect callback) can reach it.
 type TargetScope struct {
 	TaskID         string
 	ConversationID int64
 	Enabled        func() bool
 	WaitBound      time.Duration
+	Interceptor    *Interceptor
 }
 
 // WithTargetScope returns a child context carrying the target-gate scope of the
@@ -112,36 +115,52 @@ type compiledRule struct {
 	re *regexp.Regexp
 }
 
-// pendingManager tracks in-flight "ask" requests via per-request channels.
+// pendingManager tracks in-flight approval requests via per-waiter channels. A
+// classic ask has one waiter; a target request can have several (every call
+// that names the same host waits on the same row).
 type pendingManager struct {
 	mu sync.Mutex
-	ch map[int64]chan bool
+	ch map[int64][]chan bool
 }
 
-func newPendingManager() *pendingManager { return &pendingManager{ch: map[int64]chan bool{}} }
+func newPendingManager() *pendingManager { return &pendingManager{ch: map[int64][]chan bool{}} }
 
+// add registers one more waiter for id and returns its channel.
 func (p *pendingManager) add(id int64) chan bool {
 	ch := make(chan bool, 1)
 	p.mu.Lock()
-	p.ch[id] = ch
+	p.ch[id] = append(p.ch[id], ch)
 	p.mu.Unlock()
 	return ch
 }
 
+// resolve wakes every waiter of id with the decision.
 func (p *pendingManager) resolve(id int64, allowed bool) {
 	p.mu.Lock()
-	ch, ok := p.ch[id]
+	waiters := p.ch[id]
 	delete(p.ch, id)
 	p.mu.Unlock()
-	if ok {
+	for _, ch := range waiters {
 		ch <- allowed
 	}
 }
 
-func (p *pendingManager) remove(id int64) {
+// remove takes one waiter's channel out; the other waiters of id stay.
+func (p *pendingManager) remove(id int64, ch chan bool) {
 	p.mu.Lock()
-	delete(p.ch, id)
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	waiters := p.ch[id]
+	for n, w := range waiters {
+		if w == ch {
+			waiters = append(waiters[:n:n], waiters[n+1:]...)
+			break
+		}
+	}
+	if len(waiters) == 0 {
+		delete(p.ch, id)
+		return
+	}
+	p.ch[id] = waiters
 }
 
 // Reviewer runs the LLM fallback judge for one tool call and returns its verdict
@@ -159,6 +178,18 @@ type Interceptor struct {
 	enabledTools map[string]bool // nil means not loaded yet
 	pending      *pendingManager
 	reviewer     Reviewer // nil = LLM fallback judge not wired
+	// upstreamProxy reports whether target traffic leaves through an upstream
+	// egress proxy (nil = no). Injected by the server layer.
+	upstreamProxy func() bool
+}
+
+// SetUpstreamProxyCheck installs the function that reports whether an upstream
+// egress proxy is configured. Behind one the proxy chooses the address it
+// connects to, so a target approval given while it is set is name-only.
+func (i *Interceptor) SetUpstreamProxyCheck(f func() bool) {
+	i.mu.Lock()
+	i.upstreamProxy = f
+	i.mu.Unlock()
 }
 
 // SetReviewer installs the LLM fallback judge callback. Passing nil disables it.
@@ -633,7 +664,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 
 	i.bindResult(ctx, pendingID, audit)
 	ch := i.pending.add(pendingID)
-	defer i.pending.remove(pendingID)
+	defer i.pending.remove(pendingID, ch)
 	// Polling clients can decide after INSERT commits but before the channel is
 	// registered. Re-read after registration so that decision cannot be lost;
 	// later decisions will be delivered through ch.
@@ -707,7 +738,11 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 var ErrAlreadyDecided = errors.New("approval already decided or does not exist; please refresh the list")
 
 // Decide resolves a pending request. Called by the HTTP decide endpoint.
-func (i *Interceptor) Decide(pendingID int64, allowed bool) error {
+// approver (subject of the session token) and remoteAddr identify the human
+// behind the decision; they are recorded in the row's audit. On a target
+// request "allowed" also pins the addresses the request displayed, and both
+// values go to the pin: a human decision is the only thing that creates a pin.
+func (i *Interceptor) Decide(pendingID int64, allowed bool, approver, remoteAddr string) error {
 	status := "denied"
 	if allowed {
 		status = "allowed"
@@ -716,7 +751,16 @@ func (i *Interceptor) Decide(pendingID int64, allowed bool) error {
 	if allowed {
 		action, reason = "allow", "user approved execution"
 	}
-	resolved, err := i.db.ResolveIntercept(pendingID, status, action, reason, "human")
+	targetKey, err := i.db.TargetRequestKey(pendingID)
+	if err != nil {
+		return err
+	}
+	var resolved bool
+	if targetKey != "" {
+		_, resolved, err = i.db.ResolveTargetRequest(pendingID, allowed, approver, remoteAddr)
+	} else {
+		resolved, err = i.db.ResolveInterceptBy(pendingID, status, action, reason, "human", approver, remoteAddr)
+	}
 	if err != nil {
 		return err
 	}

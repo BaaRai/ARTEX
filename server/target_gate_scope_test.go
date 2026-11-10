@@ -335,8 +335,11 @@ func TestEveryAgentKindCarriesTargetScope(t *testing.T) {
 			if got.scope.WaitBound != site.wait {
 				t.Fatalf("wait bound = %v, want %v", got.scope.WaitBound, site.wait)
 			}
-			if got.scope.Enabled != nil {
-				t.Fatal("the gate must be off: tasks have no opt-in flag yet")
+			if got.scope.Enabled == nil || got.scope.Enabled() {
+				t.Fatal("the gate must be off: the task did not opt in")
+			}
+			if got.scope.Interceptor != f.m.interceptor {
+				t.Fatal("the scope does not carry the interceptor that owns the gate")
 			}
 		})
 	}
@@ -348,8 +351,11 @@ func TestEveryAgentKindCarriesTargetScope(t *testing.T) {
 		if got.scope.WaitBound != intercept.DefaultTargetWaitBound {
 			t.Fatalf("wait bound = %v, want %v", got.scope.WaitBound, intercept.DefaultTargetWaitBound)
 		}
-		if got.scope.Enabled != nil {
-			t.Fatal("the gate must be off: conversations have no opt-in flag yet")
+		if got.scope.Enabled == nil || got.scope.Enabled() {
+			t.Fatal("the gate must be off: the conversation did not opt in")
+		}
+		if got.scope.Interceptor != f.m.interceptor {
+			t.Fatal("the scope does not carry the interceptor that owns the gate")
 		}
 	})
 }
