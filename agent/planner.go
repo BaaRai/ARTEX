@@ -10,6 +10,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/agentcore"
+	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
@@ -365,7 +366,8 @@ func plannerSystem(goal, dataDir, workDir string) string {
 // and/or finding(s) reported (may be several — the engine debounces a burst; empty
 // for time/heartbeat wakes). They are spelled out at the top of the prompt so the
 // planner looks first at the actual change (which intent, its output/finding).
-func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, goal string, triggers []TriggerEvent, emit func(db.Activity)) (met bool, reason string, err error) {
+// hooks (the task's target-only Guard) sees every tool call; may be nil.
+func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, goal string, triggers []TriggerEvent, hooks harness.HookRunner, emit func(db.Activity)) (met bool, reason string, err error) {
 	// cold-digest §2.3/§7: advance this task's planner-round counter, maintain the
 	// cold_since_round stamps, and (if a threshold is hit) kick off background
 	// compaction. Synchronous part is cheap (a few queries); the LLM compaction
@@ -460,6 +462,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 
 		// Opt-in via ARTEX_UNTRUSTED_BOUNDARY (default off): nonce-frame tool output as untrusted data.
 		UntrustedOutputBoundary: untrustedBoundaryEnabled(),
+	}
+	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
+		opts.Hooks = hooks
 	}
 	if p.tx != nil { // persist raw LLM conversation; one accumulating file per task's planner
 		opts.Transcript = p.tx

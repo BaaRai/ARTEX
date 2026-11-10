@@ -558,9 +558,12 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 			log.Printf("[conv %d] append activity failed: %v", c.ID, err)
 		}
 	}
+	// Approval scope of this turn's tool calls for the target gate (chat and retester).
+	// Conversations have no opt-in flag yet, so Enabled stays nil: the gate is off.
+	gctx := intercept.WithTargetScope(ctx, intercept.TargetScope{ConversationID: c.ID, WaitBound: intercept.DefaultTargetWaitBound})
 	// On a manual stop ctx is cancelled; Chat already emits a clean "stopped by the user"
 	// step, so skip the raw-error entry — only surface genuine failures.
-	if _, err := ca.Chat(ctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit); err != nil {
+	if _, err := ca.Chat(gctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit); err != nil {
 		finishReason = err.Error()
 		if ctx.Err() == nil {
 			_, _ = pg.AppendConvActivity(c.ID, db.Activity{Worker: c.AgentKey, Kind: "text", IsError: true,

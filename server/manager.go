@@ -68,6 +68,7 @@ type Task struct {
 	DeadlineAt           int64                  `json:"deadline_at,omitempty"`
 	Store                *pgdb.ExplorationStore `json:"-"`
 	Guard                *guard.Guard           `json:"-"`
+	TargetGuard          *guard.Guard           `json:"-"` // planner and main-agent hooks: target gate only
 	notify               chan struct{}
 	lifecycleMu          sync.RWMutex
 	llmMu                sync.RWMutex
@@ -869,8 +870,15 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		PlanQuietMode:   pt.PlanQuietMode,
 		CoverageEnabled: pt.CoverageEnabled,
 		FirstRunAt:      unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
-		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
+		Store: store, Guard: guard.NewWithInterceptor(ic), TargetGuard: guard.NewTargetOnly(ic), notify: make(chan struct{}, 1),
 	}
+}
+
+// targetScope is the approval scope of this task's tool calls for the target
+// gate. wait bounds how long a gated call may wait for a human decision. Tasks
+// have no opt-in flag yet, so Enabled stays nil: the gate is off.
+func (t *Task) targetScope(wait time.Duration) intercept.TargetScope {
+	return intercept.TargetScope{TaskID: t.ID, WaitBound: wait}
 }
 
 // UpdateTaskMetadata changes list-only task metadata without interrupting any
