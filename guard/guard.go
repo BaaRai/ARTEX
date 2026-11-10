@@ -34,6 +34,7 @@ type Guard struct {
 	attrib      map[string]int // failure attribution counts (Observer / G5)
 	reg         *hook.Registry
 	interceptor *intercept.Interceptor // optional; nil disables user-configured rules
+	targetOnly  bool                   // planner / main agent: target gate only, no rules, no judge, no audit ring
 }
 
 // New creates a Guard without user-configured intercept rules (used for pentest
@@ -42,6 +43,16 @@ func New() *Guard { return newGuard(nil) }
 
 // NewWithInterceptor creates a Guard with user-configured intercept rules.
 func NewWithInterceptor(ic *intercept.Interceptor) *Guard { return newGuard(ic) }
+
+// NewTargetOnly creates the Guard for the planner and the main agent. Their tool
+// calls pass through the target gate only: the intercept rules and the fallback
+// judge are not extended to them, and their calls are not written to the audit
+// ring (which keeps the worker history of the task's main Guard).
+func NewTargetOnly(ic *intercept.Interceptor) *Guard {
+	g := &Guard{attrib: map[string]int{}, interceptor: ic, targetOnly: true}
+	g.reg = hook.NewRegistry().On(hook.PreToolUse, g.preToolUse)
+	return g
+}
 
 func newGuard(ic *intercept.Interceptor) *Guard {
 	g := &Guard{attrib: map[string]int{}, interceptor: ic}
@@ -55,6 +66,10 @@ func newGuard(ic *intercept.Interceptor) *Guard {
 func (g *Guard) Hooks() *hook.Registry { return g.reg }
 
 func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
+	if g.targetOnly {
+		// Not recorded: the audit ring is for the gated worker and chat calls.
+		return g.applyIntercept(ctx, ev)
+	}
 	// Extract the shell-command surface for the audit log: Bash + the interactive-shell
 	// tools (shell_open's command, shell_send's text). Destructive/exfil gating is no
 	// longer hard-coded here — it now lives in the DB intercept rules, evaluated by
@@ -78,9 +93,19 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 	return g.applyIntercept(ctx, ev)
 }
 
+// targetGate is the seam of the approval gate for asset targets. The gate is not
+// wired in yet: every call is allowed, and nothing is extracted, resolved, read
+// or written.
+func (g *Guard) targetGate(_ context.Context, _ hook.Event) hook.Result {
+	return hook.Result{}
+}
+
 // applyIntercept evaluates user-configured intercept rules against the tool call.
 // Both rules and the fallback judge receive the complete tool input.
 func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
+	if g.targetOnly {
+		return g.targetGate(ctx, ev)
+	}
 	if g.interceptor == nil {
 		return hook.Result{}
 	}

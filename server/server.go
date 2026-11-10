@@ -3940,8 +3940,14 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			// taskDir = the agent's working directory (CWD), consistent with chatUpload's target dir and ensureRunDir.
 			taskDir := filepath.Join(s.m.dir, "tasks", t.ID)
 			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
+			// Tag the turn for the target gate: the task, the "mainagent" lane and the approval scope.
+			gctx := intercept.WithTaskContext(ctx, t.ID, "mainagent", func(a db.Activity) {
+				a.Worker = "mainagent"
+				emit(a)
+			})
+			gctx = intercept.WithTargetScope(gctx, t.targetScope(intercept.DefaultTargetWaitBound))
 			s.engine.BeginLLMCall(t.ID)
-			_, err := ma.Chat(ctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
+			_, err := ma.Chat(gctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, t.TargetGuard.Hooks(), emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
 			s.engine.EndLLMCall(t.ID)
 			if err != nil && ctx.Err() == nil {
 				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "(main agent error: " + err.Error() + ")", MainSeg: segPtr})

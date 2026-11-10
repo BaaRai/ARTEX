@@ -807,6 +807,19 @@ func (e *Engine) quietSkipEdge(t *Task) bool {
 	return err == nil && active
 }
 
+// plannerGateContext tags a planning round's context for the target gate: the
+// task, the "planner" lane (so an approval request raised from the round shows
+// inline in the planner transcript) and the approval scope. wait bounds how long
+// a gated call may wait for a human decision.
+func (e *Engine) plannerGateContext(ctx context.Context, t *Task, wait time.Duration) context.Context {
+	emit := func(a db.Activity) {
+		a.Worker = "planner"
+		e.emitActivity(t, a)
+	}
+	ctx = intercept.WithTaskContext(ctx, t.ID, "planner", emit)
+	return intercept.WithTargetScope(ctx, t.targetScope(wait))
+}
+
 func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 	interval := plannerHeartbeatInterval(t)
 	// Arming the heartbeat timer at loop entry = counting from the task start: even a
@@ -897,8 +910,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		// coalesces a burst; empty for time/heartbeat wakes).
 		triggers := t.drainTriggers()
 		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
+		pctx := e.plannerGateContext(ectx, t, intercept.DefaultTargetWaitBound)
 		e.BeginLLMCall(t.ID)
-		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, triggers, emit)
+		met, reason, err := planner.Plan(pctx, taskIDInt, e.m.assets, t.Store, t.Goal, triggers, t.TargetGuard.Hooks(), emit)
 		e.EndLLMCall(t.ID)
 		switch {
 		case err != nil && ectx.Err() == nil:
@@ -1101,6 +1115,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	}
 	label := fmt.Sprintf("%s · #%d", name, iid)
 	workCtx = intercept.WithTaskContext(workCtx, t.ID, label, taskEmit)
+	workCtx = intercept.WithTargetScope(workCtx, t.targetScope(intercept.DefaultTargetWaitBound))
 	// nudges deliberately sits outside the model_error rerun loop: the idle-turn rerun
 	// cap is a per-intent total, and one rerun round must not reset it back to zero.
 	hooks := steerHooks{

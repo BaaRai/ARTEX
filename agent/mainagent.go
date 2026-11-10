@@ -7,6 +7,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/agentcore"
+	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
@@ -114,8 +115,9 @@ func mainAgentSystem(goal, dataDir, workDir string) string {
 // Chat handles one human message and returns the assistant reply. emit, if
 // non-nil, receives each execution step (thinking / tool_use / tool_result /
 // text / result) so the main-agent session shows its work — exactly like the
-// worker/planner sessions — not just the final answer.
-func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, message string, emit func(db.Activity), notify, resume func(), notifyGoal, notifyHint func([]string)) (string, error) {
+// worker/planner sessions — not just the final answer. hooks (the task's
+// target-only Guard) sees every tool call; may be nil.
+func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, message string, hooks harness.HookRunner, emit func(db.Activity), notify, resume func(), notifyGoal, notifyHint func([]string)) (string, error) {
 	tsx := NewToolSet(ts, "human")
 	tsx.SetFindingRecorder(m.findingRecorder)
 	if as != nil {
@@ -172,6 +174,9 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 
 		// Opt-in via ARTEX_UNTRUSTED_BOUNDARY (default off): nonce-frame tool output as untrusted data.
 		UntrustedOutputBoundary: untrustedBoundaryEnabled(),
+	}
+	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
+		opts.Hooks = hooks
 	}
 	if m.tx != nil { // persist raw human↔AI conversation; one accumulating file per segment
 		opts.Transcript = m.tx
