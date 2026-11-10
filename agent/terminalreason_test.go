@@ -141,7 +141,7 @@ func TestAbortCausesAreWellFormed(t *testing.T) {
 	all := []*AbortCause{
 		AbortPausedByUser, AbortPausedByOrchestrator, AbortTaskDeleted, AbortPausedOnReload,
 		AbortGoalMet, AbortSettleDrainTimeout, AbortKilledByPlanner, AbortWorkPausedByUser,
-		AbortWorkCancelledByUser, AbortWorkFinished, AbortPausedRaceGuard,
+		AbortWorkCancelledByUser, AbortWorkClaimLost, AbortWorkFinished, AbortPausedRaceGuard,
 		AbortChatStoppedByUser, AbortChatPausedWithTask, AbortChatTurnFinished,
 		AbortShutdown, AbortRunHardTimeout,
 	}

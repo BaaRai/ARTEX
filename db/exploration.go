@@ -2,7 +2,9 @@ package db
 
 import (
 	"bytes"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,33 @@ import (
 // ErrIntentStateConflict marks a failed compare-and-set transition. Callers use
 // it to distinguish an expected control race (HTTP 409) from a storage failure.
 var ErrIntentStateConflict = errors.New("intent state changed concurrently")
+
+// ErrIntentClaimLost marks a heartbeat or a result write rejected by the claim
+// fence: the caller's unclaim token is no longer the intent's current one (its
+// claim expired and another worker took the intent over, or it was already
+// settled). Nothing was written; the caller must stop working on that intent.
+var ErrIntentClaimLost = errors.New("intent claim lost")
+
+// IntentClaimTTL is how long an intent claim stays valid without a heartbeat. A
+// running intent whose last_heartbeat_at is older than this (per the database
+// clock) is considered abandoned — its worker crashed or its process is gone —
+// and may be taken over; a younger claim is live and is never taken over. It is
+// six heartbeat intervals, so a live worker loses its claim only after five
+// consecutive missed heartbeats (about 75s of lost database connectivity).
+const IntentClaimTTL = 90 * time.Second
+
+// IntentClaimHeartbeatInterval is how often a busy worker renews its claim, and
+// how often the engine looks for expired claims to take over.
+const IntentClaimHeartbeatInterval = 15 * time.Second
+
+// newUnclaimToken returns a fresh random claim token (128 bits, hex).
+func newUnclaimToken() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
 
 // utf8Clean makes a string safe for a PostgreSQL text column. It (1) replaces
 // invalid UTF-8 byte sequences with U+FFFD and (2) strips NUL (0x00) bytes.
@@ -309,9 +338,19 @@ func (s *ExplorationStore) DeleteGoal(id int64) error {
 // is re-claimed. Called on startup: a 'running' intent with no live worker (a
 // backend restart or crashed worker goroutine left it stuck) would otherwise spin
 // forever in the UI. Workers resume from their transcript, so reopening is safe.
+//
+// Only an expired claim is taken over: last_heartbeat_at older than
+// IntentClaimTTL, or NULL (a legacy row claimed before the lease columns
+// existed, whose claimer never heartbeats). A live claim — including one held by
+// another instance on the same database — is left alone. The expiry check and
+// the takeover are one atomic UPDATE on the database clock, and clearing
+// unclaim_token fences the previous claimer out. The engine also calls this
+// periodically, so a claim that was still live at startup is taken over once it
+// expires.
 func (s *ExplorationStore) ResetRunningIntents() (int64, error) {
-	res, err := s.db.Exec(`UPDATE exploration_nodes SET state='open', completed_at=NULL, blocked_reason=NULL
-WHERE exploration_id=$1 AND kind='intent' AND state='running'`, s.expID)
+	res, err := s.db.Exec(`UPDATE exploration_nodes SET state='open', completed_at=NULL, blocked_reason=NULL, unclaim_token=NULL
+WHERE exploration_id=$1 AND kind='intent' AND state='running'
+  AND (last_heartbeat_at IS NULL OR last_heartbeat_at < now() - $2 * INTERVAL '1 second')`, s.expID, IntentClaimTTL.Seconds())
 	if err != nil {
 		return 0, err
 	}
@@ -1216,13 +1255,107 @@ WHERE exploration_id=$1 AND kind='goal' AND state='open' ORDER BY id`, s.expID)
 
 // ClaimIntent atomically moves an open intent to running. Returns true if claimed.
 func (s *ExplorationStore) ClaimIntent(id int64, owner string) (bool, error) {
-	res, err := s.db.Exec(`UPDATE exploration_nodes SET state='running', owner=$1
-WHERE id=$2 AND exploration_id=$3 AND kind='intent' AND state='open'`, owner, id, s.expID)
+	token, err := s.ClaimIntentToken(id, owner)
+	return token != "", err
+}
+
+// ClaimIntentToken is ClaimIntent returning the claim's unclaim token ("" when
+// the intent was not claimable). Every claim gets a fresh random token and
+// starts its lease (last_heartbeat_at) in the same statement; the claimer must
+// present the token to HeartbeatIntentClaim and to the SettleIntentClaim* writes.
+func (s *ExplorationStore) ClaimIntentToken(id int64, owner string) (string, error) {
+	token, err := newUnclaimToken()
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	n, _ := res.RowsAffected()
-	return n == 1, nil
+	res, err := s.db.Exec(`UPDATE exploration_nodes SET state='running', owner=$1, unclaim_token=$4, last_heartbeat_at=now()
+WHERE id=$2 AND exploration_id=$3 AND kind='intent' AND state='open'`, owner, id, s.expID, token)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return "", nil
+	}
+	return token, nil
+}
+
+// ClaimPausedIntentToken is the paused->running counterpart of ClaimIntentToken
+// (the human-message path, which never goes through 'open'). It applies the same
+// column updates as CompareAndSetIntentState(id, "paused", "running") and starts
+// a claim with a fresh token. Returns "" when the intent is no longer paused.
+func (s *ExplorationStore) ClaimPausedIntentToken(id int64) (string, error) {
+	token, err := newUnclaimToken()
+	if err != nil {
+		return "", err
+	}
+	res, err := s.db.Exec(`UPDATE exploration_nodes
+SET state='running', blocked_reason=NULL, content_version=content_version+1, completed_at=NULL, unclaim_token=$3, last_heartbeat_at=now()
+WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='paused'`, id, s.expID, token)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return "", nil
+	}
+	return token, nil
+}
+
+// HeartbeatIntentClaim renews the lease of the claim identified by token. It
+// touches the row only while token is the running intent's current unclaim
+// token; otherwise it returns ErrIntentClaimLost and writes nothing.
+func (s *ExplorationStore) HeartbeatIntentClaim(id int64, token string) error {
+	res, err := s.db.Exec(`UPDATE exploration_nodes SET last_heartbeat_at=now()
+WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='running' AND unclaim_token=$3`, id, s.expID, token)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("%w: heartbeat for intent %d rejected", ErrIntentClaimLost, id)
+	}
+	return nil
+}
+
+// SettleIntentClaim is the fenced write of a worker's intent result: it moves
+// the running intent to state and releases the claim, but only while token is
+// still the intent's current unclaim token. A worker whose claim was taken over
+// gets ErrIntentClaimLost and nothing is written. ErrIntentStateConflict means
+// the claim is still the caller's but the intent left 'running' concurrently.
+func (s *ExplorationStore) SettleIntentClaim(id int64, token, state string) error {
+	terminal := state == "done" || state == "blocked" || state == "exhausted" || state == "stopped"
+	res, err := s.db.Exec(`UPDATE exploration_nodes
+SET state=$1, blocked_reason=NULL, content_version=content_version+1, completed_at = CASE WHEN $5 THEN now() ELSE NULL END, unclaim_token=NULL
+WHERE id=$2 AND exploration_id=$3 AND kind='intent' AND state='running' AND unclaim_token=$4`, state, id, s.expID, token, terminal)
+	return s.settleIntentClaimResult(id, token, res, err)
+}
+
+// SettleIntentClaimBlocked is the fenced counterpart of SetIntentBlockedReason:
+// it settles the running intent as blocked with reason under the same token
+// check as SettleIntentClaim.
+func (s *ExplorationStore) SettleIntentClaimBlocked(id int64, token, reason string) error {
+	res, err := s.db.Exec(`UPDATE exploration_nodes
+SET state='blocked', blocked_reason=NULLIF($1,''), completed_at=now(), unclaim_token=NULL
+WHERE id=$2 AND exploration_id=$3 AND kind='intent' AND state='running' AND unclaim_token=$4`, reason, id, s.expID, token)
+	return s.settleIntentClaimResult(id, token, res, err)
+}
+
+// settleIntentClaimResult turns a fenced settle that matched no row into the
+// explicit rejection: claim lost unless the token is still the current one.
+func (s *ExplorationStore) settleIntentClaimResult(id int64, token string, res sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return nil
+	}
+	var current sql.NullString
+	err = s.db.QueryRow(`SELECT unclaim_token FROM exploration_nodes WHERE id=$1 AND exploration_id=$2 AND kind='intent'`, id, s.expID).Scan(&current)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if current.Valid && current.String == token {
+		return fmt.Errorf("%w: intent %d is no longer in the running state", ErrIntentStateConflict, id)
+	}
+	return fmt.Errorf("%w: result write for intent %d rejected", ErrIntentClaimLost, id)
 }
 
 // Stats returns node counts grouped by kind (for dashboard).

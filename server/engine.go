@@ -480,17 +480,6 @@ func (e *Engine) releaseWorkControl(intentID int64, run *workExecution, action s
 	e.workMu.Unlock()
 }
 
-func transitionIntentState(store *db.ExplorationStore, intentID int64, expected, state string) error {
-	changed, err := store.CompareAndSetIntentState(intentID, expected, state)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return fmt.Errorf("%w: intent %d is no longer in the %s state", db.ErrIntentStateConflict, intentID, expected)
-	}
-	return nil
-}
-
 // SteerWork queues a mid-run course-correction for the work running intentID (the
 // planner's steer_work tool). The worker delivers it before its next tool call and
 // re-plans — no kill. Errors if no work is currently running that intent.
@@ -761,10 +750,11 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 		t.Notify() // already running — just nudge a planning round
 		return
 	}
-	rt := e.registerTaskRoutines(ctx, t.ID, 1+workers)
+	rt := e.registerTaskRoutines(ctx, t.ID, 2+workers)
 	e.deleteMu.RUnlock()
 	e.touch(t.ID)
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.plannerLoop(loopCtx, t) })
+	runTaskRoutine(rt, func(loopCtx context.Context) { e.claimSweepLoop(loopCtx, t) })
 	for i := 0; i < workers; i++ {
 		name := fmt.Sprintf("work#%d", i+1)
 		runTaskRoutine(rt, func(loopCtx context.Context) { e.workerLoop(loopCtx, t, name) })
@@ -950,6 +940,64 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 	}
 }
 
+// claimSweepLoop periodically returns this task's expired intent claims (no
+// heartbeat within db.IntentClaimTTL: the claiming worker crashed or its process
+// is gone) to the frontier, where the worker loops re-claim them. The startup
+// reset alone would miss a claim that was still live when this process started.
+func (e *Engine) claimSweepLoop(ctx context.Context, t *Task) {
+	ticker := time.NewTicker(db.IntentClaimHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if !e.beginTaskOperation(t.ID) {
+			return
+		}
+		n, err := t.Store.ResetRunningIntents()
+		e.decInflight(t.ID)
+		if err != nil {
+			log.Printf("[engine] task %s expired-claim sweep failed: %v", t.ID, err)
+		} else if n > 0 {
+			log.Printf("[engine] task %s returned %d expired intent claims to open", t.ID, n)
+		}
+	}
+}
+
+// startClaimHeartbeat renews an intent claim every interval while its worker is
+// busy. A heartbeat rejected with db.ErrIntentClaimLost means the claim expired
+// and another worker took the intent over: the run is cancelled with
+// AbortWorkClaimLost so the stale worker stops. Any other store error is logged
+// and retried on the next tick; the claim survives until db.IntentClaimTTL
+// passes without a heartbeat. stop blocks until the heartbeat has ended.
+func startClaimHeartbeat(store *db.ExplorationStore, interval time.Duration, label string, intentID int64, token string, cancel context.CancelCauseFunc) (stop func()) {
+	quit, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-quit:
+				return
+			case <-ticker.C:
+			}
+			err := store.HeartbeatIntentClaim(intentID, token)
+			if errors.Is(err, db.ErrIntentClaimLost) {
+				log.Printf("[worker %s] intent #%d heartbeat rejected, cancelling this run: %v", label, intentID, err)
+				cancel(agent.AbortWorkClaimLost)
+				return
+			}
+			if err != nil {
+				log.Printf("[worker %s] intent #%d heartbeat failed, retrying: %v", label, intentID, err)
+			}
+		}
+	}()
+	return func() { close(quit); <-done }
+}
+
 func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 	for {
 		select {
@@ -1000,12 +1048,12 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 // runIntent. Returns false when nothing was claimable. The pool worker loop is its
 // only caller.
 func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker *agent.Worker) bool {
-	intent := e.claimNext(t, name)
+	intent, token := e.claimNext(t, name)
 	if intent == nil {
 		return false
 	}
 	log.Printf("[worker %s] task %s claimed intent #%d", name, t.ID, intent.ID)
-	return e.runIntent(ctx, t, name, worker, intent, "", "")
+	return e.runIntent(ctx, t, name, worker, intent, token, "", "")
 }
 
 // runIntent executes and fully settles one already-claimed (state=running) intent.
@@ -1016,7 +1064,10 @@ func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker
 // transcript marker that dedups re-injection across model_error retries. The caller
 // must already hold one task-operation admission for the whole sequence so a delete
 // cannot observe quiescence between the LLM return and the final DB writes.
-func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *agent.Worker, intent *db.Node, requestID, message string) bool {
+// token is the unclaim token of the caller's claim: a heartbeat renews the claim
+// while the worker is busy, and every intent state write below is fenced on it,
+// so a worker whose claim was taken over cannot overwrite the new claimer.
+func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *agent.Worker, intent *db.Node, token, requestID, message string) bool {
 	// Per-intent LLM rotation (#85): each claimed worker intent runs on the
 	// next chain head. The pin travels through the run context into the
 	// provider resolver; non-worker roles and failover keep the active head.
@@ -1031,7 +1082,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	emit := func(r db.Activity) { e.emitActivity(t, r) }
 	ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; carries the task deadline
 	if ectx.Err() != nil || e.IsDeleting(t.ID) {
-		if err := transitionIntentState(t.Store, intent.ID, "running", "open"); err != nil {
+		if err := t.Store.SettleIntentClaim(intent.ID, token, "open"); err != nil {
 			log.Printf("[worker %s] task %s intent #%d claim rollback failed: %v", name, t.ID, intent.ID, err)
 		}
 		return true
@@ -1039,6 +1090,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// per-work child context so the planner's kill_work can stop just this work.
 	workCtx, workCancel := context.WithCancelCause(ectx)
 	e.registerWork(intent.ID, workCancel)
+	stopHeartbeat := startClaimHeartbeat(t.Store, db.IntentClaimHeartbeatInterval, name, intent.ID, token, workCancel)
 	// wrap the guard hooks so steer_work can inject a mid-run course-correction
 	// for THIS intent (drained before the worker's next tool call).
 	iid := intent.ID
@@ -1089,6 +1141,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		}
 		e.EndLLMCall(t.ID)
 	}
+	stopHeartbeat() // no longer busy: the state writes below follow within the just-renewed claim
 	// Capture kill state before detachWork cancels workCtx. kill = this work's
 	// ctx was cancelled (planner kill_work) while the TASK ctx kept running; a
 	// pause cancels the task ctx (ectx) instead. Checking workCtx.Err() AFTER
@@ -1111,7 +1164,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	var controlErr error
 	defer func() { completeWork(controlErr) }()
 	if action == "pause" {
-		controlErr = transitionIntentState(t.Store, intent.ID, "running", "paused")
+		controlErr = t.Store.SettleIntentClaim(intent.ID, token, "paused")
 		if controlErr != nil {
 			log.Printf("[worker %s] task %s intent #%d failed to persist the paused state: %v", name, t.ID, intent.ID, controlErr)
 			return true
@@ -1124,7 +1177,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		// Park the stopped run in paused before handing cleanup to the API. If the
 		// request disconnects after cancellation, the intent remains recoverable and
 		// a later cancel can finish cleanup instead of leaving a phantom running row.
-		controlErr = transitionIntentState(t.Store, intent.ID, "running", "paused")
+		controlErr = t.Store.SettleIntentClaim(intent.ID, token, "paused")
 		if controlErr != nil {
 			log.Printf("[worker %s] task %s intent #%d failed to persist the cancel barrier: %v", name, t.ID, intent.ID, controlErr)
 			return true
@@ -1133,11 +1186,18 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		e.touch(t.ID)
 		return true
 	}
+	// The heartbeat was rejected: the claim expired and another worker took the
+	// intent over. This run's result is void and the intent state is not ours to
+	// write (the fence would reject every write below).
+	if errors.Is(workCause, agent.AbortWorkClaimLost) {
+		log.Printf("[worker %s] task %s intent #%d claim lost to another worker, result discarded", name, t.ID, intent.ID)
+		return true
+	}
 	// if a pause cancelled this run mid-flight, return the intent to the frontier
 	// so it is re-claimed on resume — the worker will resume the prior LLM
 	// conversation from its transcript instead of restarting from scratch.
 	if ectx.Err() != nil && taskExecutionPaused(context.Cause(ectx)) {
-		if err := transitionIntentState(t.Store, intent.ID, "running", "open"); err != nil {
+		if err := t.Store.SettleIntentClaim(intent.ID, token, "open"); err != nil {
 			log.Printf("[worker %s] task %s intent #%d task-pause rollback failed: %v", name, t.ID, intent.ID, err)
 		}
 		return true
@@ -1145,7 +1205,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// The hard-fallback cancel of task-timeout settlement (not pause, not kill) cancelled
 	// this run → classify it as exhausted (settled), not mislabeled blocked. By then the worker has usually written its result back during the settlement phase.
 	if ectx.Err() != nil && e.isSettling(t.ID) {
-		if err := transitionIntentState(t.Store, intent.ID, "running", "exhausted"); err != nil {
+		if err := t.Store.SettleIntentClaim(intent.ID, token, "exhausted"); err != nil {
 			log.Printf("[worker %s] task %s intent #%d failed to persist the timeout-settlement state: %v", name, t.ID, intent.ID, err)
 		}
 		log.Printf("[worker %s] task %s intent #%d ended by task-timeout settlement (exhausted), wrote back %s", name, t.ID, intent.ID, wrote)
@@ -1155,7 +1215,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// Task judged complete (done via the regular path) → cancelExec above cancelled this
 	// run. The intent's result is meaningless now; mark it stopped (not blocked) and do not pollute the intent states of a completed task.
 	if ectx.Err() != nil && isTerminalStatus(e.m.TaskStatus(t.ID)) {
-		if err := transitionIntentState(t.Store, intent.ID, "running", "stopped"); err != nil {
+		if err := t.Store.SettleIntentClaim(intent.ID, token, "stopped"); err != nil {
 			log.Printf("[worker %s] task %s intent #%d failed to persist the terminal stop: %v", name, t.ID, intent.ID, err)
 		}
 		log.Printf("[worker %s] task %s intent #%d cancelled because the task completed (stopped)", name, t.ID, intent.ID)
@@ -1164,7 +1224,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	}
 	// killed by the planner: mark stopped (don't write back results, don't auto-reclaim).
 	if killed {
-		if err := transitionIntentState(t.Store, intent.ID, "running", "stopped"); err != nil {
+		if err := t.Store.SettleIntentClaim(intent.ID, token, "stopped"); err != nil {
 			log.Printf("[worker %s] task %s intent #%d failed to persist the planner stop: %v", name, t.ID, intent.ID, err)
 		}
 		log.Printf("[worker %s] task %s intent #%d killed (stopped)", name, t.ID, intent.ID)
@@ -1188,11 +1248,16 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		state = "exhausted"
 		log.Printf("[worker %s] intent %d ran out of time (exhausted), wrote back %s after settling", name, intent.ID, wrote)
 	}
+	var stateErr error
 	if state == "blocked" && isTaskLLMChainExhausted(err) {
-		_ = t.Store.SetIntentBlockedReason(intent.ID, db.IntentBlockedLLMQuota)
+		stateErr = t.Store.SettleIntentClaimBlocked(intent.ID, token, db.IntentBlockedLLMQuota)
 	} else {
-		if stateErr := transitionIntentState(t.Store, intent.ID, "running", state); stateErr != nil {
-			log.Printf("[worker %s] task %s intent #%d failed to persist terminal state %s: %v", name, t.ID, intent.ID, state, stateErr)
+		stateErr = t.Store.SettleIntentClaim(intent.ID, token, state)
+	}
+	if stateErr != nil {
+		log.Printf("[worker %s] task %s intent #%d failed to persist terminal state %s: %v", name, t.ID, intent.ID, state, stateErr)
+		if errors.Is(stateErr, db.ErrIntentClaimLost) {
+			return true // taken over: the intent is not finished, its new claimer reports the result
 		}
 	}
 	log.Printf("[worker %s] task %s intent #%d finished: %s (wrote back %s)", name, t.ID, intent.ID, state, wrote)
@@ -1234,11 +1299,11 @@ func (e *Engine) runDetachedIntent(ctx context.Context, t *Task, intentID int64,
 	if node == nil || node.Kind != db.KindIntent {
 		return fmt.Errorf("intent not found")
 	}
-	changed, err := t.Store.CompareAndSetIntentState(intentID, "paused", "running")
+	token, err := t.Store.ClaimPausedIntentToken(intentID)
 	if err != nil {
 		return err
 	}
-	if !changed {
+	if token == "" {
 		return fmt.Errorf("%w: intent is no longer in the paused state", db.ErrIntentStateConflict)
 	}
 	node.State, node.Owner = "running", "chat"
@@ -1251,7 +1316,7 @@ func (e *Engine) runDetachedIntent(ctx context.Context, t *Task, intentID int64,
 	release = false // ownership of the admission passes to the goroutine
 	go func() {
 		defer e.decInflight(t.ID)
-		e.runIntent(ctx, t, "chat", worker, node, requestID, agentMessage)
+		e.runIntent(ctx, t, "chat", worker, node, token, requestID, agentMessage)
 	}()
 	return nil
 }
@@ -1279,12 +1344,12 @@ func sleepCtx(ctx context.Context, d time.Duration) (done bool) {
 	}
 }
 
-func (e *Engine) claimNext(t *Task, name string) *db.Node {
+func (e *Engine) claimNext(t *Task, name string) (*db.Node, string) {
 	fr, _ := t.Store.Frontier(20)
 	for _, in := range fr {
-		if ok, _ := t.Store.ClaimIntent(in.ID, name); ok {
-			return in
+		if token, _ := t.Store.ClaimIntentToken(in.ID, name); token != "" {
+			return in, token
 		}
 	}
-	return nil
+	return nil, ""
 }
