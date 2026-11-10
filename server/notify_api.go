@@ -447,6 +447,8 @@ func (s *Server) notifyTestChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := notifyTestMessage(s.notifierBaseURL(pg))
+	limits := notifyLimits(pg)
+	msg.Limits = &limits
 	start := time.Now()
 	// The test message is a single entry, so the delivered count is not needed
 	// here (for a single message the channel length limit falls back to

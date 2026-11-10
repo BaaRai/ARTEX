@@ -3454,6 +3454,7 @@ func (s *Server) settingsPayload() map[string]any {
 	if concLimit == 0 {
 		concLimit = defaultConcurrencyLimit // when off, still echo a sane default to the UI
 	}
+	limits := notifyLimits(s.m.pg)
 	return map[string]any{
 		"traffic_capture":          s.m.TrafficEnabled(),
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
@@ -3483,6 +3484,9 @@ func (s *Server) settingsPayload() map[string]any {
 		"notify_enabled":             s.m.pg.GetBool(settingNotifyEnabled, true),
 		"notify_public_base_url":     notifyPublicBaseURL(s.m.pg),
 		"notify_digest_interval_min": notifyDigestIntervalMin(s.m.pg),
+		// Render limits of IM messages; 0 = no truncation.
+		"notify_summary_max_runes": limits.SummaryRunes,
+		"notify_assets_max_shown":  limits.AssetsShown,
 	}
 }
 
@@ -3555,6 +3559,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		NotifyEnabled    *bool   `json:"notify_enabled"`
 		NotifyBaseURL    *string `json:"notify_public_base_url"`
 		NotifyDigestMins *int    `json:"notify_digest_interval_min"`
+		// Render limits of IM messages: summary characters (0-4000) and asset names listed (0-50); 0 = no truncation.
+		NotifySummaryMaxRunes *int `json:"notify_summary_max_runes"`
+		NotifyAssetsMaxShown  *int `json:"notify_assets_max_shown"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -3606,6 +3613,26 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.m.pg.SetSetting(settingNotifyDigestMinutes, strconv.Itoa(*req.NotifyDigestMins)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.NotifySummaryMaxRunes != nil {
+		if *req.NotifySummaryMaxRunes < 0 || *req.NotifySummaryMaxRunes > notifySummaryMaxRunesCap {
+			writeErr(w, 400, fmt.Sprintf("summary limit must be between 0 and %d characters (0 = no truncation)", notifySummaryMaxRunesCap))
+			return
+		}
+		if err := s.m.pg.SetSetting(settingNotifySummaryMaxRunes, strconv.Itoa(*req.NotifySummaryMaxRunes)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.NotifyAssetsMaxShown != nil {
+		if *req.NotifyAssetsMaxShown < 0 || *req.NotifyAssetsMaxShown > notifyAssetsMaxShownCap {
+			writeErr(w, 400, fmt.Sprintf("asset limit must be between 0 and %d (0 = no truncation)", notifyAssetsMaxShownCap))
+			return
+		}
+		if err := s.m.pg.SetSetting(settingNotifyAssetsMaxShown, strconv.Itoa(*req.NotifyAssetsMaxShown)); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}

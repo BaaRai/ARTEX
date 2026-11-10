@@ -79,4 +79,28 @@ type Message struct {
 	// HomeURL is the platform dashboard address (global public_base_url); empty
 	// means no dashboard entry is included.
 	HomeURL string
+	// Limits are the truncation limits to render with; nil means the defaults.
+	// A pointer because the zero value is meaningful (no truncation).
+	Limits *Limits
+}
+
+// Limits are the render-time truncation limits of a message, configured
+// globally (see the server's notify_summary_max_runes / notify_assets_max_shown
+// settings). In both fields 0 means no truncation; each channel's own length
+// cap remains the final guard.
+type Limits struct {
+	// SummaryRunes is how many characters the summary of a single push is
+	// compressed to.
+	SummaryRunes int
+	// AssetsShown is the maximum number of assets listed per vulnerability.
+	AssetsShown int
+}
+
+// limits returns the limits to render with, falling back to the defaults when
+// none were passed in.
+func (m Message) limits() Limits {
+	if m.Limits == nil {
+		return Limits{SummaryRunes: DefaultMaxSummaryRunes, AssetsShown: DefaultMaxAssetsShown}
+	}
+	return *m.Limits
 }

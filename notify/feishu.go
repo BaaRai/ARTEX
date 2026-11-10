@@ -121,15 +121,20 @@ func feishuSeverityTemplate(severity string) string {
 	}
 }
 
-// feishuMaxCardBytes is a conservative cap on card content. Feishu enforces a
-// size limit on cards and rejects the whole message when exceeded; pick a value
-// clearly below the official limit to also cover JSON wrapping overhead.
-const feishuMaxCardBytes = 24000
+// feishuMaxCardBytes is a conservative cap on card content. Feishu custom bots
+// reject a request body over 20 KB as a whole (not truncated); pick a value
+// clearly below that limit to also cover JSON wrapping overhead.
+const feishuMaxCardBytes = 16000
 
 // feishuCard builds the interactive card and returns it along with the **number
 // of items actually written**. kept serves the same purpose as in markdownBody:
 // only items that actually made it into the card should be marked as sent.
 func feishuCard(m Message) (map[string]any, int) {
+	lim := m.limits()
+	// budget is the final truncation backstop for one item's text, the same role
+	// TruncateBytes plays in markdownBody. With the summary or asset limit set to
+	// 0 an item has no other bound, and an oversized card loses the whole message.
+	budget := feishuMaxCardBytes - markdownReservedBytes
 	elements := []any{}
 	kept := 0
 	if m.Batch {
@@ -137,12 +142,12 @@ func feishuCard(m Message) (map[string]any, int) {
 		// "the remaining N items will continue in the next message", and N must
 		// come from the number of items that actually fit.
 		kept = packItemCount(m.Items, feishuMaxCardBytes, markdownReservedBytes, "", byteSize, func(it Item, idx int) string {
-			return feishuBatchLine(it, idx+1)
+			return feishuBatchLine(it, idx+1, lim)
 		})
 		items := m.Items[:kept]
 		elements = append(elements, feishuMarkdownDiv(markdownBatchIntro(m, items, len(m.Items))))
 		for i, it := range items {
-			elements = append(elements, feishuMarkdownDiv(feishuBatchLine(it, i+1)))
+			elements = append(elements, feishuMarkdownDiv(TruncateBytes(feishuBatchLine(it, i+1, lim), budget)))
 		}
 		if m.HomeURL != "" {
 			elements = append(elements, feishuButton("View all on the platform", m.HomeURL))
@@ -150,7 +155,7 @@ func feishuCard(m Message) (map[string]any, int) {
 	} else if len(m.Items) > 0 {
 		kept = 1
 		it := m.Items[0]
-		elements = append(elements, feishuMarkdownDiv(feishuItemLines(it)))
+		elements = append(elements, feishuMarkdownDiv(TruncateBytes(feishuItemLines(it, lim), budget)))
 		if it.DetailURL != "" {
 			elements = append(elements, feishuButton("View details", it.DetailURL))
 		}
@@ -189,7 +194,7 @@ func feishuButton(label, url string) map[string]any {
 // emphasis, so every field coming from outside goes through markdownText
 // (single-lining + escaping) — otherwise a single vulnerability title could turn
 // into a clickable external link inside Feishu.
-func feishuItemLines(it Item) string {
+func feishuItemLines(it Item, lim Limits) string {
 	out := fmt.Sprintf("**%s · %s**", SeverityLabel(it.Severity), markdownText(it.Title(), 0))
 	if it.IsStatusChange() {
 		out += fmt.Sprintf("\n**Status change**: %s → %s",
@@ -198,11 +203,11 @@ func feishuItemLines(it Item) string {
 	if it.VulnClass != "" && it.VulnClass != it.Title() {
 		out += fmt.Sprintf("\n**Type**: %s", markdownText(it.VulnClass, 0))
 	}
-	if a := assetLine(it.Assets, maxAssetsShown); a != "" {
+	if a := assetLine(it.Assets, lim.AssetsShown); a != "" {
 		out += fmt.Sprintf("\n**Assets**: %s", markdownText(a, 0))
 	}
 	if it.Summary != "" {
-		if s := markdownText(it.Summary, maxSummaryRunes); s != "" {
+		if s := markdownText(it.Summary, lim.SummaryRunes); s != "" {
 			out += fmt.Sprintf("\n**Summary**: %s", s)
 		}
 	}
@@ -210,9 +215,9 @@ func feishuItemLines(it Item) string {
 }
 
 // feishuBatchLine renders one entry of a digest card.
-func feishuBatchLine(it Item, index int) string {
+func feishuBatchLine(it Item, index int, lim Limits) string {
 	line := fmt.Sprintf("**%d. %s · %s**", index, SeverityLabel(it.Severity), markdownText(it.Title(), 0))
-	if a := assetLine(it.Assets, maxAssetsShown); a != "" {
+	if a := assetLine(it.Assets, lim.AssetsShown); a != "" {
 		line += " — " + markdownText(a, 0)
 	}
 	return line
