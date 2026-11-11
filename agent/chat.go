@@ -83,8 +83,13 @@ func chatWorkDirSpec(workDir string) string {
 
 // chatSystem renders the DB-managed prompt body for agentKey. Custom agents have
 // no per-key in-code default, so DefaultAssistantPrompt is the render fallback.
+// Every chat agent, built-in or custom, can read target-derived content through
+// WebFetch or Bash, so all of them get the code-owned untrusted-content tail
+// after the editable body.
 func chatSystem(agentKey, dataDir, workDir string) string {
-	return renderSystem(agentKey, DefaultAssistantPrompt, chatVars{DataDir: dataDir, Now: nowStr()}) + chatWorkDirSpec(workDir)
+	body := renderSystem(agentKey, DefaultAssistantPrompt, chatVars{DataDir: dataDir, Now: nowStr()})
+	body += untrustedContentTail(body)
+	return body + chatWorkDirSpec(workDir)
 }
 
 // chatVars carries the runtime variables a custom agent's prompt may reference.
