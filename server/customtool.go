@@ -482,7 +482,11 @@ func (s *Server) httpToolTransport(ctx context.Context, key string, spec httpExe
 	if !intercept.GateOn(ctx) {
 		return nil
 	}
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	tr := base.Clone()
 	// An environment proxy would be dialled instead of the target.
 	tr.Proxy = nil
 	tr.DialContext = intercept.PinnedDialer(key, true)
@@ -494,11 +498,11 @@ func (s *Server) httpToolTransport(ctx context.Context, key string, spec httpExe
 // httpProxyTransport builds a Transport for the http tool's proxy config, or nil
 // (direct). use_recording_proxy routes through the recording proxy + trusts its CA.
 func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
-	proxyStr := strings.TrimSpace(spec.Proxy)
+	proxyStr := proxyURLString(spec.Proxy)
 	var caFile string
 	if spec.UseRecordingProxy {
-		if addr := s.m.ProxyAddr(); addr != "" {
-			proxyStr = "http://" + addr
+		if addr := proxyURLString(s.m.ProxyAddr()); addr != "" {
+			proxyStr = addr
 			caFile = s.m.ProxyCACert()
 		}
 	}
@@ -519,6 +523,17 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 		}
 	}
 	return tr
+}
+
+// proxyURLString returns a proxy address as a URL: a bare host:port gets
+// "http://", an address that already has a scheme (as ProxyAddr returns it) is
+// kept as is.
+func proxyURLString(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.Contains(s, "://") {
+		return s
+	}
+	return "http://" + s
 }
 
 // ---------- helpers ----------
