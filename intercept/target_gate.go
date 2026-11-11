@@ -93,12 +93,12 @@ func (i *Interceptor) CheckTargets(ctx context.Context, scope TargetScope, toolN
 	if scope.Enabled == nil || !scope.Enabled() {
 		return nil, TargetResult{}
 	}
-	targets := ExtractTargets(toolName, input)
-	if len(targets) == 0 {
+	declared := extractDeclared(toolName, input)
+	if len(declared.targets) == 0 {
 		return nil, TargetResult{}
 	}
-	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input}
-	return c.run(targets)
+	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, urls: declared.urls}
+	return c.run(declared.targets)
 }
 
 // targetCheck is one run of the gate decision.
@@ -109,6 +109,7 @@ type targetCheck struct {
 	ref   db.TargetScopeRef
 	tool  string
 	input []byte
+	urls  []string // the URLs the call declares, as written, for the URL block rules
 }
 
 // checkedTarget is one target of the call and what the gate learned about it.
@@ -146,21 +147,45 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 		return c.block(TargetGateUnavailable, "gate_unavailable", first, "the exemption list could not be read: "+err.Error())
 	}
 
-	// Block rules come first, on the name and on what it resolves to: an exempt
-	// or pinned host that matches one is blocked. A name the configuration
-	// exempts is never resolved.
+	// Block rules come first, and an exempt or pinned host that matches one is
+	// blocked. They are matched on what the call declares before anything is
+	// resolved: a hit there costs no lookup, for any target of the call.
+	//
+	// URL rules (exact_url, fuzzy_url) are matched once per decision, on the
+	// URLs as the call writes them. That is a known limit: exact_url compares
+	// the string as written, so another case, encoding (%2F), a trailing slash,
+	// an added query or /./ does not match, and fuzzy_url is evaded by encoding
+	// the substring; a command can also build its URL at run time. To keep an
+	// agent away from a host, a domain, IP or CIDR rule is the one to write.
+	if rule, u, hit := db.MatchAssetInterceptRules(rules, nil, nil, c.urls); hit {
+		ct := &checkedTarget{Target: targets[0]}
+		if t, ok := NormalizeTarget(u); ok {
+			ct.Target = t
+		}
+		return c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", u, rule.Reason()))
+	}
+	// Then the declared form of every target: the name as written, the IP
+	// literal, the range.
 	checked := make([]*checkedTarget, len(targets))
 	for n, t := range targets {
 		ct := &checkedTarget{Target: t}
 		checked[n] = ct
-		switch {
-		case t.Kind != TargetDomain:
+		if t.Kind != TargetDomain {
 			ct.ips, ct.resolver, ct.resolvedAt = []string{t.Host}, literalResolver, time.Now().UTC()
-		case !ex.derived[db.TargetKey(t.Host, t.Port)]:
-			c.resolve(ct, false)
 		}
 		if rule, hit := blockRule(rules, ct); hit {
 			return c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason()))
+		}
+	}
+	// Only then are the names resolved, and the rules matched on the addresses.
+	// A name the configuration exempts is never resolved.
+	for _, ct := range checked {
+		if ct.Kind != TargetDomain || ex.derived[db.TargetKey(ct.Host, ct.Port)] {
+			continue
+		}
+		c.resolve(ct, false)
+		if rule, hit := blockRule(rules, ct); hit {
+			return c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", ct.Target, rule.Reason()))
 		}
 	}
 
@@ -306,7 +331,8 @@ func (c *targetCheck) pinUsed(ct *checkedTarget, pin *db.TargetPin) {
 }
 
 // blockRule matches the asset block rules against a target: its name, and its
-// addresses. A range is matched as written and by its network address.
+// addresses. A range is matched as written and by its network address. URL
+// rules are not matched here: run matches them once, on the declared URLs.
 func blockRule(rules []db.AssetInterceptRule, ct *checkedTarget) (db.AssetInterceptRule, bool) {
 	var domains []string
 	ips := ct.ips

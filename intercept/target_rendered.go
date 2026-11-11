@@ -40,7 +40,7 @@ func GateRenderedURL(ctx context.Context, toolName, rawURL string) TargetResult 
 	if err != nil {
 		return undeterminedTarget(ctx, scope, toolName, input, "the target of the rendered URL could not be read ("+err.Error()+")")
 	}
-	return gateRendered(ctx, scope, toolName, input, []Target{t})
+	return gateRendered(ctx, scope, toolName, input, []Target{t}, []string{rawURL})
 }
 
 // GateRenderedCommand is the target gate for the command a custom command tool
@@ -62,7 +62,7 @@ func GateRenderedCommand(ctx context.Context, toolName, command string, readings
 	for _, r := range readings {
 		l.scan(r)
 	}
-	return gateRendered(ctx, scope, toolName, renderedInput("command", command), l.targets)
+	return gateRendered(ctx, scope, toolName, renderedInput("command", command), l.targets, l.urls)
 }
 
 func renderedScope(ctx context.Context) (TargetScope, bool) {
@@ -79,9 +79,10 @@ func renderedInput(field, value string) []byte {
 
 // gateRendered runs the gate decision on the targets of a rendered call, asks
 // for the approval of those no pin covers, and checks again after the
-// decisions. It never merges an ask: the rules and the judge decided at the
-// hook, before the tool ran.
-func gateRendered(ctx context.Context, scope TargetScope, toolName string, input []byte, targets []Target) TargetResult {
+// decisions. urls are the URLs the call renders, for the URL block rules. It
+// never merges an ask: the rules and the judge decided at the hook, before the
+// tool ran.
+func gateRendered(ctx context.Context, scope TargetScope, toolName string, input []byte, targets []Target, urls []string) TargetResult {
 	if len(targets) == 0 {
 		return TargetResult{}
 	}
@@ -95,7 +96,7 @@ func gateRendered(ctx context.Context, scope TargetScope, toolName string, input
 		if !scope.Enabled() {
 			return nil, TargetResult{}
 		}
-		c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input}
+		c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, urls: urls}
 		return c.run(targets)
 	}
 	unpinned, res := check()

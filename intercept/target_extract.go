@@ -62,6 +62,13 @@ func toolSet(names ...string) map[string]bool {
 // names on its own. The gate detects a declared target; it does not prevent an
 // undeclared connection.
 func ExtractTargets(toolName string, input []byte) []Target {
+	return extractDeclared(toolName, input).targets
+}
+
+// extractDeclared reads what a tool call declares: its targets, as
+// ExtractTargets returns them, and the URLs it writes, as written, for the URL
+// block rules. A URL is kept only when it names a target.
+func extractDeclared(toolName string, input []byte) targetList {
 	if toolName == executeExtraTool {
 		var in struct {
 			ToolName string          `json:"tool_name"`
@@ -72,13 +79,15 @@ func ExtractTargets(toolName string, input []byte) []Target {
 		}
 	}
 	if noTargetTools[toolName] {
-		return nil
+		return targetList{}
 	}
 	var out targetList
 	switch toolName {
 	case "WebFetch":
-		if t, ok := NormalizeTarget(declaredFields(input).URL); ok {
+		u := declaredFields(input).URL
+		if t, ok := NormalizeTarget(u); ok {
 			out.add(t)
+			out.urls = append(out.urls, strings.TrimSpace(u))
 		}
 	case "Bash", "shell_open", "Monitor":
 		out.scan(declaredFields(input).Command)
@@ -87,7 +96,7 @@ func ExtractTargets(toolName string, input []byte) []Target {
 	default:
 		out.scanStrings(input)
 	}
-	return out.targets
+	return out
 }
 
 // declaredInput holds the fields of the built-in tools that carry a target.
@@ -109,6 +118,7 @@ func declaredFields(input []byte) declaredInput {
 type targetList struct {
 	targets []Target
 	seen    map[Target]bool
+	urls    []string // the URLs that name a target, as written
 }
 
 func (l *targetList) add(t Target) {
@@ -206,6 +216,10 @@ func (l *targetList) scan(s string) {
 				l.add(t)
 				found = true
 			}
+		}
+		if found {
+			// The whole token, path and query included, from the original string.
+			l.urls = append(l.urls, s[m[0]:m[1]])
 		}
 		// The scheme and what follows the authority are never read again. An
 		// authority that named no host is: an address written in it still counts.
