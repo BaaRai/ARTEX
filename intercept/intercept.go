@@ -181,6 +181,15 @@ type Interceptor struct {
 	// upstreamProxy reports whether target traffic leaves through an upstream
 	// egress proxy (nil = no). Injected by the server layer.
 	upstreamProxy func() bool
+	// derivedExempt lists the endpoints of the platform's own services (nil =
+	// none). Injected by the server layer. See SetDerivedExemptions.
+	derivedExempt func() []string
+	// targets is what the target gate reads and writes; resolve resolves the
+	// names it checks. firstUse holds the exemptions and pin versions whose first
+	// use this process has logged.
+	targets  targetStore
+	resolve  *resolveCache
+	firstUse sync.Map
 }
 
 // SetUpstreamProxyCheck installs the function that reports whether an upstream
@@ -210,7 +219,8 @@ var defaultEnabledTools = []string{
 // New creates an Interceptor backed by d. The rule cache is lazy-loaded on
 // first use.
 func New(d *db.DB) *Interceptor {
-	return &Interceptor{db: d, pending: newPendingManager()}
+	return &Interceptor{db: d, pending: newPendingManager(),
+		targets: dbTargetStore{d}, resolve: newResolveCache(systemResolver{})}
 }
 
 // Invalidate clears the in-memory rule cache and the enabled-tools cache.

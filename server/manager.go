@@ -404,6 +404,8 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
 	// Behind the global egress proxy a target approval is name-only.
 	m.interceptor.SetUpstreamProxyCheck(func() bool { return m.GlobalProxy() != "" })
+	// The platform's own endpoints need no target approval.
+	m.interceptor.SetDerivedExemptions(m.targetGateEndpoints)
 	if proxyAddr != "" {
 		tr, err := traffic.Open(filepath.Join(dir, "traffic"), proxyAddr)
 		if err != nil {
@@ -890,6 +892,32 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 // API takes effect on the next tool call.
 func (t *Task) targetScope(wait time.Duration) intercept.TargetScope {
 	return intercept.TargetScope{TaskID: t.ID, Enabled: t.targetGate.Load, WaitBound: wait, Interceptor: t.interceptor}
+}
+
+// searchBackendEndpoints are the endpoints of the search backends. The
+// "deepseek" backend has none of its own: it uses the active LLM profile.
+var searchBackendEndpoints = map[string]string{
+	"ddgs":       "https://html.duckduckgo.com",
+	"brave-free": "https://api.search.brave.com",
+	"tavily":     "https://api.tavily.com",
+}
+
+// targetGateEndpoints lists the endpoints of the platform's own services, which
+// the target gate exempts from approval: every LLM gateway, the search backend
+// in use, and the proxies an agent may name on a command line (the recording
+// proxy, the global egress proxy, the search proxy and each profile's proxy).
+// It is read on every gated call, so the exemptions follow the configuration.
+func (m *Manager) targetGateEndpoints() []string {
+	var out []string
+	profiles, _ := m.pg.ListProfiles()
+	for _, p := range profiles {
+		out = append(out, p.BaseURL, p.Proxy)
+	}
+	on, backend, _, _, searchProxy := m.WebSearch()
+	if on {
+		out = append(out, searchBackendEndpoints[backend])
+	}
+	return append(out, searchProxy, m.ProxyAddr(), m.GlobalProxy())
 }
 
 // UpdateTaskMetadata changes list-only task metadata without interrupting any

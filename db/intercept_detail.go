@@ -43,7 +43,8 @@ type InterceptAudit struct {
 	Output           string                  `json:"output,omitempty"`
 	OutputTruncated  bool                    `json:"output_truncated,omitempty"`
 	ExecutionEndedAt *time.Time              `json:"execution_ended_at,omitempty"`
-	// Targets is set on target approval requests only (target_key IS NOT NULL).
+	// Targets is set on the rows of the target gate only (decision_source = target):
+	// approval requests, blocks, and the first use of an exemption or pin version.
 	Targets []InterceptTarget `json:"targets,omitempty"`
 	// MergedAsk marks a target request that also carries the ask of a rule or of
 	// the judge: one row, one decision for both.
@@ -68,10 +69,13 @@ type InterceptTarget struct {
 	PinVersion  int       `json:"pin_version,omitempty"`
 	PinnedIPs   []string  `json:"pinned_ips,omitempty"`
 	Reason      string    `json:"reason,omitempty"` // no_pin | new_ip | revoked
-	Outcome     string    `json:"outcome"`          // requested | pinned | denied
+	Outcome     string    `json:"outcome"`          // requested | pinned | denied | pin_match | exempt | rule_blocked | resolve_failed | too_many | gate_unavailable
 	// NameOnlyEffective: requested while the upstream egress proxy was set; a pin
 	// created from this request covers the name only.
 	NameOnlyEffective bool `json:"name_only_effective,omitempty"`
+	// ExemptVoid: a stored exemption names this target, and did not apply because
+	// the name resolved to a private, loopback or otherwise local address.
+	ExemptVoid bool `json:"exempt_void,omitempty"`
 }
 
 type InterceptDetail struct {
