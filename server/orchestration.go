@@ -170,7 +170,7 @@ func (s *Server) delegateToTask(ctx context.Context, in json.RawMessage, pick fu
 		tsx.SetAssetStore(s.m.Assets(), s.m.Assets().Companies())
 	}
 	tsx.SetNotify(t.Notify)         // generic wake-up (write ops without a dedicated callback go through it; no-op for read tools)
-	tsx.SetNotifyHint(t.NotifyHint) // add_hint → records a "human added N strategic hints: ..." entry and wakes the planner
+	tsx.SetNotifyHint(t.NotifyHint) // add_hint → records an "orchestrator added N strategic hints: ..." entry and wakes the planner
 	return pick(tsx).Call(ctx, inner, nil)
 }
 

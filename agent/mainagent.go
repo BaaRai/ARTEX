@@ -111,7 +111,7 @@ func mainAgentSystem(goal, dataDir, workDir string) string {
 // text / result) so the main-agent session shows its work — exactly like the
 // worker/planner sessions — not just the final answer. hooks (the task's
 // target-only Guard) sees every tool call; may be nil.
-func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, message string, hooks harness.HookRunner, emit func(db.Activity), notify, resume func(), notifyGoal, notifyHint func([]string)) (string, error) {
+func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, message string, hooks harness.HookRunner, emit func(db.Activity), notify, resume func(), notifyGoal func([]string), notifyHint func(string, []string)) (string, error) {
 	tsx := NewToolSet(ts, "human")
 	tsx.SetFindingRecorder(m.findingRecorder)
 	if as != nil {
@@ -122,7 +122,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	tsx.SetNotify(notify)         // generic wake-up (write ops without a dedicated callback go through it, debounced)
 	tsx.SetResumeTask(resume)     // set_goals adds a goal → pull a completed/paused task back to running
 	tsx.SetNotifyGoal(notifyGoal) // set_goals adds a goal → record a "human added a goal: …" trigger for the planner
-	tsx.SetNotifyHint(notifyHint) // add_hint adds hints → record a "human added N strategic hints: …" trigger for the planner
+	tsx.SetNotifyHint(notifyHint) // add_hint adds hints → record a "human added N strategic hints: …" trigger for the planner (origin "human")
 	tsx.steerWork = m.steerWork   // enable steer_work tool (nil = unavailable)
 	// domain tools + basic default toolset (Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash)
 	// when the asset coverage feature is off, drop add_task_scope/list_untested_assets (not in the prompt).
