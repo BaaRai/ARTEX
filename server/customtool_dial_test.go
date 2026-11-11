@@ -138,6 +138,52 @@ func TestCustomHTTPGateOffTransportUnchanged(t *testing.T) {
 	}
 }
 
+// The proxy URL of the http tool's transport: an address with a scheme is kept
+// as is, a bare host:port gets "http://"; never a doubled scheme.
+func TestHTTPProxyTransportProxyScheme(t *testing.T) {
+	req := httptest.NewRequest("GET", "http://api.example.com/", nil)
+	for _, c := range []struct {
+		name, globalProxy string
+		spec              httpExec
+		want              string
+	}{
+		{"recording proxy, global proxy with a scheme", "http://127.0.0.1:3128", httpExec{UseRecordingProxy: true}, "http://127.0.0.1:3128"},
+		{"operator proxy with a scheme", "", httpExec{Proxy: "http://10.0.0.5:8080"}, "http://10.0.0.5:8080"},
+		{"operator proxy as bare host:port", "", httpExec{Proxy: " 10.0.0.5:8080 "}, "http://10.0.0.5:8080"},
+	} {
+		s := &Server{m: &Manager{globalProxy: c.globalProxy}}
+		tr := s.httpProxyTransport(c.spec)
+		if tr == nil || tr.Proxy == nil {
+			t.Fatalf("%s: transport %+v, want a proxy transport", c.name, tr)
+		}
+		u, err := tr.Proxy(req)
+		if err != nil || u == nil || u.String() != c.want {
+			t.Fatalf("%s: Proxy(req) = %v, %v; want %s", c.name, u, err, c.want)
+		}
+	}
+}
+
+// passRoundTripper stands in for an http.DefaultTransport that is not an
+// *http.Transport; it hands every request to the original transport.
+type passRoundTripper struct{ next http.RoundTripper }
+
+func (p passRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	return p.next.RoundTrip(r)
+}
+
+// With http.DefaultTransport replaced by another RoundTripper, a gated direct
+// call still gets a transport with the pinned dialer instead of a panic.
+func TestHTTPToolTransportDefaultTransportNotStd(t *testing.T) {
+	orig := http.DefaultTransport
+	http.DefaultTransport = passRoundTripper{next: orig}
+	defer func() { http.DefaultTransport = orig }()
+	ctx := intercept.WithTargetScope(context.Background(), intercept.TargetScope{TaskID: "7", Enabled: func() bool { return true }})
+	tr := (&Server{}).httpToolTransport(ctx, "probe", httpExec{URL: "http://api.example.com/"})
+	if tr == nil || tr.DialContext == nil {
+		t.Fatalf("transport %+v, want one with the pinned dialer", tr)
+	}
+}
+
 // A redirect of a pinned origin to a pinned hop: the hop is dialled at the
 // hop's pinned address.
 func TestCustomHTTPRedirectHopDialPinned(t *testing.T) {
@@ -224,10 +270,10 @@ func TestBypass_CustomHTTPProxyPeerNotPinned(t *testing.T) {
 	direct := g.s.buildCustomTool(&db.Tool{Key: "probe_bypass", Kind: "http", Exec: execJSON(t, map[string]any{"url": url})})
 	approveTarget(t, g, task, direct, func() (string, bool) { return callTool(t, direct, gatedCtx(task, 0), `{}`, nil) }, key)
 
-	// httpProxyTransport writes "http://" before the recording proxy address, so
-	// the address is given here without a scheme.
+	// The global proxy carries a scheme, as in production (ProxyAddr returns it
+	// as is with capture off); httpProxyTransport must not write a second one.
 	g.m.mu.Lock()
-	g.m.globalProxy = proxy.Listener.Addr().String()
+	g.m.globalProxy = proxy.URL
 	g.m.mu.Unlock()
 	t.Cleanup(func() {
 		g.m.mu.Lock()
