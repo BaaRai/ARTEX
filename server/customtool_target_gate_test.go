@@ -571,6 +571,49 @@ func TestDenyRuleWinsBeforeRenderedTarget(t *testing.T) {
 	}
 }
 
+// Documents a known limit: script tools stay advisory (D9). A custom script
+// tool's target is in its stored code, which neither the hook nor the tool
+// reads, so in a gated task the call is allowed and the script reaches a target
+// nobody approved: no lookup, no request, no row. This test changes only if
+// that decision changes.
+func TestBypass_CustomScriptToolTargetNotGated(t *testing.T) {
+	if detectPython() == "" {
+		t.Skip("python3 unavailable")
+	}
+	g := newGateServer(t)
+	on := true
+	task := g.newTask(t, db.TaskCreateOptions{TargetGate: &on})
+	res := &countingResolver{answers: map[string][]string{"localhost": {"127.0.0.1"}}}
+	g.m.interceptor.SetResolver(res)
+	_, hits, _, port := countingServer(t)
+
+	code := "import urllib.request\n" +
+		"opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))\n" +
+		"print(opener.open('http://localhost:" + port + "/script', timeout=20).read().decode())\n"
+	tool := g.s.buildCustomTool(&db.Tool{Key: "probe_script", Kind: "script", Exec: execJSON(t, map[string]any{"code": code})})
+	// The gate sees no target in the call: only the parameters reach the hook.
+	if got := intercept.ExtractTargets("probe_script", []byte(`{}`)); len(got) != 0 {
+		t.Fatalf("the hook reads %+v; the test needs a target only the stored code names", got)
+	}
+
+	p := &toolScript{calls: []scriptedCall{{"probe_script", `{}`}}, results: make(chan string, 16)}
+	done := runScriptedWorker(t, g, task, p, tool)
+	if r := p.next(t); !strings.Contains(r, "probe-reached") || strings.Contains(r, "TARGET_") {
+		t.Fatalf("script tool in a gated task: %q, want it allowed and the target reached", r)
+	}
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("the worker run did not end")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("%d requests reached the unapproved target, want 1 (the gap)", hits.Load())
+	}
+	if n, rows := res.lookups(), targetRowCount(t, g.m.pg, task.ID); n != 0 || rows != 0 {
+		t.Fatalf("%d lookups, %d target rows; the gate did see the script's target", n, rows)
+	}
+}
+
 // A task with the gate off (the default) runs as before: a worker's WebFetch
 // and the custom tools reach their targets, and the gate writes no row and
 // resolves no name.

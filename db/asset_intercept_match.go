@@ -45,6 +45,12 @@ func (r AssetInterceptRule) Reason() string {
 
 // matchOne checks whether a single enabled rule matches the given domain/IP/URL
 // candidates, and returns the concrete matched value.
+//
+// URL rules match the URL string as given, with no normalisation. Known limit:
+// exact_url misses any other spelling of the same URL (case, percent-encoding
+// such as %2F, a trailing slash, an added query, /./), and fuzzy_url misses an
+// encoded form of its substring. At tool dispatch the string is the URL the
+// call declares (intercept, targetCheck.run).
 func matchOne(r AssetInterceptRule, domains, ips, urls []string) (string, bool) {
 	p := strings.TrimSpace(r.Pattern)
 	if p == "" {

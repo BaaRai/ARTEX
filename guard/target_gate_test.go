@@ -282,18 +282,27 @@ type gateDB struct {
 	task string // task id
 }
 
-// stubResolver answers every name with the addresses it holds.
+// stubResolver answers every name with the addresses it holds, and counts the
+// lookups.
 type stubResolver struct {
 	mu  sync.Mutex
 	ips []string
 	err error
+	n   int
 }
 
 func (r *stubResolver) Name() string { return "stub" }
 
+func (r *stubResolver) lookups() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.n
+}
+
 func (r *stubResolver) LookupIPs(context.Context, string) ([]netip.Addr, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.n++
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -576,8 +585,8 @@ func TestGateOffLeavesEveryBranchUnchanged(t *testing.T) {
 	}
 }
 
-// A deny by a rule blocks first, as before: the gate is not consulted and no
-// target request exists.
+// A deny by a rule or by the judge blocks first, as before: the gate is not
+// consulted, nothing is resolved and no target request exists.
 func TestDenyRuleWinsBeforeTargetRequest(t *testing.T) {
 	g := newGateDB(t)
 	m := marker(t)
@@ -601,8 +610,77 @@ func TestDenyRuleWinsBeforeTargetRequest(t *testing.T) {
 	if block, _ := pre(guard, g.ctx(true, time.Minute), "Bash", `{"command":"curl https://app.example.com/ # `+m+`"}`); !block {
 		t.Fatal("deny did not block")
 	}
-	if len(g.pending()) != 0 || len(g.pins()) != 0 {
-		t.Fatalf("pending=%+v pins=%+v, want none", g.pending(), g.pins())
+	if len(g.pending()) != 0 || len(g.pins()) != 0 || g.res.lookups() != 0 {
+		t.Fatalf("pending=%+v pins=%+v lookups=%d, want none", g.pending(), g.pins(), g.res.lookups())
+	}
+
+	// A deny by the judge takes the same branch.
+	g.judge("deny")
+	input := `{"command":"curl https://judged.example.com/"}`
+	gate = &fakeGate{t: t, check: unpinnedOnce}
+	guard = NewWithInterceptor(g.ic)
+	guard.gate = gate
+	before := len(g.rows())
+	if block, msg := pre(guard, g.ctx(true, time.Minute), "Bash", input); !block || !strings.Contains(msg, "judge says deny") || strings.Contains(msg, "TARGET_") {
+		t.Fatalf("judge deny: block=%v msg=%q", block, msg)
+	}
+	if gate.checks != 0 || len(gate.asked) != 0 {
+		t.Fatalf("judge deny: the gate was reached: %d checks, %d requests", gate.checks, len(gate.asked))
+	}
+	if rows := g.rows()[before:]; len(rows) != 1 || rows[0].status != "denied" || rows[0].decidedBy != "model" || rows[0].targetKey != "" {
+		t.Fatalf("judge deny: rows = %+v, want the denied judge row only", rows)
+	}
+	guard = NewWithInterceptor(g.ic)
+	if block, _ := pre(guard, g.ctx(true, time.Minute), "Bash", input); !block {
+		t.Fatal("judge deny did not block")
+	}
+	if len(g.pending()) != 0 || len(g.pins()) != 0 || g.res.lookups() != 0 {
+		t.Fatalf("judge deny: pending=%+v pins=%+v lookups=%d, want none", g.pending(), g.pins(), g.res.lookups())
+	}
+}
+
+// An asset block rule wins over an allow and an ask, of a rule or of the
+// judge: the call is blocked, the allow is not logged, no human is asked, and
+// the rule hits on what the call declares, so nothing is resolved. A name rule
+// and a URL rule behave the same.
+func TestBlockRuleWinsOverAllowAndAsk(t *testing.T) {
+	const input = `{"command":"curl https://app.example.com/blocked-path # %s"}`
+	for _, block := range []struct{ name, kind, pattern string }{
+		{"name rule", "exact_domain", "app.example.com"},
+		{"URL rule", "fuzzy_url", "/blocked-path"},
+	} {
+		for _, v := range []struct{ name, by, action string }{
+			{"rule allow", "rule", "allow"},
+			{"judge allow", "judge", "allow"},
+			{"rule ask", "rule", "ask"},
+			{"judge ask", "judge", "ask"},
+		} {
+			t.Run(block.name+" over "+v.name, func(t *testing.T) {
+				g := newGateDB(t)
+				id, _ := strconv.ParseInt(g.task, 10, 64)
+				if _, err := g.d.Assets().CreateTaskInterceptRule(id, "block", block.kind, block.pattern, "guard test", true); err != nil {
+					t.Fatal(err)
+				}
+				m := marker(t)
+				if v.by == "rule" {
+					g.rule(v.action, m)
+				} else {
+					g.judge(v.action)
+				}
+				guard := NewWithInterceptor(g.ic)
+				r := g.result(call(guard, g.ctx(true, time.Minute), "Bash", fmt.Sprintf(input, m)))
+				if !r.block || !strings.Contains(r.msg, intercept.TargetRuleBlocked+": ") || !strings.Contains(r.msg, block.pattern) {
+					t.Fatalf("block=%v msg=%q, want %s", r.block, r.msg, intercept.TargetRuleBlocked)
+				}
+				rows := g.rows()
+				if len(rows) != 1 || rows[0].status != "denied" || rows[0].decidedBy != "system" || rows[0].ruleID != 0 {
+					t.Fatalf("rows = %+v, want the one block row of the gate: no allow logged, nobody asked", rows)
+				}
+				if n := g.res.lookups(); n != 0 || len(g.pins()) != 0 {
+					t.Fatalf("%d lookups, pins %+v; want none", n, g.pins())
+				}
+			})
+		}
 	}
 }
 
