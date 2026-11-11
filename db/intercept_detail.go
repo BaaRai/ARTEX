@@ -76,6 +76,9 @@ type InterceptTarget struct {
 	// ExemptVoid: a stored exemption names this target, and did not apply because
 	// the name resolved to a private, loopback or otherwise local address.
 	ExemptVoid bool `json:"exempt_void,omitempty"`
+	// RedirectFrom: the origin (host:port) of the redirect hop that led to this
+	// target; empty when the call named the target itself.
+	RedirectFrom string `json:"redirect_from,omitempty"`
 }
 
 type InterceptDetail struct {

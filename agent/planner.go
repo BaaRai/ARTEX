@@ -426,13 +426,10 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		Provider:        p.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           tools,
+		Tools:           withWebFetch(tools, p.proxyAddr, p.proxyCACert), // WebFetch: route through the recording proxy for traceability; load the proxy CA to verify MITM-re-signed HTTPS certs; every redirect hop is gated
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // route through the recording proxy for traceability; load the proxy CA to verify MITM-re-signed HTTPS certs
-		WebFetchProxy:   p.proxyAddr,
-		WebFetchCACert:  p.proxyCACert,
 		// Web search (optional). ddgs needs no key; brave-free needs BraveKey; tavily needs TavilyKey.
 		// WebSearchProxy is a dedicated egress proxy (http/https/socks5), unrelated to the traffic-recording MITM proxy; empty = direct.
 		EnableWebSearch:       p.webSearch.Enabled,

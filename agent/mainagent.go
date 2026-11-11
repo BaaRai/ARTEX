@@ -144,13 +144,10 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		Provider:        m.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           tools,
+		Tools:           withWebFetch(tools, m.proxyAddr, m.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates
-		WebFetchProxy:   m.proxyAddr,
-		WebFetchCACert:  m.proxyCACert,
 		// Web search (optional). ddgs needs no key; brave-free needs BraveKey; tavily needs TavilyKey.
 		// WebSearchProxy is a dedicated egress proxy (http/https/socks5), unrelated to the traffic-recording MITM proxy; empty = direct.
 		EnableWebSearch:       m.webSearch.Enabled,
