@@ -12,6 +12,7 @@ Machine-checked finding verification (S1), intercept decisions traced to their a
 - **Verification in the findings UI**: a badge (`Verified L3`/`L4`, `Unverified`, `Blocked`, `Not assessed`, `False positive`) beside the triage status, a filter, and the note on the detail page; the list, groups, asset tree and export accept `verification_status` (#163).
 - **Retest linkage**: a completed retest with verdict `reproduced` or `fixed` upgrades an `unverified`, `not_assessed` or `blocked` finding to `verified`, with a note naming the retest; other verdicts never change the state (#164).
 - **Evidence gzip decoding**: gzip and deflate bodies are decoded (one layer, 4 MiB cap, fail-closed) before the quote check, so compressed HTML can verify; brotli and zstd stay `not_assessed` (#169).
+- **Counterevidence and confidence rationale**: findings take two optional free-text fields, `counterevidence` (what was tried and did not work) and `confidence_rationale` (why the conclusion holds), through `report_finding`, the findings API and the finding detail page; a missing field never refuses a finding. An idempotent upgrade adds both properties to the stored `report_finding` schema on existing databases and keeps user edits (#193).
 
 ### Intercept decision tracing
 
@@ -37,6 +38,7 @@ Machine-checked finding verification (S1), intercept decisions traced to their a
 - **`prove_goal` requires an observed fact**: a fact is accepted only with `confidence` `observed`; findings are accepted as before (#190).
 - **Hint origin**: `add_hint` stores who wrote the hint (`human`, `orchestrator` or the agent name) and the planner trigger names it, instead of always "The human (main agent)" (#190).
 - **Built-in rules for the planner and the main agent**: the `[built-in]` deny rules now apply to their Bash and other intercept-enabled tools; user rules and the judge still do not (#190).
+- **Deny reasons to the model are capped**: the reason in a block message (deny rule, judge or target gate) is cut to 4000 runes, with a truncation marker, before it reaches the model; the reason stored in the interception log is unchanged (#192).
 
 ### Target gate (S3b phase 1 and 2.1): OFF by default, API-only
 
@@ -83,6 +85,7 @@ Machine-checked finding verification (S1), intercept decisions traced to their a
 - **Stored tool descriptions**: the new `add_hint` and `prove_goal` descriptions reach fresh databases only (#190).
 - **Intent claim leases need one version per database**: an older binary does not heartbeat, so a 0.6.0 instance takes over its live claims (#176).
 - **Verification**: no path produces `blocked` or `false_positive` yet, and non-HTTP findings stay `unverified` until S1b.
+- **Finding reasoning fields are not enforced**: the prompts and the `report_finding` descriptions ask for `counterevidence` and `confidence_rationale` when confidence is not high, but findings have no confidence field, so nothing requires them; a confidence field and its enforcement are 0.7.0 items. The prompt sentence reaches fresh databases only; the schema descriptions reach existing ones through the upgrade (#193).
 
 ## [0.5.1] - 2026-11-05
 
