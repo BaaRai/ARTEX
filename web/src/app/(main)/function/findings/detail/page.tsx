@@ -189,6 +189,26 @@ function FindingDetailInner() {
                   )}
                 </CardContent>
               </Card>
+              {finding.counterevidence?.trim() && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Counterevidence</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.counterevidence}</p>
+                  </CardContent>
+                </Card>
+              )}
+              {finding.confidence_rationale?.trim() && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Confidence rationale</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.confidence_rationale}</p>
+                  </CardContent>
+                </Card>
+              )}
               <FindingTrafficPanel
                 key={id}
                 findingId={id}
