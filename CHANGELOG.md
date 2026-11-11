@@ -2,15 +2,90 @@
 
 All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.6.0] - 2026-11-12
 
-### Added
+Machine-checked finding verification (S1), intercept decisions traced to their actor, configurable notification limits, prompt hardening and goal guards from the #124 agentic audit, the target gate (S3b phase 1 and step 2.1, off by default and API-only), intent claim leases, and checksum-verified tool downloads in the Docker image.
 
-- **Optional custom User-Agent for LLM requests**: an LLM profile can set a `User-Agent` value that overrides the header on every outbound LLM request; left empty, the default User-Agent is unchanged. The value is trimmed and rejected if it contains control characters or exceeds 256 bytes. Part of #154 (the fixed-full-URL mode is not included).
+### Verified findings (S1)
+
+- **POE level and verification status**: findings carry `poe_level` (0-4), `verification_status` and `verification_note`; a finding is `verified` only with a bound proof or verification response, a declared POE level of 3 or more, and every evidence quote of 8 runes or more found verbatim in a bound body. Existing rows stay `unverified` (#162).
+- **Verification in the findings UI**: a badge (`Verified L3`/`L4`, `Unverified`, `Blocked`, `Not assessed`, `False positive`) beside the triage status, a filter, and the note on the detail page; the list, groups, asset tree and export accept `verification_status` (#163).
+- **Retest linkage**: a completed retest with verdict `reproduced` or `fixed` upgrades an `unverified`, `not_assessed` or `blocked` finding to `verified`, with a note naming the retest; other verdicts never change the state (#164).
+- **Evidence gzip decoding**: gzip and deflate bodies are decoded (one layer, 4 MiB cap, fail-closed) before the quote check, so compressed HTML can verify; brotli and zstd stay `not_assessed` (#169).
+- **Counterevidence and confidence rationale**: findings take two optional free-text fields, `counterevidence` (what was tried and did not work) and `confidence_rationale` (why the conclusion holds), through `report_finding`, the findings API and the finding detail page; a missing field never refuses a finding. An idempotent upgrade adds both properties to the stored `report_finding` schema on existing databases and keeps user edits (#193).
+
+### Intercept decision tracing
+
+- **`decided_by` on approvals**: each settled approval records its actor (`human`, `rule`, `model`, `system`), shown in a "Decided by" column with a filter; legacy rows show "Legacy" and are not rewritten (#165).
+- **Judge decisions no longer stored as `unknown`**: the `[model]`/`[Model]` prefix case mismatch is fixed, and an idempotent backfill relabels the affected rows `decision_source=model` (#159, fixes #156).
+
+### Notifications (closes #168)
+
+- **"and N more" counts the hidden items**: the notification asset list reported the total instead of the assets left out (#170); the malformed-IP asset warning had the same bug (#171).
+- **Configurable limits**: `notify_summary_max_runes` (default 120, 0-4000) and `notify_assets_max_shown` (default 3, 0-50) in `/api/settings`, `0` meaning no truncation; the Feishu card guard drops from 24000 to 16000 bytes to stay under the 20 KB request limit (#172).
+- **Limits on the settings page**: both fields under System > Notifications > Global settings, validated before anything is saved (#173).
+- **Feishu digest overflow**: digests are packed against the serialized request body, so a digest of many short items is split instead of exceeding 20 KB and being rejected (#174).
+
+### Agentic prompt hardening (#124 phase B)
+
+- **Untrusted-content tails owned by code**: the planner and the compactor get an untrusted-data rule appended after their prompt body, and the #49 block moves out of the editable bodies into a tail appended for every chat agent (worker, main agent, auto, pentest, reporter), so a prompt override cannot remove it (#189).
+- **Planner goal anchor**: the planner user message ends with a block that restates the task goal and constraints and asks each new intent to name the goal it serves (#189).
+- **bbot skill rules**: every bbot event field is untrusted, only `scope_distance == 0` reaches `insert_assets`, and other events stay intel facts that are never auto-scoped or probed (#189).
+
+### Agentic guards (#124 phase B)
+
+- **`goal_met` refuses while a goal is open**: it names the open count and points to `prove_goal`; a task with no goal node keeps the old behaviour (#190).
+- **`prove_goal` requires an observed fact**: a fact is accepted only with `confidence` `observed`; findings are accepted as before (#190).
+- **Hint origin**: `add_hint` stores who wrote the hint (`human`, `orchestrator` or the agent name) and the planner trigger names it, instead of always "The human (main agent)" (#190).
+- **Built-in rules for the planner and the main agent**: the `[built-in]` deny rules now apply to their Bash and other intercept-enabled tools; user rules and the judge still do not (#190).
+- **Deny reasons to the model are capped**: the reason in a block message (deny rule, judge or target gate) is cut to 4000 runes, with a truncation marker, before it reaches the model; the reason stored in the interception log is unchanged (#192).
+
+### Target gate (S3b phase 1 and 2.1): OFF by default, API-only
+
+- **Opt-in only**: `target_gate` on tasks and conversations defaults to `false` and is set through the API (`POST`/`PATCH`); there is no UI. With it off, nothing below runs. Decision D2 (gate on by default) is NOT in 0.6.0 (#178).
+- **Hooks and scope**: the planner and the main agent run with tool hooks, and every session carries a target-gate scope (#177).
+- **Schema, flag and approval requests**: `target_pins`, one open request per scope and `host:port`, and a human approval that pins the displayed addresses; pin list and revoke routes (#178).
+- **Extraction, resolver, exemptions, decision in the hook**: declared targets are extracted, block rules and exemptions applied, names resolved, and uncovered targets wait for a human approval (#179).
+- **Rendered custom-tool targets**: the URL or command that a custom `http` or `command` tool renders goes through the gate (#180).
+- **Inheritance**: a task spawned by a gated caller and a conversation triggered by a gated task start gated; pins are never copied (#182).
+- **Declared form first**: block and URL rules match the declared targets before any DNS lookup (#183).
+- **Redirect hops**: every redirect hop of WebFetch and of the custom `http` tool is checked; an uncovered hop fails with `TARGET_APPROVAL_PENDING` (#185).
+- **Pinned dialer**: in a gated scope, WebFetch and a direct custom `http` call connect only to pinned or exempt addresses, on every hop, with no direct retry (#186).
+
+### Other changes
+
+- **Custom User-Agent for LLM requests**: an optional per-profile `User-Agent` (trimmed, no control characters, 256 bytes max); empty keeps the default. Part of #154, without the fixed-full-URL mode (#155).
+- **Untrusted-output boundary toggle**: `ARTEX_UNTRUSTED_BOUNDARY=1` enables Norma's framing of tool results for worker, planner, chat and main agent; off by default (#166).
+- **Intent claim lease and fencing (S3c)**: a claim has a 15 s heartbeat, a 90 s TTL and an owner token, so a stale worker can no longer overwrite a result; in-flight intents reopen when their claim expires, not at startup (#176).
+
+### Fixed
+
+- **Custom-tool proxy scheme**: `use_recording_proxy` produced `http://http://...`; a value with a scheme is now used as is and a bare `host:port` gets `http://` (#187).
+- **`list_task_credentials` schema**: it emitted `"required": [""]`, which strict providers reject, failing every worker; fixed, with a one-time heal of existing databases at startup. Reported and first fixed by @kiserufetch (#130).
+- **MCP protocol version**: the Streamable HTTP client negotiates the version (offers 2025-11-25, then 2025-06-18) and sends the negotiated one after `initialize` (#132, fixes #131).
+
+### Build, Docker and tests
+
+- **Docker tool verification**: the recon tools are checked against their release checksums, sqlmap is pinned to tag 1.9.9 at a fixed commit, Node 22.23.4 comes from nodejs.org verified against `SHASUMS256.txt`, and the Playwright packages are pinned. Carries over the Dockerfile part of #127 (#188).
+- **Secrets out of the build context**: `.dockerignore` excludes `.env`, `config.json`, `jwt.key` and `backups` (#153).
+- **Server tests skip without a DSN**: the Postgres-backed `./server` tests skip when no database is configured instead of failing (#175).
+- **Norma v0.4.4 to v0.4.8**: v0.4.5 (#160), v0.4.6 (#161), v0.4.7 (#184), v0.4.8 (#186).
 
 ### Docs
 
-- **LLM base URL note in the README**: for the Anthropic format, enter the host without a `/v1` suffix (the provider appends `/v1/messages`, so a `/v1` base becomes `/v1/v1/messages`); OpenAI-format providers append `/chat/completions` (or `/responses` for the `openai-responses` format), so their base does end in `/v1`. Follow-up to #154.
+- **LLM base URL note in the README**: the Anthropic base has no `/v1` suffix; OpenAI-format bases end in `/v1` (`/chat/completions` or `/responses` is appended). Follow-up to #154 (#157, #158).
+
+### Known limits
+
+- **Target gate**: OFF by default and API-only; turning it on by default (D2) is not part of this release.
+- **Declared-input detection, not enforcement, for subprocesses**: the gate reads the targets a call declares; a subprocess that builds its target at run time, or a custom script tool's stored code, is not seen. Only WebFetch and direct custom `http` calls are bound at connect time; calls through a proxy are not (recording-proxy binding is step 2.2).
+- **URL rules match the URL as written**, with no normalisation; use a domain, IP or CIDR rule to keep an agent away from a host (#183).
+- **Fact provenance**: `prove_goal` trusts the `confidence` the model declared in `record_fact`; F4 fact provenance and the source check come in 0.7.0. There is no pending-proof UI.
+- **Prompt rules are advisory to the model**: the tails, the goal anchor and the skill rules are prompt text, and their effect on model behaviour was not measured. The enforced parts are the `goal_met`/`prove_goal` handlers, the built-in deny rules and the target gate.
+- **Stored tool descriptions**: the new `add_hint` and `prove_goal` descriptions reach fresh databases only (#190).
+- **Intent claim leases need one version per database**: an older binary does not heartbeat, so a 0.6.0 instance takes over its live claims (#176).
+- **Verification**: no path produces `blocked` or `false_positive` yet, and non-HTTP findings stay `unverified` until S1b.
+- **Finding reasoning fields are not enforced**: the prompts and the `report_finding` descriptions ask for `counterevidence` and `confidence_rationale` when confidence is not high, but findings have no confidence field, so nothing requires them; a confidence field and its enforcement are 0.7.0 items. The prompt sentence reaches fresh databases only; the schema descriptions reach existing ones through the upgrade (#193).
 
 ## [0.5.1] - 2026-11-05
 
@@ -1000,7 +1075,8 @@ First release of this fork. The engine underneath is still upstream's, but this 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
 
-[Unreleased]: https://github.com/BaaRai/ARTEX/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/BaaRai/ARTEX/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/BaaRai/ARTEX/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/BaaRai/ARTEX/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/BaaRai/ARTEX/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/BaaRai/ARTEX/compare/v0.3.15...v0.4.0
