@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.6.0] - 2026-11-11
+## [0.6.0] - 2026-11-12
 
 Machine-checked finding verification (S1), intercept decisions traced to their actor, configurable notification limits, prompt hardening and goal guards from the #124 agentic audit, the target gate (S3b phase 1 and step 2.1, off by default and API-only), intent claim leases, and checksum-verified tool downloads in the Docker image.
 
