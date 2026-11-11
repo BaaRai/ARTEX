@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -190,6 +191,9 @@ type Interceptor struct {
 	targets  targetStore
 	resolve  *resolveCache
 	firstUse sync.Map
+	// dial is the base dialer of PinnedDialer: every connection it lets through
+	// is opened here. See SetBaseDialer.
+	dial func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // SetUpstreamProxyCheck installs the function that reports whether an upstream
@@ -220,7 +224,7 @@ var defaultEnabledTools = []string{
 // first use.
 func New(d *db.DB) *Interceptor {
 	return &Interceptor{db: d, pending: newPendingManager(),
-		targets: dbTargetStore{d}, resolve: newResolveCache(systemResolver{})}
+		targets: dbTargetStore{d}, resolve: newResolveCache(systemResolver{}), dial: baseDial}
 }
 
 // Invalidate clears the in-memory rule cache and the enabled-tools cache.

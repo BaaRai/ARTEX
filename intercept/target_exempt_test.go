@@ -1,6 +1,11 @@
 package intercept
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	"github.com/Autumn-27/artex/db"
+)
 
 // An operator may exempt a private unicast IP literal, never a loopback,
 // link-local (cloud metadata), unspecified or multicast one.
@@ -25,5 +30,22 @@ func TestValidateExemptionHost(t *testing.T) {
 		if err := ValidateExemptionHost(host); err == nil {
 			t.Errorf("%s accepted, want it refused", host)
 		}
+	}
+}
+
+// A proxy endpoint configured without a port is exempt on the port net/http
+// dials for it (OPEN-9): the scheme's default, 1080 for socks5. An endpoint
+// with no port and no known scheme is not listed.
+func TestDerivedExemptionsDefaultProxyPort(t *testing.T) {
+	ic := New(nil)
+	ic.SetDerivedExemptions(func() []string {
+		return []string{"socks5://egress.example.net", "SOCKS5H://dns.example.net", "http://proxy.example.net", "https://gw.example.net", "bare.example.net", "socks5://set.example.net:9050"}
+	})
+	want := []db.TargetExemption{
+		{Host: "egress.example.net", Port: 1080}, {Host: "dns.example.net", Port: 1080}, {Host: "proxy.example.net", Port: 80},
+		{Host: "gw.example.net", Port: 443}, {Host: "set.example.net", Port: 9050},
+	}
+	if got := ic.DerivedExemptions(); !slices.Equal(got, want) {
+		t.Fatalf("derived exemptions = %+v, want %+v", got, want)
 	}
 }

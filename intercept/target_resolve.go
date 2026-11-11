@@ -24,6 +24,16 @@ type Resolver interface {
 // resolver unless one is set.
 func (i *Interceptor) SetResolver(r Resolver) { i.resolve.use(r) }
 
+// SetBaseDialer replaces the dialer that opens the connections PinnedDialer
+// lets through, which is a net.Dialer with the settings of
+// http.DefaultTransport unless one is set. Tests use it to map addresses to
+// local listeners and to see what was dialled.
+func (i *Interceptor) SetBaseDialer(f func(ctx context.Context, network, addr string) (net.Conn, error)) {
+	i.mu.Lock()
+	i.dial = f
+	i.mu.Unlock()
+}
+
 // systemResolver is the resolver of the ARTEX process. It reads the same
 // resolver configuration as the tools that run in the same container.
 type systemResolver struct{}

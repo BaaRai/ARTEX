@@ -128,7 +128,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		Provider:        c.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           withWebFetch(tools, c.proxyAddr, c.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
+		Tools:           withWebFetch(ctx, tools, c.proxyAddr, c.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
