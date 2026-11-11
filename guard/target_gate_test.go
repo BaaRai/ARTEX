@@ -257,7 +257,7 @@ func TestTargetBlockMessage(t *testing.T) {
 			[]string{"TARGET_GATE_UNAVAILABLE: target app.example.com:443: the pins could not be read: connection refused.", "failure on the platform side"}},
 	}
 	for _, c := range cases {
-		msg := targetBlockMessage(c.res)
+		msg := TargetBlockMessage(c.res)
 		if !strings.HasPrefix(msg, "[ARTEX platform control, not target defense] "+c.res.Code+": ") {
 			t.Errorf("%s: message = %q", c.res.Code, msg)
 		}
