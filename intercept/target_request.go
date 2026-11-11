@@ -41,6 +41,9 @@ type TargetRequest struct {
 	Reason      string        // no_pin | new_ip | revoked
 	Pin         *db.TargetPin // the active pin an approval would extend (new_ip); nil otherwise
 	ExemptVoid  bool          // a stored exemption names the target and was void for this call
+	// RedirectFrom is the origin (host:port) of the redirect that leads to the
+	// target; empty when the call names the target itself.
+	RedirectFrom string
 }
 
 // TargetResult is the outcome of RequestTargets. Code is empty when every
@@ -248,6 +251,7 @@ func (i *Interceptor) openTargetRequest(ctx context.Context, ref db.TargetScopeR
 		Host: t.Host, Port: t.Port, Kind: t.Kind,
 		ResolvedIPs: t.ResolvedIPs, Resolver: t.Resolver, ResolvedAt: t.ResolvedAt,
 		Reason: t.Reason, Outcome: "requested", NameOnlyEffective: nameOnly, ExemptVoid: t.ExemptVoid,
+		RedirectFrom: t.RedirectFrom,
 	}
 	if t.Pin != nil {
 		target.PinID, target.PinVersion, target.PinnedIPs = t.Pin.ID, t.Pin.Version, t.Pin.PinnedIPs
@@ -362,6 +366,9 @@ func targetReason(scope TargetScope, t TargetRequest, ask *Decision, nameOnly bo
 	if ask != nil && ask.Message != "" {
 		b.WriteString(ask.Message)
 		b.WriteString("\nThis call also names a target that needs approval. ")
+	}
+	if t.RedirectFrom != "" {
+		fmt.Fprintf(&b, "A redirect from %s leads to this target; the redirect was not followed. ", t.RedirectFrom)
 	}
 	name, bound := targetName(t), scope.scopeName()
 	if t.Port == 0 {

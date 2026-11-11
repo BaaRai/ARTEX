@@ -455,6 +455,8 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 		req.Header.Set(k, renderTemplate(v, params, identity))
 	}
 	client := &http.Client{Timeout: timeoutOr(spec.TimeoutMs, 30000)}
+	// Every redirect hop goes through the target gate, as the rendered URL did.
+	client.CheckRedirect = intercept.RedirectCheck(key)
 	if tr := s.httpProxyTransport(spec); tr != nil {
 		client.Transport = tr
 	}

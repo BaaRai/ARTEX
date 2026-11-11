@@ -110,6 +110,8 @@ type targetCheck struct {
 	tool  string
 	input []byte
 	urls  []string // the URLs the call declares, as written, for the URL block rules
+	// redirectFrom is the origin (host:port) of a redirect hop; empty for a call.
+	redirectFrom string
 }
 
 // checkedTarget is one target of the call and what the gate learned about it.
@@ -302,6 +304,9 @@ func (c *targetCheck) log(status, reason, configDigest string, targets ...db.Int
 	if status == "allowed" {
 		// The row records that a pin or an exemption was used, not this one call.
 		audit.ExecutionStatus = "unknown"
+	}
+	for n := range targets {
+		targets[n].RedirectFrom = c.redirectFrom
 	}
 	audit.Targets = targets
 	_, agentName := taskInfoFromCtx(c.ctx)

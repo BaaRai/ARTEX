@@ -482,16 +482,14 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		Provider:        w.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           tools,
+		Tools:           withWebFetch(tools, w.proxyAddr, w.proxyCACert),
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
-		// WebFetch goes through the recording proxy, so its HTTP is recorded just like
-		// curl; loading the proxy CA lets MITM-re-signed HTTPS certs [verify normally]
-		// (rather than disabling verification). Direct when proxy is empty.
-		EnableWebFetch: true,
-		WebFetchProxy:  w.proxyAddr,
-		WebFetchCACert: w.proxyCACert,
+		// WebFetch (added to Tools above) goes through the recording proxy, so its
+		// HTTP is recorded just like curl; loading the proxy CA lets MITM-re-signed
+		// HTTPS certs [verify normally] (rather than disabling verification). Direct
+		// when proxy is empty. Every redirect hop goes through the target gate.
 		// Web search (optional). ddgs needs no key; brave-free needs BraveKey; tavily needs TavilyKey.
 		// WebSearchProxy is a dedicated egress proxy (http/https/socks5), unrelated to the traffic-recording MITM proxy; empty = direct.
 		EnableWebSearch:       w.webSearch.Enabled,
