@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,8 +21,8 @@ import (
 )
 
 // Step 1.9: the WebFetch tool of every agent kind checks each redirect hop
-// against the target gate, on the primary client and on the direct retry
-// client. With the gate off it follows redirects as before.
+// against the target gate. With the gate off it follows redirects as before.
+// Step 2.1: in a gated scope WebFetch has no direct retry.
 
 // passHooks lets every tool call run.
 type passHooks struct{}
@@ -100,7 +101,9 @@ func fetchInputJSON(u string) string {
 // no pin covers. The hooks let the call run, so the hop is what the gate sees:
 // each kind must stop at the hop, leave the redirect target untouched and open
 // one request for it. A fifth agent kind added without the redirect policy
-// fails this table once it is added to it.
+// fails this table once it is added to it. The origin is pinned first: the
+// hooks never check it here, and the pinned dialer (step 2.1) connects only to
+// a pinned target.
 func TestWebFetchRedirectCheckWiredOnEveryAgentKind(t *testing.T) {
 	for _, kind := range []string{"worker", "planner", "mainagent", "chat"} {
 		t.Run(kind, func(t *testing.T) {
@@ -109,6 +112,7 @@ func TestWebFetchRedirectCheckWiredOnEveryAgentKind(t *testing.T) {
 			t.Cleanup(func() { _ = d.Close() })
 			pair := newRedirectPair(t)
 			scope := gatedScope(t, d, f.taskID)
+			pinTarget(t, d, scope, pair.start)
 			ctx := intercept.WithTargetScope(t.Context(), scope)
 			prov := toolCallThenStop("WebFetch", fetchInputJSON(pair.start))
 
@@ -155,30 +159,33 @@ func TestWebFetchRedirectCheckWiredOnEveryAgentKind(t *testing.T) {
 	}
 }
 
-// The direct retry client carries the policy too: with a proxy that refuses
-// the connection, WebFetch retries without it, reaches the origin, and the
-// hop is still stopped.
-func TestWebFetchRedirectCheckOnDirectRetry(t *testing.T) {
+// In a gated scope the direct retry is off (D-8): with a proxy that refuses the
+// connection, the fetch fails with the proxy's error and never leaves without
+// it. The proxy is a derived exemption, so its dial asks for nothing.
+func TestWebFetchGatedScopeHasNoDirectRetry(t *testing.T) {
 	d := testDB(t)
 	t.Cleanup(func() { _ = d.Close() })
-	expID, err := d.CreateExploration("redirect retry probe", "the direct retry client checks redirects")
+	expID, err := d.CreateExploration("no direct retry probe", "a gated scope has no direct retry")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM explorations WHERE id=$1`, expID) })
 	taskID := fmt.Sprint(expID)
 	pair := newRedirectPair(t)
-	ctx := intercept.WithTargetScope(t.Context(), gatedScope(t, d, taskID))
+	scope := gatedScope(t, d, taskID)
+	scope.Interceptor.SetDerivedExemptions(func() []string { return []string{"http://127.0.0.1:1"} })
+	ctx := intercept.WithTargetScope(t.Context(), scope)
 
 	out, isErr := callWebFetch(t, ctx, "http://127.0.0.1:1", pair.start)
-	if !isErr || !strings.Contains(out, intercept.TargetApprovalPending) || !strings.Contains(out, "redirects to "+pair.finalKey) {
-		t.Fatalf("retried fetch: error=%v out=%q", isErr, out)
+	if !isErr || !strings.Contains(out, "proxyconnect") || strings.Contains(out, "TARGET_") {
+		t.Fatalf("proxied fetch: error=%v out=%q, want the proxy's error", isErr, out)
 	}
-	if pair.startHits.Load() != 1 || pair.finalHits.Load() != 0 {
-		t.Fatalf("hits origin=%d target=%d, want the origin reached by the retry and the target untouched", pair.startHits.Load(), pair.finalHits.Load())
+	if pair.startHits.Load() != 0 || pair.finalHits.Load() != 0 {
+		t.Fatalf("hits origin=%d target=%d, want no direct retry", pair.startHits.Load(), pair.finalHits.Load())
 	}
-	if keys := openRedirectRequests(t, d, taskID); len(keys) != 1 || keys[0] != pair.finalKey {
-		t.Fatalf("open requests = %v, want one for %s", keys, pair.finalKey)
+	var requests int
+	if err := d.QueryRow(`SELECT count(*) FROM intercept_pending WHERE task_id=$1 AND target_key IS NOT NULL`, taskID).Scan(&requests); err != nil || requests != 0 {
+		t.Fatalf("%d requests, %v; want none", requests, err)
 	}
 }
 
@@ -213,10 +220,33 @@ func TestWebFetchRedirectGateOffUnchanged(t *testing.T) {
 	}
 }
 
+// pinTarget opens the request for the target of rawURL in scope and approves
+// it, as a click on the approval card does.
+func pinTarget(t *testing.T, d *db.DB, scope intercept.TargetScope, rawURL string) {
+	t.Helper()
+	ic, input := scope.Interceptor, []byte(fetchInputJSON(rawURL))
+	reqs, res := ic.CheckTargets(t.Context(), scope, "WebFetch", input)
+	if res.Code != "" || len(reqs) != 1 {
+		t.Fatalf("%s: requests=%+v result=%+v, want one request", rawURL, reqs, res)
+	}
+	scope.WaitBound = 0
+	if res = ic.RequestTargets(t.Context(), scope, "WebFetch", input, reqs, nil); res.Code != intercept.TargetApprovalPending || res.PendingID == 0 {
+		t.Fatalf("%s: request = %+v", rawURL, res)
+	}
+	if err := ic.Decide(res.PendingID, true, "test", "192.0.2.1"); err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := strconv.ParseInt(scope.TaskID, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM target_pins WHERE task_id=$1`, taskID) })
+}
+
 // callWebFetch runs the WebFetch tool the agents build, with proxy.
 func callWebFetch(t *testing.T, ctx context.Context, proxy, u string) (string, bool) {
 	t.Helper()
-	tools := withWebFetch(nil, proxy, "")
+	tools := withWebFetch(ctx, nil, proxy, "")
 	if len(tools) != 1 || tools[0].Name() != "WebFetch" {
 		t.Fatalf("withWebFetch built %d tools", len(tools))
 	}

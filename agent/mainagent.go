@@ -144,7 +144,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		Provider:        m.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           withWebFetch(tools, m.proxyAddr, m.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
+		Tools:           withWebFetch(ctx, tools, m.proxyAddr, m.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,

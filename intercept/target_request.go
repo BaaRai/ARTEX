@@ -384,7 +384,8 @@ func targetReason(scope TargetScope, t TargetRequest, ask *Decision, nameOnly bo
 	fmt.Fprintf(&b, " Approving pins these addresses for %s until revoked.", bound)
 	if nameOnly {
 		b.WriteString(" Egress goes through the upstream proxy, which chooses the address it connects to." +
-			" The addresses listed are what the platform resolved. This approval is name-only.")
+			" The addresses listed are what the platform resolved. This approval is name-only." +
+			" The platform does not bind the connection to these addresses.")
 	}
 	return b.String()
 }

@@ -482,7 +482,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		Provider:        w.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           withWebFetch(tools, w.proxyAddr, w.proxyCACert),
+		Tools:           withWebFetch(ctx, tools, w.proxyAddr, w.proxyCACert),
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,

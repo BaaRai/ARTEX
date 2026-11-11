@@ -112,7 +112,20 @@ type targetCheck struct {
 	urls  []string // the URLs the call declares, as written, for the URL block rules
 	// redirectFrom is the origin (host:port) of a redirect hop; empty for a call.
 	redirectFrom string
+	// fresh makes every lookup skip the cache: the decision of a connection
+	// (dialTarget) compares the answer it is about to dial.
+	fresh bool
+	// checked is what the run decided about each target, read by dialTarget.
+	checked []*checkedTarget
 }
+
+// What let a target pass, recorded in checkedTarget.cover.
+const (
+	coverDerived  = "derived"   // an exemption derived from the configuration
+	coverStored   = "stored"    // a stored exemption that holds
+	coverPin      = "pin"       // a pin that holds every resolved address
+	coverNameOnly = "name_only" // a pin that is name-only for this call
+)
 
 // checkedTarget is one target of the call and what the gate learned about it.
 type checkedTarget struct {
@@ -122,6 +135,7 @@ type checkedTarget struct {
 	resolvedAt time.Time
 	err        error // the name did not resolve
 	exemptVoid bool
+	cover      string // what let the target pass; empty when nothing did
 }
 
 func (t Target) String() string {
@@ -169,6 +183,7 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 	// Then the declared form of every target: the name as written, the IP
 	// literal, the range.
 	checked := make([]*checkedTarget, len(targets))
+	c.checked = checked
 	for n, t := range targets {
 		ct := &checkedTarget{Target: t}
 		checked[n] = ct
@@ -185,7 +200,7 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 		if ct.Kind != TargetDomain || ex.derived[db.TargetKey(ct.Host, ct.Port)] {
 			continue
 		}
-		c.resolve(ct, false)
+		c.resolve(ct, c.fresh)
 		if rule, hit := blockRule(rules, ct); hit {
 			return c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", ct.Target, rule.Reason()))
 		}
@@ -204,11 +219,13 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 	for _, ct := range checked {
 		key := db.TargetKey(ct.Host, ct.Port)
 		if ex.derived[key] {
+			ct.cover = coverDerived
 			uses = append(uses, func() { c.exemptUsed(ct, ex.digest) })
 			continue
 		}
 		if ex.stored[key] {
 			if exemptionHolds(ct) {
+				ct.cover = coverStored
 				uses = append(uses, func() { c.exemptUsed(ct, ex.digest) })
 				continue
 			}
@@ -223,9 +240,10 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 			return c.block(TargetGateUnavailable, "gate_unavailable", ct, "the pins could not be read: "+err.Error())
 		}
 		pin := coveringPin(pins, ct.ips, nameOnly)
-		if pin == nil && ct.Kind == TargetDomain {
+		if pin == nil && ct.Kind == TargetDomain && !c.fresh {
 			// A request is about to be raised: the addresses a human reads and
-			// pins are resolved now, never taken from the cache.
+			// pins are resolved now, never taken from the cache. A fresh run
+			// already has them.
 			if c.resolve(ct, true); ct.err != nil {
 				return c.block(TargetResolveFailed, "resolve_failed", ct, c.resolveFailure(ct))
 			}
@@ -235,7 +253,11 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 			pin = coveringPin(pins, ct.ips, nameOnly)
 		}
 		if pin != nil {
-			uses = append(uses, func() { c.pinUsed(ct, pin) })
+			ct.cover = coverPin
+			if nameOnly || pin.NameOnlyEffective {
+				ct.cover = coverNameOnly
+			}
+			uses = append(uses, func() { c.pinUsed(ct, pin, nameOnly) })
 			continue
 		}
 		req := TargetRequest{Host: ct.Host, Port: ct.Port, Kind: ct.Kind, ResolvedIPs: ct.ips,
@@ -326,12 +348,14 @@ func (c *targetCheck) exemptUsed(ct *checkedTarget, digest string) {
 }
 
 // pinUsed logs the first call of this process that a pin version covers.
-func (c *targetCheck) pinUsed(ct *checkedTarget, pin *db.TargetPin) {
+// nameOnly is whether the upstream proxy made every pin name-only for the call:
+// the row records the effective state, not only the pin's mark.
+func (c *targetCheck) pinUsed(ct *checkedTarget, pin *db.TargetPin, nameOnly bool) {
 	if _, seen := c.i.firstUse.LoadOrStore(fmt.Sprintf("pin|%d", pin.ID), true); seen {
 		return
 	}
 	t := ct.audit("pin_match")
-	t.PinID, t.PinVersion, t.PinnedIPs, t.NameOnlyEffective = pin.ID, pin.Version, pin.PinnedIPs, pin.NameOnlyEffective
+	t.PinID, t.PinVersion, t.PinnedIPs, t.NameOnlyEffective = pin.ID, pin.Version, pin.PinnedIPs, pin.NameOnlyEffective || nameOnly
 	c.log("allowed", fmt.Sprintf("Target %s is covered by pin v%d of %s.", ct.Target, pin.Version, c.scope.scopeName()), "", t)
 }
 

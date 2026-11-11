@@ -426,7 +426,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		Provider:        p.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           withWebFetch(tools, p.proxyAddr, p.proxyCACert), // WebFetch: route through the recording proxy for traceability; load the proxy CA to verify MITM-re-signed HTTPS certs; every redirect hop is gated
+		Tools:           withWebFetch(ctx, tools, p.proxyAddr, p.proxyCACert), // WebFetch: route through the recording proxy for traceability; load the proxy CA to verify MITM-re-signed HTTPS certs; every redirect hop is gated
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,

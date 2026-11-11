@@ -73,8 +73,13 @@ func (i *Interceptor) SetDerivedExemptions(f func() []string) {
 	i.mu.Unlock()
 }
 
+// proxyPorts are the ports net/http dials for a proxy URL without one, for the
+// schemes schemePorts has no default for.
+var proxyPorts = map[string]int{"socks5": 1080, "socks5h": 1080}
+
 // DerivedExemptions returns the exemptions derived from the configuration, as
-// exact host and port. An endpoint without a port is not listed.
+// exact host and port. An endpoint without a port gets the one net/http dials
+// (the scheme's default, 1080 for socks5); one with neither is not listed.
 func (i *Interceptor) DerivedExemptions() []db.TargetExemption {
 	i.mu.RLock()
 	f := i.derivedExempt
@@ -86,6 +91,9 @@ func (i *Interceptor) DerivedExemptions() []db.TargetExemption {
 	seen := map[string]bool{}
 	for _, raw := range f() {
 		t, ok := NormalizeTarget(raw)
+		if scheme, _, found := strings.Cut(strings.TrimSpace(raw), "://"); ok && found && t.Port == 0 {
+			t.Port = proxyPorts[strings.ToLower(scheme)]
+		}
 		if !ok || t.Port == 0 || t.Kind == TargetCIDR || seen[db.TargetKey(t.Host, t.Port)] {
 			continue
 		}

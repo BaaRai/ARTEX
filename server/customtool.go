@@ -457,7 +457,7 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	client := &http.Client{Timeout: timeoutOr(spec.TimeoutMs, 30000)}
 	// Every redirect hop goes through the target gate, as the rendered URL did.
 	client.CheckRedirect = intercept.RedirectCheck(key)
-	if tr := s.httpProxyTransport(spec); tr != nil {
+	if tr := s.httpToolTransport(ctx, key, spec); tr != nil {
 		client.Transport = tr
 	}
 	resp, err := client.Do(req)
@@ -469,6 +469,26 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	out := map[string]any{"status": resp.StatusCode, "body": string(respBody)}
 	b, _ := json.Marshal(out)
 	return actool.Text(actool.Capture(tc, string(b))), nil
+}
+
+// httpToolTransport is the transport of one http tool call, or nil
+// (http.DefaultTransport). A call through a proxy keeps httpProxyTransport: it
+// dials the proxy, which makes the connection to the target. A direct call in
+// a gated scope connects through the pinned dialer, to addresses a pin covers.
+func (s *Server) httpToolTransport(ctx context.Context, key string, spec httpExec) *http.Transport {
+	if tr := s.httpProxyTransport(spec); tr != nil {
+		return tr
+	}
+	if !intercept.GateOn(ctx) {
+		return nil
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	// An environment proxy would be dialled instead of the target.
+	tr.Proxy = nil
+	tr.DialContext = intercept.PinnedDialer(key, true)
+	// One request per call: no idle connection outlives the call.
+	tr.DisableKeepAlives = true
+	return tr
 }
 
 // httpProxyTransport builds a Transport for the http tool's proxy config, or nil
