@@ -147,6 +147,9 @@ type triggeredRun struct {
 	taskDesc  string // task description (task-level, same across one task); rendered once when merged
 	taskGoal  string // task goal (task-level, same across one task); rendered once when merged
 	mergeable bool   // true for finding/goal event triggers (merge by taskID)
+	// targetGate: the source task had the target gate on when the event fired; a
+	// merged run is gated if any of its fires is. Never carries pins.
+	targetGate bool
 }
 
 func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDir string, opts ...Option) *Server {

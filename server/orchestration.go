@@ -13,6 +13,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -253,7 +254,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			"plan_heartbeat_seconds": map[string]any{"type": "integer", "description": "optional: planner heartbeat interval (seconds). When this much time has passed since the last planning round ended/the task started with no trigger in between → run one planning round (deadlock backstop + wakes the planner to supervise in-flight workers). Empty or 0 = default 600 (10min);"},
 			"seed_first_intent":      map[string]any{"type": "boolean", "description": "optional: enable for simple tasks to issue one seed intent at creation (content = description + goal) so a worker can start testing right away without waiting for the first planner round; default false (the standard plan-then-execute flow)."},
 		}, "description", "goal"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
 				Description          string          `json:"description"`
 				Goal                 string          `json:"goal"`
@@ -307,11 +308,32 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			if pin != nil {
 				llmIDs = []int64{*pin}
 			}
+			// Target gate: a child spawned from a gated scope is gated too, and keeps
+			// the block rules of the calling task. Read from the caller's scope, never
+			// from parent_ref (optional and written by the model). Pins and allow rules
+			// are never copied. Gate-off caller or no scope: created as before.
+			var gate *bool
+			var blockRules []db.TaskInterceptRuleInput
+			if scope, ok := intercept.TargetScopeFromContext(ctx); ok && scope.Enabled != nil && scope.Enabled() {
+				on := true
+				gate = &on
+				if callerID, err := strconv.ParseInt(scope.TaskID, 10, 64); err == nil && callerID > 0 {
+					block, _, err := s.m.Assets().TaskInterceptRulesSplit(callerID)
+					if err != nil {
+						return actool.Errorf("read the block rules of the calling task: " + err.Error()), nil
+					}
+					for _, r := range block {
+						blockRules = append(blockRules, db.TaskInterceptRuleInput{Enabled: r.Enabled, Action: r.Action, Kind: r.Kind, Pattern: r.Pattern, Note: r.Note})
+					}
+				}
+			}
 			t, err := s.m.CreateTaskWithOptions(a.Description, a.Goal, db.TaskCreateOptions{
 				SourceTaskIDs:        sourceIDs,
 				LLMProfileIDs:        llmIDs,
 				TimeoutSeconds:       a.TimeoutSeconds,
 				PlanHeartbeatSeconds: a.PlanHeartbeatSeconds,
+				InterceptRules:       blockRules,
+				TargetGate:           gate,
 			})
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
