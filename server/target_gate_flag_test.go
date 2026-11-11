@@ -5,16 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/norma/llm"
 )
 
 // Target-gate opt-in flag, pins and decisions over the real mux and the real
@@ -180,38 +183,260 @@ func TestCreateTaskAcceptsTargetGate(t *testing.T) {
 	}
 }
 
-// No inheritance: a task spawned by the orchestration agent starts with the
-// gate off, even from a gated parent.
-func TestSpawnedTaskStartsWithGateOff(t *testing.T) {
-	g := newGateServer(t)
-	on := true
-	parent := g.newTask(t, db.TaskCreateOptions{TargetGate: &on})
-	if !parent.targetScope(0).Enabled() {
-		t.Fatal("control: the parent was expected to have the gate on")
-	}
-	in, _ := json.Marshal(map[string]any{"description": "spawned child", "goal": gateTestGoal, "parent_ref": parent.ID, "source_task_ids": []string{parent.ID}})
-	res, err := g.s.toolSpawnTask().Call(context.Background(), in, nil)
+// ruleLines renders a task's intercept rules for comparison.
+func ruleLines(t *testing.T, as *db.AssetStore, taskID string) []string {
+	t.Helper()
+	n, _ := strconv.ParseInt(taskID, 10, 64)
+	rules, err := as.ListTaskInterceptRules(n)
 	if err != nil {
 		t.Fatal(err)
 	}
-	childID, found := strings.CutPrefix(res.Flatten(), "task created: ")
-	if !found {
-		t.Fatalf("spawn_task result: %q", res.Flatten())
+	var out []string
+	for _, r := range rules {
+		out = append(out, fmt.Sprintf("%s %s %s enabled=%v %q", r.Action, r.Kind, r.Pattern, r.Enabled, r.Note))
 	}
-	g.cleanupTask(t, childID)
+	return out
+}
+
+// checkSpawnedChild checks the target-gate state of a spawned task: the flag,
+// live and stored, no pin, and its own intercept rules.
+func (g *gateServer) checkSpawnedChild(t *testing.T, childID string, gate bool, rules []string) {
+	t.Helper()
 	child, ok := g.m.Task(childID)
-	if !ok || child.ParentRef != parent.ID {
-		t.Fatalf("spawned task = %+v (found=%v), want a child of %s", child, ok, parent.ID)
+	if !ok {
+		t.Fatalf("spawned task %s not found", childID)
 	}
-	if child.targetScope(0).Enabled() {
-		t.Fatal("the spawned task inherited the gate")
+	if child.targetScope(0).Enabled() != gate {
+		t.Fatalf("spawned task gate = %v, want %v", !gate, gate)
 	}
 	n, _ := strconv.ParseInt(childID, 10, 64)
-	if stored, err := g.m.pg.GetTask(n); err != nil || stored == nil || stored.TargetGate {
-		t.Fatalf("stored child = %+v, %v; want the gate off", stored, err)
+	if stored, err := g.m.pg.GetTask(n); err != nil || stored == nil || stored.TargetGate != gate {
+		t.Fatalf("stored child = %+v, %v; want the gate %v", stored, err, gate)
 	}
 	if pins, err := g.m.pg.ListTargetPins(db.TargetScopeRef{TaskID: n}); err != nil || len(pins) != 0 {
 		t.Fatalf("the spawned task has pins: %+v, %v", pins, err)
+	}
+	if got := ruleLines(t, g.m.Assets(), childID); !slices.Equal(got, rules) {
+		t.Fatalf("spawned task rules = %q, want %q", got, rules)
+	}
+}
+
+// A task spawned through spawn_task takes the target gate of the calling scope
+// (D23) and, from a gated task, that task's block rules (D24). It never takes
+// pins or allow rules, and parent_ref plays no part. A gate-off caller and a
+// call with no scope create the child as before: gate off, no rules.
+func TestSpawnedTaskInheritsGateFromCaller(t *testing.T) {
+	g := newGateServer(t)
+	on := true
+	parentRules := []db.TaskInterceptRuleInput{
+		{Enabled: true, Action: "block", Kind: "exact_domain", Pattern: "blocked.example.com", Note: "out of scope"},
+		{Enabled: false, Action: "block", Kind: "cidr", Pattern: "198.51.100.0/24"},
+		{Enabled: true, Action: "allow", Kind: "exact_domain", Pattern: "allowed.example.com"},
+	}
+	gated := g.newTask(t, db.TaskCreateOptions{TargetGate: &on, InterceptRules: parentRules})
+	open := g.newTask(t, db.TaskCreateOptions{InterceptRules: parentRules})
+	if !gated.targetScope(0).Enabled() || open.targetScope(0).Enabled() {
+		t.Fatal("control: one parent gated, the other not")
+	}
+	// The gated parent holds one pin, which no child may get.
+	if p, ok, err := g.m.pg.ResolveTargetRequest(openTargetRow(t, g.m.pg, taskRef(t, gated), "app.example.com", "203.0.113.7"), true, "ARTEX", "192.0.2.1"); err != nil || !ok || p == nil {
+		t.Fatalf("pin the parent: %+v ok=%v err=%v", p, ok, err)
+	}
+	conv, err := g.m.pg.CreateConversationGated("auto", "spawn from a gated chat", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = g.m.pg.DeleteConversation(conv.ID) })
+	gatedChat := intercept.TargetScope{ConversationID: conv.ID, Enabled: func() bool { return true },
+		WaitBound: intercept.DefaultTargetWaitBound, Interceptor: g.m.interceptor}
+	scoped := func(s intercept.TargetScope) context.Context {
+		return intercept.WithTargetScope(context.Background(), s)
+	}
+	blockOnly := []string{
+		`block exact_domain blocked.example.com enabled=true "out of scope"`,
+		`block cidr 198.51.100.0/24 enabled=false ""`,
+	}
+
+	for _, tc := range []struct {
+		name      string
+		ctx       context.Context
+		parentRef string
+		gate      bool
+		rules     []string
+	}{
+		{"gated task", scoped(gated.targetScope(intercept.DefaultTargetWaitBound)), "", true, blockOnly},
+		{"gated task, parent_ref names a gate-off task", scoped(gated.targetScope(0)), open.ID, true, blockOnly},
+		{"gated conversation", scoped(gatedChat), "", true, nil},
+		{"gate-off task", scoped(open.targetScope(0)), "", false, nil},
+		{"gate-off task, parent_ref names a gated task", scoped(open.targetScope(0)), gated.ID, false, nil},
+		{"no scope, parent_ref names a gated task", context.Background(), gated.ID, false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := map[string]any{"description": "spawned child", "goal": gateTestGoal}
+			if tc.parentRef != "" {
+				args["parent_ref"] = tc.parentRef
+			}
+			in, _ := json.Marshal(args)
+			res, err := g.s.toolSpawnTask().Call(tc.ctx, in, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			childID, found := strings.CutPrefix(res.Flatten(), "task created: ")
+			if !found {
+				t.Fatalf("spawn_task result: %q", res.Flatten())
+			}
+			g.cleanupTask(t, childID)
+			if child, _ := g.m.Task(childID); child == nil || child.ParentRef != tc.parentRef {
+				t.Fatalf("spawned task = %+v, want parent_ref %q", child, tc.parentRef)
+			}
+			g.checkSpawnedChild(t, childID, tc.gate, tc.rules)
+		})
+	}
+	// The callers are unchanged.
+	if pins, err := g.m.pg.ListTargetPins(taskRef(t, gated)); err != nil || len(pins) != 1 {
+		t.Fatalf("parent pins = %+v, %v; want still one", pins, err)
+	}
+	if got := ruleLines(t, g.m.Assets(), gated.ID); len(got) != 3 {
+		t.Fatalf("parent rules = %q, want the three it was created with", got)
+	}
+}
+
+// toolCallProvider is a model that makes one tool call on its first turn and
+// ends the run on the next.
+type toolCallProvider struct {
+	tool, input string
+	turn        atomic.Int64
+}
+
+func (p *toolCallProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+	events := []llm.StreamEvent{{Type: llm.SETextDelta, Text: "done"}, {Type: llm.SEMessageDelta, StopReason: "end_turn"}}
+	if p.turn.Add(1) == 1 {
+		events = []llm.StreamEvent{
+			{Type: llm.SEToolUseStart, ToolID: "call-1", ToolName: p.tool},
+			{Type: llm.SEToolInputJSON, Text: p.input},
+			{Type: llm.SEMessageDelta, StopReason: "tool_use"},
+		}
+	}
+	return func(yield func(llm.StreamEvent, error) bool) {
+		for _, event := range events {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}
+}
+
+func (p *toolCallProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	return accumulateStreamForTest(ctx, p.Stream, req)
+}
+
+// spawn_task called by the model of an auto conversation, through the real
+// harness, tool binding and tool context: the child takes the conversation's
+// flag. The unit test above builds the caller's context by hand; this one shows
+// the conversation's scope reaches the tool.
+func TestSpawnTaskSeesCallerScopeThroughHarness(t *testing.T) {
+	g := newGateServer(t)
+	for _, gate := range []bool{true, false} {
+		t.Run(fmt.Sprintf("conversation gate %v", gate), func(t *testing.T) {
+			desc := fmt.Sprintf("harness child %v %d", gate, time.Now().UnixNano())
+			in, _ := json.Marshal(map[string]any{"description": desc, "goal": gateTestGoal})
+			conv, err := g.m.pg.CreateConversationGated("auto", "spawn through the harness", nil, gate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = g.m.pg.DeleteConversation(conv.ID) })
+			g.s.cfgMu.Lock()
+			g.s.chatAgent = agent.NewChatAgent(&toolCallProvider{tool: "spawn_task", input: string(in)}, "test-model", g.m.dir, nil, 10000)
+			g.s.cfgMu.Unlock()
+			// The server context of this fixture is cancelled; the turn gets its own.
+			ctx, cancel := context.WithCancelCause(intercept.WithConvID(context.Background(), conv.ID))
+			g.s.runConversationTurn(ctx, cancel, conv, "spawn the child task", g.s.convBusyKey(conv.ID))
+			var childID string
+			for _, task := range g.m.List() {
+				if task.Description == desc {
+					childID = task.ID
+				}
+			}
+			if childID == "" {
+				t.Fatal("the model's spawn_task call created no task")
+			}
+			g.cleanupTask(t, childID)
+			g.checkSpawnedChild(t, childID, gate, nil)
+		})
+	}
+}
+
+// A conversation started by a trigger of a gated task is gated (D25): a single
+// fire, a by-task merge, and a merge across tasks of which one is gated. A fire
+// of a gate-off task, or with no task, starts it gate off as before. The flag is
+// copied, never pins.
+func TestTriggeredConversationInheritsGate(t *testing.T) {
+	g := newGateServer(t)
+	g.s.cfgMu.Lock()
+	g.s.chatAgent = agent.NewChatAgent(newScopeProbeProvider(), "test-model", g.m.dir, nil, 10000)
+	g.s.cfgMu.Unlock()
+	on := true
+	gated, open := g.newTask(t, db.TaskCreateOptions{TargetGate: &on}), g.newTask(t, db.TaskCreateOptions{})
+	if p, ok, err := g.m.pg.ResolveTargetRequest(openTargetRow(t, g.m.pg, taskRef(t, gated), "app.example.com", "203.0.113.7"), true, "ARTEX", "192.0.2.1"); err != nil || !ok || p == nil {
+		t.Fatalf("pin the gated task: %+v ok=%v err=%v", p, ok, err)
+	}
+	gatedID, openID := taskRef(t, gated).TaskID, taskRef(t, open).TaskID
+
+	// The server context is cancelled, so StartTriggeredRun only queues. The test
+	// takes the next run with the merge mode under test and runs it as the pump would.
+	trigger := func(t *testing.T, mode string, taskIDs ...int64) *db.Conversation {
+		t.Helper()
+		key := fmt.Sprintf("gate-trigger-%d", time.Now().UnixNano())
+		for _, id := range taskIDs {
+			g.s.StartTriggeredRun(key, "trigger", "event body", id, id > 0, "desc", "goal")
+		}
+		g.s.queueMu.Lock()
+		item := g.s.nextTriggerRun(key, triggerBehavior{runMode: "serial", mergeMode: mode})
+		left := len(g.s.triggerQ[key])
+		delete(g.s.triggerQ, key)
+		delete(g.s.triggerCfg, key)
+		g.s.queueMu.Unlock()
+		if left != 0 {
+			t.Fatalf("%d fires left in the queue, want one run", left)
+		}
+		item.title = key
+		g.s.runTriggeredRun(item)
+		convs, err := g.m.pg.ListConversations()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range convs {
+			if c.Title == key {
+				t.Cleanup(func() { _ = g.m.pg.DeleteConversation(c.ID) })
+				return c
+			}
+		}
+		t.Fatal("the trigger created no conversation")
+		return nil
+	}
+
+	for _, tc := range []struct {
+		name  string
+		mode  string
+		tasks []int64
+		gate  bool
+	}{
+		{"gated task", "none", []int64{gatedID}, true},
+		{"gated task, merged by task", "by_task", []int64{gatedID, gatedID}, true},
+		{"merge across tasks, gated second", "all", []int64{openID, gatedID}, true},
+		{"gate-off task", "none", []int64{openID}, false},
+		{"gate-off task, merged by task", "by_task", []int64{openID, openID}, false},
+		{"no task", "none", []int64{0}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := trigger(t, tc.mode, tc.tasks...)
+			if c.TargetGate != tc.gate {
+				t.Fatalf("triggered conversation gate = %v, want %v", c.TargetGate, tc.gate)
+			}
+			if pins, err := g.m.pg.ListTargetPins(db.TargetScopeRef{ConversationID: c.ID}); err != nil || len(pins) != 0 {
+				t.Fatalf("the triggered conversation has pins: %+v, %v", pins, err)
+			}
+		})
 	}
 }
 
