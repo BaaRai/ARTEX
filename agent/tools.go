@@ -187,13 +187,14 @@ type ToolSet struct {
 	// agent; nil for the goals decomposer (round-0 has no running planner to inform)
 	// and workers → those fall back to the bare notify.
 	notifyGoal func(texts []string)
-	// notifyHint, if set, wakes the planner AND records ONE "human added N strategic
+	// notifyHint, if set, wakes the planner AND records ONE "<origin> added N strategic
 	// hints: …" trigger for a whole add_hint call (batch-aware — one call, one
 	// trigger) so the next round is told the round was fired by a new hint and spells
 	// the hint out, instead of the planner having to spot it folded into the graph
-	// overview. Wired for the main agent + cross-task orchestration; nil elsewhere →
-	// falls back to the bare notify.
-	notifyHint func(texts []string)
+	// overview. origin is the ToolSet's worker (human, orchestrator, or an agent name).
+	// Wired for the main agent + cross-task orchestration; nil elsewhere → falls back
+	// to the bare notify.
+	notifyHint func(origin string, texts []string)
 }
 
 // SetNotifyGoal wires the goal-add trigger callback (see ToolSet.notifyGoal). Set only
@@ -203,7 +204,7 @@ func (t *ToolSet) SetNotifyGoal(fn func([]string)) { t.notifyGoal = fn }
 // SetNotifyHint wires the hint-add trigger callback (see ToolSet.notifyHint). Set by
 // the main-agent chat and cross-task orchestration, so a runtime-added hint fires a
 // planner round announced by name instead of a bare wake.
-func (t *ToolSet) SetNotifyHint(fn func([]string)) { t.notifyHint = fn }
+func (t *ToolSet) SetNotifyHint(fn func(string, []string)) { t.notifyHint = fn }
 
 // SetResumeTask wires the task-revive callback (see ToolSet.resumeTask). Set only by
 // the main-agent chat, so runtime-added goals can pull a finished task back to running.
@@ -1288,7 +1289,7 @@ func (t *ToolSet) listGoals() actool.CoreTool {
 }
 
 func (t *ToolSet) proveGoal() actool.CoreTool {
-	return t.writeExpTool("prove_goal", "Call when you judge that a finding/fact proves a goal met: links the evidence node to the goal node and marks the goal met.",
+	return t.writeExpTool("prove_goal", "Call when you judge that a finding/fact proves a goal met: links the evidence node to the goal node and marks the goal met. A fact counts as evidence only when its confidence is observed; an inferred fact is refused and the goal stays open.",
 		obj(map[string]any{
 			"goal_id":     idp("goal node id"),
 			"evidence_id": idp("id of the finding/fact node that proves it"),
@@ -1312,6 +1313,20 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 			evidenceNode, err := t.ts.GetNodeWithSources(ev)
 			if err != nil || evidenceNode == nil || (evidenceNode.Kind != db.KindFact && evidenceNode.Kind != db.KindFinding) {
 				return actool.Errorf("evidence_id must be a fact/finding node of this task or a directly related task"), nil
+			}
+			// A fact proves a goal only when it was seen directly (#124, F5): an inferred
+			// conclusion, or one without a confidence, is refused and the goal stays open.
+			// The confidence is declared by the agent that recorded the fact.
+			if evidenceNode.Kind == db.KindFact {
+				var fp map[string]any
+				_ = json.Unmarshal(evidenceNode.Payload, &fp)
+				confidence, _ := fp["confidence"].(string)
+				if strings.ToLower(strings.TrimSpace(confidence)) != "observed" {
+					if confidence == "" {
+						confidence = "none"
+					}
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has confidence %q, and a fact proves a goal only when its confidence is \"observed\" (seen directly in tool output). Goal %d stays open: prove it with a finding or with an observed fact.", ev, confidence, goal)), nil
+				}
 			}
 			_ = t.ts.Link(ev, db.RelProves, goal)
 			_ = t.ts.SetNodeState(goal, "met")
@@ -1337,11 +1352,26 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 }
 
 func (t *ToolSet) goalMet() actool.CoreTool {
-	return writeTool("goal_met", "[End the entire task immediately] — call only when you are sure [all of the task's goals are truly met and it is complete overall] (note: the task as a [whole]; having met just one goal / one flag / one finding [does not count] — in that case mark that goal with prove_goal). ⚠️ It is NOT for \"ending this planning round\": if there is no new intent to dispatch this round, or you're waiting on worker output, [just end the round — do NOT call this tool] (0 intents is a perfectly normal outcome). Prefer prove_goal to prove goals one by one; goal_met is only a means to skip per-goal proofs and complete the task globally.",
+	return t.writeExpTool("goal_met", "[End the entire task immediately] — call only when you are sure [all of the task's goals are truly met and it is complete overall] (note: the task as a [whole]; having met just one goal / one flag / one finding [does not count] — in that case mark that goal with prove_goal). ⚠️ It is NOT for \"ending this planning round\": if there is no new intent to dispatch this round, or you're waiting on worker output, [just end the round — do NOT call this tool] (0 intents is a perfectly normal outcome). Prefer prove_goal to prove goals one by one; goal_met is only a means to skip per-goal proofs and complete the task globally.",
 		obj(map[string]any{"reason": str("grounds for completion (must be evidence that the goals are truly met, not a round-ending reason like 'no new directions this round')")}, "reason"),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct{ Reason string }
 			_ = json.Unmarshal(in, &a)
+			// goal_met ends the task only when no goal node is open (#124, F5). A task
+			// without goal nodes keeps the old behavior.
+			goals, err := t.ts.ListByKind(db.KindGoal, 1000)
+			if err != nil {
+				return actool.Errorf("goal_met refused: the goals of this task could not be read (" + err.Error() + "); the task stays open"), nil
+			}
+			open := 0
+			for _, g := range goals {
+				if g.State != "met" {
+					open++
+				}
+			}
+			if open > 0 {
+				return actool.Errorf(fmt.Sprintf("goal_met refused: %d of %d goals of this task are still open; the task stays open. Prove each one with prove_goal(goal_id, evidence_id, reason): the task completes automatically when its last goal is marked met.", open, len(goals))), nil
+			}
 			t.GoalMet = true
 			t.Reason = a.Reason
 			return actool.Text("acknowledged: goal marked met"), nil
@@ -1547,8 +1577,9 @@ type hintItem struct {
 	TrafficRefs []db.TrafficRef   `json:"traffic_refs"`
 }
 
-// addOneHint attaches a hint node (active/human) to the exploration graph, optionally
-// anchored to assets; returns the id.
+// addOneHint attaches a hint node (active) to the exploration graph, optionally
+// anchored to assets; returns the id. Its origin is t.worker, the agent that wrote
+// it: "human" for the main-agent chat, "orchestrator" for cross-task orchestration.
 func (t *ToolSet) addOneHint(it hintItem) (int64, error) {
 	if len(it.TrafficRefs) > 0 && !findingTrafficBindingEnabled() {
 		return 0, fmt.Errorf("automatic agent traffic binding is off; the hint carrying traffic_refs was not saved — enable it in system settings, or hand over text only")
@@ -1573,7 +1604,7 @@ func (t *ToolSet) addOneHint(it hintItem) (int64, error) {
 	// Waking the planner is not done here per item — addHint fires it once after the
 	// whole batch is written (carrying the hint texts), so one add_hint with multiple
 	// hints doesn't spam the planner's trigger lines one by one.
-	return t.ts.AddNode(db.KindHint, payload, 0, "active", "human", anchors)
+	return t.ts.AddNode(db.KindHint, payload, 0, "active", t.worker, anchors)
 }
 
 type goalItem struct {
@@ -1763,7 +1794,7 @@ func (t *ToolSet) setConstraints() actool.CoreTool {
 }
 
 func (t *ToolSet) addHint() actool.CoreTool {
-	return t.writeExpTool("add_hint", "Attach a strategic hint from the human/main agent to the exploration graph; the planner reads it the next time it generates intents.\n"+
+	return t.writeExpTool("add_hint", "Attach a strategic hint to the exploration graph; the planner reads it the next time it generates intents. The hint is stored with the calling agent as its origin (human for the main-agent chat, orchestrator for cross-task orchestration, otherwise the agent's name).\n"+
 		"★Batch preferred: put multiple hints in the hints array in a single submission (saves round trips vs. one call per item). Returns an ids array, same length and order as hints (failed items get id=0, details in errors). For a single hint, omit hints and pass the top-level text.",
 		obj(map[string]any{
 			"hints":        map[string]any{"type": "array", "description": "[Prefer this] array of hints to add, processed in order. Each element has the same fields as the top-level ones below (text/asset_ids/traffic_refs). The returned ids match this array in length and order.", "items": obj(map[string]any{"text": str("hint content"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}, "traffic_refs": HintTrafficSchema()})},
@@ -1797,13 +1828,13 @@ func (t *ToolSet) addHint() actool.CoreTool {
 			}
 			if len(addedTexts) > 0 {
 				// Wake the planner (once for the whole batch). Prefer notifyHint: one
-				// add_hint records a single "human added N strategic hints: …" trigger, so
-				// the planner knows "this round was fired by a new hint" and sees its
-				// content; when the callback isn't wired, fall back to plain notify (bare
-				// wake; the hint is still folded into the graph for it to read).
+				// add_hint records a single "<origin> added N strategic hints: …" trigger,
+				// so the planner knows "this round was fired by a new hint", who wrote it,
+				// and sees its content; when the callback isn't wired, fall back to plain
+				// notify (bare wake; the hint is still folded into the graph for it to read).
 				switch {
 				case t.notifyHint != nil:
-					t.notifyHint(addedTexts)
+					t.notifyHint(t.worker, addedTexts)
 				case t.notify != nil:
 					t.notify()
 				}

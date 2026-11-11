@@ -615,6 +615,74 @@ func (i *Interceptor) Match(toolName string, input []byte) (Decision, bool) {
 	return Decision{}, false
 }
 
+// builtinRulePrefix marks the rules seeded by the platform (db.seedDefaultInterceptRules
+// and its v2/v3 migrations).
+const builtinRulePrefix = "[built-in]"
+
+// MatchBuiltin is Match restricted to the built-in deny rules: the enabled rules
+// whose name starts with "[built-in]" and whose action is deny, on the tools that
+// enter the rule system. It returns the first match in priority order. User rules,
+// allow and ask rules, and the judge are not consulted. The planner and the main
+// agent use it (#124, F11). An interceptor without a database and without loaded
+// rules matches nothing.
+func (i *Interceptor) MatchBuiltin(toolName string, input []byte) (Decision, bool) {
+	i.mu.RLock()
+	loaded := i.cached != nil
+	i.mu.RUnlock()
+	if !loaded && i.db == nil {
+		return Decision{}, false
+	}
+	if !i.IsToolEnabled(toolName) {
+		return Decision{}, false
+	}
+	rules, err := i.rules()
+	if err != nil {
+		return Decision{}, false
+	}
+	for _, r := range rules {
+		if r.Action != "deny" || !strings.HasPrefix(r.Name, builtinRulePrefix) || !ruleMatches(r, toolName, input) {
+			continue
+		}
+		msg := r.Message
+		if msg == "" {
+			msg = defaultMessage(r.Action, r.Name)
+		}
+		configJSON, _ := json.Marshal(r.InterceptRule)
+		return Decision{
+			RuleName: r.Name, ConfigDigest: digestInput(configJSON),
+			Action:  r.Action,
+			Message: msg,
+			RuleID:  r.ID,
+		}, true
+	}
+	return Decision{}, false
+}
+
+// SetRulesForTest installs rules (in priority order) as the loaded rule set, with
+// the default intercept-enabled tools, on an interceptor that may have no
+// database. It is a test seam for the guard package, which cannot reach the
+// unexported cache; production code loads the rules from the database.
+func (i *Interceptor) SetRulesForTest(rules []db.InterceptRule) {
+	out := []compiledRule{}
+	for _, r := range rules {
+		if !r.Enabled {
+			continue
+		}
+		cr := compiledRule{InterceptRule: r}
+		if r.MatchType == "regex" {
+			cr.re = regexp.MustCompile(r.Pattern)
+		}
+		out = append(out, cr)
+	}
+	tools := make(map[string]bool, len(defaultEnabledTools))
+	for _, n := range defaultEnabledTools {
+		tools[n] = true
+	}
+	i.mu.Lock()
+	i.cached, i.enabledTools = out, tools
+	i.mu.Unlock()
+}
+
 func ruleMatches(r compiledRule, toolName string, input []byte) bool {
 	var subject string
 	switch r.MatchTarget {
@@ -649,6 +717,9 @@ func defaultMessage(action, name string) string {
 // error is swallowed so logging never changes the tool call's outcome. The pending list
 // (status='pending') is unaffected, so it still shows only asks awaiting a decision.
 func (i *Interceptor) Log(ctx context.Context, convID int64, dec Decision, toolName string, input []byte, status string) {
+	if i.db == nil {
+		return // no store to record into (SetRulesForTest)
+	}
 	taskID, agentName := taskInfoFromCtx(ctx)
 	audit := auditFor(ctx, dec, input, status)
 	id, err := i.db.CreateDecidedIntercept(dec.RuleID, convID, taskID, agentName, toolName, input, status, dec.Message, audit)

@@ -1888,16 +1888,17 @@ func (t *Task) NotifyGoal(texts []string) {
 }
 
 // NotifyHint records that one OR MORE hints were added in a single add_hint call —
-// by the human via the main agent, or by cross-task orchestration — then wakes the
-// planner, so the next round is told "the human added N strategy hints: ..." and looks at them
-// directly instead of having to spot the new hint folded into the graph overview.
+// by the human via the main agent (origin "human"), or by cross-task orchestration
+// (origin "orchestrator") — then wakes the planner, so the next round is told who
+// added N strategy hints and looks at them directly instead of having to spot the
+// new hint folded into the graph overview.
 // One call → one trigger event (a batched add_hint counts as one, not one per hint).
-func (t *Task) NotifyHint(texts []string) {
+func (t *Task) NotifyHint(origin string, texts []string) {
 	if len(texts) == 0 {
 		return
 	}
 	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "hint", Hints: texts})
+	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "hint", Hints: texts, HintOrigin: origin})
 	t.trigMu.Unlock()
 	t.Notify()
 }

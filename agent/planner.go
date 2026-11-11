@@ -195,6 +195,9 @@ func plannerGoalAnchor(goal, constraints string) string {
 //	"cancelled" — the human deleted intent IntentID (Detail = the deletion reason).
 //	            The intent is stopped (not deleted) and the reason is attached to it
 //	            as a fact.
+//	"hint"    — one add_hint call added one OR MORE hints (Hints = the hint texts;
+//	            HintOrigin = who wrote them: "human" via the main agent,
+//	            "orchestrator" for cross-task orchestration, otherwise an agent name).
 type TriggerEvent struct {
 	Kind     string
 	IntentID int64
@@ -204,6 +207,25 @@ type TriggerEvent struct {
 	OldGoal  string   // Kind=="goal_edited" only: the goal text before the edit
 	NewGoal  string   // Kind=="goal_edited" only: the goal text after the edit
 	Hints    []string // Kind=="hint" only: the hint texts added by this add_hint call (one or more)
+	// HintOrigin is the writer of the hints (Kind=="hint" only): the origin stored
+	// on the hint nodes. Empty when unknown.
+	HintOrigin string
+}
+
+// hintAuthor names the writer of a hint for the planner, from its stored origin.
+// Only the main-agent chat writes as "human"; the other writers are named as
+// what they are, so an agent-written hint is not read as an operator instruction.
+func hintAuthor(origin string) string {
+	switch origin {
+	case "human":
+		return "The human (via the main agent)"
+	case "orchestrator":
+		return "A cross-task orchestration"
+	case "":
+		return "A source that was not recorded"
+	default:
+		return "An agent (" + origin + ")"
+	}
 }
 
 // renderTriggers spells out the change(s) that fired this round: for a finished
@@ -226,9 +248,9 @@ func renderTriggers(ts *db.ExplorationStore, evs []TriggerEvent) string {
 			}
 		case "hint":
 			if len(ev.Hints) == 1 {
-				b.WriteString(fmt.Sprintf("\n- The human (main agent) added a strategic hint: %s — already attached to the exploration graph; please adjust/add exploration directions accordingly (if no corresponding intent exists yet).", ev.Hints[0]))
+				b.WriteString(fmt.Sprintf("\n- %s added a strategic hint: %s — already attached to the exploration graph; please adjust/add exploration directions accordingly (if no corresponding intent exists yet).", hintAuthor(ev.HintOrigin), ev.Hints[0]))
 			} else {
-				b.WriteString(fmt.Sprintf("\n- The human (main agent) added %d strategic hints: %s — all are attached to the exploration graph; please adjust/add exploration directions accordingly, one by one.", len(ev.Hints), strings.Join(ev.Hints, "; ")))
+				b.WriteString(fmt.Sprintf("\n- %s added %d strategic hints: %s — all are attached to the exploration graph; please adjust/add exploration directions accordingly, one by one.", hintAuthor(ev.HintOrigin), len(ev.Hints), strings.Join(ev.Hints, "; ")))
 			}
 		case "goal_deleted":
 			b.WriteString(fmt.Sprintf("\n- The human deleted this goal: %s — the goal has been removed; re-judge the remaining goals/directions accordingly (no need to dispatch intents for it anymore).", ev.Detail))
