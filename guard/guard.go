@@ -162,7 +162,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 	if gated {
 		var res intercept.TargetResult
 		if unpinned, res = g.gate.CheckTargets(ctx, scope, ev.ToolName, ev.Input); res.Code != "" {
-			return g.block(ev.ToolName, targetBlockMessage(res), "")
+			return g.block(ev.ToolName, TargetBlockMessage(res), "")
 		}
 	}
 	var ask *intercept.Decision
@@ -182,7 +182,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 	if len(unpinned) > 0 {
 		res, merged := g.requestTargets(ctx, scope, ev, unpinned, ask)
 		if res.Code != "" {
-			return g.block(ev.ToolName, targetBlockMessage(res), "")
+			return g.block(ev.ToolName, TargetBlockMessage(res), "")
 		}
 		if merged {
 			// The approval of the target request answered the ask as well.
@@ -235,11 +235,11 @@ var targetGuidance = map[string]string{
 		"Retry the same call later, or report the failure.",
 }
 
-// targetBlockMessage is systemBlockMessage for the target gate: the block code,
+// TargetBlockMessage is systemBlockMessage for the target gate: the block code,
 // the reason and the target, then what to do about it. A target block is not
 // always final (an approval can still arrive, a lookup can succeed later), so
 // it does not end with "This operation is forbidden."
-func targetBlockMessage(res intercept.TargetResult) string {
+func TargetBlockMessage(res intercept.TargetResult) string {
 	reason := res.Reason
 	if res.Host != "" && !strings.Contains(reason, res.Host) {
 		target := res.Host

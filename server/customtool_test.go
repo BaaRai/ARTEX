@@ -128,7 +128,7 @@ func TestRunHTTPTool(t *testing.T) {
 		"headers": map[string]string{"Authorization": "Bearer {token}"},
 		"body":    `{"flag":"{flag}"}`,
 	})
-	res, err := (&Server{}).runHTTPTool(context.Background(), execRaw,
+	res, err := (&Server{}).runHTTPTool(context.Background(), "probe", execRaw,
 		map[string]any{"flag": "CTF{x}", "token": "sekret"}, nil)
 	if err != nil {
 		t.Fatalf("runHTTPTool: %v", err)
@@ -176,7 +176,7 @@ func TestHTTPToolTruncatesLargeBody(t *testing.T) {
 	defer srv.Close()
 
 	execRaw, _ := json.Marshal(map[string]any{"method": "GET", "url": srv.URL})
-	res, err := (&Server{}).runHTTPTool(context.Background(), execRaw, map[string]any{}, nil)
+	res, err := (&Server{}).runHTTPTool(context.Background(), "probe", execRaw, map[string]any{}, nil)
 	if err != nil {
 		t.Fatalf("runHTTPTool: %v", err)
 	}

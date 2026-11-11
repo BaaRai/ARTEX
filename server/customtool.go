@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/guard"
+	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -163,11 +165,11 @@ func (s *Server) pgTestCustomTool(w http.ResponseWriter, r *http.Request) {
 	var res actool.Result
 	switch req.Kind {
 	case "command":
-		res, _ = s.runCommandTool(ctx, req.Exec, params, tc)
+		res, _ = s.runCommandTool(ctx, "test", req.Exec, params, tc)
 	case "script":
 		res, _ = s.runScriptTool(ctx, "test", req.Exec, params, tc)
 	case "http":
-		res, _ = s.runHTTPTool(ctx, req.Exec, params, tc)
+		res, _ = s.runHTTPTool(ctx, "test", req.Exec, params, tc)
 	case "shell":
 		writeErr(w, 400, "shell-kind tools are bash environment declarations with no executable content")
 		return
@@ -275,11 +277,11 @@ func (s *Server) buildCustomTool(t *db.Tool) actool.CoreTool {
 		}
 		switch kind {
 		case "command":
-			return s.runCommandTool(ctx, execRaw, params, tc)
+			return s.runCommandTool(ctx, key, execRaw, params, tc)
 		case "script":
 			return s.runScriptTool(ctx, key, execRaw, params, tc)
 		case "http":
-			return s.runHTTPTool(ctx, execRaw, params, tc)
+			return s.runHTTPTool(ctx, key, execRaw, params, tc)
 		default:
 			return actool.Errorf("unknown custom tool kind: " + kind), nil
 		}
@@ -328,13 +330,18 @@ func ensureSchema(raw json.RawMessage) map[string]any {
 
 // ---------- command: render the command → reuse the Bash low-level run ----------
 
-func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, params map[string]any, tc *actool.ToolContext) (actool.Result, error) {
+func (s *Server) runCommandTool(ctx context.Context, key string, execRaw json.RawMessage, params map[string]any, tc *actool.ToolContext) (actool.Result, error) {
 	var spec commandExec
 	_ = json.Unmarshal(execRaw, &spec)
 	if strings.TrimSpace(spec.Command) == "" {
 		return actool.Errorf("command is empty"), nil
 	}
 	cmd := renderTemplate(spec.Command, params, shellQuote)
+	// The hook saw the parameters, not the command they render: the target gate
+	// reads the rendered command here, also without the quoting of the parameters.
+	if res := intercept.GateRenderedCommand(ctx, key, cmd, renderTemplate(spec.Command, params, identity)); res.Code != "" {
+		return actool.Errorf(guard.TargetBlockMessage(res)), nil
+	}
 	// Reuse the low-level run Bash also uses (via the Bash CoreTool.Call): it
 	// automatically inherits the safety floor/timeout/proxy env/output overflow. The tool is a peer of Bash sharing that low level, not routed through the Bash tool for the model to call.
 	bashIn, _ := json.Marshal(map[string]any{"command": cmd})
@@ -417,7 +424,7 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 
 // ---------- http: native request + proxy ----------
 
-func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, params map[string]any, tc *actool.ToolContext) (actool.Result, error) {
+func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMessage, params map[string]any, tc *actool.ToolContext) (actool.Result, error) {
 	var spec httpExec
 	_ = json.Unmarshal(execRaw, &spec)
 	method := strings.ToUpper(strings.TrimSpace(spec.Method))
@@ -427,6 +434,12 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 	rawURL := renderTemplate(spec.URL, params, identity)
 	if strings.TrimSpace(rawURL) == "" {
 		return actool.Errorf("http url is empty"), nil
+	}
+	// The hook saw the parameters, not the URL they render (nor a URL written in
+	// the template): the target gate reads the rendered URL here, before the
+	// tool's own timeout starts, so a wait for an approval does not consume it.
+	if res := intercept.GateRenderedURL(ctx, key, rawURL); res.Code != "" {
+		return actool.Errorf(guard.TargetBlockMessage(res)), nil
 	}
 	var bodyReader io.Reader
 	if spec.Body != "" {
