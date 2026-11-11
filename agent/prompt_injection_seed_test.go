@@ -28,6 +28,7 @@ func TestInjectionTailSurvivesPromptOverride(t *testing.T) {
 		"auto":      chatSystem("auto", "/data", "/work"),
 		"pentest":   chatSystem("pentest", "/data", "/work"),
 		"reporter":  chatSystem("reporter", "/data", "/work"),
+		"custom":    chatSystem("custom-assistant", "/data", "/work"),
 	}
 	for role, sys := range content {
 		if !strings.HasPrefix(sys, "BARE BODY") {
@@ -73,6 +74,7 @@ func TestInjectionTailNotDuplicated(t *testing.T) {
 			"auto":      chatSystem("auto", "/data", "/work"),
 			"pentest":   chatSystem("pentest", "/data", "/work"),
 			"reporter":  chatSystem("reporter", "/data", "/work"),
+			"custom":    chatSystem("custom-assistant", "/data", "/work"),
 		}
 	}
 
