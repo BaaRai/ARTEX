@@ -500,6 +500,8 @@ export interface Finding {
   poe_level?: number; // proof-of-exploitation level (3 or 4 when verified); 0 = none declared
   verification_status?: VerificationStatus; // automated verification outcome (S1)
   verification_note?: string; // why the status was reached; empty when verified
+  counterevidence?: string; // what was tested and did not work; optional, omitted when empty
+  confidence_rationale?: string; // why the conclusion holds; optional, omitted when empty
   id: string;
   finding_id?: string; // row id in the standalone findings table, the handle for status updates (may be missing for old in-task nodes)
   vulnclass: string;

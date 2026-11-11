@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/evidence"
 )
@@ -240,5 +241,42 @@ WHERE key=$1 AND system AND NOT(COALESCE(schema->'properties','{}'::jsonb) ? $2)
 		if err != nil {
 			log.Printf("[verification] upgrade update_finding_report.%s: %v", name, err)
 		}
+	}
+}
+
+// seedFindingEvidenceSchema adds the optional counterevidence /
+// confidence_rationale properties to the report_finding schema of existing
+// databases (SeedTool is first-insert only, so without this the model would never
+// see them). Idempotent: a property is added only when the stored schema lacks it,
+// and user edits are preserved.
+func (s *Server) seedFindingEvidenceSchema() {
+	for _, seed := range agent.BuiltinToolSeeds() {
+		if seed.Key != "report_finding" {
+			continue
+		}
+		raw, err := json.Marshal(seed.Schema)
+		if err != nil {
+			log.Printf("[evidence] report_finding schema: %v", err)
+			return
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return
+		}
+		var properties map[string]json.RawMessage
+		if err := json.Unmarshal(obj["properties"], &properties); err != nil {
+			return
+		}
+		for _, name := range []string{"counterevidence", "confidence_rationale"} {
+			if len(properties[name]) == 0 {
+				continue
+			}
+			_, err := s.m.pg.Exec(`UPDATE tools SET schema=jsonb_set(schema,ARRAY['properties',$2::text],$3::jsonb,true),updated_at=now()
+WHERE key=$1 AND system AND NOT(COALESCE(schema->'properties','{}'::jsonb) ? $2)`, "report_finding", name, string(properties[name]))
+			if err != nil {
+				log.Printf("[evidence] upgrade report_finding.%s: %v", name, err)
+			}
+		}
+		return
 	}
 }

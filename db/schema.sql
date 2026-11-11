@@ -1247,6 +1247,10 @@ ALTER TABLE findings ADD COLUMN IF NOT EXISTS report_evidence_version BIGINT NOT
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS poe_level SMALLINT NOT NULL DEFAULT 0;
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unverified';
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_note TEXT NOT NULL DEFAULT '';
+-- Reporter-supplied reasoning, both optional (empty = not given): counterevidence is what was
+-- tested and did not work; confidence_rationale is why the conclusion holds.
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS counterevidence TEXT NOT NULL DEFAULT '';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS confidence_rationale TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS traffic_evidence_snapshots (
     id TEXT PRIMARY KEY,
