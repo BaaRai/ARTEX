@@ -252,7 +252,7 @@ var targetGuidance = map[string]string{
 // always final (an approval can still arrive, a lookup can succeed later), so
 // it does not end with "This operation is forbidden."
 func TargetBlockMessage(res intercept.TargetResult) string {
-	reason := res.Reason
+	reason := capBlockReason(res.Reason)
 	if res.Host != "" && !strings.Contains(reason, res.Host) {
 		target := res.Host
 		if res.Port != 0 {
@@ -277,7 +277,27 @@ func TargetBlockMessage(res intercept.TargetResult) string {
 // model-facing tool_result carries this framing.
 func systemBlockMessage(reason string) string {
 	return "[ARTEX platform control, not target defense] This call was intercepted by the platform. " +
-		"Reason: " + reason + ". This operation is forbidden."
+		"Reason: " + capBlockReason(reason) + ". This operation is forbidden."
+}
+
+// maxBlockReasonRunes bounds the reason a block message carries back to the
+// model. Rule messages are operator text and judge or target reasons can embed
+// command input, so a reason has no natural bound; 4000 runes keeps every
+// realistic reason whole while one oversized reason cannot flood the context.
+// Only the model-facing text is capped: Interceptor.Log stores the raw reason.
+const maxBlockReasonRunes = 4000
+
+// capBlockReason returns s unchanged when it has at most maxBlockReasonRunes
+// runes, and otherwise its first maxBlockReasonRunes runes and a marker.
+func capBlockReason(s string) string {
+	n := 0
+	for i := range s {
+		if n == maxBlockReasonRunes {
+			return s[:i] + " …(truncated)"
+		}
+		n++
+	}
+	return s
 }
 
 var reBlocked = regexp.MustCompile(`(?i)\b(403|forbidden|waf|blocked|rate.?limit|429|captcha|denied)\b`)
