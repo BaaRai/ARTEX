@@ -22,6 +22,9 @@ type Input struct {
 	Coverage    *db.CoverageLedger // nil when the task's coverage feature is off
 }
 
+// reportMaxGaps caps the coverage gap list of the report; the rest is counted.
+const reportMaxGaps = 200
+
 type findingView struct {
 	VulnClass string
 	Name      string
@@ -95,7 +98,11 @@ func Markdown(in Input) string {
 			fmt.Fprintf(&b, "- **Completeness**: %s. %s\n", c.Completeness.State, c.Completeness.Caveat)
 		}
 		fmt.Fprintf(&b, "- Ledger entries: %d, open gaps: %d\n", len(c.Entries), len(c.Gaps))
-		for _, g := range c.Gaps {
+		for i, g := range c.Gaps {
+			if i == reportMaxGaps {
+				fmt.Fprintf(&b, "- and %d more (see the coverage API)\n", len(c.Gaps)-reportMaxGaps)
+				break
+			}
 			fmt.Fprintf(&b, "- %s\n", g)
 		}
 		b.WriteString("\n")

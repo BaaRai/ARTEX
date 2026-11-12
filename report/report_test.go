@@ -32,3 +32,18 @@ func TestMarkdownCoverageGaps(t *testing.T) {
 		}
 	}
 }
+
+// The report lists at most reportMaxGaps gaps, then a count line.
+func TestMarkdownCoverageGapsCap(t *testing.T) {
+	var entries []db.CoverageEntry
+	for i := 0; i < reportMaxGaps+30; i++ {
+		entries = append(entries, db.CoverageEntry{Surface: "/p", RiskArea: "xss", Outcome: db.OutcomeNeedsFollowUp})
+	}
+	md := Markdown(Input{Title: "t", Coverage: db.BuildCoverageLedger(entries, nil, db.CoverageCompleteness{})})
+	if n := strings.Count(md, "\n- needs_follow_up /p xss"); n != reportMaxGaps {
+		t.Fatalf("listed %d gaps, want %d", n, reportMaxGaps)
+	}
+	if !strings.Contains(md, "- and 30 more (see the coverage API)") {
+		t.Fatalf("missing count line in\n%s", md)
+	}
+}

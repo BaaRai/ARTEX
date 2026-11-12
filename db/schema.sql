@@ -1600,3 +1600,7 @@ CREATE TABLE IF NOT EXISTS coverage_ledger_history (
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_coverage_ledger_history_task ON coverage_ledger_history(task_id, id);
+-- Why the current run ended ('' = normal, 'budget' = run-budget wrap-up). Per run:
+-- written with the guarded terminal status, cleared when the task moves back to a
+-- non-terminal state (revive), so an earlier run's reason never marks a later one.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS end_reason TEXT NOT NULL DEFAULT '';

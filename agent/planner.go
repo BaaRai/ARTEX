@@ -491,7 +491,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// situation may be compressed by compaction (planner rounds are usually short — low
 	// risk). situational is spliced into input below.
 	// One envelope (one fresh nonce) per user message (#124, F3).
-	situational := plannerSituational(triggers, storeTriggerLookup(ts), tsx.graphOverviewData(), newDataEnvelope())
+	env := newDataEnvelope()
+	situational := plannerSituational(triggers, storeTriggerLookup(ts), tsx.graphOverviewData(), env)
 	// Task-level deadline / endgame mode (injected via ctx, see taskclock.go). On the
 	// endgame round, the task-timeout planner wrap-up prompt is spliced into this
 	// round's user input (along with situational) as [this round's operating
@@ -503,9 +504,10 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// Task budget (off by default, see budget.go): the remaining-budget line, and on
 	// the forced wrap-up round the budget wrap-up instruction. Empty without a budget.
 	situational += plannerBudgetBlock(ctx)
-	// Coverage ledger (coverage-only): compact line each round; full gap list on a wrap-up round.
+	// Coverage ledger (coverage-only): compact line each round; capped gap list on a
+	// wrap-up round. Its agent-reported gap lines are framed with this message's env.
 	budgetRound, _ := ctx.Value(budgetRoundKey{}).(BudgetRound)
-	situational += tsx.coverageLedgerBlock(tc.Final || budgetRound.WrapUp)
+	situational += tsx.coverageLedgerBlock(tc.Final || budgetRound.WrapUp, env)
 	// This task's work dir <workDir>/tasks/<taskID>; create it first.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})

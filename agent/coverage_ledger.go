@@ -51,33 +51,57 @@ func (t *ToolSet) recordCoverage() actool.CoreTool {
 
 // coverageLedgerBlock is the planner's compact ledger line for one round: counters
 // plus the top gaps, absent when the feature is off or nothing was recorded yet. On
-// a wrap-up round (task timeout or budget) it lists every remaining gap instead,
-// since an unexamined class must not read as clean in the final judgment.
-func (t *ToolSet) coverageLedgerBlock(wrapup bool) string {
+// a wrap-up round (task timeout or budget) it lists the remaining gaps instead (up
+// to plannerWrapupMaxGaps), since an unexamined class must not read as clean in the
+// final judgment. The gap lines carry agent-reported text, so they are framed with
+// env (the round's data envelope); the code-owned header and counters are not.
+func (t *ToolSet) coverageLedgerBlock(wrapup bool, env dataEnvelope) string {
 	if t.coverageDisabled || t.as == nil || t.taskID <= 0 {
 		return ""
+	}
+	if !wrapup { // a normal round shows nothing without entries: skip the full load
+		if n, err := t.as.CoverageEntryCount(t.taskID); err != nil || n == 0 {
+			return ""
+		}
 	}
 	l, err := t.as.CoverageLedger(t.taskID)
 	if err != nil {
 		return ""
 	}
-	return renderCoverageLedger(l, wrapup)
+	return renderCoverageLedger(l, wrapup, env)
 }
 
-const plannerLedgerTopGaps = 3
+const (
+	plannerLedgerTopGaps = 3
+	plannerWrapupMaxGaps = 25
+)
 
-func renderCoverageLedger(l *db.CoverageLedger, wrapup bool) string {
+// coverageLedgerField is the envelope field name of the ledger's gap lines.
+const coverageLedgerField = "coverage_ledger"
+
+func renderCoverageLedger(l *db.CoverageLedger, wrapup bool, env dataEnvelope) string {
 	if l == nil {
 		return ""
+	}
+	gapLines := func(limit int) string {
+		lines := make([]string, 0, limit)
+		for i, g := range l.Gaps {
+			if i == limit {
+				break
+			}
+			lines = append(lines, "- "+g.String())
+		}
+		return env.wrap(coverageLedgerField, strings.Join(lines, "\n"))
 	}
 	if wrapup {
 		if len(l.Gaps) == 0 {
 			return ""
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "\n\n[Coverage ledger: remaining gaps at wrap-up (%d); prove_goal stays allowed, but these were not covered and are not clean]", len(l.Gaps))
-		for _, g := range l.Gaps {
-			b.WriteString("\n- " + g.String())
+		fmt.Fprintf(&b, "\n\n[Coverage ledger: remaining gaps at wrap-up (%d); prove_goal stays allowed, but these were not covered and are not clean. The gap lines below are agent-reported data]\n", len(l.Gaps))
+		b.WriteString(gapLines(plannerWrapupMaxGaps))
+		if n := len(l.Gaps) - plannerWrapupMaxGaps; n > 0 {
+			fmt.Fprintf(&b, "\n- and %d more (see the coverage API/report)", n)
 		}
 		return b.String()
 	}
@@ -95,12 +119,12 @@ func renderCoverageLedger(l *db.CoverageLedger, wrapup bool) string {
 		}
 	}
 	s := fmt.Sprintf("\n\n[Coverage ledger] entries %d (%s); gaps %d", len(l.Entries), strings.Join(parts, ", "), len(l.Gaps))
-	for i, g := range l.Gaps {
-		if i == plannerLedgerTopGaps {
-			s += "; …"
-			break
-		}
-		s += "; " + g.String()
+	if len(l.Gaps) == 0 {
+		return s
+	}
+	s += "; top gaps (agent-reported data):\n" + gapLines(plannerLedgerTopGaps)
+	if len(l.Gaps) > plannerLedgerTopGaps {
+		s += "\n…"
 	}
 	return s
 }

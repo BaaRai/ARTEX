@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Coverage ledger (modeled on Strix strix/report/coverage.py, skill_coverage_gaps).
@@ -31,9 +33,23 @@ const (
 	GapMissingReason       = "missing_reason"
 )
 
-// EndReasonBudget is the activity metadata end_reason of a task stopped by the
-// run-budget wrap-up (server/engine_timeout.go); completeness reads it back.
+// EndReasonBudget is the tasks.end_reason of a run settled by the run-budget
+// wrap-up (server/engine_timeout.go); completeness reads it back. The column is
+// per run: a revive to running clears it (ApplyTaskAdmission, SetStatus).
 const EndReasonBudget = "budget"
+
+// Ledger field limits (characters, after normalisation). Over a limit the write
+// is refused, never truncated.
+const (
+	maxCoverageSurface  = 200
+	maxCoverageRiskArea = 64
+	maxCoverageEvidence = 500
+	maxCoverageReason   = 500
+	// MaxCoverageRowsPerTask caps the current rows of one task: a new key beyond
+	// it is refused, an update of an existing key is always allowed. The history
+	// is append-only and not capped.
+	MaxCoverageRowsPerTask = 2000
+)
 
 // ValidCoverageOutcome reports whether o is one of the five ledger outcomes.
 func ValidCoverageOutcome(o string) bool {
@@ -88,24 +104,75 @@ type CoverageLedger struct {
 	Completeness    *CoverageCompleteness `json:"completeness"`
 }
 
-func normRiskArea(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+func normRiskArea(s string) string { return strings.ToLower(NormalizeCoverageField(s)) }
 
-// RecordCoverage upserts the current row of (task, surface, risk_area) and appends
-// the write to the history, in one transaction.
-func (s *AssetStore) RecordCoverage(taskID int64, e CoverageEntry) error {
-	e.Surface, e.RiskArea = strings.TrimSpace(e.Surface), normRiskArea(e.RiskArea)
-	if taskID <= 0 || e.Surface == "" || e.RiskArea == "" {
-		return fmt.Errorf("task, surface and risk_area are required")
+// NormalizeCoverageField folds an agent-reported ledger field to one line: every
+// control character (C0, DEL, C1) and the Unicode line/paragraph separators become
+// a space, runs of whitespace collapse to one space, and the ends are trimmed. The
+// fields reach the planner prompt and the report, so they must not carry newlines.
+func NormalizeCoverageField(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == ' ' || r == ' ' {
+			return ' '
+		}
+		return r
+	}, s)
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// normalizeCoverageEntry normalises the agent-reported fields of e and checks
+// them: required fields, the outcome and the length limits.
+func normalizeCoverageEntry(e CoverageEntry) (CoverageEntry, error) {
+	e.Surface, e.RiskArea = NormalizeCoverageField(e.Surface), normRiskArea(e.RiskArea)
+	e.Evidence, e.Reason = NormalizeCoverageField(e.Evidence), NormalizeCoverageField(e.Reason)
+	if e.Surface == "" || e.RiskArea == "" {
+		return e, fmt.Errorf("task, surface and risk_area are required")
 	}
 	if !ValidCoverageOutcome(e.Outcome) {
-		return fmt.Errorf("outcome must be one of reported, no_issue_found, ruled_out, not_applicable, needs_follow_up")
+		return e, fmt.Errorf("outcome must be one of reported, no_issue_found, ruled_out, not_applicable, needs_follow_up")
+	}
+	for _, f := range []struct {
+		name, v string
+		max     int
+	}{{"surface", e.Surface, maxCoverageSurface}, {"risk_area", e.RiskArea, maxCoverageRiskArea},
+		{"evidence", e.Evidence, maxCoverageEvidence}, {"reason", e.Reason, maxCoverageReason}} {
+		if utf8.RuneCountInString(f.v) > f.max {
+			return e, fmt.Errorf("%s too long (max %d)", f.name, f.max)
+		}
+	}
+	return e, nil
+}
+
+// RecordCoverage upserts the current row of (task, surface, risk_area) and appends
+// the write to the history, in one transaction. The fields are normalised and
+// checked here (normalizeCoverageEntry), whatever the caller.
+func (s *AssetStore) RecordCoverage(taskID int64, e CoverageEntry) error {
+	if taskID <= 0 {
+		return fmt.Errorf("task, surface and risk_area are required")
+	}
+	e, err := normalizeCoverageEntry(e)
+	if err != nil {
+		return err
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	args := []any{taskID, e.Surface, e.RiskArea, e.Outcome, strings.TrimSpace(e.Evidence), strings.TrimSpace(e.Reason), e.Worker, nullID(e.IntentID)}
+	// Serialise the writers of one task so the row cap holds under concurrency.
+	if _, err := tx.Exec(`SELECT 1 FROM tasks WHERE id=$1 FOR UPDATE`, taskID); err != nil {
+		return err
+	}
+	var exists bool
+	var current int
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM coverage_ledger WHERE task_id=$1 AND surface=$2 AND risk_area=$3),
+  (SELECT COUNT(*) FROM coverage_ledger WHERE task_id=$1)`, taskID, e.Surface, e.RiskArea).Scan(&exists, &current); err != nil {
+		return err
+	}
+	if !exists && current >= MaxCoverageRowsPerTask {
+		return fmt.Errorf("coverage ledger full for this task (max %d entries): update an existing surface and risk_area instead", MaxCoverageRowsPerTask)
+	}
+	args := []any{taskID, e.Surface, e.RiskArea, e.Outcome, e.Evidence, e.Reason, e.Worker, nullID(e.IntentID)}
 	if _, err := tx.Exec(`INSERT INTO coverage_ledger_history(task_id, surface, risk_area, outcome, evidence, reason, worker, intent_id)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, args...); err != nil {
 		return err
@@ -124,6 +191,13 @@ func nullID(id int64) any {
 		return nil
 	}
 	return id
+}
+
+// CoverageEntryCount returns the number of current ledger rows of a task.
+func (s *AssetStore) CoverageEntryCount(taskID int64) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM coverage_ledger WHERE task_id=$1`, taskID).Scan(&n)
+	return n, err
 }
 
 // CoverageLedger loads the ledger document of a task: its entries, the mandatory
@@ -171,8 +245,9 @@ WHERE t.id=$1 AND n.kind='goal' AND COALESCE(btrim(n.payload->>'vulnclass'),'')<
 	}
 	var status string
 	var paused, budget, pastDeadline bool
-	if err := s.db.QueryRow(`SELECT t.status, COALESCE(t.paused,false),
-  EXISTS (SELECT 1 FROM activity a WHERE a.exploration_id=t.exploration_id AND a.worker='system' AND a.metadata->>'end_reason'=$2),
+	// end_reason is per run (cleared when a revive moves the task back to running),
+	// so a budget wrap-up of an earlier run never marks a later one.
+	if err := s.db.QueryRow(`SELECT t.status, COALESCE(t.paused,false), t.end_reason=$2,
   COALESCE(t.deadline_at IS NOT NULL AND t.completed_at IS NOT NULL AND t.completed_at >= t.deadline_at, false)
 FROM tasks t WHERE t.id=$1`, taskID, EndReasonBudget).Scan(&status, &paused, &budget, &pastDeadline); err != nil {
 		return nil, err

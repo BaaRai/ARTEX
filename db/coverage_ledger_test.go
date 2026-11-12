@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -141,13 +142,141 @@ func TestRecordCoverageUpsertHistory(t *testing.T) {
 	if l.Completeness.State != "in_progress" {
 		t.Fatalf("completeness=%+v", l.Completeness)
 	}
-	if _, err := store.AppendActivity(Activity{Worker: "system", Kind: "text", Metadata: json.RawMessage(`{"end_reason":"budget"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.SetStatus(task.ID, "done"); err != nil {
-		t.Fatal(err)
+	if won, err := d.SetTerminalStatusGuarded(task.ID, "done", EndReasonBudget); err != nil || !won {
+		t.Fatalf("settle won=%v err=%v", won, err)
 	}
 	if l, _ = as.CoverageLedger(task.ID); l.Completeness.Complete || l.Completeness.State != "budget" {
 		t.Fatalf("completeness after budget=%+v", l.Completeness)
+	}
+}
+
+// PG: the budget end reason belongs to one run. Budget wrap-up, then a revive,
+// later planner/worker activity (even one carrying the old activity marker) and
+// a normal done: the task is complete, not budget.
+func TestCoverageCompletenessBudgetThenReviveDone(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer d.Close()
+	task, err := d.CreateTaskWithOptions("coverage revive", "g", TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	as, store := d.Assets(), d.Exploration(task.ExplorationID)
+	state := func() string {
+		t.Helper()
+		l, err := as.CoverageLedger(task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l.Completeness.State
+	}
+	if won, err := d.SetTerminalStatusGuarded(task.ID, "timeout", EndReasonBudget); err != nil || !won {
+		t.Fatalf("budget settle won=%v err=%v", won, err)
+	}
+	if s := state(); s != "budget" {
+		t.Fatalf("after budget settle: %s", s)
+	}
+	if won, _ := d.SetTerminalStatusGuarded(task.ID, "done", ""); won { // a losing writer stores nothing
+		t.Fatal("guard overwritten")
+	}
+	if s := state(); s != "budget" {
+		t.Fatalf("after losing writer: %s", s)
+	}
+	if err := d.SetStatus(task.ID, "running"); err != nil { // revive
+		t.Fatal(err)
+	}
+	for _, w := range []string{"planner", "worker-1", "system"} {
+		if _, err := store.AppendActivity(Activity{Worker: w, Kind: "text", Metadata: json.RawMessage(`{"end_reason":"budget"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s := state(); s != "in_progress" {
+		t.Fatalf("revived run: %s", s)
+	}
+	if won, err := d.SetTerminalStatusGuarded(task.ID, "done", ""); err != nil || !won {
+		t.Fatalf("done won=%v err=%v", won, err)
+	}
+	if s := state(); s != "complete" {
+		t.Fatalf("revived run ended normally: %s, want complete", s)
+	}
+	// ClearRunEndReason never touches a terminal task.
+	if _, err := d.Exec(`UPDATE tasks SET status='timeout', end_reason='budget' WHERE id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.ClearRunEndReason(task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if s := state(); s != "budget" {
+		t.Fatalf("terminal end_reason cleared: %s", s)
+	}
+}
+
+// PG: a task holds at most MaxCoverageRowsPerTask current rows; a new key beyond
+// the cap is refused, an existing key is still updated.
+func TestRecordCoverageRowCap(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer d.Close()
+	task, err := d.CreateTaskWithOptions("coverage cap", "g", TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	if _, err := d.Exec(`INSERT INTO coverage_ledger(task_id, surface, risk_area, outcome)
+SELECT $1, '/s' || g, 'xss', 'needs_follow_up' FROM generate_series(1, $2::int) g`, task.ID, MaxCoverageRowsPerTask); err != nil {
+		t.Fatal(err)
+	}
+	as := d.Assets()
+	err = as.RecordCoverage(task.ID, CoverageEntry{Surface: "/new", RiskArea: "xss", Outcome: OutcomeNeedsFollowUp})
+	if err == nil || !strings.Contains(err.Error(), "max 2000") {
+		t.Fatalf("new key past the cap: err=%v", err)
+	}
+	if err := as.RecordCoverage(task.ID, CoverageEntry{Surface: "/s1", RiskArea: "xss", Outcome: OutcomeRuledOut, Reason: "static page"}); err != nil {
+		t.Fatalf("update of an existing key refused: %v", err)
+	}
+}
+
+// Every agent-reported field is folded to one line and length-checked before any
+// write; an over-long field is refused, never truncated.
+func TestNormalizeCoverageEntry(t *testing.T) {
+	e, err := normalizeCoverageEntry(CoverageEntry{
+		Surface: " /a\r\n\n\t[[x]]\x00\x7f\u0085 b  ", RiskArea: " SQLi\n", Outcome: OutcomeNoIssueFound,
+		Evidence: "fact\n\n12", Reason: "\tr\x1b[31m",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Surface != "/a [[x]] b" || e.RiskArea != "sqli" || e.Evidence != "fact 12" || e.Reason != "r [31m" {
+		t.Fatalf("normalised=%+v", e)
+	}
+	ok := CoverageEntry{Surface: "/s", RiskArea: "xss", Outcome: OutcomeReported}
+	for _, c := range []struct {
+		name string
+		edit func(*CoverageEntry, int)
+		max  int
+	}{
+		{"surface", func(e *CoverageEntry, n int) { e.Surface = strings.Repeat("s", n) }, 200},
+		{"risk_area", func(e *CoverageEntry, n int) { e.RiskArea = strings.Repeat("r", n) }, 64},
+		{"evidence", func(e *CoverageEntry, n int) { e.Evidence = strings.Repeat("é", n) }, 500},
+		{"reason", func(e *CoverageEntry, n int) { e.Reason = strings.Repeat("x", n) }, 500},
+	} {
+		at, over := ok, ok
+		c.edit(&at, c.max)
+		c.edit(&over, c.max+1)
+		if _, err := normalizeCoverageEntry(at); err != nil {
+			t.Errorf("%s at the limit refused: %v", c.name, err)
+		}
+		want := c.name + " too long (max " + strconv.Itoa(c.max) + ")"
+		if _, err := normalizeCoverageEntry(over); err == nil || err.Error() != want {
+			t.Errorf("%s over the limit: err=%v, want %q", c.name, err, want)
+		}
+	}
+	if _, err := normalizeCoverageEntry(CoverageEntry{Surface: "\n\t", RiskArea: "xss", Outcome: OutcomeReported}); err == nil {
+		t.Fatal("blank surface accepted")
 	}
 }

@@ -878,7 +878,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			if active, err := t.Store.HasActiveIntent(); err == nil && !active {
 				// Frontier drained and no running intents → settle. Use the Guarded variant for
 				// the CAS, to avoid stepping on concurrent pause/delete/timeout-settlement state transitions.
-				if won, err := e.m.SetTaskStatusGuarded(t.ID, "done"); err != nil {
+				if won, err := e.m.SetTaskStatusGuarded(t.ID, "done", ""); err != nil {
 					log.Printf("[goalless] task %s failed to settle into done: %v", t.ID, err)
 				} else if won {
 					e.emitActivity(t, db.Activity{Worker: "system", Kind: "text",
