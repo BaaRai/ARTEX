@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -235,7 +236,9 @@ func (e *Engine) settleTask(ctx context.Context, t *Task, budget bool) {
 	}
 	if budget {
 		e.emitActivity(t, db.Activity{Worker: "system", Kind: "text",
-			Summary: "Task run budget exhausted: forced wrap-up done, task stopped (final state " + status + ")"})
+			Summary: "Task run budget exhausted: forced wrap-up done, task stopped (final state " + status + ")",
+			// read back by the coverage ledger's completeness (db.CoverageLedger)
+			Metadata: json.RawMessage(`{"end_reason":"` + db.EndReasonBudget + `"}`)})
 	}
 	won, err := e.m.SetTaskStatusGuarded(t.ID, status)
 	switch {

@@ -503,6 +503,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// Task budget (off by default, see budget.go): the remaining-budget line, and on
 	// the forced wrap-up round the budget wrap-up instruction. Empty without a budget.
 	situational += plannerBudgetBlock(ctx)
+	// Coverage ledger (coverage-only): compact line each round; full gap list on a wrap-up round.
+	budgetRound, _ := ctx.Value(budgetRoundKey{}).(BudgetRound)
+	situational += tsx.coverageLedgerBlock(tc.Final || budgetRound.WrapUp)
 	// This task's work dir <workDir>/tasks/<taskID>; create it first.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})

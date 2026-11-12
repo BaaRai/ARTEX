@@ -668,6 +668,8 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// avoid reporting the same finding twice.
 		t.listFindings(),
 		t.addFinding(), t.recordFact(),
+		// coverage ledger (coverage-only: dropped when coverage_enabled=false).
+		t.recordCoverage(),
 		// asset management (handlers guard nil store internally).
 		// add_company_scope is not given to workers: defining a company's asset scope is
 		// the duty of planning/main-control/Auto; a worker only executes exploration.

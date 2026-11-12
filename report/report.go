@@ -19,6 +19,7 @@ type Input struct {
 	GeneratedAt time.Time
 	AssetCounts map[string]int
 	Findings    []*db.Node
+	Coverage    *db.CoverageLedger // nil when the task's coverage feature is off
 }
 
 type findingView struct {
@@ -86,6 +87,18 @@ func Markdown(in Input) string {
 				fmt.Fprintf(&b, "**PoC / Evidence:**\n\n```\n%s\n```\n\n", f.PoC)
 			}
 		}
+	}
+
+	if c := in.Coverage; c != nil {
+		fmt.Fprintf(&b, "## Coverage gaps\n\n")
+		if c.Completeness != nil {
+			fmt.Fprintf(&b, "- **Completeness**: %s. %s\n", c.Completeness.State, c.Completeness.Caveat)
+		}
+		fmt.Fprintf(&b, "- Ledger entries: %d, open gaps: %d\n", len(c.Entries), len(c.Gaps))
+		for _, g := range c.Gaps {
+			fmt.Fprintf(&b, "- %s\n", g)
+		}
+		b.WriteString("\n")
 	}
 
 	return b.String()

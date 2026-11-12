@@ -1568,3 +1568,35 @@ CREATE TABLE IF NOT EXISTS rsi_lesson_usage (
     shown_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (lesson_id, task_id, mode)
 );
+
+-- Coverage ledger (agent_reported layer, see db/coverage_ledger.go): what a worker
+-- examined, ruled out or left open, per (task, surface, risk_area). One current row
+-- per key; every write is also appended to coverage_ledger_history. A risk class with
+-- no row is unexamined, never clean. Rows exist only for tasks with coverage_enabled.
+CREATE TABLE IF NOT EXISTS coverage_ledger (
+    id          BIGSERIAL PRIMARY KEY,
+    task_id     BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    surface     TEXT NOT NULL,
+    risk_area   TEXT NOT NULL,  -- stored lower-case, matched against goal vulnclass
+    outcome     TEXT NOT NULL
+                CHECK (outcome IN ('reported','no_issue_found','ruled_out','not_applicable','needs_follow_up')),
+    evidence    TEXT NOT NULL DEFAULT '',
+    reason      TEXT NOT NULL DEFAULT '',
+    worker      TEXT NOT NULL DEFAULT '',
+    intent_id   BIGINT,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (task_id, surface, risk_area)
+);
+CREATE TABLE IF NOT EXISTS coverage_ledger_history (
+    id          BIGSERIAL PRIMARY KEY,
+    task_id     BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    surface     TEXT NOT NULL,
+    risk_area   TEXT NOT NULL,
+    outcome     TEXT NOT NULL,
+    evidence    TEXT NOT NULL DEFAULT '',
+    reason      TEXT NOT NULL DEFAULT '',
+    worker      TEXT NOT NULL DEFAULT '',
+    intent_id   BIGINT,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_coverage_ledger_history_task ON coverage_ledger_history(task_id, id);
