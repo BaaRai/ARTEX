@@ -571,9 +571,45 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedFindingWorkflowTools()
 	s.seedFindingVerificationSchema() // S1: poe_level / evidence_quotes on update_finding_report, added once per DB
 	s.seedFindingEvidenceSchema()     // optional counterevidence / confidence_rationale on report_finding, added once per DB
+	s.seedFactSourceSchema()          // source enum on record_fact, added once per DB
 	// Note: pentest's default tool bindings need no migration — BuiltinToolSeeds already seeds
 	// list_assets/insert_assets/report_finding/list_findings/list_companies together with
 	// pentest at fresh initialization (no old DBs exist in this project, so no migration).
+}
+
+// seedFactSourceSchema adds the source property (closed enum) to the record_fact
+// schema of existing databases (SeedTool is first-insert only, and ToolResolve
+// serves the stored schema, so without this the model would never see the enum).
+// Idempotent: the property is added only when the stored schema lacks it, and user
+// edits are preserved.
+func (s *Server) seedFactSourceSchema() {
+	for _, seed := range agent.BuiltinToolSeeds() {
+		if seed.Key != "record_fact" {
+			continue
+		}
+		raw, err := json.Marshal(seed.Schema)
+		if err != nil {
+			log.Printf("[facts] record_fact schema: %v", err)
+			return
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return
+		}
+		var properties map[string]json.RawMessage
+		if err := json.Unmarshal(obj["properties"], &properties); err != nil {
+			return
+		}
+		if len(properties["source"]) == 0 {
+			return
+		}
+		_, err = s.m.pg.Exec(`UPDATE tools SET schema=jsonb_set(schema,ARRAY['properties','source'],$1::jsonb,true),updated_at=now()
+WHERE key='record_fact' AND system AND NOT(COALESCE(schema->'properties','{}'::jsonb) ? 'source')`, string(properties["source"]))
+		if err != nil {
+			log.Printf("[facts] upgrade record_fact.source: %v", err)
+		}
+		return
+	}
 }
 
 // refreshBuiltinToolSchemas propagates code schema/description changes on the

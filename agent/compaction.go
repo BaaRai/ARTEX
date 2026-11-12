@@ -454,8 +454,22 @@ func nodeConfidence(n *db.Node) string {
 	return ""
 }
 
+// nodeSource returns a fact's declared source ("" when it has none).
+func nodeSource(n *db.Node) string {
+	if n == nil {
+		return ""
+	}
+	var p map[string]any
+	if json.Unmarshal(n.Payload, &p) == nil {
+		if s, ok := p["source"].(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
 // buildCompressionInput renders the connected sub-graph for the §4 prompt:
-// member nodes (summary + id + kind + state + confidence), the internal blood
+// member nodes (summary + id + kind + state + confidence + source + origin), the internal blood
 // edges among members, and — for a §3.1 shared-parent group — the anchor parents
 // as context ("common parent #p"), which are NOT members.
 func buildCompressionInput(g *coldGraph, b block, nodeByID map[int64]*db.Node) string {
@@ -476,8 +490,20 @@ func buildCompressionInput(g *coldGraph, b block, nodeByID map[int64]*db.Node) s
 			state = n.State
 		}
 		line := fmt.Sprintf("- #%d [%s/%s] %s", m, kind, state, nodeSummary(n))
+		// provenance (#124, F4): source is the fact's declared source, origin the
+		// writer recorded by the server.
+		var attrs []string
 		if conf := nodeConfidence(n); conf != "" {
-			line += fmt.Sprintf(" (confidence=%s)", conf)
+			attrs = append(attrs, "confidence="+conf)
+		}
+		if src := nodeSource(n); src != "" {
+			attrs = append(attrs, "source="+src)
+		}
+		if n != nil && n.Origin != "" {
+			attrs = append(attrs, "origin="+n.Origin)
+		}
+		if len(attrs) > 0 {
+			line += " (" + strings.Join(attrs, ", ") + ")"
 		}
 		sb.WriteString(line)
 		sb.WriteByte('\n')
