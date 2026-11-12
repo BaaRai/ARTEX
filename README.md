@@ -183,6 +183,8 @@ Daily cron example (03:20, operator crontab):
 
 > Upgrading only swaps the program and never touches data: the Postgres volume `pgdata`, `./data` (SQLite, task files, etc.), `./keys` (jwt.key), and `./skills` are all preserved. **No manual database migration is needed**: `artex` idempotently re-runs `schema.sql` on every start (with `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`), i.e. "restart equals migrate". It is still recommended to back up `./data` and the database before upgrading.
 
+**Update banner (opt-in, off by default)**: start ARTEX with `ARTEX_UPDATE_CHECK=1` to have the backend ask the public GitHub releases API for the latest ARTEX tag, at most once per 24 hours (cached in memory; a failed check is not retried within that window). When the release is newer than the running version, the web UI shows a small dismissible strip linking to the Releases page. The request sends only the `User-Agent: artex-update-check` header. Unset, ARTEX makes no update request and shows no banner.
+
 ### Upgrading from a clone made before 2026-10-23
 
 The repository history was rewritten that day to drop a personal email address from the commit metadata. A clone made before then cannot fast-forward, and `./update.sh` now stops instead of silently rebuilding stale code. Recover once, then upgrade normally:
