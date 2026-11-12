@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/permission"
@@ -457,9 +458,13 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	client := &http.Client{Timeout: timeoutOr(spec.TimeoutMs, 30000)}
 	// Every redirect hop goes through the target gate, as the rendered URL did.
 	client.CheckRedirect = intercept.RedirectCheck(key)
+	// The shared egress governor paces every request and redirect hop per host
+	// under the noise profile (off by default: the base transport itself).
+	var base http.RoundTripper = http.DefaultTransport
 	if tr := s.httpToolTransport(ctx, key, spec); tr != nil {
-		client.Transport = tr
+		base = tr
 	}
+	client.Transport = egress.Shared().Transport(base)
 	resp, err := client.Do(req)
 	if err != nil {
 		return actool.Errorf("request failed: " + err.Error()), nil

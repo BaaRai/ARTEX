@@ -40,6 +40,9 @@ services:
       # disables it. Cost: about 154 bytes per tool result plus one system note.
       ARTEX_UNTRUSTED_BOUNDARY: ${ARTEX_UNTRUSTED_BOUNDARY:-}
       ARTEX_UPDATE_CHECK: ${ARTEX_UPDATE_CHECK:-}
+      # Noise profile for target requests: off (default) | quiet | balanced | aggressive.
+      ARTEX_NOISE_PROFILE: ${ARTEX_NOISE_PROFILE:-}
+      ARTEX_TARGET_USER_AGENT: ${ARTEX_TARGET_USER_AGENT:-}
     ports:
       - "${ARTEX_BIND_ADDR:-127.0.0.1}:8787:8787"
       - "127.0.0.1:8788:8788"
