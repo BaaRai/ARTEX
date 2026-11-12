@@ -68,6 +68,32 @@ func TestCompleteForwardsAtomicResponse(t *testing.T) {
 	}
 }
 
+// The usage sink sees each metered call once, with the usage the llm_usage row gets.
+func TestUsageSinkSeesMeteredCalls(t *testing.T) {
+	var got []llm.Usage
+	ctx := WithUsageSink(context.Background(), func(u llm.Usage) { got = append(got, u) })
+	recorder := Wrap(meteredStreamProvider{}, nil, "model", "profile", "", "", func() bool { return false })
+	for _, err := range recorder.Stream(ctx, llm.CompletionRequest{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, _, err := recorder.Complete(ctx, llm.CompletionRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	want := []llm.Usage{{InputTokens: 23, OutputTokens: 5}, {InputTokens: 7, OutputTokens: 3}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("sink saw %+v, want %+v", got, want)
+	}
+	// A call that gets no llm_usage row (no model, zero usage) is not seen either.
+	got = nil
+	empty := Wrap(completeProvider{}, nil, "", "", "", "", nil)
+	empty.recordUsage(ctx, "", 0, "", llm.Usage{}, 0, "ok")
+	if len(got) != 0 {
+		t.Fatalf("sink saw an unmetered call: %+v", got)
+	}
+}
+
 type meteredStreamProvider struct{ completeProvider }
 
 func (meteredStreamProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
