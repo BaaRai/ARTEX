@@ -66,7 +66,7 @@ func (s *Server) toolAskOperator() actool.CoreTool {
 				return actool.Errorf("Error: " + err.Error()), nil
 			}
 			text := "OPERATOR INPUT REQUESTED: " + q + " (this intent is pausing; reply here to resume it with your answer)"
-			act := askOperatorActivity(text, att, targetDerivedHosts(q, commandTargets(t.Goal)))
+			act := askOperatorActivity(text, att, targetDerivedHosts(q, goalTargets(t.Goal)))
 			node := ri.IntentID
 			act.NodeID = &node
 			s.engine.emitActivity(t, act)
@@ -85,6 +85,38 @@ func (s *Server) toolAskOperator() actool.CoreTool {
 func commandTargets(s string) []intercept.Target {
 	in, _ := json.Marshal(map[string]string{"command": s})
 	return intercept.ExtractTargets("Bash", in)
+}
+
+// goalTargets returns the goal targets a question is compared against: the
+// commandTargets of the goal plus the bare host names the goal gate accepts
+// (goalDomainRE), which commandTargets does not read. A goalDomainRE match
+// covers two labels only (app.example.com matches as app.example), so each match
+// is widened to its whole dotted name; port and path are left out and the name
+// is lowercased.
+func goalTargets(goal string) []intercept.Target {
+	out := commandTargets(goal)
+	end := 0
+	for _, m := range goalDomainRE.FindAllStringIndex(goal, -1) {
+		if m[0] < end {
+			continue // inside a name already taken
+		}
+		start := m[0]
+		for start > 0 && isHostByte(goal[start-1]) {
+			start--
+		}
+		end = m[0]
+		for end < len(goal) && isHostByte(goal[end]) {
+			end++
+		}
+		if h := strings.ToLower(strings.Trim(goal[start:end], ".-")); h != "" {
+			out = append(out, intercept.Target{Kind: intercept.TargetDomain, Host: h})
+		}
+	}
+	return out
+}
+
+func isHostByte(c byte) bool {
+	return c == '.' || c == '-' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 // targetDerivedHosts returns the hosts an ask_operator question names that are

