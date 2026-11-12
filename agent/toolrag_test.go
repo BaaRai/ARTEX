@@ -141,3 +141,23 @@ func TestToolRAGDeterministic(t *testing.T) {
 		t.Fatalf("ties not ordered by name: %v", n)
 	}
 }
+
+// Pins the keep set beyond the core list: harness tools, Skill and deferred names
+// are never hidden, even when the query matches something else.
+func TestToolRAGKeepsHarnessSkillAndDeferred(t *testing.T) {
+	in := append(ragCatalog(15), actool.DefaultTools()...)
+	in = append(in, ragTool("Skill", "Load a skill"), ragTool("mcp__srv__crawl", "Crawl pages"))
+	out, projected, err := projectTools(ragQuery, in, toolRAGKeep([]string{"mcp__srv__crawl"}), 1, bm25Score)
+	if err != nil || !projected || len(in) <= 20 {
+		t.Fatalf("projected=%v err=%v n=%d", projected, err, len(in))
+	}
+	n := ragNames(out)
+	for _, want := range append(ragNames(actool.DefaultTools()), "Skill", "mcp__srv__crawl", "sqli_probe") {
+		if !slices.Contains(n, want) {
+			t.Fatalf("%s hidden: %v", want, n)
+		}
+	}
+	if slices.Contains(n, "http_request") {
+		t.Fatalf("k=1 exceeded: %v", n)
+	}
+}
