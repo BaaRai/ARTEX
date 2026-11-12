@@ -672,6 +672,9 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// add_company_scope is not given to workers: defining a company's asset scope is
 		// the duty of planning/main-control/Auto; a worker only executes exploration.
 		t.insertAssets(), t.listAssets(),
+		// bbot output by path: in-scope assets via insert_assets, the rest as
+		// third_party_intel facts (never auto-scoped).
+		t.ingestBbot(),
 		// Task credentials (#3): reuse user-declared test accounts, record
 		// self-registered ones so they are not forgotten.
 		t.saveTaskCredential(), t.listTaskCredentials(),
