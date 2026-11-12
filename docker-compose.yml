@@ -36,6 +36,8 @@ services:
       ARTEX_LLM_PROXY: ${ARTEX_LLM_PROXY:-}
       ARTEX_JWT_KEY_DIR: /app/keys
       ARTEX_TRUSTED_PROXIES: ${ARTEX_TRUSTED_PROXIES:-}
+      # Untrusted-output boundary: on by default (empty = on); ARTEX_UNTRUSTED_BOUNDARY=0 in .env
+      # disables it. Cost: about 154 bytes per tool result plus one system note.
       ARTEX_UNTRUSTED_BOUNDARY: ${ARTEX_UNTRUSTED_BOUNDARY:-}
       ARTEX_UPDATE_CHECK: ${ARTEX_UPDATE_CHECK:-}
     ports:
