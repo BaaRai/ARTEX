@@ -156,22 +156,24 @@ func TestAddHintRecordsOrigin(t *testing.T) {
 }
 
 // renderTriggers names the writer of a hint from its origin; only the main agent
-// is "the human" (#124, F6). The hint case never reads the store.
+// is "the human" (#124, F6). The hint case never reads the store. Since F3 a hint
+// not written by the operator is framed as data.
 func TestRenderTriggersHintOrigin(t *testing.T) {
-	ts := &db.ExplorationStore{}
+	env := newDataEnvelope()
+	framed := "\n" + env.wrap("hints", "h1") + "\n"
 	for origin, want := range map[string]string{
-		"human":        "- The human (via the main agent) added a strategic hint: h1",
-		"orchestrator": "- A cross-task orchestration added a strategic hint: h1",
-		"worker-3":     "- An agent (worker-3) added a strategic hint: h1",
-		"":             "- A source that was not recorded added a strategic hint: h1",
+		"human":        "- [operator] The human (via the main agent) added a strategic hint: h1",
+		"orchestrator": "- A cross-task orchestration added a strategic hint: " + framed,
+		"worker-3":     "- An agent (worker-3) added a strategic hint: " + framed,
+		"":             "- A source that was not recorded added a strategic hint: " + framed,
 	} {
-		got := renderTriggers(ts, []TriggerEvent{{Kind: "hint", Hints: []string{"h1"}, HintOrigin: origin}})
+		got := renderTriggers([]TriggerEvent{{Kind: "hint", Hints: []string{"h1"}, HintOrigin: origin}}, env, triggerLookup{})
 		if !strings.Contains(got, want) || strings.Contains(got, "The human (main agent)") {
 			t.Errorf("origin %q: got %q, want %q", origin, got, want)
 		}
 	}
-	got := renderTriggers(ts, []TriggerEvent{{Kind: "hint", Hints: []string{"h1", "h2"}, HintOrigin: "orchestrator"}})
-	if !strings.Contains(got, "- A cross-task orchestration added 2 strategic hints: h1; h2") {
+	got := renderTriggers([]TriggerEvent{{Kind: "hint", Hints: []string{"h1", "h2"}, HintOrigin: "orchestrator"}}, env, triggerLookup{})
+	if !strings.Contains(got, "- A cross-task orchestration added 2 strategic hints: \n"+env.wrap("hints", "h1; h2")) {
 		t.Errorf("batch: got %q", got)
 	}
 }
