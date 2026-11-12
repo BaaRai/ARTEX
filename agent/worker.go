@@ -415,7 +415,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// are kept as usual.
 	base = append(base, defaultToolsExcept("MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
-	tools, def, cleanup := AugmentTools(ctx, "worker", base)
+	tools, def, cleanup := AugmentTools(WithToolQuery(ctx, nodeSummary(intent)), "worker", base)
 	defer cleanup()
 
 	// The intent is the worker's [sole duty, an invariant across the whole run] → it
