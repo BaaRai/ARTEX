@@ -754,12 +754,13 @@ WHERE t.active_llm_profile_id IS NULL
   AND t.llm_profile_id IS NOT NULL
   AND EXISTS (SELECT 1 FROM task_llm_profiles x WHERE x.task_id=t.id AND x.profile_id=t.llm_profile_id);
 
--- Task test scope (the asset-coverage denominator + authorization boundary).
+-- Task test scope (the asset-coverage denominator; coverage scope, not enforced).
 --   Auto-filled (source='auto'): insertAssets' top level adds a conservative scope per asset type explicitly
 --     inserted by the worker (root_domain→root_domain, subdomain/service/endpoint→subdomain(host), ip→ip);
 --     side-effect-derived assets do not enter the scope (the hook sits at the handler top level; derivation is internal to the db layer).
 --   Agent-filled (source='agent'): add_task_scope adds company/root_domain/subdomain/ip.
 -- Coverage = among assets matching active rows (denominator), the share anchored by fact nodes (numerator).
+-- An auto row is active only under a declared (non-auto) root of the same task (declaredScopeFilter in task_scope.go).
 CREATE TABLE IF NOT EXISTS task_scope (
     id          BIGSERIAL PRIMARY KEY,
     task_id     BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,

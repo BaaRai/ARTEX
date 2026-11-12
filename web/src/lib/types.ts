@@ -350,7 +350,7 @@ export interface WorkspaceFile {
   content?: string;
 }
 
-// One row of a task's test scope (coverage denominator + authorization boundary).
+// One row of a task's test scope (coverage denominator; coverage scope, not enforced).
 export interface TaskScopeRow {
   id: number;
   task_id: number;

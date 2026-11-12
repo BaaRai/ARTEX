@@ -805,13 +805,13 @@ export function OverviewTab({ taskId }: { taskId: string }) {
           )}
         </CardContent>
       </Card>
-      {/* Test scope: coverage denominator + authorization boundary; can be edited manually. */}
+      {/* Test scope: coverage denominator (coverage scope, not enforced); can be edited manually. */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <ShieldCheckIcon className="size-4 text-emerald-500" /> Test scope
             <span className="text-muted-foreground text-xs font-normal">
-              (coverage denominator + authorization boundary, {scope.length} in total)
+              (coverage scope, not enforced, {scope.length} in total)
             </span>
           </CardTitle>
         </CardHeader>
