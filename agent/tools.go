@@ -466,7 +466,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	for _, h := range hints {
 		var p map[string]any
 		_ = json.Unmarshal(h.Payload, &p)
-		hint := map[string]any{"id": h.ID, "state": h.State, "text": p["text"]}
+		// origin lets the user-message renderers keep the operator's own hints
+		// outside the data envelope (#124, F3).
+		hint := map[string]any{"id": h.ID, "state": h.State, "text": p["text"], "origin": h.Origin}
 		if findingTrafficBindingEnabled() && p["traffic_refs"] != nil {
 			hint["traffic_refs"] = p["traffic_refs"]
 		}
@@ -589,7 +591,7 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		if hidden(n.ID) {
 			continue // folded into a digest and still cold — see cold_digests
 		}
-		m := compactNode(n)
+		m := compactFact(n) // summary capped at factSummaryMax (#124, F3)
 		if from := factFrom[n.ID]; from > 0 {
 			m["from_intent"] = from // which intent produced this fact
 		}
@@ -1110,13 +1112,15 @@ func (t *ToolSet) listFacts() actool.CoreTool {
 		})
 }
 
-// factSummaryMax caps a fact summary in list_facts output. Facts carry one-line
-// conclusions, but nothing enforces brevity; a runaway summary must not bloat a
-// whole page. Full text stays available via node_detail(id).
+// factSummaryMax caps a fact summary in list_facts output and in the overview's
+// recent_facts (#124, F3). Facts carry one-line conclusions, but nothing enforces
+// brevity; a runaway summary must not bloat a whole page, nor carry a long
+// payload into every planner and worker message. Full text stays available via
+// node_detail(id).
 const factSummaryMax = 160
 
-// compactFact is compactNode with the summary rune-capped for list_facts, so a
-// page of facts stays bounded regardless of how long any single summary grew.
+// compactFact is compactNode with the summary rune-capped for list_facts and
+// recent_facts, so they stay bounded regardless of how long any summary grew.
 func compactFact(n *db.Node) map[string]any {
 	m := compactNode(n)
 	if s, ok := m["summary"].(string); ok && len([]rune(s)) > factSummaryMax {

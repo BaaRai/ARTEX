@@ -230,10 +230,12 @@ func hintAuthor(origin string) string {
 
 // renderTriggers spells out the change(s) that fired this round: for a finished
 // worker — which intent + its output conclusion; for a finding — which intent +
-// what was found. Empty for time/heartbeat wakes. Reads the store (best-effort;
-// a blank field never blocks the round).
-func renderTriggers(ts *db.ExplorationStore, evs []TriggerEvent) string {
-	if len(evs) == 0 || ts == nil {
+// what was found. Empty for time/heartbeat wakes. Reads the store through look
+// (best-effort; a blank field never blocks the round). Worker output, finding
+// details and hints not written by the operator go inside env's frame (#124,
+// F3); operator hints are labelled operator and stay outside it.
+func renderTriggers(evs []TriggerEvent, env dataEnvelope, look triggerLookup) string {
+	if len(evs) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -247,27 +249,33 @@ func renderTriggers(ts *db.ExplorationStore, evs []TriggerEvent) string {
 				b.WriteString(fmt.Sprintf("\n- The human (main agent) added %d goals: %s — all are new goals to be met; please add exploration directions for each goal that has no corresponding intent yet.", len(ev.Goals), strings.Join(ev.Goals, "; ")))
 			}
 		case "hint":
-			if len(ev.Hints) == 1 {
-				b.WriteString(fmt.Sprintf("\n- %s added a strategic hint: %s — already attached to the exploration graph; please adjust/add exploration directions accordingly (if no corresponding intent exists yet).", hintAuthor(ev.HintOrigin), ev.Hints[0]))
+			label, text := "", strings.Join(ev.Hints, "; ")
+			if ev.HintOrigin == operatorHintOrigin {
+				label = "[operator] "
 			} else {
-				b.WriteString(fmt.Sprintf("\n- %s added %d strategic hints: %s — all are attached to the exploration graph; please adjust/add exploration directions accordingly, one by one.", hintAuthor(ev.HintOrigin), len(ev.Hints), strings.Join(ev.Hints, "; ")))
+				text = "\n" + env.wrap("hints", text) + "\n"
+			}
+			if len(ev.Hints) == 1 {
+				b.WriteString(fmt.Sprintf("\n- %s%s added a strategic hint: %s — already attached to the exploration graph; please adjust/add exploration directions accordingly (if no corresponding intent exists yet).", label, hintAuthor(ev.HintOrigin), text))
+			} else {
+				b.WriteString(fmt.Sprintf("\n- %s%s added %d strategic hints: %s — all are attached to the exploration graph; please adjust/add exploration directions accordingly, one by one.", label, hintAuthor(ev.HintOrigin), len(ev.Hints), text))
 			}
 		case "goal_deleted":
 			b.WriteString(fmt.Sprintf("\n- The human deleted this goal: %s — the goal has been removed; re-judge the remaining goals/directions accordingly (no need to dispatch intents for it anymore).", ev.Detail))
 		case "goal_edited":
 			b.WriteString(fmt.Sprintf("\n- The human edited a goal, from \"%s\" to \"%s\" — please adjust exploration directions to the new goal (stop dispatching the old directions if they no longer apply).", ev.OldGoal, ev.NewGoal))
 		case "finding":
-			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) reported a finding: %s", ev.IntentID, intentSummary(ts, ev.IntentID), ev.Detail))
+			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) reported a finding:\n%s", ev.IntentID, look.intentSummary(ev.IntentID), env.wrap("finding", ev.Detail)))
 		case "cancelled":
 			// For the intent content prefer the Summary captured at deletion time (after a real delete the node no longer exists, so intentSummary can't find it).
 			sm := ev.Summary
 			if sm == "" {
-				sm = intentSummary(ts, ev.IntentID)
+				sm = look.intentSummary(ev.IntentID)
 			}
 			b.WriteString(fmt.Sprintf("\n- Intent #%d was deleted by the user; the intent was: %s; the deletion reason: %s. The intent has been deleted (no longer executed); please re-plan accordingly.", ev.IntentID, sm, ev.Detail))
 		default: // "done"
-			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) finished; output conclusion: %s", ev.IntentID, intentSummary(ts, ev.IntentID), workerOutput(ts, ev.IntentID)))
-			if fids := factIDsYielded(ts, ev.IntentID); fids != "" {
+			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) finished; output conclusion:\n%s", ev.IntentID, look.intentSummary(ev.IntentID), env.wrap("worker_output", look.workerOutput(ev.IntentID))))
+			if fids := look.factIDs(ev.IntentID); fids != "" {
 				b.WriteString(fmt.Sprintf("; new fact ids produced by this intent: %s ", fids))
 			}
 		}
@@ -343,15 +351,38 @@ func truncOutput(s string, n int) string {
 
 // renderGraphOverview folds the pre-computed graph_overview snapshot into the
 // wake-up prompt so the planner starts each round with the full situation in
-// hand — saving the round-trip it would otherwise spend calling the tool. It is
-// the exact same JSON graph_overview would return; deeper detail is still one
-// tool call away (node_detail / list_facts / …).
-func renderGraphOverview(data map[string]any) string {
-	b, err := json.Marshal(data)
-	if err != nil {
+// hand — saving the round-trip it would otherwise spend calling the tool. It
+// carries the same fields graph_overview would return, split by origin, with the
+// derived ones in env's frame (#124, F3); deeper detail is still one tool call
+// away (node_detail / list_facts / …).
+func renderGraphOverview(data map[string]any, env dataEnvelope) string {
+	sections := renderOverviewSections(data, env)
+	if sections == "" {
 		return "" // fall back to the model calling graph_overview itself
 	}
-	return "\n\n[This round's situation (graph_overview pre-fetched; identical to what calling that tool would return; call node_detail/list_facts etc. on demand for details)]:\n" + string(b)
+	return "\n\n[This round's situation (graph_overview pre-fetched, the same fields that tool returns, split by origin; call node_detail/list_facts etc. on demand for details)]:" + sections
+}
+
+// triggerLookup is what renderTriggers reads per intent: the store in Plan
+// (storeTriggerLookup), plain functions in tests.
+type triggerLookup struct {
+	intentSummary func(int64) string
+	workerOutput  func(int64) string
+	factIDs       func(int64) string
+}
+
+func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
+	return triggerLookup{
+		intentSummary: func(id int64) string { return intentSummary(ts, id) },
+		workerOutput:  func(id int64) string { return workerOutput(ts, id) },
+		factIDs:       func(id int64) string { return factIDsYielded(ts, id) },
+	}
+}
+
+// plannerSituational is the planner's situational block for one round: the
+// envelope intro, the triggers, then the overview, all framed with env.
+func plannerSituational(evs []TriggerEvent, look triggerLookup, data map[string]any, env dataEnvelope) string {
+	return env.intro() + renderTriggers(evs, env, look) + renderGraphOverview(data, env)
 }
 
 // plannerDefaultTmpl is the built-in EDITABLE body (section [A]) of the planner
@@ -447,7 +478,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// which is better for caching; the cost is that if a single round grows long, the
 	// situation may be compressed by compaction (planner rounds are usually short — low
 	// risk). situational is spliced into input below.
-	situational := renderTriggers(ts, triggers) + renderGraphOverview(tsx.graphOverviewData())
+	// One envelope (one fresh nonce) per user message (#124, F3).
+	situational := plannerSituational(triggers, storeTriggerLookup(ts), tsx.graphOverviewData(), newDataEnvelope())
 	// Task-level deadline / endgame mode (injected via ctx, see taskclock.go). On the
 	// endgame round, the task-timeout planner wrap-up prompt is spliced into this
 	// round's user input (along with situational) as [this round's operating

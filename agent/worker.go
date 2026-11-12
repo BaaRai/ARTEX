@@ -353,21 +353,23 @@ func renderIntentTask(intent *db.Node) string {
 // must NOT widen the worker's job — it still does only its assigned intent. Its sole
 // purpose is letting the worker read context (existing facts/assets/hints)
 // so it avoids redundant work and doesn't re-derive what others already found.
-func renderWorkerGraphOverview(data map[string]any) string {
+// The derived fields go inside env's frame (#124, F3); env is built once per
+// launch message.
+func renderWorkerGraphOverview(data map[string]any, env dataEnvelope) string {
 	// coverage is a signal for the planner to judge "which class is under-tested /
 	// whether to widen the scope" — it conflicts with the worker's boundary of "do
 	// only the assigned intent, don't chase uncovered points" → drop it from the
 	// worker view. data is a fresh map dedicated to this worker, so deleting the key
 	// doesn't affect the planner.
 	delete(data, "coverage")
-	b, err := json.Marshal(data)
-	if err != nil {
+	sections := renderOverviewSections(data, env)
+	if sections == "" {
 		return "" // fall back silently: the worker just won't have the global context
 	}
-	return "\n\n[Global exploration overview (read-only, helps you place your assigned intent in the bigger picture)]:\n" +
+	return env.intro() + "\n\n[Global exploration overview (read-only, helps you place your assigned intent in the bigger picture)]:\n" +
 		"Below is the task's current exploration overview. Two purposes: first, know what others have already found — don't repeat; second, let you relate this intent to the global picture while exploring it.\n" +
-		"**Digressing is good**: while exploring this intent, think deep and associate freely. The only boundary is — don't actually go execute other intents (that's other workers' business, scheduled by the planner). But whenever you associate a valuable clue (cross-asset linkage, the suspected entry of another exploit chain, a global-level suspicious point), **be sure to write it into a fact for the planner** — this is an important output of yours, not optional. Better to report one more for the planner to judge than to swallow it yourself.\n" +
-		string(b)
+		"**Digressing is good**: while exploring this intent, think deep and associate freely. The only boundary is — don't actually go execute other intents (that's other workers' business, scheduled by the planner). But whenever you associate a valuable clue (cross-asset linkage, the suspected entry of another exploit chain, a global-level suspicious point), **be sure to write it into a fact for the planner** — this is an important output of yours, not optional. Better to report one more for the planner to judge than to swallow it yourself." +
+		sections
 }
 
 // Execute runs one intent. hooks (the per-task Guard) gates every tool call; may
@@ -434,7 +436,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// The run-wide intent is not the current tool action. Do not forward it or
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
-	overview := renderWorkerGraphOverview(tsx.graphOverviewData())
+	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), newDataEnvelope())
 	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir) + w.lessonsBlock
 	if w.wantConstraints() {
 		sysBody += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
