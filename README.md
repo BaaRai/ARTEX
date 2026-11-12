@@ -264,6 +264,8 @@ Optional: `ARTEX_LLM_PROVIDER` (anthropic | openai | openai-responses | ollama) 
 
 **Untrusted-output boundary (on by default)**: tool results for the worker, planner, chat and main agent are framed between nonce-tagged markers so the model treats them as data, not instructions. Unset or empty, the boundary is on; set `ARTEX_UNTRUSTED_BOUNDARY=0` (or `false` / `off` / `no`) to disable it. Measured cost: about 154 bytes per tool result plus one system note.
 
+**Noise profile (off by default)**: `ARTEX_NOISE_PROFILE` paces the requests ARTEX itself sends to targets (WebFetch, http custom tools, the enrich probe). Unset or `off`, nothing changes: no limit, no cache. Set `quiet` (2 req/s per host, burst 4, 1 in flight), `balanced` (5 req/s, burst 10, 2 in flight) or `aggressive` (20 req/s, burst 40, 4 in flight), e.g. `ARTEX_NOISE_PROFILE=balanced` in `.env` or the environment. A profile also adds a small jitter, backs off on 429/503 (honouring `Retry-After`, bounded retries, GET/HEAD/OPTIONS only), and, for the http custom tools and the enrich probe, merges identical in-flight GETs of one task (per tool) and caches them briefly (60/30/10 s; never POST, PUT, PATCH or DELETE; WebFetch is paced only), and logs a per-host noise line each minute. `ARTEX_TARGET_USER_AGENT` sets a User-Agent on target requests that carry none, under a profile; empty keeps the current one. Tools launched through Bash are not paced yet.
+
 **Common flags**: `./start.sh -addr :8787 -proxy :8788` (`-addr` frontend+API, `-proxy` traffic recording proxy). The startup script passes arguments through to `artex` verbatim.
 
 ### Reverse proxy deployment (HTTPS / only exposing 443)

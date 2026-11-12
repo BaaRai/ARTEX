@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
 
 	"github.com/miekg/dns"
@@ -97,7 +98,8 @@ func New(as *db.AssetStore, proxy func() string, workers int) *Engine {
 // intercept.PinnedDialer, under the target scope of the request's context: a
 // probe without a scope is refused. When the scope's gate is on, the probe
 // connects to the target itself, without the proxy, so that the dialer decides
-// on the target and connects only to the addresses a pin covers.
+// on the target and connects only to the addresses a pin covers. Every request
+// goes through the shared egress governor (the noise profile; off by default).
 func buildClient(proxy func() string) *http.Client {
 	tr := &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
@@ -118,7 +120,7 @@ func buildClient(proxy func() string) *http.Client {
 		}
 	}
 	return &http.Client{
-		Transport: tr,
+		Transport: egress.Shared().Transport("enrich", tr),
 		Timeout:   httpTimeout,
 		// cap redirects; keep them within scope by re-checking at probe time
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -245,7 +247,6 @@ func (e *Engine) doHTTP(ctx context.Context, id int64, rawURL string) {
 	if err != nil {
 		return
 	}
-	req.Header.Set("User-Agent", "artex-enrich/1.0")
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return

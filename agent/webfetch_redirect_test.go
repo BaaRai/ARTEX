@@ -193,6 +193,7 @@ func TestWebFetchGatedScopeHasNoDirectRetry(t *testing.T) {
 // with agentcore's own tool: to the end of the chain, and the same error after
 // 10 hops. No database.
 func TestWebFetchRedirectGateOffUnchanged(t *testing.T) {
+	pinNoiseOff(t) // a gate-off regression test: independent of ARTEX_NOISE_PROFILE
 	loop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, r.URL.Path+"x", http.StatusFound)
 	}))
