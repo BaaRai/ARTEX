@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/intercept"
 	actool "github.com/Autumn-27/norma/tool"
 )
 
@@ -64,7 +66,7 @@ func (s *Server) toolAskOperator() actool.CoreTool {
 				return actool.Errorf("Error: " + err.Error()), nil
 			}
 			text := "OPERATOR INPUT REQUESTED: " + q + " (this intent is pausing; reply here to resume it with your answer)"
-			act := userActivityWithAttachments("worker", text, att)
+			act := askOperatorActivity(text, att, targetDerivedHosts(q, commandTargets(t.Goal)))
 			node := ri.IntentID
 			act.NodeID = &node
 			s.engine.emitActivity(t, act)
@@ -75,6 +77,51 @@ func (s *Server) toolAskOperator() actool.CoreTool {
 			}
 			return actool.Text("Question delivered to the operator. This intent is pausing now: finish your current step, record everything you already know as facts, and stop. The operator's reply will resume this run and arrive as your next input."), nil
 		})
+}
+
+// commandTargets reads the network targets of a free text with the gate's
+// command-string rules (intercept.ExtractTargets on a Bash command): URLs with a
+// scheme, IP literals, IP:port, host:port and CIDR. A bare host name is not read.
+func commandTargets(s string) []intercept.Target {
+	in, _ := json.Marshal(map[string]string{"command": s})
+	return intercept.ExtractTargets("Bash", in)
+}
+
+// targetDerivedHosts returns the hosts an ask_operator question names that are
+// not among the goal targets, without duplicates, in order of appearance (audit
+// F12). Such a host came from somewhere other than the operator's goal, most
+// likely from target content the worker read. Hosts are compared without the
+// port. An empty goal list makes every named host count.
+func targetDerivedHosts(question string, goal []intercept.Target) []string {
+	inGoal := map[string]bool{}
+	for _, g := range goal {
+		inGoal[g.Host] = true
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, t := range commandTargets(question) {
+		if !inGoal[t.Host] && !seen[t.Host] {
+			seen[t.Host] = true
+			out = append(out, t.Host)
+		}
+	}
+	return out
+}
+
+// askOperatorActivity builds the transcript turn of a request. derived lists the
+// hosts of targetDerivedHosts: when there are any, they are stored as a field of
+// the Detail payload for the operator UI, which tags the request with them. The
+// text is unchanged, and the request is delivered and paused the same way.
+func askOperatorActivity(text string, att []chatAttachment, derived []string) db.Activity {
+	a := userActivityWithAttachments("worker", text, att)
+	if len(derived) > 0 {
+		if att == nil {
+			att = []chatAttachment{} // the UI reads the JSON form only with an attachments array
+		}
+		blob, _ := json.Marshal(map[string]any{"text": text, "attachments": att, "target_derived_hosts": derived})
+		a.Detail = string(blob)
+	}
+	return a
 }
 
 // stageAskOperatorImage copies the referenced image into the task's uploads dir

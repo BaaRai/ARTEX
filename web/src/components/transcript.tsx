@@ -564,13 +564,15 @@ type MsgAttachment = { name: string; path: string; size: number };
 
 // parseUserBody splits a user turn's body into text + attachments. The backend stores
 // Detail as JSON {text, attachments} when files were uploaded, else plain text — so we
-// parse defensively and fall back to treating the whole body as text.
-function parseUserBody(body: string): { text: string; attachments: MsgAttachment[] } {
+// parse defensively and fall back to treating the whole body as text. An ask_operator
+// request that names hosts outside the task goal also carries target_derived_hosts (F12).
+function parseUserBody(body: string): { text: string; attachments: MsgAttachment[]; targetDerivedHosts?: string[] } {
   if (body.startsWith("{")) {
     try {
       const p = JSON.parse(body);
       if (p && Array.isArray(p.attachments)) {
-        return { text: typeof p.text === "string" ? p.text : "", attachments: p.attachments };
+        const hosts = Array.isArray(p.target_derived_hosts) ? (p.target_derived_hosts as string[]) : undefined;
+        return { text: typeof p.text === "string" ? p.text : "", attachments: p.attachments, targetDerivedHosts: hosts };
       }
     } catch {
       /* plain text that merely starts with "{" */
@@ -600,10 +602,18 @@ function UserRow({ step, intent, getDetail }: { step: Activity; intent?: boolean
       live = false;
     };
   }, [inView, step.seq, getDetail, step.summary, inline]);
-  const { text, attachments } = parseUserBody(full ?? step.summary);
+  const { text, attachments, targetDerivedHosts } = parseUserBody(full ?? step.summary);
   return (
     <div ref={ref} className="mt-3 mb-2 flex min-w-0 justify-end gap-2">
       <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1.5">
+        {targetDerivedHosts && targetDerivedHosts.length > 0 && (
+          <span
+            className="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-amber-700 text-xs [overflow-wrap:anywhere] dark:text-amber-400"
+            title="This request names hosts that are not in the task goal; they may come from target content."
+          >
+            Contains target-derived text: {targetDerivedHosts.join(", ")}
+          </span>
+        )}
         {attachments.length > 0 && (
           <div className="flex min-w-0 max-w-full flex-wrap justify-end gap-1.5">
             {attachments.map((a) => (
