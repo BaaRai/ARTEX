@@ -81,7 +81,7 @@ func TestOffIsStrictPassthrough(t *testing.T) {
 	var calls atomic.Int64
 	u, _ := url.Parse(s.URL)
 	for range 2 {
-		_, _ = Do(g, task("t1"), u, "x", func() (int, bool, error) { calls.Add(1); return 0, true, nil })
+		_, _ = Do(g, task("t1"), u, "x", func() (int, error) { calls.Add(1); return 0, nil })
 	}
 	if calls.Load() != 2 || len(g.report()) != 0 {
 		t.Fatalf("off: Do calls = %d, report %v; want 2 calls, no counter", calls.Load(), g.report())
@@ -176,18 +176,18 @@ func TestDedupeAndCache(t *testing.T) {
 	if r := g.report(); len(r) != 1 || !strings.Contains(r[0], "rpm=12 ") || !strings.Contains(r[0], "duplicates_avoided=5") {
 		t.Fatalf("noise counter: %v", r)
 	}
-	// WebFetch path: Do coalesces and caches what fn keeps.
+	// WebFetch path: Do coalesces concurrent calls and caches nothing.
 	var calls atomic.Int64
 	u, _ := url.Parse(s.URL)
-	fn := func(keep bool) func() (string, bool, error) {
-		return func() (string, bool, error) { calls.Add(1); time.Sleep(50 * time.Millisecond); return "r", keep, nil }
-	}
-	parallel(3, func(int) { _, _ = Do(g, task("t1"), u, "a", fn(true)) })
-	_, _ = Do(g, task("t1"), u, "a", fn(true))
-	_, _ = Do(g, task("t1"), u, "b", fn(false))
-	_, _ = Do(g, task("t1"), u, "b", fn(false))
-	if calls.Load() != 3 {
-		t.Fatalf("Do calls = %d, want 3", calls.Load())
+	fn := func() (string, error) { calls.Add(1); time.Sleep(50 * time.Millisecond); return "r", nil }
+	parallel(3, func(int) {
+		if v, _ := Do(g, task("t1"), u, "a", fn); v != "r" {
+			t.Errorf("value = %q", v)
+		}
+	})
+	_, _ = Do(g, task("t1"), u, "a", fn)
+	if calls.Load() != 2 {
+		t.Fatalf("Do calls = %d, want 2 (one coalesced flight, then no cache)", calls.Load())
 	}
 }
 

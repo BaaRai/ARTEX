@@ -28,14 +28,19 @@ func withWebFetch(ctx context.Context, tools []actool.CoreTool, proxy, caCert st
 	gated := scoped && scope.Enabled != nil && scope.Enabled()
 	webFetch := actool.NewWebFetch(actool.WebFetchConfig{Proxy: proxy, CACert: caCert, CheckRedirect: intercept.RedirectCheck("WebFetch"),
 		DialContext: intercept.PinnedDialer("WebFetch", scoped), DisableDirectRetry: gated})
-	return append(tools[:len(tools):len(tools)], governedFetch{webFetch, egress.Shared()})
+	return append(tools[:len(tools):len(tools)], governedFetch{webFetch, egressGovernor()})
 }
+
+// egressGovernor is the governor of WebFetch; a test may pin it.
+var egressGovernor = egress.Shared
 
 // governedFetch runs each WebFetch call as one send under the egress governor
 // (off by default; then the call runs unchanged), under a noise profile:
 // the rate, jitter and concurrency of the URL's host, and, within one task,
-// identical calls (WebFetch only sends GET) coalesced and cached. A failed call
-// is not cached. WebFetch ignores tc, so a shared result fits every caller.
+// identical concurrent calls (WebFetch only sends GET) coalesced. Results are
+// never cached: the key does not hold the tool's proxy or gate config, so each
+// later call runs the tool and its redirect and dial gate again. WebFetch
+// ignores tc, so a coalesced result fits every caller.
 // Norma owns the HTTP client, so redirect hops are not paced separately and a
 // 429/503 is not retried.
 type governedFetch struct {
@@ -54,9 +59,8 @@ func (f governedFetch) Call(ctx context.Context, input json.RawMessage, tc *acto
 	if err != nil || u.Host == "" {
 		return f.CoreTool.Call(ctx, input, tc) // the tool reports the bad URL
 	}
-	r, err := egress.Do(f.g, ctx, u, string(input), func() (actool.Result, bool, error) {
-		r, err := f.CoreTool.Call(ctx, input, tc)
-		return r, err == nil && !r.IsError, err
+	r, err := egress.Do(f.g, ctx, u, string(input), func() (actool.Result, error) {
+		return f.CoreTool.Call(ctx, input, tc)
 	})
 	r.Content = slices.Clone(r.Content) // each caller gets its own slice
 	return r, err

@@ -305,13 +305,13 @@ func taskKey(ctx context.Context) string {
 
 // Do runs fn as one send to u for a caller whose HTTP client is not ours
 // (WebFetch): the rate, jitter and concurrency of u's host and, when id is not
-// empty and ctx has a task, coalescing and caching under id within the task
-// (keep reports whether the value may be cached). fn hides the response, so a
-// 429/503 is not retried here. Off, fn just runs.
-func Do[T any](g *Governor, ctx context.Context, u *url.URL, id string, fn func() (val T, keep bool, err error)) (T, error) {
+// empty and ctx has a task, coalescing of concurrent calls with the same id
+// within the task. Nothing is cached: each later call runs fn, and with it the
+// caller's own checks. fn hides the response, so a 429/503 is not retried
+// here. Off, fn just runs.
+func Do[T any](g *Governor, ctx context.Context, u *url.URL, id string, fn func() (T, error)) (T, error) {
 	if g.off() {
-		v, _, err := fn()
-		return v, err
+		return fn()
 	}
 	host := HostKey(u)
 	run := func() (any, time.Duration, error) {
@@ -320,11 +320,8 @@ func Do[T any](g *Governor, ctx context.Context, u *url.URL, id string, fn func(
 			return nil, 0, err
 		}
 		defer release()
-		v, keep, err := fn()
-		if !keep {
-			return v, 0, err
-		}
-		return v, g.p.CacheTTL, err
+		v, err := fn()
+		return v, 0, err
 	}
 	var v any
 	var err error
