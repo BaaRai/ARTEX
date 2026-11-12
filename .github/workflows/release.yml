@@ -82,6 +82,7 @@ jobs:
     needs: binaries
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4 # CHANGELOG.md and the extractor script
       - uses: actions/download-artifact@v4
         with:
           pattern: pkg-*
@@ -90,13 +91,24 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: sha256sum *.zip > SHA256SUMS
+      - name: Release body from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          if bash scripts/extract-changelog-section.sh "$version" CHANGELOG.md > "$RUNNER_TEMP/release-body.md"; then
+            echo "Release body: CHANGELOG.md section [$version]"
+          else
+            echo "::warning::CHANGELOG.md has no section [$version]; using the generic release body"
+            echo "Release $TAG. See CHANGELOG.md for the list of changes in this release." > "$RUNNER_TEMP/release-body.md"
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.zip
             dist/SHA256SUMS
           generate_release_notes: false
-          body: "See CHANGELOG.md for the list of changes in this release."
+          body_path: ${{ runner.temp }}/release-body.md
 
   # ④ Multi-arch image → push to Docker Hub (reuses the Linux binaries built by the
   #    binaries job; the image only installs tools + ships the binary; arm64 only needs
