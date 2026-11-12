@@ -139,8 +139,8 @@ type Verdict struct {
 // unparseable. A reply cut off at MaxTokens has no closing fence and is left
 // alone on purpose — completing it would invent a verdict the model never gave.
 //
-// It exists because the fail action defaults to allow: without it a model that
-// merely wraps its JSON in markdown turns a DENY into a silent allow.
+// It exists because the fail action can be set to allow (freeform mode): without
+// it a model that merely wraps its JSON in markdown turns a DENY into an allow.
 func stripCodeFence(text string) string {
 	t := strings.TrimSpace(text)
 	if len(t) <= 6 || !strings.HasPrefix(t, "```") || !strings.HasSuffix(t, "```") {

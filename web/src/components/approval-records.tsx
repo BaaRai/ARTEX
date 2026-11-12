@@ -507,6 +507,12 @@ export function ApprovalDetail({
                 label={`${initialLabel}: ${actionLabels[audit.initial_action] ?? audit.initial_action}`}
                 text={audit.initial_reason.replace(/^\[model\]\s*/, "")}
               />
+              {audit.judge_answers?.length ? (
+                <CodeBlock
+                  label="Judge answers"
+                  text={audit.judge_answers.map((a) => `${a.id}: ${a.answer}${a.evidence ? ` - ${a.evidence}` : ""}`).join("\n")}
+                />
+              ) : null}
               <CodeBlock
                 label="Execution output"
                 text={audit.output ?? (audit.execution_status === "not_executed" ? "Tool not executed." : "No execution output yet")}

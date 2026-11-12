@@ -39,6 +39,7 @@ type InterceptAudit struct {
 	RuleName         string                  `json:"rule_name,omitempty"`
 	ConfigDigest     string                  `json:"config_digest,omitempty"`
 	ProfileID        int64                   `json:"profile_id,omitempty"`
+	JudgeAnswers     []JudgeAnswer           `json:"judge_answers,omitempty"` // closed-mode judge answers, in question order
 	ExecutionStatus  string                  `json:"execution_status"`
 	Output           string                  `json:"output,omitempty"`
 	OutputTruncated  bool                    `json:"output_truncated,omitempty"`
@@ -54,6 +55,14 @@ type InterceptAudit struct {
 	// the actor class (human).
 	Approver     string `json:"approver,omitempty"`
 	ApproverAddr string `json:"approver_addr,omitempty"`
+}
+
+// JudgeAnswer is the judge's closed answer to one code-owned question: Answer is
+// yes, no or unknown; Evidence is one line of at most 200 runes.
+type JudgeAnswer struct {
+	ID       string `json:"id"`
+	Answer   string `json:"answer"`
+	Evidence string `json:"evidence"`
 }
 
 // InterceptTarget is one asset target of a target approval request: what was

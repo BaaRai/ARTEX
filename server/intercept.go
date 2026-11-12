@@ -34,17 +34,9 @@ func (s *Server) chatGuard() *guard.Guard {
 // runs a one-shot JSON classification with an explanation for every verdict.
 func (s *Server) wireInterceptReviewer() {
 	s.m.interceptor.SetReviewer(func(ctx context.Context, profileID int64, prompt string, input intercept.ReviewInput) (intercept.Decision, error) {
-		if profileID == 0 {
-			if p, err := s.m.pg.ActiveProfile(); err == nil && p != nil {
-				profileID = p.ID
-			}
-		}
-		if profileID == 0 {
-			return intercept.Decision{}, fmt.Errorf("no usable judge model is configured")
-		}
-		prov, _, ok := s.providerForProfile(profileID)
-		if !ok {
-			return intercept.Decision{ProfileID: profileID}, fmt.Errorf("judge model profile %d is unavailable", profileID)
+		prov, profileID, err := s.judgeProvider(profileID)
+		if err != nil {
+			return intercept.Decision{ProfileID: profileID}, err
 		}
 		// Tag this call's usage as the "judge" lane so the config page can report
 		// how much the fallback approval has spent, separate from model profiles.
@@ -59,6 +51,37 @@ func (s *Server) wireInterceptReviewer() {
 		}
 		return intercept.Decision{Action: v.Action, Message: v.Reason, ProfileID: profileID}, nil
 	})
+	// Closed mode: one call answers every question; intercept parses and decides.
+	s.m.interceptor.SetCompleter(func(ctx context.Context, profileID int64, system, user string) (string, int64, error) {
+		prov, profileID, err := s.judgeProvider(profileID)
+		if err != nil {
+			return "", profileID, err
+		}
+		ctx = llmrec.WithWorker(ctx, judgeWorkerLane)
+		text, err := streamCollectText(ctx, prov, system, user, closedJudgeMaxTokens)
+		return text, profileID, err
+	})
+}
+
+// closedJudgeMaxTokens bounds the closed-question reply: eight short answers
+// with one evidence line of at most 200 characters each.
+const closedJudgeMaxTokens = 768
+
+// judgeProvider resolves the judge profile (0 → active/default) to a provider.
+func (s *Server) judgeProvider(profileID int64) (llm.Provider, int64, error) {
+	if profileID == 0 {
+		if p, err := s.m.pg.ActiveProfile(); err == nil && p != nil {
+			profileID = p.ID
+		}
+	}
+	if profileID == 0 {
+		return nil, 0, fmt.Errorf("no usable judge model is configured")
+	}
+	prov, _, ok := s.providerForProfile(profileID)
+	if !ok {
+		return nil, profileID, fmt.Errorf("judge model profile %d is unavailable", profileID)
+	}
+	return prov, profileID, nil
 }
 
 func reviewCompletion(ctx context.Context, prov llm.Provider, prompt string, input intercept.ReviewInput) (string, error) {
@@ -66,18 +89,18 @@ func reviewCompletion(ctx context.Context, prov llm.Provider, prompt string, inp
 	if err != nil {
 		return "", err
 	}
-	return streamCollectText(ctx, prov, prompt, string(user))
+	return streamCollectText(ctx, prov, prompt, string(user), 1024)
 }
 
 // streamCollectText runs a single non-streaming-style completion (thinking off,
 // low temperature, bounded output) and returns the concatenated text. The
 // budget includes the explanation and complete closing JSON delimiters.
-func streamCollectText(ctx context.Context, prov llm.Provider, system, user string) (string, error) {
+func streamCollectText(ctx context.Context, prov llm.Provider, system, user string, maxTokens int) (string, error) {
 	temp := 0.0
 	req := llm.CompletionRequest{
 		System:      []string{system},
 		Messages:    []llm.Message{llm.UserText(user)},
-		MaxTokens:   1024,
+		MaxTokens:   maxTokens,
 		Temperature: &temp,
 		Thinking:    "disabled",
 	}
@@ -575,6 +598,12 @@ func (s *Server) interceptSetJudgeConfig(w http.ResponseWriter, r *http.Request)
 	case "allow", "ask", "deny":
 	default:
 		writeErr(w, 400, "fail_action must be allow, ask or deny")
+		return
+	}
+	switch req.Mode {
+	case "", intercept.JudgeModeClosed, intercept.JudgeModeFreeform:
+	default:
+		writeErr(w, 400, "mode must be closed or freeform")
 		return
 	}
 	switch req.AskTimeoutAction {
