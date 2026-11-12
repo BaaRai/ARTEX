@@ -464,7 +464,7 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	if tr := s.httpToolTransport(ctx, key, spec); tr != nil {
 		base = tr
 	}
-	client.Transport = egress.Shared().Transport(base)
+	client.Transport = egress.Shared().Transport(key, base)
 	resp, err := client.Do(req)
 	if err != nil {
 		return actool.Errorf("request failed: " + err.Error()), nil

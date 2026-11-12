@@ -245,7 +245,8 @@ var errNotShared = errors.New("egress: response not shared")
 // share runs fn once for the concurrent callers of key and keeps its value for
 // the ttl fn returns. A caller that waited on a flight that failed for a reason
 // of the leader's own (its context, a response too large to share) runs fn
-// itself, uncached.
+// itself, uncached; fn paces its own send (transport.send goes through
+// acquire), so that request is paced like any other.
 func (g *Governor) share(ctx context.Context, host, key string, fn func() (any, time.Duration, error)) (any, error) {
 	g.mu.Lock()
 	f := g.flights[key]
@@ -304,51 +305,43 @@ func taskKey(ctx context.Context) string {
 }
 
 // Do runs fn as one send to u for a caller whose HTTP client is not ours
-// (WebFetch): the rate, jitter and concurrency of u's host and, when id is not
-// empty and ctx has a task, coalescing of concurrent calls with the same id
-// within the task. Nothing is cached: each later call runs fn, and with it the
-// caller's own checks. fn hides the response, so a 429/503 is not retried
-// here. Off, fn just runs.
-func Do[T any](g *Governor, ctx context.Context, u *url.URL, id string, fn func() (T, error)) (T, error) {
+// (WebFetch): only the rate, jitter and concurrency of u's host. Nothing is
+// coalesced or cached: each WebFetch call carries its own proxy and its own
+// redirect and dial gate, which a shared key would have to fingerprint
+// completely; running every call keeps every gate decision, at the cost of a
+// duplicate request now and then. fn hides the response, so a 429/503 is not
+// retried here. Off, fn just runs.
+func Do[T any](g *Governor, ctx context.Context, u *url.URL, fn func() (T, error)) (T, error) {
 	if g.off() {
 		return fn()
 	}
-	host := HostKey(u)
-	run := func() (any, time.Duration, error) {
-		release, err := g.acquire(ctx, host)
-		if err != nil {
-			return nil, 0, err
-		}
-		defer release()
-		v, err := fn()
-		return v, 0, err
+	release, err := g.acquire(ctx, HostKey(u))
+	if err != nil {
+		var zero T
+		return zero, err
 	}
-	var v any
-	var err error
-	if task := taskKey(ctx); task != "" && id != "" {
-		v, err = g.share(ctx, host, task+"\x00"+id, run)
-	} else {
-		v, _, err = run()
-	}
-	t, _ := v.(T)
-	return t, err
+	defer release()
+	return fn()
 }
 
 // Transport returns base (nil: http.DefaultTransport) governed by g; off, base
-// itself.
-func (g *Governor) Transport(base http.RoundTripper) http.RoundTripper {
+// itself. namespace names the client (a custom tool's key, "enrich"): it is
+// part of the cache key, so clients with other proxies, gates or pins never
+// share a response.
+func (g *Governor) Transport(namespace string, base http.RoundTripper) http.RoundTripper {
 	if base == nil {
 		base = http.DefaultTransport
 	}
 	if g.off() {
 		return base
 	}
-	return &transport{g, base}
+	return &transport{g, namespace, base}
 }
 
 type transport struct {
-	g    *Governor
-	base http.RoundTripper
+	g         *Governor
+	namespace string
+	base      http.RoundTripper
 }
 
 const maxSharedBody = 2 << 20 // a larger response is neither coalesced nor cached
@@ -366,7 +359,8 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var hdr bytes.Buffer
 	_ = req.Header.Write(&hdr)
 	var own *http.Response // the leader's response when too large to share
-	v, err := t.g.share(req.Context(), HostKey(req.URL), task+"\x00GET "+req.URL.String()+"\x00"+hdr.String(), func() (any, time.Duration, error) {
+	key := t.namespace + "\x00" + task + "\x00GET " + req.URL.String() + "\x00" + hdr.String()
+	v, err := t.g.share(req.Context(), HostKey(req.URL), key, func() (any, time.Duration, error) {
 		resp, err := t.send(req)
 		if err != nil {
 			return nil, 0, err
@@ -387,8 +381,11 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		return &stored{resp, body}, ttl, nil
 	})
-	if own != nil || err != nil {
-		return own, err
+	if own != nil {
+		return own, nil // too large to share: this caller's own response
+	}
+	if err != nil {
+		return nil, err
 	}
 	s := v.(*stored)
 	r := *s.resp

@@ -48,7 +48,7 @@ func newServer(t *testing.T, delay time.Duration, h func(n int64, w http.Respons
 
 func do(t *testing.T, g *Governor, ctx context.Context, method, u string) (int, string) {
 	req, _ := http.NewRequestWithContext(ctx, method, u, nil)
-	resp, err := (&http.Client{Transport: g.Transport(nil)}).Do(req)
+	resp, err := (&http.Client{Transport: g.Transport("test", nil)}).Do(req)
 	if err != nil {
 		t.Errorf("%s %s: %v", method, u, err)
 		return 0, ""
@@ -69,7 +69,7 @@ func parallel(n int, f func(i int)) {
 
 func TestOffIsStrictPassthrough(t *testing.T) {
 	g := New(Profile{Name: "off"})
-	if g.Transport(http.DefaultTransport) != http.DefaultTransport {
+	if g.Transport("test", http.DefaultTransport) != http.DefaultTransport {
 		t.Fatal("off: Transport must return the base transport itself")
 	}
 	s := newServer(t, 50*time.Millisecond, nil)
@@ -81,7 +81,7 @@ func TestOffIsStrictPassthrough(t *testing.T) {
 	var calls atomic.Int64
 	u, _ := url.Parse(s.URL)
 	for range 2 {
-		_, _ = Do(g, task("t1"), u, "x", func() (int, error) { calls.Add(1); return 0, nil })
+		_, _ = Do(g, task("t1"), u, func() (int, error) { calls.Add(1); return 0, nil })
 	}
 	if calls.Load() != 2 || len(g.report()) != 0 {
 		t.Fatalf("off: Do calls = %d, report %v; want 2 calls, no counter", calls.Load(), g.report())
@@ -176,18 +176,49 @@ func TestDedupeAndCache(t *testing.T) {
 	if r := g.report(); len(r) != 1 || !strings.Contains(r[0], "rpm=12 ") || !strings.Contains(r[0], "duplicates_avoided=5") {
 		t.Fatalf("noise counter: %v", r)
 	}
-	// WebFetch path: Do coalesces concurrent calls and caches nothing.
+	// WebFetch path: Do paces, and neither coalesces nor caches.
 	var calls atomic.Int64
 	u, _ := url.Parse(s.URL)
 	fn := func() (string, error) { calls.Add(1); time.Sleep(50 * time.Millisecond); return "r", nil }
 	parallel(3, func(int) {
-		if v, _ := Do(g, task("t1"), u, "a", fn); v != "r" {
+		if v, _ := Do(g, task("t1"), u, fn); v != "r" {
 			t.Errorf("value = %q", v)
 		}
 	})
-	_, _ = Do(g, task("t1"), u, "a", fn)
-	if calls.Load() != 2 {
-		t.Fatalf("Do calls = %d, want 2 (one coalesced flight, then no cache)", calls.Load())
+	_, _ = Do(g, task("t1"), u, fn)
+	if calls.Load() != 4 {
+		t.Fatalf("Do calls = %d, want 4", calls.Load())
+	}
+	// Two clients (namespaces) with the same task, URL and headers never share
+	// a response; the same namespace again is a cache hit.
+	for _, ns := range []string{"tool-a", "tool-b", "tool-a"} {
+		req, _ := http.NewRequestWithContext(task("t9"), "GET", s.URL+"/ns", nil)
+		if resp, err := (&http.Client{Transport: g.Transport(ns, nil)}).Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}
+	if s.hits.Load() != 14 {
+		t.Fatalf("namespaces: hits %d, want 14 (one per namespace, then a cache hit)", s.hits.Load())
+	}
+}
+
+// A response too large to share reaches its caller in full and frees its
+// slots: with one slot per host, three GETs in a row each complete.
+func TestLargeResponseNotSharedReleasesSlots(t *testing.T) {
+	p := open
+	p.MaxPerHost = 1
+	g := New(p)
+	big := strings.Repeat("x", 3<<20)
+	s := newServer(t, 0, func(_ int64, w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, big) })
+	for i := range 3 {
+		ctx, cancel := context.WithTimeout(task("t1"), 5*time.Second)
+		if _, body := do(t, g, ctx, "GET", s.URL); len(body) != len(big) {
+			t.Fatalf("GET %d: body %d bytes, want %d", i+1, len(body), len(big))
+		}
+		cancel()
+	}
+	if s.hits.Load() != 3 {
+		t.Fatalf("hits %d, want 3", s.hits.Load())
 	}
 }
 

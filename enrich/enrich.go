@@ -120,7 +120,7 @@ func buildClient(proxy func() string) *http.Client {
 		}
 	}
 	return &http.Client{
-		Transport: egress.Shared().Transport(tr),
+		Transport: egress.Shared().Transport("enrich", tr),
 		Timeout:   httpTimeout,
 		// cap redirects; keep them within scope by re-checking at probe time
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
