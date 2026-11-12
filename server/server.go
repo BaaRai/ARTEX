@@ -991,7 +991,12 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "service": "artex", "version": BuildVersion})
+	out := map[string]any{"ok": true, "service": "artex", "version": BuildVersion}
+	// Opt-in only (ARTEX_UPDATE_CHECK); off, this returns "" without any request.
+	if latest := updates.newerVersion(r.Context(), time.Now(), BuildVersion); latest != "" {
+		out["latest_version"] = latest
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
