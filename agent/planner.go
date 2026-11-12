@@ -500,6 +500,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if tc.Final {
 		situational += "\n\n[Task endgame wrap-up (special instruction for this round, overriding the normal planning flow above)]: " + resolveTaskTimeoutWrapup("planner")
 	}
+	// Task budget (off by default, see budget.go): the remaining-budget line, and on
+	// the forced wrap-up round the budget wrap-up instruction. Empty without a budget.
+	situational += plannerBudgetBlock(ctx)
 	// This task's work dir <workDir>/tasks/<taskID>; create it first.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})

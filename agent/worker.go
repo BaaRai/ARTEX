@@ -503,7 +503,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		// default (tools need no -x/-k).
 		BashEnv:    proxyEnv(w.proxyAddr, w.proxyCACert),
 		WorkingDir: runDir,
-		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
+		MaxTurns:   w.turnCap(ctx), // 0 = unlimited (configurable in agent management); clamped by the intent budget
 		// Wall-clock budget, judged at turn boundaries without interrupting mid-flight;
 		// 0 = unlimited. When a task-level deadline exists, clamp to min(own budget, time
 		// until the deadline) so this run naturally enters wrap-up when the task hits its

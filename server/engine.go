@@ -146,6 +146,7 @@ type Engine struct {
 	stamped      sync.Map // taskID -> bool, whether first_run_at has been stamped (once per process)
 	inflight     sync.Map // taskID -> *int64, count of in-flight planner.Plan + worker.Execute (for drain)
 	coordStarted sync.Map // taskID -> bool, whether the deadline coordinator has started (deduplicated across Run/reload)
+	budgets      sync.Map // taskID -> *agent.BudgetLedger, run budget meter (nil = no budget configured; see engine_budget.go)
 
 	// resolve returns a task's dedicated planner/worker (wired by the server as the
 	// authoritative task-router). nil,nil means this task is deliberately unavailable
@@ -289,6 +290,7 @@ func (e *Engine) StopTask(taskID string) {
 	e.stamped.Delete(taskID)
 	e.inflight.Delete(taskID)
 	e.coordStarted.Delete(taskID)
+	e.budgets.Delete(taskID)
 	e.deleteMu.Lock()
 	e.deleting.Delete(taskID)
 	e.deleteMu.Unlock()
@@ -532,6 +534,9 @@ type steerHooks struct {
 	limit int
 	// label looks like "worker-1 · #42"; used only for logging.
 	label string
+	// budget meters this intent's run (nil = no budget). Once exhausted, every tool
+	// but the write-back ones is refused with the wrap-up instruction.
+	budget *agent.IntentMeter
 }
 
 // Default number of reruns for idle turns (thinking only, neither body text nor tool
@@ -572,6 +577,9 @@ func (h steerHooks) PreToolUse(ctx context.Context, name string, input []byte) (
 	if msg, ok := h.drain(); ok {
 		return true, "[Planner real-time steering] " + msg +
 			"\n(This is the planner's immediate instruction for this intent; the tool call was not executed — adjust your next step accordingly. If it conflicts with your current plan, this takes precedence.)", nil
+	}
+	if h.budget != nil && agent.BudgetWrapupBlocks(name) && h.budget.Exhausted() {
+		return true, agent.WorkerBudgetWrapup, nil
 	}
 	if h.inner != nil {
 		return h.inner.PreToolUse(ctx, name, input)
@@ -879,6 +887,11 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			}
 			return // the goalless branch never enters planner.Plan
 		}
+		// Run budget (off by default): no worker affordable any more → the forced
+		// wrap-up (once) instead of a normal round.
+		if e.budgetStop(ctx, t) {
+			return
+		}
 		// quiet-mode (#79): an edge round is redundant while work is in flight
 		// and the open-goal set is unchanged since the last completed round —
 		// there is no new decision for the plan to make. Drain the triggers so
@@ -910,7 +923,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		// coalesces a burst; empty for time/heartbeat wakes).
 		triggers := t.drainTriggers()
 		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
-		pctx := e.plannerGateContext(ectx, t, intercept.DefaultTargetWaitBound)
+		pctx := e.budgetRoundCtx(e.plannerGateContext(ectx, t, intercept.DefaultTargetWaitBound), t, false)
 		e.BeginLLMCall(t.ID)
 		met, reason, err := planner.Plan(pctx, taskIDInt, e.m.assets, t.Store, t.Goal, triggers, t.TargetGuard.Hooks(), emit)
 		e.EndLLMCall(t.ID)
@@ -935,6 +948,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		// tell "nothing changed" apart from "the plan input changed".
 		if fp, err := t.Store.OpenGoalFingerprint(); err == nil {
 			e.goalFP.Store(t.ID, fp)
+		}
+		if e.budgetBlocksClaim(t.ID) {
+			t.Notify() // this round crossed the budget: settle on the next round, not at the next heartbeat
 		}
 		e.touch(t.ID)
 	}
@@ -1041,6 +1057,12 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			}
 			continue // task timeout settlement in progress: claim no new intents (running ones settle themselves; the coordinator waits for them to drain)
 		}
+		if e.budgetBlocksClaim(t.ID) {
+			if sleepCtx(ctx, 1000*time.Millisecond) {
+				return
+			}
+			continue // run budget below one worker's estimate: dispatch no new worker (the planner loop settles the task)
+		}
 		if isTerminalStatus(e.m.TaskStatus(t.ID)) {
 			if sleepCtx(ctx, 1000*time.Millisecond) {
 				return
@@ -1116,6 +1138,9 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	label := fmt.Sprintf("%s · #%d", name, iid)
 	workCtx = intercept.WithTaskContext(workCtx, t.ID, label, taskEmit)
 	workCtx = intercept.WithTargetScope(workCtx, t.targetScope(intercept.DefaultTargetWaitBound))
+	// Run budget (off by default): meter this run's calls; its effective budget is
+	// min(intent budget, task remaining above the wrap-up reserve).
+	workCtx, meter := e.budgetIntent(workCtx, t.ID)
 	// nudges deliberately sits outside the model_error rerun loop: the idle-turn rerun
 	// cap is a per-intent total, and one rerun round must not reset it back to zero.
 	hooks := steerHooks{
@@ -1124,6 +1149,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		nudges: &atomic.Int64{},
 		limit:  e.emptyTurnNudgeLimit(),
 		label:  label,
+		budget: meter,
 	}
 	wTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	e.BeginLLMCall(t.ID)
@@ -1157,6 +1183,9 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		e.EndLLMCall(t.ID)
 	}
 	stopHeartbeat() // no longer busy: the state writes below follow within the just-renewed claim
+	if meter != nil {
+		meter.Finish() // feeds the per-worker cost estimate
+	}
 	// Capture kill state before detachWork cancels workCtx. kill = this work's
 	// ctx was cancelled (planner kill_work) while the TASK ctx kept running; a
 	// pause cancels the task ctx (ectx) instead. Checking workCtx.Err() AFTER

@@ -197,6 +197,10 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 		// otherwise the old settling flag would make every worker skip forever.
 		s.engine.resetTimeoutRevival(t.ID)
 	}
+	if wasTerminal && status == "running" {
+		// done/failed -> running: the previous run's settle state must not gate the new one.
+		s.engine.resetSettledRun(t.ID)
+	}
 	if shouldQueue {
 		if !wasQueued {
 			summary := fmt.Sprintf("Queued: concurrency limit %d reached; starts automatically once a slot frees up", limit)

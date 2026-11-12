@@ -229,7 +229,7 @@ func (f *targetScopeFixture) finalPlannerRound(t *testing.T, task *Task) scopePr
 	t.Helper()
 	probe := newScopeProbeProvider()
 	f.usePlanner(probe)
-	f.e.runFinalPlannerRound(context.Background(), task)
+	f.e.runFinalPlannerRound(context.Background(), task, false)
 	return probe.first(t)
 }
 
