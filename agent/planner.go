@@ -299,6 +299,18 @@ func factIDsYielded(ts *db.ExplorationStore, id int64) string {
 	return strings.Join(parts, ", ")
 }
 
+// plannerToolQuery is the Tool RAG query for one planning round: the goal plus the
+// short texts the round's triggers already carry (no store lookups).
+func plannerToolQuery(goal string, triggers []TriggerEvent) string {
+	parts := []string{goal}
+	for _, ev := range triggers {
+		parts = append(parts, ev.Summary, ev.NewGoal)
+		parts = append(parts, ev.Goals...)
+		parts = append(parts, ev.Hints...)
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
 // intentSummary reads an intent node's one-line summary (best-effort, "?" on miss).
 func intentSummary(ts *db.ExplorationStore, id int64) string {
 	n, err := ts.GetNode(id)
@@ -470,7 +482,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// When the asset-coverage feature is off, drop add_task_scope/list_untested_assets (not in the prompt).
 	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), actool.DefaultTools()...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts)})
-	tools, def, cleanup := AugmentTools(ctx, "planner", base)
+	tools, def, cleanup := AugmentTools(WithToolQuery(ctx, plannerToolQuery(goal, triggers)), "planner", base)
 	defer cleanup()
 	// The key situation (just-finished intents + the pre-fetched full graph) goes into
 	// [this round's user input] (see input below); the system prompt keeps only the
