@@ -94,9 +94,19 @@ func (e *Engine) resetTimeoutRevival(taskID string) {
 
 // resetSettledRun clears the settle state of a finished run (settling and the
 // budget ledger) so a revived task can plan and claim again with a fresh budget.
+// It also clears the persisted end_reason of the previous run (ApplyTaskAdmission
+// already did in the same UPDATE as the revive; this is idempotent and never
+// touches a task that is terminal again).
 func (e *Engine) resetSettledRun(taskID string) {
 	e.settling.Delete(taskID)
 	e.budgets.Delete(taskID)
+	if e.m != nil && e.m.pg != nil {
+		if n, err := strconv.ParseInt(taskID, 10, 64); err == nil {
+			if err := e.m.pg.ClearRunEndReason(n); err != nil {
+				log.Printf("[budget] task %s failed to clear end_reason: %v", taskID, err)
+			}
+		}
+	}
 }
 
 // stampFirstRun records first_run_at + deadline_at on the FIRST real run (LLM ready)
@@ -227,17 +237,20 @@ func (e *Engine) settleTask(ctx context.Context, t *Task, budget bool) {
 	// ⑥ set the terminal state (guarded): met → done (completed); otherwise timeout. If the
 	// normal path already settled done first, the guard (SetTaskStatusGuarded) rejects the
 	// overwrite, preserving the completed semantics. A budget-exhausted run reuses the
-	// timeout state (a resource limit ended it; no new task status) and is marked by an
-	// activity record.
+	// timeout state (a resource limit ended it; no new task status), is marked by an
+	// activity record, and stores tasks.end_reason=budget with the status (read back by
+	// the coverage ledger's completeness; cleared when a revive starts a new run).
 	status := "timeout"
 	if met {
 		status = "done"
 	}
+	endReason := ""
 	if budget {
+		endReason = db.EndReasonBudget
 		e.emitActivity(t, db.Activity{Worker: "system", Kind: "text",
 			Summary: "Task run budget exhausted: forced wrap-up done, task stopped (final state " + status + ")"})
 	}
-	won, err := e.m.SetTaskStatusGuarded(t.ID, status)
+	won, err := e.m.SetTaskStatusGuarded(t.ID, status, endReason)
 	switch {
 	case err != nil:
 		log.Printf("[deadline] task %s failed to settle the terminal state: %v", t.ID, err)

@@ -212,7 +212,7 @@ func (m *IntentMeter) Finish() {
 // BudgetWrapupBlocks reports whether a worker tool is refused once its budget is
 // exhausted: all but the write-back tools, so the run records facts and stops.
 func BudgetWrapupBlocks(tool string) bool {
-	return tool != "record_fact" && tool != "insert_assets" && tool != "report_finding" && tool != "update_finding_report"
+	return tool != "record_fact" && tool != "insert_assets" && tool != "report_finding" && tool != "update_finding_report" && tool != "record_coverage"
 }
 
 // WorkerBudgetWrapup is returned in place of a refused tool call.

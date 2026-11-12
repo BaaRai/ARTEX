@@ -514,12 +514,13 @@ func (d *DB) SetQueued(id int64, queued bool) error {
 // SetStatus updates a task's lifecycle status. Entering a terminal state
 // (done/failed/timeout) stamps completed_at once (COALESCE keeps the first stamp
 // stable); moving back to a non-terminal state clears it, so a re-run has no stale
-// finish time.
+// finish time (and no stale end_reason).
 func (d *DB) SetStatus(id int64, status string) error {
 	_, err := d.Exec(`
 UPDATE tasks
    SET status = $1,
-       completed_at = CASE WHEN $1 IN ('done','failed','timeout') THEN COALESCE(completed_at, now()) ELSE NULL END
+       completed_at = CASE WHEN $1 IN ('done','failed','timeout') THEN COALESCE(completed_at, now()) ELSE NULL END,
+       end_reason = CASE WHEN $1 IN ('done','failed','timeout') THEN end_reason ELSE '' END
  WHERE id = $2`, status, id)
 	return err
 }
@@ -528,17 +529,27 @@ UPDATE tasks
 // terminal, so a completed↔timeout race resolves to the first writer (won=true).
 // Returns won=false (no error) when another terminal status already stuck — the
 // caller then leaves it alone. Non-terminal transitions / re-run still use SetStatus.
-func (d *DB) SetTerminalStatusGuarded(id int64, status string) (won bool, err error) {
+// endReason is stored with the status in the same statement (empty = normal end,
+// EndReasonBudget = run-budget wrap-up); a losing writer stores nothing.
+func (d *DB) SetTerminalStatusGuarded(id int64, status, endReason string) (won bool, err error) {
 	res, err := d.Exec(`
 UPDATE tasks
    SET status = $1,
-       completed_at = COALESCE(completed_at, now())
- WHERE id = $2 AND status NOT IN ('done','failed','timeout')`, status, id)
+       completed_at = COALESCE(completed_at, now()),
+       end_reason = $3
+ WHERE id = $2 AND status NOT IN ('done','failed','timeout')`, status, id, endReason)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// ClearRunEndReason drops the end_reason of a task that is running again (a
+// revived run). A terminal task keeps its reason.
+func (d *DB) ClearRunEndReason(id int64) error {
+	_, err := d.Exec(`UPDATE tasks SET end_reason='' WHERE id=$1 AND end_reason<>'' AND status NOT IN ('done','failed','timeout')`, id)
+	return err
 }
 
 // StampFirstRun records a task's first-real-run moment and computes its absolute

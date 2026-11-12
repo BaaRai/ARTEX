@@ -408,7 +408,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// base = built-in worker tools ∪ host tools (traffic) ∪ default tools (incl. Bash);
 	// then augment with the agent's visible skills/MCP. During the SDK settlement
 	// phase, Bash is hidden via Settlement.DisabledTools (no local gating needed).
-	base := append(tsx.WorkerTools(), w.extraTools...)
+	base := append(tsx.DropCoverageTools(tsx.WorkerTools()), w.extraTools...)
 	// The worker deliberately gets no MultiEdit/Glob/Grep: precise file edits use Edit,
 	// searching goes through Bash(grep/find) — narrowing the tool surface and reducing
 	// low-value calls. The rest of the SDK default tools (Read/Write/Edit/LS/Bash/Sleep)

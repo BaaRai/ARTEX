@@ -1266,7 +1266,13 @@ func (m *Manager) ApplyTaskAdmission(id, expectedStatus, status string, queued b
 	        WHEN paused_at IS NOT NULL AND deadline_at IS NOT NULL THEN deadline_at + (now() - paused_at)
 	        ELSE deadline_at
 	    END,
-	    paused_at=NULL
+	    paused_at=NULL,
+	    -- A revive (terminal -> non-terminal) starts a new run: drop the previous
+	    -- run's end reason (e.g. budget) so it never marks the new one.
+	    end_reason=CASE
+	        WHEN $2 NOT IN ('done','failed','timeout') THEN ''
+	        ELSE end_reason
+	    END
 	WHERE id=$1 AND deleted_at IS NULL AND status=$6
 	RETURNING queued_at, queue_mode, completed_at, first_run_at, deadline_at`, n, status, queued, mode, preservePosition, expectedStatus).
 		Scan(&queuedAt, &committedMode, &completedAt, &firstRunAt, &deadlineAt)
@@ -1459,14 +1465,15 @@ func (m *Manager) StampTaskFirstRun(id string) (int64, error) {
 // SetTaskStatusGuarded sets a TERMINAL status only if the task isn't already terminal
 // (resolves the completed↔timeout race — first terminal writer wins). Reflects the
 // won status on the live handle. won=false means another terminal already stuck.
-func (m *Manager) SetTaskStatusGuarded(id, status string) (won bool, err error) {
+// endReason is persisted with the status (empty or db.EndReasonBudget).
+func (m *Manager) SetTaskStatusGuarded(id, status, endReason string) (won bool, err error) {
 	m.taskStateMu.Lock()
 	defer m.taskStateMu.Unlock()
 	n, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		return false, err
 	}
-	won, err = m.pg.SetTerminalStatusGuarded(n, status)
+	won, err = m.pg.SetTerminalStatusGuarded(n, status, endReason)
 	if err != nil || !won {
 		return won, err
 	}
