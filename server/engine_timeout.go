@@ -86,11 +86,17 @@ func (e *Engine) taskDeadline(t *Task) int64 {
 // stamps a fresh full budget. coordStarted is reset because the coordinator that
 // produced the timeout has already completed (or is in its final return path).
 func (e *Engine) resetTimeoutRevival(taskID string) {
-	e.settling.Delete(taskID)
+	e.resetSettledRun(taskID)
 	e.deadline.Delete(taskID)
 	e.stamped.Delete(taskID)
 	e.coordStarted.Delete(taskID)
-	e.budgets.Delete(taskID) // a revived task also gets a fresh run budget
+}
+
+// resetSettledRun clears the settle state of a finished run (settling and the
+// budget ledger) so a revived task can plan and claim again with a fresh budget.
+func (e *Engine) resetSettledRun(taskID string) {
+	e.settling.Delete(taskID)
+	e.budgets.Delete(taskID)
 }
 
 // stampFirstRun records first_run_at + deadline_at on the FIRST real run (LLM ready)

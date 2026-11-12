@@ -42,3 +42,28 @@ func TestEngineBudgetPassthroughAndGate(t *testing.T) {
 		t.Fatal("budget: write-back tool refused during the wrap-up")
 	}
 }
+
+// A finished run that settled with the budget wrap-up must not gate its revive:
+// after resetSettledRun the task plans and claims again, with a fresh ledger.
+func TestResetSettledRunRestartsBudget(t *testing.T) {
+	t.Setenv("ARTEX_TASK_BUDGET_TOKENS", "100000")
+	t.Setenv("ARTEX_TASK_BUDGET_TURNS", "")
+	t.Setenv("ARTEX_INTENT_BUDGET_TOKENS", "")
+	t.Setenv("ARTEX_INTENT_BUDGET_TURNS", "")
+	ctx, task := context.Background(), &Task{ID: "9"}
+	e := NewEngine(nil)
+	e.settling.Store(task.ID, true)
+	l := e.budgetFor(task.ID)
+	l.Record(llm.Usage{InputTokens: 90_000})
+	l.BeginWrapup()
+	if !e.isSettling(task.ID) || !e.budgetStop(ctx, task) || !e.budgetBlocksClaim(task.ID) {
+		t.Fatal("settled run: wrap-up must gate the planner and the workers before the revive")
+	}
+	e.resetSettledRun(task.ID)
+	if e.isSettling(task.ID) || e.budgetStop(ctx, task) || e.budgetBlocksClaim(task.ID) {
+		t.Fatal("revived run: planner or workers still gated by the previous run")
+	}
+	if got := e.budgetFor(task.ID).State().Spent.Tokens; got != 0 {
+		t.Fatalf("revived run: ledger not fresh, spent %d tokens", got)
+	}
+}

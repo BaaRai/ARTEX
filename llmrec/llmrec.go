@@ -274,7 +274,8 @@ func thinkingText(msg llm.Message) string {
 
 // recordUsage appends one lightweight metering row to llm_usage (no bodies). Skips
 // zero-token calls with no model, which carry nothing worth metering. The ctx
-// usage sink (if any) sees exactly the calls that get a row.
+// usage sink (if any) sees these calls even when no PostgreSQL recorder is set
+// (r.pg == nil), so a budget also counts calls that are not persisted.
 func (r *Recorder) recordUsage(ctx context.Context, taskID string, expID int64, worker string, usage llm.Usage, latencyMs int, status string) {
 	if r.model == "" && usage.InputTokens == 0 && usage.OutputTokens == 0 &&
 		usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 {
