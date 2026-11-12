@@ -454,6 +454,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 				// test scope (same conservative granularity as insertAssets). upsertTaskScope's
 				// ON CONFLICT DO NOTHING + the uq_task_scope unique index guarantee no
 				// duplicate additions; reruns/retries are idempotent no-ops as well.
+				// asset_ids can trace back to target content, so these auto rows count
+				// toward coverage only under a declared domain or IP root (db.declaredScopeFilter);
+				// coverage scope, not enforced.
 				// When the asset-coverage feature is off, the test scope (denominator) is no
 				// longer accumulated.
 				if coverageEnabled {

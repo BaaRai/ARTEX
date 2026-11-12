@@ -53,7 +53,7 @@ Call set_goals to submit the results.`
 const goalsScopeTail = `
 
 **Extra duty: register the test asset scope**
-Besides decomposing goals, you must also identify the **explicitly stated test asset scope** from the "task goal / task description" and register it via add_task_scope (this task's authorization boundary, and also the denominator of asset test coverage). **Minimal-scope principle: register only the one target the user explicitly named — never enlarge it on your own.**
+Besides decomposing goals, you must also identify the **explicitly stated test asset scope** from the "task goal / task description" and register it via add_task_scope (this task's ` + taskScopeLabel + `: the denominator of asset test coverage, and the root under which auto-added hosts count). **Minimal-scope principle: register only the one target the user explicitly named — never enlarge it on your own.**
 - The goal is a URL or a host-bearing address (e.g. https://xxx.example.com/path, app.example.com) → take its **full hostname**, kind=subdomain, value=full hostname.
   Example: goal https://a1b2c3.lab.example.net/path → kind=subdomain, value=a1b2c3.lab.example.net (**not** example.net).
   **Never** shrink a subdomain-bearing hostname to its root domain — registering all of example.com upon seeing xxx.example.com expands the scope beyond the user's target, violating the minimal-scope principle.

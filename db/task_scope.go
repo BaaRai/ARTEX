@@ -8,10 +8,14 @@ import (
 	"strings"
 )
 
-// TaskScope is one row of a task's test scope — the coverage denominator and the
-// per-task authorization edge. Rows come either from insertAssets (source='auto',
-// conservative, one per explicitly-inserted asset) or from the add_task_scope tool
-// (source='agent', for company / domain / network / ICP / keyword scope).
+// TaskScope is one row of a task's test scope — coverage scope, not enforced: it is
+// the coverage denominator and the filter for asset queries, and nothing blocks a
+// tool call outside it. Rows come from insertAssets / intent asset_ids (source='auto',
+// conservative, one per explicitly-inserted asset), from the add_task_scope tool
+// (source='agent': the goal targets the decomposer registers, or planner widening),
+// or from the operator (source='manual'). An auto row counts toward coverage only
+// under a declared domain or IP root (a non-auto root_domain/subdomain/ip/cidr row),
+// see declaredScopeFilter.
 type TaskScope struct {
 	ID        int64  `json:"id"`
 	TaskID    int64  `json:"task_id"`
@@ -105,6 +109,8 @@ func (s *AssetStore) upsertTaskScope(ts TaskScope) error {
 // asset item (source='auto'). MUST be called only from insertAssets' top-level loop —
 // never from a db-layer side effect (linkHostAssets), so derived assets do not blindly expand the scope.
 // Rule: scope granularity follows the asset's own type. taskID<=0 → no-op.
+// The asset comes from target-derived content, so the row counts toward coverage and
+// list_untested_assets only under a declared domain or IP root (declaredScopeFilter).
 func (s *AssetStore) AddAutoScope(taskID int64, assetType, domain, rawURL, ip string) error {
 	if taskID <= 0 {
 		return nil
@@ -274,8 +280,9 @@ type CoverageByType struct {
 }
 
 // Coverage is a task's rough asset test coverage — a reference figure for the agent,
-// NOT a precise metric. Denominator = assets matching any active task_scope row;
-// Tested = those anchored to at least one fact node in the exploration.
+// NOT a precise metric. Denominator = assets matching a declared task_scope row or an
+// auto row under a declared domain or IP root (declaredScopeFilter); Tested = those anchored to at
+// least one fact node in the exploration.
 type Coverage struct {
 	Enabled     bool             `json:"enabled"`     // whether the asset coverage feature is on; when false the other fields are zero
 	ScopeRows   int              `json:"scope_rows"`  // 0 → scope not anchored
@@ -299,6 +306,22 @@ func (s *AssetStore) CoverageEnabled(taskID int64) bool {
 	return enabled
 }
 
+// declaredScopeFilter keeps a task_scope row ts in the coverage match only when it is
+// declared (source<>'auto': goal targets registered through add_task_scope, or manual
+// scope) or when it is an auto row under a domain or IP root the same task declared:
+// the same or a deeper domain of a declared root_domain/subdomain, or a net inside a
+// declared ip/cidr. A declared company, icp or keyword row is not a root here. Auto
+// rows come from target-derived content (insert_assets, intent asset_ids), so
+// anything else stays out of the coverage denominator and list_untested_assets.
+const declaredScopeFilter = `(ts.source <> 'auto' OR EXISTS (
+    SELECT 1 FROM task_scope d
+    WHERE d.task_id = ts.task_id AND d.source <> 'auto' AND (
+         (d.kind IN ('root_domain','subdomain') AND ts.domain IS NOT NULL
+          AND (ts.domain = d.domain OR right(ts.domain, length(d.domain)+1) = '.' || d.domain))
+      OR (d.kind IN ('ip','cidr') AND ts.net IS NOT NULL AND ts.net <<= d.net)
+    )
+  ))`
+
 // task_scope→assets match predicate, reused by the count / by-type / untested queries. $1=taskID.
 const covTargetCTE = `
 target AS (
@@ -314,7 +337,7 @@ target AS (
          lower(regexp_replace(COALESCE(a.icp,''), '[[:space:]]+', '', 'g')) = ts.value
          OR lower(regexp_replace(COALESCE(a.app_icp,''), '[[:space:]]+', '', 'g')) = ts.value
        ))
-  )
+  ) AND ` + declaredScopeFilter + `
 ),
 tested AS (
   SELECT DISTINCT ea.asset_id

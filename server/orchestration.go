@@ -572,6 +572,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedFindingVerificationSchema() // S1: poe_level / evidence_quotes on update_finding_report, added once per DB
 	s.seedFindingEvidenceSchema()     // optional counterevidence / confidence_rationale on report_finding, added once per DB
 	s.seedFactSourceSchema()          // source enum on record_fact, added once per DB
+	s.seedTaskScopeDescription()      // add_task_scope: "coverage scope, not enforced" replaces the authorization-boundary text
 	// Note: pentest's default tool bindings need no migration — BuiltinToolSeeds already seeds
 	// list_assets/insert_assets/report_finding/list_findings/list_companies together with
 	// pentest at fresh initialization (no old DBs exist in this project, so no migration).
@@ -607,6 +608,34 @@ func (s *Server) seedFactSourceSchema() {
 WHERE key='record_fact' AND system AND NOT(COALESCE(schema->'properties','{}'::jsonb) ? 'source')`, string(properties["source"]))
 		if err != nil {
 			log.Printf("[facts] upgrade record_fact.source: %v", err)
+		}
+		return
+	}
+}
+
+// oldTaskScopeDescription is the add_task_scope description as seeded up to commit
+// 0dc8bdf, which called task_scope the task's authorization boundary. Kept verbatim:
+// seedTaskScopeDescription replaces only a row that still holds exactly this text.
+const oldTaskScopeDescription = "Add test scope to [this task] — this is the task's authorization boundary, and also the denominator of asset test coverage.\n" +
+	"Supported kinds: company (all assets under the company) / root_domain (a whole root domain, including all subdomains) / subdomain (a single precise subdomain) / ip / cidr / icp / keyword.\n" +
+	"Note: hosts a worker touches one by one are [automatically] added to the scope by the system (precise subdomains); this tool is for [deliberate widening] — pulling in a whole root domain / whole company, or adding a specific subdomain/IP.\n" +
+	"value: for company pass the company name or id (the company must already exist); for root_domain/subdomain pass a domain; for ip/cidr pass an IP or range; for icp/keyword pass an ICP number or company keyword.\n" +
+	"Always give reason explaining the basis (auditable). Use the entries array for multiple entries."
+
+// seedTaskScopeDescription brings the add_task_scope description of existing
+// databases to the code text (SeedTool is first-insert only, and ToolResolve serves
+// the stored description, so without this the model would keep reading
+// "authorization boundary"). Idempotent: only a system row still holding the old
+// seeded text is replaced; an absent row or an operator-edited text is left alone.
+func (s *Server) seedTaskScopeDescription() {
+	for _, seed := range agent.BuiltinToolSeeds() {
+		if seed.Key != "add_task_scope" {
+			continue
+		}
+		_, err := s.m.pg.Exec(`UPDATE tools SET description=$1,updated_at=now()
+WHERE key='add_task_scope' AND system AND description=$2`, seed.Desc, oldTaskScopeDescription)
+		if err != nil {
+			log.Printf("[tools] upgrade add_task_scope description: %v", err)
 		}
 		return
 	}
