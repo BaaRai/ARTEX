@@ -262,6 +262,8 @@ Optional: `ARTEX_LLM_PROVIDER` (anthropic | openai | openai-responses | ollama) 
 
 **Concurrency**: the number of work agents per task is configured in "System Settings" (default 3).
 
+**Untrusted-output boundary (on by default)**: tool results for the worker, planner, chat and main agent are framed between nonce-tagged markers so the model treats them as data, not instructions. Unset or empty, the boundary is on; set `ARTEX_UNTRUSTED_BOUNDARY=0` (or `false` / `off` / `no`) to disable it. Measured cost: about 154 bytes per tool result plus one system note.
+
 **Common flags**: `./start.sh -addr :8787 -proxy :8788` (`-addr` frontend+API, `-proxy` traffic recording proxy). The startup script passes arguments through to `artex` verbatim.
 
 ### Reverse proxy deployment (HTTPS / only exposing 443)

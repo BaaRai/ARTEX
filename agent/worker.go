@@ -524,7 +524,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		NonStreaming:  w.nonStreaming(),                       // when this profile selects non-streaming, use Provider.Complete
 		MaxTokens:     w.maxTokens(),                          // 0 = send no cap; the server default decides
 
-		// Opt-in via ARTEX_UNTRUSTED_BOUNDARY (default off): nonce-frame tool output as untrusted data.
+		// On by default; ARTEX_UNTRUSTED_BOUNDARY=0 opts out: nonce-frame tool output as untrusted data.
 		UntrustedOutputBoundary: untrustedBoundaryEnabled(),
 	}
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)

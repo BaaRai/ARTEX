@@ -11,15 +11,20 @@ func TestUntrustedBoundaryEnabled(t *testing.T) {
 		env  string
 		want bool
 	}{
-		{"", false},
+		{"", true},
 		{"0", false},
 		{"false", false},
-		{"yes", false},
+		{"off", false},
+		{"no", false},
+		{" FALSE ", false},
+		{"Off", false},
+		{"NO", false},
 		{"1", true},
 		{"true", true},
 		{"on", true},
+		{"yes", true},
 		{" TRUE ", true},
-		{"On", true},
+		{"anything", true},
 	} {
 		t.Setenv("ARTEX_UNTRUSTED_BOUNDARY", tc.env)
 		if got := untrustedBoundaryEnabled(); got != tc.want {
@@ -28,11 +33,11 @@ func TestUntrustedBoundaryEnabled(t *testing.T) {
 	}
 }
 
-func TestUntrustedBoundaryDisabledWhenUnset(t *testing.T) {
-	t.Setenv("ARTEX_UNTRUSTED_BOUNDARY", "1") // registers restoration of the original value
+func TestUntrustedBoundaryEnabledWhenUnset(t *testing.T) {
+	t.Setenv("ARTEX_UNTRUSTED_BOUNDARY", "0") // registers restoration of the original value
 	os.Unsetenv("ARTEX_UNTRUSTED_BOUNDARY")
-	if untrustedBoundaryEnabled() {
-		t.Fatal("ARTEX_UNTRUSTED_BOUNDARY unset: got true, want false")
+	if !untrustedBoundaryEnabled() {
+		t.Fatal("ARTEX_UNTRUSTED_BOUNDARY unset: got false, want true")
 	}
 }
 
