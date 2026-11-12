@@ -7,6 +7,7 @@
 package enrich
 
 import (
+	"context"
 	"crypto/tls"
 	"html"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/intercept"
 
 	"github.com/miekg/dns"
 	"github.com/projectdiscovery/dnsx/libs/dnsx"
@@ -34,8 +36,9 @@ const (
 
 type job struct {
 	kind jobKind
-	id   int64  // asset id (domain for DNS, site for HTTP)
-	arg  string // host (DNS) or url (HTTP)
+	id   int64           // asset id (domain for DNS, site for HTTP)
+	arg  string          // host (DNS) or url (HTTP)
+	ctx  context.Context // HTTP: carries the target scope the probe dials under
 }
 
 // Engine owns the resolver, the proxy-routed HTTP client, and the worker pool.
@@ -90,15 +93,23 @@ func New(as *db.AssetStore, proxy func() string, workers int) *Engine {
 // buildClient returns an HTTP client that dials via the recording proxy (resolved
 // per-request via proxy(), so the traffic-capture toggle applies live) and skips
 // TLS verification (the proxy re-signs with its MITM CA; targets are often
-// self-signed — this is a pentest probe).
+// self-signed — this is a pentest probe). Every connection goes through
+// intercept.PinnedDialer, under the target scope of the request's context: a
+// probe without a scope is refused. When the scope's gate is on, the probe
+// connects to the target itself, without the proxy, so that the dialer decides
+// on the target and connects only to the addresses a pin covers.
 func buildClient(proxy func() string) *http.Client {
 	tr := &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		DisableKeepAlives:   true,
 		TLSHandshakeTimeout: httpTimeout,
+		DialContext:         intercept.PinnedDialer("enrich", true),
 	}
 	if proxy != nil {
-		tr.Proxy = func(*http.Request) (*url.URL, error) {
+		tr.Proxy = func(req *http.Request) (*url.URL, error) {
+			if intercept.GateOn(req.Context()) {
+				return nil, nil // direct: the dialer decides on the target
+			}
 			p := proxy()
 			if p == "" {
 				return nil, nil // direct
@@ -116,10 +127,14 @@ func buildClient(proxy func() string) *http.Client {
 
 // ResolveDomain enqueues a DNS resolution for a domain asset (ungated). host is the
 // FQDN. No-op for an empty engine.
-func (e *Engine) ResolveDomain(id int64, host string) { e.enqueue(job{jobDNS, id, host}) }
+func (e *Engine) ResolveDomain(id int64, host string) { e.enqueue(job{jobDNS, id, host, nil}) }
 
 // ProbeSite enqueues an HTTP probe for a web-asset (site). rawURL is the site URL.
-func (e *Engine) ProbeSite(id int64, rawURL string) { e.enqueue(job{jobHTTP, id, rawURL}) }
+// ctx carries the target scope of the call that asks for the probe: the probe
+// connects under that scope (see buildClient).
+func (e *Engine) ProbeSite(ctx context.Context, id int64, rawURL string) {
+	e.enqueue(job{jobHTTP, id, rawURL, ctx})
+}
 
 func (e *Engine) enqueue(j job) {
 	if e == nil || id0(j.id) || j.arg == "" {
@@ -155,7 +170,7 @@ func (e *Engine) worker() {
 			case jobDNS:
 				e.doDNS(j.id, j.arg)
 			case jobHTTP:
-				e.doHTTP(j.id, j.arg)
+				e.doHTTP(j.ctx, j.id, j.arg)
 			}
 		}
 	}
@@ -221,12 +236,12 @@ func (e *Engine) doDNS(id int64, host string) {
 
 var reTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
-func (e *Engine) doHTTP(id int64, rawURL string) {
+func (e *Engine) doHTTP(ctx context.Context, id int64, rawURL string) {
 	host := hostOf(rawURL)
 	if host == "" {
 		return
 	}
-	req, err := http.NewRequest("GET", rawURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return
 	}
