@@ -760,7 +760,7 @@ WHERE t.active_llm_profile_id IS NULL
 --     side-effect-derived assets do not enter the scope (the hook sits at the handler top level; derivation is internal to the db layer).
 --   Agent-filled (source='agent'): add_task_scope adds company/root_domain/subdomain/ip.
 -- Coverage = among assets matching active rows (denominator), the share anchored by fact nodes (numerator).
--- An auto row is active only under a declared (non-auto) root of the same task (declaredScopeFilter in task_scope.go).
+-- An auto row is active only under a declared (non-auto) domain or IP root of the same task (declaredScopeFilter in task_scope.go).
 CREATE TABLE IF NOT EXISTS task_scope (
     id          BIGSERIAL PRIMARY KEY,
     task_id     BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,

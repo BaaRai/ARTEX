@@ -121,7 +121,7 @@ ORDER BY CASE WHEN ts.task_id=$1 THEN 0 ELSE 1 END, ts.id`, taskID)
 // TaskCoverageWithSources computes one coverage view over the union of the
 // current task and its direct sources: source scopes and fact-anchored assets
 // extend the denominator, while fact anchors count as tested. Auto scope rows
-// count only under a declared root (declaredScopeFilter), and an intent anchor
+// count only under a declared domain or IP root (declaredScopeFilter), and an intent anchor
 // alone (insert_assets, asset_ids) no longer adds an asset. No row is copied.
 func (s *AssetStore) TaskCoverageWithSources(taskID int64) (*Coverage, error) {
 	cov := &Coverage{ByType: []CoverageByType{}}

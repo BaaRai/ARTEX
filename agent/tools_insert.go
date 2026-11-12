@@ -365,9 +365,9 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 				// type; side-effect-derived assets don't go through here, so the scope
 				// doesn't widen blindly. No-op when taskID=0.
 				// The item may come from target content, so this auto row counts toward
-				// coverage and list_untested_assets only under a declared root (a
-				// non-auto row: goal target, add_task_scope or manual scope, see
-				// db.declaredScopeFilter). task_scope is
+				// coverage and list_untested_assets only under a declared domain or IP
+				// root (a non-auto root_domain/subdomain/ip/cidr row: goal target,
+				// add_task_scope or manual scope, see db.declaredScopeFilter). task_scope is
 				// coverage scope, not enforced: nothing blocks a call outside it.
 				// Independent of the coverage switch: task_scope is the task's range
 				// boundary (the filter basis for list/query); the coverage switch only
@@ -454,7 +454,7 @@ func (t *ToolSet) addTaskScope() actool.CoreTool {
 		"add_task_scope",
 		"Add test scope to [this task] — "+taskScopeLabel+": it is the denominator of asset test coverage; nothing blocks a tool call outside it.\n"+
 			"Supported kinds: company (all assets under the company) / root_domain (a whole root domain, including all subdomains) / subdomain (a single precise subdomain) / ip / cidr / icp / keyword.\n"+
-			"Note: hosts a worker touches one by one are [automatically] added to the scope by the system (precise subdomains), but they count toward coverage and list_untested_assets only under a declared root (a goal target or scope added here or manually); this tool is for [deliberate widening] — pulling in a whole root domain / whole company, or adding a specific subdomain/IP.\n"+
+			"Note: hosts a worker touches one by one are [automatically] added to the scope by the system (precise subdomains), but they count toward coverage and list_untested_assets only under a declared domain or IP root (a root_domain/subdomain/ip/cidr goal target or scope added here or manually; a company/icp/keyword entry is not such a root); this tool is for [deliberate widening] — pulling in a whole root domain / whole company, or adding a specific subdomain/IP.\n"+
 			"value: for company pass the company name or id (the company must already exist); for root_domain/subdomain pass a domain; for ip/cidr pass an IP or range; for icp/keyword pass an ICP number or company keyword.\n"+
 			"Always give reason explaining the basis (auditable). Use the entries array for multiple entries.",
 		obj(map[string]any{
