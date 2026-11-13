@@ -81,7 +81,10 @@ var (
 	colCredPass    = secretColumn{"task_credentials", "password", false, ""}
 	colNotifConfig = secretColumn{"notification_channels", "config", true, ""}
 	colToolExec    = secretColumn{"tools", "exec", true, ""} // system=false rows: headers, proxy, body, code, command
-	secretColumns  = append([]secretColumn{colLLMKey, colLLMProxy, colMCPEnv, colCredPass, colNotifConfig, colToolExec}, secretSettingColumns()...)
+	// Evidence head blocks carry the captured Cookie and Authorization headers.
+	colEvReqHead  = secretColumn{"traffic_evidence_snapshots", "req_head", false, ""}
+	colEvRespHead = secretColumn{"traffic_evidence_snapshots", "resp_head", false, ""}
+	secretColumns = append([]secretColumn{colLLMKey, colLLMProxy, colMCPEnv, colCredPass, colNotifConfig, colToolExec, colEvReqHead, colEvRespHead}, secretSettingColumns()...)
 )
 
 // secretSettingKeys are the settings stored encrypted, AAD "settings.<key>".
