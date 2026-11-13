@@ -1232,6 +1232,9 @@ export const api = {
   interceptGetOne: (id: number) => get<InterceptPending>(`/intercept/pending/${id}`),
   interceptDecide: (id: number, decision: "allowed" | "denied") =>
     post<{ ok: boolean }>(`/intercept/pending/${id}/decide`, { decision }),
+  // No body: the server derives the rule from the stored request, which stays pending.
+  interceptAlwaysAllow: (id: number) =>
+    post<{ rule: InterceptRule; created: boolean }>(`/intercept/pending/${id}/always-allow`),
   interceptExecution: (id: number, conversationId?: number) =>
     get<import("@/lib/types").InterceptExecution>(
       `/intercept/history/${id}/execution${conversationId ? `?conversation=${conversationId}` : ""}`,

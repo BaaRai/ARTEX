@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Autumn-27/artex/intercept"
+)
 
 func TestValidateArgvRuleReq(t *testing.T) {
 	base := interceptRuleReq{Name: "r", MatchTarget: "tool_input", MatchType: "argv", Pattern: `["git","push"]`, Action: "allow"}
@@ -20,6 +24,31 @@ func TestValidateArgvRuleReq(t *testing.T) {
 		mut(&req)
 		if err := validateInterceptRuleReq(req); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// The manual rule form refuses an argv allow rule for a denylisted program,
+// with the message of the "always allow" endpoint; deny and ask stay creatable.
+func TestValidateArgvAllowDenylist(t *testing.T) {
+	for _, pattern := range []string{`["python"]`, `["python3.11"]`, `["/usr/bin/env"]`, `["find"]`, `["docker","run"]`} {
+		req := interceptRuleReq{Name: "r", MatchTarget: "tool_input", MatchType: "argv", Pattern: pattern, Action: "allow"}
+		tokens, _ := intercept.ParseArgvPattern(pattern)
+		want := intercept.CheckArgvAllow(tokens)
+		if err := validateInterceptRuleReq(req); err == nil || want == nil || err.Error() != want.Error() {
+			t.Errorf("allow %s: %v, want %v", pattern, err, want)
+		}
+		for _, action := range []string{"deny", "ask"} {
+			req.Action = action
+			if err := validateInterceptRuleReq(req); err != nil {
+				t.Errorf("%s %s refused: %v", action, pattern, err)
+			}
+		}
+	}
+	for _, pattern := range []string{`["nmap"]`, `["git","push"]`} {
+		req := interceptRuleReq{Name: "r", MatchTarget: "tool_input", MatchType: "argv", Pattern: pattern, Action: "allow"}
+		if err := validateInterceptRuleReq(req); err != nil {
+			t.Errorf("allow %s refused: %v", pattern, err)
 		}
 	}
 }

@@ -958,6 +958,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/intercept/pending", s.interceptListPending)
 	mux.HandleFunc("GET /api/intercept/pending/{id}", s.interceptGetOne)
 	mux.HandleFunc("POST /api/intercept/pending/{id}/decide", s.interceptDecide)
+	mux.HandleFunc("POST /api/intercept/pending/{id}/always-allow", s.interceptAlwaysAllow) // creates an argv allow rule; the request stays pending
 	mux.HandleFunc("GET /api/intercept/history", s.interceptHistory)
 	mux.HandleFunc("GET /api/intercept/history/{id}", s.interceptDetail)
 	mux.HandleFunc("GET /api/intercept/history/{id}/execution", s.interceptExecution)

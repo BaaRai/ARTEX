@@ -1560,6 +1560,7 @@ export interface InterceptAudit {
 }
 export interface InterceptDetail extends InterceptApprovalRow {
   audit: InterceptAudit | null;
+  always_allow_prefix?: string; // pending Bash request: the argv prefix "always allow" would allow
 }
 
 export type TrafficEvidenceRole = "baseline" | "proof" | "verification" | "supporting";
