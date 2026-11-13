@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toast } from "sonner";
@@ -120,8 +121,8 @@ export function useSideQuestions(parent: string | null) {
   useEffect(() => {
     if (!open || !parent) return;
     void load();
-    const timer = setInterval(() => void load(), 2000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(() => load(), 2000);
+    return () => timer();
   }, [open, parent, load]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Reconnect after a clear attempt invalidates older callbacks.

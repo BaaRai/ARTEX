@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import {
@@ -125,8 +126,8 @@ function PoolSheet({
   // The cooldown countdown is the remaining seconds computed by the backend — fetched on a timer only while the drawer is open and some profile is unhealthy, to keep it ticking.
   React.useEffect(() => {
     if (!open || !pool?.enabled || !pool.chain.some((m) => m.state !== "ok")) return;
-    const t = setInterval(() => void onReload(), 10_000);
-    return () => clearInterval(t);
+    const t = setVisibleInterval(() => onReload(), 10_000);
+    return () => t();
   }, [open, pool, onReload]);
 
   async function toggle(patch: { llm_pool_enabled?: boolean; llm_pool_bind_fallback?: boolean }) {
@@ -1023,7 +1024,7 @@ export default function LLMPage() {
         </TabsContent>
       </Tabs>
 
-      <ProfileSheet profile={editing} open={editOpen} onOpenChange={setEditOpen} onSaved={() => void load()} />
+      <ProfileSheet profile={editing} open={editOpen} onOpenChange={setEditOpen} onSaved={() => load()} />
       <PoolSheet open={poolOpen} onOpenChange={setPoolOpen} pool={pool} onReload={loadPool} />
     </div>
   );

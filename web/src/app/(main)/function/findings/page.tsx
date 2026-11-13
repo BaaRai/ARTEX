@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import Link from "next/link";
@@ -174,7 +175,6 @@ export default function FindingsPage() {
   React.useEffect(() => {
     let disposed = false;
     let failed = false;
-    let timer: ReturnType<typeof setTimeout>;
     async function refreshRetests() {
       const version = retestRefreshVersion.current;
       try {
@@ -185,14 +185,13 @@ export default function FindingsPage() {
       } catch (error) {
         if (!disposed && !failed) toast.error(`Failed to load retest status: ${(error as Error).message}`);
         failed = true;
-      } finally {
-        if (!disposed) timer = setTimeout(() => void refreshRetests(), 3000);
       }
     }
     void refreshRetests();
+    const stop = setVisibleInterval(refreshRetests, 3000);
     return () => {
       disposed = true;
-      clearTimeout(timer);
+      stop();
     };
   }, []);
 
@@ -573,8 +572,8 @@ export default function FindingsPage() {
     };
     refresh();
     if (view === "asset") return;
-    const timer = setInterval(refresh, 5000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(refresh, 5000);
+    return () => timer();
   }, [activeRetestFingerprint, loadFlat, loadGroup, preferencesHydrated, refreshGroups, view]);
 
   React.useEffect(() => {
@@ -606,10 +605,10 @@ export default function FindingsPage() {
         });
     };
     load();
-    const t = setInterval(load, 5000);
+    const t = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      t();
     };
   }, []);
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import {
@@ -459,8 +460,8 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
 
   React.useEffect(() => {
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 30000);
-    return () => clearInterval(t);
+    const t = setVisibleInterval(() => setNow(Date.now()), 30000);
+    return () => t();
   }, []);
 
   // Input debounce: the query fires 300ms after typing stops, and returns to page 1.
@@ -519,10 +520,10 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
         alive = false;
       };
     }
-    const timer = setInterval(load, POLL_MS);
+    const timer = setVisibleInterval(load, POLL_MS);
     return () => {
       alive = false;
-      clearInterval(timer);
+      timer();
     };
   }, [taskId, page, size, kinds, query, order, live, atLive]);
 

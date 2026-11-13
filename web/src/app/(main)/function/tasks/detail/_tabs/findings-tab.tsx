@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import Link from "next/link";
@@ -159,10 +160,10 @@ export function FindingsTab({ taskId }: { taskId: string }) {
         });
     };
     load();
-    const t = setInterval(load, 3000);
+    const t = setVisibleInterval(load, 3000);
     return () => {
       active = false;
-      clearInterval(t);
+      t();
     };
   }, [taskId]);
 

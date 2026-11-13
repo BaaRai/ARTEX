@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import Link from "next/link";
@@ -225,20 +226,27 @@ function TaskDetailInner() {
 
   React.useEffect(() => {
     let alive = true;
-    const load = () =>
-      api
-        .interceptTask(id)
-        .then((rows) => {
-          if (alive) setInterceptPendingCount(rows.filter((r) => r.status === "pending").length);
-        })
-        .catch(() => {
-          // Polling is best-effort; the next interval retries automatically.
-        });
+    let loading = false;
+    setInterceptPendingCount(0);
+    const load = async () => {
+      if (!alive || loading) return;
+      loading = true;
+      try {
+        const rows = await api.interceptPending();
+        if (alive) {
+          setInterceptPendingCount(rows.filter((r) => r.task_id === id && r.status === "pending").length);
+        }
+      } catch {
+        // Polling is best-effort; the next interval retries automatically.
+      } finally {
+        loading = false;
+      }
+    };
     void load();
-    const t = setInterval(load, 5000);
+    const t = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      t();
     };
   }, [id]);
 
@@ -246,7 +254,7 @@ function TaskDetailInner() {
   const load = React.useCallback(() => {
     if (taskLoadInFlight.current === id) return;
     taskLoadInFlight.current = id;
-    Promise.all([api.task(id), api.stats(id).catch(() => null)])
+    return Promise.all([api.task(id), api.stats(id).catch(() => null)])
       .then(([task, s]) => {
         if (taskLoadInFlight.current !== id) return;
         const base = { ...task };
@@ -273,8 +281,8 @@ function TaskDetailInner() {
   }, [id]);
   React.useEffect(() => {
     load();
-    const timer = setInterval(load, 5000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(load, 5000);
+    return () => timer();
   }, [load]);
 
   async function togglePause() {

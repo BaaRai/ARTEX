@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import Link from "next/link";
@@ -74,8 +75,7 @@ export function FindingRetestPanel({
 
   React.useEffect(() => {
     if (error || !items?.some(active)) return;
-    const timer = setTimeout(() => void load(), 3000);
-    return () => clearTimeout(timer);
+    return setVisibleInterval(load, 3000);
   }, [error, items, load]);
 
   const running = items?.find(active);

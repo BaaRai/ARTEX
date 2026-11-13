@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import {
@@ -322,24 +323,25 @@ export function ApprovalDetail({
   // biome-ignore lint/correctness/useExhaustiveDependencies: Status, refresh and retry invalidate details without closing the panel.
   React.useEffect(() => {
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let keepPolling = true;
     async function load() {
+      if (cancelled || !keepPolling) return;
       try {
         const next = await api.interceptDetail(row.id);
         if (cancelled) return;
         setDetail(next);
         setError("");
         if (next.status !== "pending") onResolved?.(next.status);
-        if (next.status === "pending" || next.audit?.execution_status === "awaiting_result")
-          timer = setTimeout(() => void load(), 5000);
+        keepPolling = next.status === "pending" || next.audit?.execution_status === "awaiting_result";
       } catch (e) {
         if (!cancelled) setError((e as Error).message || "Failed to load details");
       }
     }
     void load();
+    const stop = setVisibleInterval(load, 5000);
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      stop();
     };
   }, [row.id, row.status, revision, retry, onResolved]);
 
@@ -740,10 +742,10 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
 
   React.useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), 5000);
+    const timer = setVisibleInterval(() => load(), 5000);
     return () => {
       request.current++;
-      clearInterval(timer);
+      timer();
     };
   }, [load]);
 

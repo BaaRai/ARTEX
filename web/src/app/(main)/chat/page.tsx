@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import {
@@ -580,9 +581,9 @@ function ChatView({
   React.useEffect(() => {
     if (!running) return;
     let live = true;
-    let timer: ReturnType<typeof setTimeout>;
+    let keepPolling = true;
     const tick = async () => {
-      let keepPolling = true;
+      if (!live || !keepPolling) return;
       try {
         const r = await api.conversationMessages(conv.id, cursorRef.current);
         if (!live) return;
@@ -595,15 +596,13 @@ function ChatView({
         if (!r.running) onTitleMaybeChanged(); // first-turn auto-title landed
       } catch {
         /* transient — keep polling */
-      } finally {
-        // Slow responses must not overlap another poll with the same cursor.
-        if (live && keepPolling) timer = setTimeout(() => void tick(), 1000);
       }
     };
     void tick();
+    const stop = setVisibleInterval(tick, 1000);
     return () => {
       live = false;
-      clearTimeout(timer);
+      stop();
     };
   }, [running, conv.id, onTitleMaybeChanged]);
 
@@ -1108,17 +1107,11 @@ export default function ChatPage() {
   // One list poll supplies runtime state for all sidebar rows, including the
   // unselected ones. Await completion so slow requests do not overlap.
   React.useEffect(() => {
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout>;
-    async function poll() {
-      await reloadConvs();
-      if (!disposed) timer = setTimeout(() => void poll(), 2000);
-    }
-    void poll();
+    void reloadConvs();
+    const stop = setVisibleInterval(reloadConvs, 2000);
     return () => {
-      disposed = true;
       conversationListSeq.current++;
-      clearTimeout(timer);
+      stop();
     };
   }, [reloadConvs]);
 

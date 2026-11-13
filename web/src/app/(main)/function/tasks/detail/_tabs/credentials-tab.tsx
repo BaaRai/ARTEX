@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import { CopyIcon, EyeIcon, EyeOffIcon, PlusIcon, TrashIcon } from "lucide-react";
@@ -39,8 +40,8 @@ export function CredentialsTab({ taskId }: { taskId: string }) {
   React.useEffect(() => {
     load();
     // Agent runs can record credentials mid-task; a light poll keeps the tab current.
-    const timer = setInterval(load, 15000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(load, 15000);
+    return () => timer();
   }, [load]);
 
   async function add() {

@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import Link from "next/link";
@@ -172,10 +173,10 @@ export default function DashboardPage() {
       }
     };
     void load();
-    const t = setInterval(load, 5000);
+    const t = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      t();
     };
   }, []);
 
@@ -211,10 +212,10 @@ export default function DashboardPage() {
       }
     };
     void load();
-    const timer = setInterval(load, 5000);
+    const timer = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(timer);
+      timer();
     };
   }, []);
 
@@ -247,10 +248,10 @@ export default function DashboardPage() {
       }
     };
     void load();
-    const t = setInterval(load, 15000);
+    const t = setVisibleInterval(load, 15000);
     return () => {
       alive = false;
-      clearInterval(t);
+      t();
     };
   }, []);
 

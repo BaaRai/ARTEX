@@ -3,6 +3,8 @@
 // a few fields the backend serializes differently (e.g. created_at as a unix int)
 // are passed through and formatted at the call site.
 
+import { InflightReads } from "@/lib/inflight";
+
 import type { ChatMention } from "@/lib/chat-mentions";
 import { MOCK } from "@/lib/mock/enabled";
 import { mockHandle } from "@/lib/mock/handler";
@@ -112,7 +114,11 @@ function getToken(): string | null {
   return localStorage.getItem("artex_token");
 }
 
+const inflightReads = new InflightReads();
+
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") inflightReads.clear();
   if (MOCK) return mockHandle<T>(init?.method ?? "GET", path, init?.body ?? null);
   const token = getToken();
   const r = await fetch(`/api${path}`, {
@@ -123,6 +129,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers as Record<string, string> | undefined),
     },
   });
+  if (method !== "GET" && method !== "HEAD") inflightReads.clear();
   if (r.status === 401) {
     if (typeof window !== "undefined") {
       localStorage.removeItem("artex_token");
@@ -198,7 +205,8 @@ export function sseUrl(path: string): string {
   return token ? `${base}${path}${sep}token=${encodeURIComponent(token)}` : `${base}${path}`;
 }
 
-const get = <T>(p: string) => http<T>(p);
+const get = <T>(p: string): Promise<T> =>
+  inflightReads.run(JSON.stringify([getToken(), p]), () => http<T>(p)).then((value) => structuredClone(value));
 const post = <T>(p: string, body?: unknown) =>
   http<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
 const put = <T>(p: string, body?: unknown) =>

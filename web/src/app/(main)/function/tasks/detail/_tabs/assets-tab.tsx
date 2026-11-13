@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import {
@@ -414,12 +415,12 @@ export function AssetsTab({ taskId }: { taskId: string }) {
       }
     };
     // Debounce DSL keystrokes; plain (re)loads and polling run immediately.
-    const debounce = setTimeout(() => void load(), dsl ? 400 : 0);
-    const timer = setInterval(() => void load(), 10_000);
+    const debounce = setTimeout(() => load(), dsl ? 400 : 0);
+    const timer = setVisibleInterval(() => load(), 10_000);
     return () => {
       active = false;
       clearTimeout(debounce);
-      clearInterval(timer);
+      timer();
     };
   }, [page, query, refreshKey, size, tab, taskId]);
 

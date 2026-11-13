@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import {
@@ -59,7 +60,7 @@ import type {
   Activity,
   ChatAttachment,
   IntentAsset,
-  InterceptApprovalRow,
+  InterceptPending,
   Session,
   SessionStatus,
   SessionTokenUsage,
@@ -639,7 +640,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
   const [sessionTokens, setSessionTokens] = React.useState<Record<string, SessionTokenUsage>>({});
   const [llmResolutions, setLLMResolutions] = React.useState<TaskLLMResolutions | null>(null);
   // Pending intercept requests for this task — used to show warning icons on sessions.
-  const [pendingIntercepts, setPendingIntercepts] = React.useState<InterceptApprovalRow[]>([]);
+  const [pendingIntercepts, setPendingIntercepts] = React.useState<InterceptPending[]>([]);
 
   // Refs backing SSE/loading without re-render churn.
   const snapshotRef = React.useRef(0); // task-level snapshot cursor → SSE since=
@@ -794,10 +795,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           // Polling is best-effort; the next interval retries automatically.
         });
     void load();
-    const t = setInterval(load, 5000);
+    const t = setVisibleInterval(load, 10_000);
     return () => {
       alive = false;
-      clearInterval(t);
+      t();
     };
   }, [taskId]);
 
@@ -817,10 +818,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
         });
     };
     void load();
-    const timer = setInterval(load, 2000);
+    const timer = setVisibleInterval(load, 2000);
     return () => {
       alive = false;
-      clearInterval(timer);
+      timer();
     };
   }, [taskId]);
 
@@ -836,37 +837,44 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           // Polling is best-effort; the next interval retries automatically.
         });
     void load();
-    const timer = setInterval(load, 10_000);
+    const timer = setVisibleInterval(load, 10_000);
     return () => {
       alive = false;
-      clearInterval(timer);
+      timer();
     };
   }, [taskId]);
 
   React.useEffect(() => {
     let alive = true;
-    const load = () =>
-      api
-        .interceptTask(taskId)
-        .then((rows) => {
-          if (alive) setPendingIntercepts(rows.filter((r) => r.status === "pending"));
-        })
-        .catch(() => {
-          // Polling is best-effort; the next interval retries automatically.
-        });
+    let loading = false;
+    setPendingIntercepts([]);
+    const load = async () => {
+      if (!alive || loading) return;
+      loading = true;
+      try {
+        const rows = await api.interceptPending();
+        if (alive) {
+          setPendingIntercepts(rows.filter((r) => r.task_id === taskId && r.status === "pending"));
+        }
+      } catch {
+        // Polling is best-effort; the next interval retries automatically.
+      } finally {
+        loading = false;
+      }
+    };
     void load();
-    const t = setInterval(load, 5000);
+    const t = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      t();
     };
   }, [taskId]);
 
   // Re-render on a timer so "streaming" liveness recomputes as activity goes stale.
   const [, setTick] = React.useState(0);
   React.useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 1500);
-    return () => clearInterval(id);
+    const id = setVisibleInterval(() => setTick((t) => t + 1), 1500);
+    return () => id();
   }, []);
 
   // ── first load + single task SSE ────────────────────────────────────────────────
@@ -1047,25 +1055,6 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
     };
   }, [taskId, patchStore]);
 
-  React.useEffect(() => {
-    let active = true;
-    const load = () =>
-      api
-        .taskIntentAssets(taskId)
-        .then((assets) => {
-          if (active) setIntentAssets(assets);
-        })
-        .catch(() => {
-          // The next poll retries; Worker controls and transcripts remain available.
-        });
-    void load();
-    const timer = setInterval(load, 5000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [taskId]);
-
   // ── worker (intent) session list — paged, poll first page lightly ───────────────
   React.useEffect(() => {
     let active = true;
@@ -1076,7 +1065,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
     setOlderIntentsHasMore(false);
     const load = () =>
       api
-        .intentsPage(taskId, 0, 300)
+        .intentsPage(taskId, 0, 100)
         .then((r) => {
           if (!active) return;
           const freshIds = new Set(r.items.map((item) => item.id));
@@ -1099,10 +1088,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           // Polling is best-effort; the next interval retries automatically.
         });
     void load();
-    const t = setInterval(load, 5000);
+    const t = setVisibleInterval(load, 5000);
     return () => {
       active = false;
-      clearInterval(t);
+      t();
     };
   }, [taskId]);
 
@@ -1113,7 +1102,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
     if (!Number.isFinite(minId)) return;
     setLoadingOlderIntents(true);
     api
-      .intentsPage(taskId, minId, 300)
+      .intentsPage(taskId, minId, 100)
       .then((r) => {
         setOlderIntents((prev) => {
           const seen = new Set([...intents, ...prev].map((n) => n.id));
@@ -1259,6 +1248,31 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
   };
 
   const active = sessions.find((s) => s.id === activeId) ?? MAIN_SESSION;
+  // Asset targets are only displayed in worker sessions; Main/Planner/System
+  // should never download the complete task asset history on a timer.
+  const showWorkerAssets = active.role === "worker";
+  React.useEffect(() => setIntentAssets([]), [taskId]);
+  React.useEffect(() => {
+    if (!showWorkerAssets) return;
+    let active = true;
+    const load = () =>
+      api
+        .taskIntentAssets(taskId)
+        .then((assets) => {
+          if (active) setIntentAssets(assets);
+        })
+        .catch(() => {
+          // The next poll retries; Worker controls and transcripts remain available.
+        });
+    void load();
+    const timer = setVisibleInterval(load, 30_000);
+    return () => {
+      active = false;
+      timer();
+    };
+  }, [taskId, showWorkerAssets]);
+
+
   const side = useSideQuestions(
     active.role === "mainagent"
       ? `/api/tasks/${taskId}/chat`
