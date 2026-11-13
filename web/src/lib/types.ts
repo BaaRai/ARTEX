@@ -1278,7 +1278,8 @@ export interface Stats {
 // ---- Intercept Rules ----
 export type InterceptAction = "allow" | "deny" | "ask";
 export type InterceptMatchTarget = "tool_name" | "tool_input";
-export type InterceptMatchType = "string" | "regex";
+// argv: pattern is a JSON array of tokens, the prefix of a Bash command (program and subcommands; flags are not constrained).
+export type InterceptMatchType = "string" | "regex" | "argv";
 
 export interface InterceptRule {
   id: number;

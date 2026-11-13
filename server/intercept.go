@@ -663,8 +663,15 @@ func validateInterceptRuleReq(req interceptRuleReq) error {
 	}
 	switch req.MatchType {
 	case "string", "regex":
+	case "argv":
+		if req.MatchTarget != "tool_input" {
+			return fmt.Errorf("an argv rule matches tool_input (the Bash command)")
+		}
+		if _, err := intercept.ParseArgvPattern(req.Pattern); err != nil {
+			return fmt.Errorf("invalid argv pattern: %w", err)
+		}
 	default:
-		return fmt.Errorf("match_type must be string or regex")
+		return fmt.Errorf("match_type must be string, regex or argv")
 	}
 	if req.Pattern == "" {
 		return fmt.Errorf("pattern cannot be empty")

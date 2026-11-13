@@ -52,6 +52,14 @@ AI autonomous penetration testing system (Go backend + Next.js frontend)
 The global "Approval Records", the in-task "Interception Approvals", and the approval cards in conversations all support expanding to view details. The display structure references the
 [AegisHook approval details component](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue), reusing ARTEX's components and theme:
 
+## Argv prefix rules
+
+Besides `string` and `regex`, an interception rule can use `match_type: argv` (Bash only, `match_target: tool_input`). Its pattern is a JSON array of 1 to 8 tokens, for example `["git","push"]`, with no empty token, no token starting with `-` and no shell metacharacter or space.
+
+- **It is a prefix rule.** The command is parsed (mvdan.cc/sh, Bash grammar, as the Bash tool runs `bash -c`) and must be one simple command: no pipe, list (`;`, `&&`, `||`), redirection, prefix assignment, subshell, background job, no wrapper program (`command`, `builtin`, `env`, `exec`, `eval`), and no command or process substitution or parameter expansion anywhere. Its prefix (program plus subcommands, from a code-owned arity table: `git push`, `npm run build`, `nmap`) must equal the pattern exactly. Any other form does not match, and the normal flow (judge, approval) continues.
+- **Flags are ignored by construction.** `["git","push"]` also covers `git push --force`; a flag before the subcommand (`git -C /repo push`) matches nothing. An allowed prefix does not cover what the program does internally.
+- An argv rule takes its place in the priority order like any rule, and the target gate still runs after an argv allow.
+
 
 ## Traffic capture browser extension
 

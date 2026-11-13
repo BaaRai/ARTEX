@@ -110,10 +110,33 @@ func TargetScopeFromContext(ctx context.Context) (s TargetScope, ok bool) {
 	return s, ok
 }
 
-// compiledRule is an InterceptRule with the regex pre-compiled (nil for string rules).
+// compiledRule is an InterceptRule with the regex pre-compiled (nil for string rules)
+// and the argv tokens pre-parsed (nil for non-argv rules).
 type compiledRule struct {
 	db.InterceptRule
-	re *regexp.Regexp
+	re   *regexp.Regexp
+	argv []string
+}
+
+// compileRule prepares a rule for matching. ok is false for a rule whose
+// pattern does not compile; such a rule is skipped rather than crashing.
+func compileRule(r db.InterceptRule) (compiledRule, bool) {
+	cr := compiledRule{InterceptRule: r}
+	switch r.MatchType {
+	case "regex":
+		re, err := regexp.Compile(r.Pattern)
+		if err != nil {
+			return cr, false
+		}
+		cr.re = re
+	case "argv":
+		tokens, err := ParseArgvPattern(r.Pattern)
+		if err != nil {
+			return cr, false
+		}
+		cr.argv = tokens
+	}
+	return cr, true
 }
 
 // pendingManager tracks in-flight approval requests via per-waiter channels. A
@@ -260,13 +283,9 @@ func (i *Interceptor) loadLocked() error {
 		if !r.Enabled {
 			continue
 		}
-		cr := compiledRule{InterceptRule: r}
-		if r.MatchType == "regex" {
-			re, err := regexp.Compile(r.Pattern)
-			if err != nil {
-				continue // skip rules with bad regex rather than crashing
-			}
-			cr.re = re
+		cr, ok := compileRule(r)
+		if !ok {
+			continue // skip rules with a bad pattern rather than crashing
 		}
 		out = append(out, cr)
 	}
@@ -716,9 +735,9 @@ func (i *Interceptor) SetRulesForTest(rules []db.InterceptRule) {
 		if !r.Enabled {
 			continue
 		}
-		cr := compiledRule{InterceptRule: r}
-		if r.MatchType == "regex" {
-			cr.re = regexp.MustCompile(r.Pattern)
+		cr, ok := compileRule(r)
+		if !ok {
+			panic("SetRulesForTest: bad pattern " + r.Pattern)
 		}
 		out = append(out, cr)
 	}
@@ -732,6 +751,10 @@ func (i *Interceptor) SetRulesForTest(rules []db.InterceptRule) {
 }
 
 func ruleMatches(r compiledRule, toolName string, input []byte) bool {
+	if r.MatchType == "argv" {
+		// Bash only, on the parsed command; match_target is always tool_input.
+		return r.MatchTarget == "tool_input" && argvRuleMatches(r.argv, toolName, input)
+	}
 	var subject string
 	switch r.MatchTarget {
 	case "tool_name":
