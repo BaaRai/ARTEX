@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -14,7 +15,8 @@ func TestProfileRetryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanup below.
+	t.Cleanup(func() { d.Close() })
 
 	want := RetryOverride{
 		Connect: RetryRule{Attempts: 5, IntervalMS: 2000},
@@ -22,12 +24,12 @@ func TestProfileRetryRoundTrip(t *testing.T) {
 		Stream:  RetryRule{IntervalMS: 250},
 	}
 	id, err := d.SaveProfile(&LLMProfile{
-		Name: "t-retry-roundtrip", Format: "openai", Model: "m", APIKey: "k", Retry: want,
+		Name: fmt.Sprintf("t-retry-roundtrip-%d", time.Now().UnixNano()), Format: "openai", Model: "m", APIKey: "k", Retry: want,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { d.Exec(`DELETE FROM llm_profiles WHERE id=$1`, id) })
+	t.Cleanup(func() { deleteTestProfile(t, d, id) })
 
 	got, err := d.ProfileByID(id)
 	if err != nil || got == nil {
@@ -71,16 +73,17 @@ func TestProfileRetryClampedOnSave(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanup below.
+	t.Cleanup(func() { d.Close() })
 
 	id, err := d.SaveProfile(&LLMProfile{
-		Name: "t-retry-clamp", Format: "openai", Model: "m", APIKey: "k",
+		Name: fmt.Sprintf("t-retry-clamp-%d", time.Now().UnixNano()), Format: "openai", Model: "m", APIKey: "k",
 		Retry: RetryOverride{Connect: RetryRule{Attempts: -99, IntervalMS: -5}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { d.Exec(`DELETE FROM llm_profiles WHERE id=$1`, id) })
+	t.Cleanup(func() { deleteTestProfile(t, d, id) })
 	got, err := d.ProfileByID(id)
 	if err != nil || got == nil {
 		t.Fatalf("ProfileByID: %v", err)
@@ -97,17 +100,22 @@ func TestLLMRetryPolicyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the restore below.
+	t.Cleanup(func() { d.Close() })
 
 	before, hadBefore, err := d.GetSetting(settingLLMRetryPolicy)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		var err error
 		if hadBefore {
-			d.SetSetting(settingLLMRetryPolicy, before)
+			err = d.SetSetting(settingLLMRetryPolicy, before)
 		} else {
-			d.Exec(`DELETE FROM settings WHERE key=$1`, settingLLMRetryPolicy)
+			_, err = d.Exec(`DELETE FROM settings WHERE key=$1`, settingLLMRetryPolicy)
+		}
+		if err != nil {
+			t.Errorf("restore %s: %v", settingLLMRetryPolicy, err)
 		}
 	})
 
