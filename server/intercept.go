@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -413,6 +414,67 @@ func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// alwaysAllowPriority places "always allow" rules below every default and
+// manual rule, so any deny or ask rule that matches the same call wins.
+const alwaysAllowPriority = -1000
+
+// interceptAlwaysAllow creates an argv allow rule from a pending Bash request.
+// The request body is never read: the command comes from the stored row, so a
+// caller cannot choose what gets allowed. The request itself stays pending.
+func (s *Server) interceptAlwaysAllow(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, ok := pathInt(r, "id")
+	if !ok {
+		writeErr(w, 400, "bad pending id")
+		return
+	}
+	p, err := pg.GetInterceptPending(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if p == nil {
+		writeErr(w, 404, "not found")
+		return
+	}
+	if p.Status != "pending" {
+		writeErr(w, 409, "the request is no longer pending")
+		return
+	}
+	prefix, err := intercept.AlwaysAllowPrefix(p.ToolName, p.ToolInput)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	pattern, _ := json.Marshal(prefix)
+	rules, err := pg.ListInterceptRules()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	for _, rule := range rules {
+		if rule.MatchType != "argv" || rule.Action != "allow" || !rule.Enabled || rule.MatchTarget != "tool_input" {
+			continue
+		}
+		if tokens, err := intercept.ParseArgvPattern(rule.Pattern); err == nil && slices.Equal(tokens, prefix) {
+			writeJSON(w, 200, map[string]any{"rule": rule, "created": false})
+			return
+		}
+	}
+	// Timeout fields take the rule form's defaults.
+	rule, err := pg.CreateInterceptRule("always-allow: "+strings.Join(prefix, " "), "tool_input", "argv", string(pattern),
+		"allow", "", alwaysAllowPriority, true, true, 60, "deny")
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	s.m.interceptor.Invalidate()
+	writeJSON(w, 200, map[string]any{"rule": rule, "created": true})
+}
+
 // --- target pins (hosts a human approved for one task or one conversation) ---
 
 // taskPinScope resolves {id} to the pin scope of an existing task.
@@ -667,8 +729,14 @@ func validateInterceptRuleReq(req interceptRuleReq) error {
 		if req.MatchTarget != "tool_input" {
 			return fmt.Errorf("an argv rule matches tool_input (the Bash command)")
 		}
-		if _, err := intercept.ParseArgvPattern(req.Pattern); err != nil {
+		tokens, err := intercept.ParseArgvPattern(req.Pattern)
+		if err != nil {
 			return fmt.Errorf("invalid argv pattern: %w", err)
+		}
+		if req.Action == "allow" {
+			if err := intercept.CheckArgvAllow(tokens); err != nil {
+				return err
+			}
 		}
 	default:
 		return fmt.Errorf("match_type must be string, regex or argv")
@@ -708,7 +776,18 @@ func (s *Server) interceptDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "not found")
 		return
 	}
-	writeJSON(w, 200, detail)
+	// The "always allow" button label: the prefix the endpoint would allow,
+	// derived here so the UI never parses the command.
+	out := struct {
+		*db.InterceptDetail
+		AlwaysAllowPrefix string `json:"always_allow_prefix,omitempty"`
+	}{InterceptDetail: detail}
+	if detail.Status == "pending" {
+		if prefix, err := intercept.AlwaysAllowPrefix(detail.ToolName, detail.ToolInput); err == nil {
+			out.AlwaysAllowPrefix = strings.Join(prefix, " ")
+		}
+	}
+	writeJSON(w, 200, out)
 }
 
 // The navigation endpoint returns only the original call and its paired result.

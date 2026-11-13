@@ -753,6 +753,11 @@ func (i *Interceptor) SetRulesForTest(rules []db.InterceptRule) {
 func ruleMatches(r compiledRule, toolName string, input []byte) bool {
 	if r.MatchType == "argv" {
 		// Bash only, on the parsed command; match_target is always tool_input.
+		// The denylist neutralises allow rules only: an argv deny or ask rule
+		// for a denylisted program still matches.
+		if r.Action == "allow" && CheckArgvAllow(r.argv) != nil {
+			return false
+		}
 		return r.MatchTarget == "tool_input" && argvRuleMatches(r.argv, toolName, input)
 	}
 	var subject string

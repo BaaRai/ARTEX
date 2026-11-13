@@ -297,6 +297,38 @@ function DecisionActions({ row, busy, decide }: { row: InterceptApprovalRow; bus
   );
 }
 
+// AlwaysAllowAction creates an argv allow rule from a pending Bash request.
+// The prefix comes from the server; the request itself stays pending.
+function AlwaysAllowAction({ id, prefix }: { id: number; prefix?: string }) {
+  const [busy, setBusy] = React.useState(false);
+  async function create() {
+    setBusy(true);
+    try {
+      const res = await api.interceptAlwaysAllow(id);
+      toast.success(
+        res.created
+          ? "Rule created, the request is still pending approval"
+          : "Rule already exists, the request is still pending approval",
+      );
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <Button size="sm" variant="outline" className="self-start" disabled={busy} onClick={() => void create()}>
+        {prefix ? `Toujours autoriser "${prefix} *"` : "Toujours autoriser"}
+      </Button>
+      <p className="text-muted-foreground text-xs">
+        The prefix does not constrain flags, and it does not cover what the program does next (git hooks, npm
+        scripts, docker images).
+      </p>
+    </div>
+  );
+}
+
 export function ApprovalDetail({
   row,
   busy,
@@ -418,6 +450,9 @@ export function ApprovalDetail({
             ) : null}
           </dl>
           {!readOnly ? <DecisionActions row={current} busy={busy} decide={decide} /> : null}
+          {!readOnly && current.status === "pending" && row.tool_name === "Bash" ? (
+            <AlwaysAllowAction id={row.id} prefix={detail?.always_allow_prefix} />
+          ) : null}
         </div>
       </div>
       {error ? (
