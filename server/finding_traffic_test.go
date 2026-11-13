@@ -172,6 +172,11 @@ func TestFindingTrafficAPIAndExport(t *testing.T) {
 	if w = req("GET", fmt.Sprintf("%s/%d", base, first), ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"binary":true`) {
 		t.Fatal(w.Code, w.Body)
 	}
+	// The viewer reads the heads in clear; the table stores them sealed.
+	var rawHead string
+	if err := s.m.pg.QueryRow(`SELECT req_head FROM traffic_evidence_snapshots WHERE id=$1`, list.Bindings[0].SnapshotID).Scan(&rawHead); err != nil || !strings.HasPrefix(rawHead, "enc:v1:") || !strings.Contains(w.Body.String(), `"req_head":"POST / HTTP/1.1"`) {
+		t.Fatalf("head at rest %q (%v), viewer %s", rawHead, err, w.Body)
+	}
 	if w = req("GET", fmt.Sprintf("%s/%d/body?side=response&offset=20001", base, first), ""); w.Code != 422 {
 		t.Fatal(w.Code, w.Body)
 	}

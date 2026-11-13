@@ -34,5 +34,10 @@ func runEvidenceSuite(m *testing.M) int {
 		panic(err)
 	}
 	defer conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(7337741002)`)
+	// Snapshot inserts seal the heads: load a fixed test key (env, no key file).
+	os.Setenv("ARTEX_SECRET_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err = pg.InitSecrets(""); err != nil {
+		panic(err)
+	}
 	return m.Run()
 }
