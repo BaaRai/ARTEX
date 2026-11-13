@@ -1,11 +1,9 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,30 +23,13 @@ const bbotMaxLineBytes = 64 << 10
 // skipped for exceeding bbotMaxLineBytes.
 func readBbotJSONL(r io.Reader) (bbotIngest, int, error) {
 	var out bbotIngest
-	oversized := 0
-	br := bufio.NewReaderSize(r, bbotMaxLineBytes)
-	for {
-		line, err := br.ReadSlice('\n')
-		if errors.Is(err, bufio.ErrBufferFull) {
-			for errors.Is(err, bufio.ErrBufferFull) { // drop the rest of the line
-				_, err = br.ReadSlice('\n')
-			}
-			oversized++
-			line = nil
-		}
-		if len(bytes.TrimSpace(line)) > 0 {
-			res, _ := parseBbotJSONL(bytes.NewReader(line)) // a bytes.Reader never fails
-			out.InScope = append(out.InScope, res.InScope...)
-			out.Intel = append(out.Intel, res.Intel...)
-			out.Skipped += res.Skipped
-		}
-		if errors.Is(err, io.EOF) {
-			return out, oversized, nil
-		}
-		if err != nil {
-			return out, oversized, err
-		}
-	}
+	oversized, err := readJSONLines(r, func(line []byte) {
+		res, _ := parseBbotJSONL(bytes.NewReader(line)) // a bytes.Reader never fails
+		out.InScope = append(out.InScope, res.InScope...)
+		out.Intel = append(out.Intel, res.Intel...)
+		out.Skipped += res.Skipped
+	})
+	return out, oversized, err
 }
 
 // bbotIntelFact builds the record_fact item for an intel event from its typed

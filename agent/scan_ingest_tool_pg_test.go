@@ -116,3 +116,86 @@ func TestIngestScanOutputPG(t *testing.T) {
 		}
 	}
 }
+
+// ingest_scan_output (PG), JSON formats: nuclei, httpx and ffuf write their
+// assets and facts; a second ingestion keeps the counters and adds no asset
+// row and no fact.
+func TestIngestScanOutputJSONPG(t *testing.T) {
+	d := testDB(t)
+	t.Cleanup(func() { _ = d.Close() })
+	task, err := d.CreateTaskWithOptions("ingest_scan_output_json", "scan-ingest.example.com", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const assetsWhere = `domain LIKE '%scan-ingest.example.com' OR url LIKE '%scan-ingest.example.com%'`
+	t.Cleanup(func() {
+		_ = d.DeleteTask(task.ID)
+		_, _ = d.Exec(`DELETE FROM assets WHERE ` + assetsWhere)
+	})
+	store := d.Exploration(task.ExplorationID)
+	tsx := NewToolSet(store, "worker-1")
+	tsx.SetTaskID(task.ID)
+	tsx.SetAssetStore(d.Assets(), d.Companies())
+	dir := t.TempDir()
+	tool := tsx.ingestScanOutput()
+	formats := map[string]string{"nuclei-jsonl": nucleiFixture, "httpx-jsonl": httpxFixture, "ffuf-json": ffufFixture}
+	ingest := func(format string) map[string]any {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, format+".out"), []byte(formats[format]), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		in, _ := json.Marshal(map[string]string{"format": format, "path": format + ".out"})
+		res, err := tool.Call(context.Background(), in, &actool.ToolContext{WorkingDir: dir})
+		var out map[string]any
+		if err != nil || res.IsError || json.Unmarshal([]byte(res.Flatten()), &out) != nil ||
+			out["asset_errors"] != nil || out["fact_errors"] != nil {
+			t.Fatalf("%s: %v %s", format, err, res.Flatten())
+		}
+		return out
+	}
+	state := func() (assets, facts int) {
+		t.Helper()
+		if err := d.QueryRow(`SELECT count(*) FROM assets WHERE ` + assetsWhere).Scan(&assets); err != nil {
+			t.Fatal(err)
+		}
+		all, err := store.ListByKind(db.KindFact, 500)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range all {
+			if f.Origin == "worker-1" {
+				facts++
+			}
+		}
+		return assets, facts
+	}
+
+	first := map[string]map[string]any{}
+	for format := range formats {
+		if first[format] = ingest(format); first[format]["facts_written"] != 2.0 || first[format]["assets_written"] != 2.0 {
+			t.Fatalf("%s first ingestion: %v", format, first[format])
+		}
+	}
+	assets, facts := state()
+	if facts != 6 || assets == 0 {
+		t.Fatalf("%d assets and %d facts after the first ingestion, want some assets and 6 facts", assets, facts)
+	}
+	var n int
+	if err := d.QueryRow(`SELECT count(*) FROM assets WHERE url LIKE '%evil%' OR domain LIKE '%evil%'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d assets from target text (%v)", n, err)
+	}
+	for format := range formats {
+		out := ingest(format)
+		if out["facts_written"] != 0.0 || out["facts_existing"] != 2.0 {
+			t.Fatalf("%s re-ingestion: %v", format, out)
+		}
+		for _, k := range []string{"hosts", "urls", "events", "skipped", "oversized_lines", "assets_written"} {
+			if out[k] != first[format][k] {
+				t.Fatalf("%s re-ingestion: %s = %v, first run %v", format, k, out[k], first[format][k])
+			}
+		}
+	}
+	if a, f := state(); a != assets || f != facts {
+		t.Fatalf("re-ingestion: %d assets and %d facts, first run %d and %d", a, f, assets, facts)
+	}
+}
