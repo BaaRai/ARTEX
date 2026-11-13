@@ -38,9 +38,9 @@ func TestRenderNoiseProfileTable(t *testing.T) {
 			fmt.Sprintf("- httpx: -rl %d -t %d", c.rps, c.conc),
 			fmt.Sprintf("- katana: -rl %d -c %d", c.rps, c.conc),
 			fmt.Sprintf("- ffuf: -rate %d -t %d", c.rps, c.conc),
-			fmt.Sprintf("- dalfox: --delay %d -w %d", c.delay, c.conc),
+			fmt.Sprintf("- dalfox scan: --rate-limit %d --workers %d", c.rps, c.conc),
 			fmt.Sprintf("- sqlmap: --delay=%s --threads=1", c.sql),
-			fmt.Sprintf("- subfinder: -t %d", c.conc),
+			fmt.Sprintf("at least %d ms between requests", c.delay),
 			"commands launched through Bash are not paced",
 		} {
 			if !strings.Contains(got, want) {
