@@ -1355,7 +1355,8 @@ func (s *Server) getLLM(w http.ResponseWriter, r *http.Request) {
 		"provider":         s.llmCfg.Provider(),
 		"model":            s.llmCfg.Model,
 		"base_url":         s.llmCfg.BaseURL,
-		"proxy":            s.llmCfg.Proxy,
+		"proxy":            maskedSecret(s.llmCfg.Proxy),
+		"proxy_set":        s.llmCfg.Proxy != "",
 		"key_set":          s.llmCfg.APIKey != "",
 		"rate_per_second":  s.llmCfg.RatePerSecond,
 		"rate_per_minute":  s.llmCfg.RatePerMinute,
@@ -1382,6 +1383,11 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
+	}
+	if isMaskedSecret(req.Proxy) { // getLLM returns the proxy masked: keep the current one
+		s.cfgMu.Lock()
+		req.Proxy = s.llmCfg.Proxy
+		s.cfgMu.Unlock()
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
 	cfg.RatePerSecond, cfg.RatePerMinute = req.RatePerSecond, req.RatePerMinute
@@ -1453,6 +1459,14 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	if req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
 			stored = p
+		}
+	}
+	if isMaskedSecret(req.Proxy) { // the form echoes the masked proxy: test with the stored one
+		req.Proxy = ""
+		if stored == nil {
+			s.cfgMu.Lock()
+			req.Proxy = s.llmCfg.Proxy
+			s.cfgMu.Unlock()
 		}
 	}
 	if stored != nil {
@@ -3487,8 +3501,10 @@ func (s *Server) settingsPayload() map[string]any {
 		"web_search_backend":       backend,
 		"brave_key_set":            strings.TrimSpace(braveKey) != "",
 		"tavily_key_set":           strings.TrimSpace(tavilyKey) != "",
-		"web_search_proxy":         proxy,                       // dedicated egress proxy (http/https/socks5), empty = direct
-		"global_proxy":             s.m.GlobalProxy(),           // global egress proxy (http/https/socks5), all target traffic goes through it, empty = direct
+		"web_search_proxy":         maskedSecret(proxy), // proxies may carry user:pass: masked when set, "" = direct
+		"web_search_proxy_set":     proxy != "",
+		"global_proxy":             maskedSecret(s.m.GlobalProxy()), // global egress proxy, masked when set, "" = direct
+		"global_proxy_set":         s.m.GlobalProxy() != "",
 		"python_interpreter":       strings.TrimSpace(pyStored), // user/auto-set value (empty = use runtime detection)
 		"workers":                  s.m.Workers(),               // number of concurrent worker agents (default 3); applies to tasks started afterwards
 		"task_concurrency_enabled": concOn,                      // task concurrency cap switch (default off)
@@ -3591,6 +3607,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	// A masked placeholder echoed back keeps the stored secret, like null.
+	req.BraveKey, req.TavilyKey = keepIfMasked(req.BraveKey), keepIfMasked(req.TavilyKey)
+	req.WebSearchProxy, req.GlobalProxy = keepIfMasked(req.WebSearchProxy), keepIfMasked(req.GlobalProxy)
 	if req.ConstraintsInjectPlanner != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectPlanner, *req.ConstraintsInjectPlanner); err != nil {
 			writeErr(w, 500, err.Error())
@@ -3788,13 +3807,17 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	_, backend, storedBraveKey, storedTavilyKey, _ := s.m.WebSearch()
+	_, backend, storedBraveKey, storedTavilyKey, storedProxy := s.m.WebSearch()
 	if strings.TrimSpace(req.Backend) != "" {
 		backend = req.Backend
 	}
 	// Proxy is taken from the form as-is (empty = direct), so testing reflects exactly
 	// what's shown — including an intentional "clear proxy to test direct" before saving.
+	// The masked placeholder the form shows for a saved proxy means the saved one.
 	proxy := strings.TrimSpace(req.Proxy)
+	if isMaskedSecret(proxy) {
+		proxy = storedProxy
+	}
 	// API keys are secrets the form omits when already saved, so fall back to stored.
 	braveKey := storedBraveKey
 	if strings.TrimSpace(req.BraveKey) != "" {

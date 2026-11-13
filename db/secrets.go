@@ -19,7 +19,8 @@ import (
 	"sync/atomic"
 )
 
-// Secrets at rest: AES-256-GCM, a random nonce per value, AAD "<table>.<column>".
+// Secrets at rest: AES-256-GCM, a random nonce per value, AAD "<table>.<column>"
+// ("settings.<key>" for the secret settings).
 // TEXT stores "enc:v1:<base64(nonce||ciphertext)>"; JSONB stores
 // {"__artex_enc":"enc:v1:..."} over the canonical JSON. Empty values stay empty.
 // A value that fails to decrypt is an error, never returned as-is.
@@ -34,9 +35,32 @@ const (
 type secretColumn struct {
 	table, col string
 	json       bool
+	setting    string // a settings row: its key; "" for a table column
 }
 
-func (c secretColumn) aad() string { return c.table + "." + c.col }
+func (c secretColumn) aad() string {
+	if c.setting != "" {
+		return "settings." + c.setting
+	}
+	return c.table + "." + c.col
+}
+
+// rowFilter limits a settings entry to its own row; the key is a code-owned
+// constant from secretSettingKeys, never input.
+func (c secretColumn) rowFilter() string {
+	if c.setting != "" {
+		return ` AND key='` + c.setting + `'`
+	}
+	return ""
+}
+
+// idCol names the row key: settings rows are keyed by name, the rest by id.
+func (c secretColumn) idCol() string {
+	if c.setting != "" {
+		return "key"
+	}
+	return "id"
+}
 
 // valueExpr is the SQL text that holds the ciphertext, if any.
 func (c secretColumn) valueExpr() string {
@@ -47,12 +71,36 @@ func (c secretColumn) valueExpr() string {
 }
 
 var (
-	colLLMKey      = secretColumn{"llm_profiles", "api_key", false}
-	colMCPEnv      = secretColumn{"mcp_servers", "env", true}
-	colCredPass    = secretColumn{"task_credentials", "password", false}
-	colNotifConfig = secretColumn{"notification_channels", "config", true}
-	secretColumns  = []secretColumn{colLLMKey, colMCPEnv, colCredPass, colNotifConfig}
+	colLLMKey      = secretColumn{"llm_profiles", "api_key", false, ""}
+	colLLMProxy    = secretColumn{"llm_profiles", "proxy", false, ""} // may carry user:pass
+	colMCPEnv      = secretColumn{"mcp_servers", "env", true, ""}
+	colCredPass    = secretColumn{"task_credentials", "password", false, ""}
+	colNotifConfig = secretColumn{"notification_channels", "config", true, ""}
+	secretColumns  = append([]secretColumn{colLLMKey, colLLMProxy, colMCPEnv, colCredPass, colNotifConfig}, secretSettingColumns()...)
 )
+
+// secretSettingKeys are the settings stored encrypted, AAD "settings.<key>".
+// Every other setting stays in clear.
+var secretSettingKeys = []string{"brave_search_api_key", "tavily_search_api_key", "web_search_proxy", "global_proxy"}
+
+func secretSettingColumns() []secretColumn {
+	out := make([]secretColumn, 0, len(secretSettingKeys))
+	for _, k := range secretSettingKeys {
+		out = append(out, secretColumn{"settings", "value", false, k})
+	}
+	return out
+}
+
+// secretSetting returns the secret column of a settings key, ok=false when the
+// key is stored in clear.
+func secretSetting(key string) (secretColumn, bool) {
+	for _, c := range secretColumns {
+		if c.setting != "" && c.setting == key {
+			return c, true
+		}
+	}
+	return secretColumn{}, false
+}
 
 type secretBox struct{ aead cipher.AEAD }
 
@@ -203,7 +251,7 @@ func (d *DB) InitSecrets(keyDir string) error {
 		// A key other than the one that sealed the data fails here, at startup.
 		for _, c := range secretColumns {
 			var v string
-			err := conn.QueryRowContext(ctx, `SELECT `+c.valueExpr()+` FROM `+c.table+` WHERE `+c.valueExpr()+` LIKE 'enc:v1:%' LIMIT 1`).Scan(&v)
+			err := conn.QueryRowContext(ctx, `SELECT `+c.valueExpr()+` FROM `+c.table+` WHERE `+c.valueExpr()+` LIKE 'enc:v1:%'`+c.rowFilter()+` LIMIT 1`).Scan(&v)
 			if err == nil {
 				_, err = box.decrypt(c.aad(), v)
 			}
@@ -241,7 +289,7 @@ func loadSecretKey(ctx context.Context, conn *sql.Conn, keyDir string) ([]byte, 
 	}
 	var parts []string
 	for _, c := range secretColumns {
-		parts = append(parts, `(SELECT count(*) FROM `+c.table+` WHERE `+c.valueExpr()+` LIKE 'enc:v1:%')`)
+		parts = append(parts, `(SELECT count(*) FROM `+c.table+` WHERE `+c.valueExpr()+` LIKE 'enc:v1:%'`+c.rowFilter()+`)`)
 	}
 	var n int64
 	if err := conn.QueryRowContext(ctx, `SELECT `+strings.Join(parts, "+")).Scan(&n); err != nil {
@@ -279,14 +327,14 @@ func loadSecretKey(ctx context.Context, conn *sql.Conn, keyDir string) ([]byte, 
 func backfillSecrets(ctx context.Context, conn *sql.Conn, box *secretBox) (int, error) {
 	total := 0
 	for _, c := range secretColumns {
-		var ids []int64
+		var ids []any // int64 ids, or the settings key
 		var olds, news []string
-		rows, err := conn.QueryContext(ctx, `SELECT id, `+c.col+`::text FROM `+c.table+` WHERE `+c.col+` IS NOT NULL`)
+		rows, err := conn.QueryContext(ctx, `SELECT `+c.idCol()+`, `+c.col+`::text FROM `+c.table+` WHERE `+c.col+` IS NOT NULL`+c.rowFilter())
 		if err != nil {
 			return total, err
 		}
 		for rows.Next() {
-			var id int64
+			var id any
 			var old string
 			if err = rows.Scan(&id, &old); err != nil {
 				break
@@ -296,7 +344,7 @@ func backfillSecrets(ctx context.Context, conn *sql.Conn, box *secretBox) (int, 
 			}
 			nv, serr := box.seal(c, old)
 			if serr != nil {
-				err = fmt.Errorf("backfill %s id=%d: %w", c.aad(), id, serr)
+				err = fmt.Errorf("backfill %s id=%v: %w", c.aad(), id, serr)
 				break
 			}
 			if isSealed(c, nv) { // empty values stay as they are
@@ -315,9 +363,9 @@ func backfillSecrets(ctx context.Context, conn *sql.Conn, box *secretBox) (int, 
 			cast = "::jsonb"
 		}
 		for i, id := range ids {
-			res, err := conn.ExecContext(ctx, `UPDATE `+c.table+` SET `+c.col+`=$1`+cast+` WHERE id=$2 AND `+c.col+`::text=$3`, news[i], id, olds[i])
+			res, err := conn.ExecContext(ctx, `UPDATE `+c.table+` SET `+c.col+`=$1`+cast+` WHERE `+c.idCol()+`=$2 AND `+c.col+`::text=$3`, news[i], id, olds[i])
 			if err != nil {
-				return total, fmt.Errorf("backfill %s id=%d: %w", c.aad(), id, err)
+				return total, fmt.Errorf("backfill %s id=%v: %w", c.aad(), id, err)
 			}
 			if n, _ := res.RowsAffected(); n > 0 {
 				total++
