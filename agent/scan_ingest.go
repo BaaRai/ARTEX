@@ -1,36 +1,44 @@
 package agent
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
 )
 
-// Deterministic ingestion of scanner output files (nmap -oX). The rules are the
-// bbot parser's: only typed fields are read and validated, and every free-text
-// field the target shapes (banner, product, version, hostname, OS name) is kept
-// only inside one Go-quoted fact detail. It never reaches a summary, a notable
+// Deterministic ingestion of scanner output files (nmap -oX, nuclei -jsonl,
+// httpx -json, ffuf -of json). The rules are the bbot parser's: only typed
+// fields are read and validated, and every free-text field the target shapes
+// (banner, product, title, template name, extracted value) is kept only inside
+// one Go-quoted fact detail. It never reaches a summary, a notable
 // item or an instruction.
 
 // scanNotableMax caps the notable items returned per type.
 const scanNotableMax = 20
 
+// scanMaxItems caps the assets and facts one file may yield. The records past
+// it are counted, not ingested, and the result is marked truncated.
+const scanMaxItems = 50000
+
 // scanIngest is what one scanner file yields: counters, the insert_assets
 // items, the facts, and a capped list of notable items per type.
 type scanIngest struct {
-	Events, Ports, Skipped int
-	Truncated              bool
-	hosts, urls            map[string]bool
-	Assets                 []assetInputItem
-	Facts                  []factItem
-	Notable                map[string][]string
+	Events, Ports, Skipped, Oversized, OverCap int
+	Truncated                                  bool
+	hosts, urls                                map[string]bool
+	Assets                                     []assetInputItem
+	Facts                                      []factItem
+	Notable                                    map[string][]string
 }
 
 func newScanIngest() *scanIngest {
@@ -41,6 +49,18 @@ func (s *scanIngest) note(kind, item string) {
 	if len(s.Notable[kind]) < scanNotableMax {
 		s.Notable[kind] = append(s.Notable[kind], item)
 	}
+}
+
+// full reports whether the item cap is reached; the record is then counted
+// in OverCap and dropped. It is checked once per record, so the last record
+// admitted may take the total slightly past the cap.
+func (s *scanIngest) full() bool {
+	if len(s.Assets)+len(s.Facts) < scanMaxItems {
+		return false
+	}
+	s.OverCap++
+	s.Truncated = true
+	return true
 }
 
 // fact records a tool_output fact: the summary is built by the caller from
@@ -61,6 +81,31 @@ func scanHost(h string) string {
 		return h
 	}
 	return ""
+}
+
+// scanURL returns raw re-serialized and its host when it is an http(s) URL
+// with a valid host, "" otherwise.
+func scanURL(raw string) (string, string) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", ""
+	}
+	h := scanHost(u.Hostname())
+	if h == "" {
+		return "", ""
+	}
+	return u.String(), h
+}
+
+// scanHostOf reads a host from a URL, a host:port or a bare host.
+func scanHostOf(s string) string {
+	if _, h := scanURL(s); h != "" {
+		return h
+	}
+	if h, _, err := net.SplitHostPort(strings.TrimSpace(s)); err == nil {
+		return scanHost(h)
+	}
+	return scanHost(s)
 }
 
 // ---- nmap -oX ----
@@ -148,7 +193,7 @@ func nmapWebScheme(name, tunnel string) string {
 }
 
 func (s *scanIngest) addNmapHost(h nmapHost) {
-	if h.Status.State != "up" {
+	if h.Status.State != "up" || s.full() {
 		return
 	}
 	ip := ""
@@ -212,4 +257,228 @@ func (s *scanIngest) addNmapHost(h nmapHost) {
 	}
 	detail["ports"] = ports
 	s.fact(summary, detail)
+}
+
+// readJSONLines calls fn with each non-blank line of r, and returns the number
+// of lines skipped for exceeding bbotMaxLineBytes. fn must not keep the line:
+// its buffer is reused by the next read.
+func readJSONLines(r io.Reader, fn func(line []byte)) (int, error) {
+	oversized := 0
+	br := bufio.NewReaderSize(r, bbotMaxLineBytes)
+	for {
+		line, err := br.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			for errors.Is(err, bufio.ErrBufferFull) { // drop the rest of the line
+				_, err = br.ReadSlice('\n')
+			}
+			oversized++
+			line = nil
+		}
+		if len(bytes.TrimSpace(line)) > 0 {
+			fn(line)
+		}
+		if errors.Is(err, io.EOF) {
+			return oversized, nil
+		}
+		if err != nil {
+			return oversized, err
+		}
+	}
+}
+
+// ---- nuclei -jsonl ----
+
+type nucleiResult struct {
+	TemplateID string `json:"template-id"`
+	Info       struct {
+		Name     string `json:"name"`
+		Severity string `json:"severity"`
+	} `json:"info"`
+	Host        string   `json:"host"`
+	MatchedAt   string   `json:"matched-at"`
+	MatcherName string   `json:"matcher-name"`
+	Extracted   []string `json:"extracted-results"`
+}
+
+// addNuclei records one nuclei result as a fact, and the scanned target (not
+// the matched path) as an asset when it is valid. No finding: a scanner match
+// is unverified until the planner checks it.
+func (s *scanIngest) addNuclei(line []byte) {
+	var r nucleiResult
+	if s.full() {
+		return
+	}
+	if json.Unmarshal(line, &r) != nil {
+		s.Skipped++
+		return
+	}
+	host := scanHostOf(r.Host)
+	if host == "" {
+		host = scanHostOf(r.MatchedAt)
+	}
+	tid := bbotToken(r.TemplateID)
+	if tid == "" || host == "" {
+		s.Skipped++
+		return
+	}
+	sev := strings.ToLower(r.Info.Severity)
+	switch sev {
+	case "info", "low", "medium", "high", "critical":
+	default:
+		sev = "unknown"
+	}
+	s.Events++
+	s.hosts[host] = true
+	if u, _ := scanURL(r.MatchedAt); u != "" {
+		s.urls[u] = true
+	}
+	switch u, _ := scanURL(r.Host); {
+	case u != "":
+		s.Assets = append(s.Assets, assetInputItem{Type: "service", URL: u})
+	case net.ParseIP(host) != nil:
+		s.Assets = append(s.Assets, assetInputItem{Type: "ip", IP: host})
+	default:
+		s.Assets = append(s.Assets, assetInputItem{Type: "subdomain", Domain: host})
+	}
+	s.note("results", tid+" ("+sev+") on "+host)
+	s.fact(fmt.Sprintf("nuclei: template %s (severity %s) matched on %s; unverified scanner result", tid, sev, host),
+		map[string]any{"name": r.Info.Name, "host": r.Host, "matched_at": r.MatchedAt,
+			"matcher_name": r.MatcherName, "extracted_results": r.Extracted})
+}
+
+// ---- httpx -json ----
+
+type httpxResult struct {
+	URL           string          `json:"url"`
+	StatusCode    int             `json:"status_code"`
+	Title         string          `json:"title"`
+	Tech          []string        `json:"tech"`
+	Webserver     string          `json:"webserver"`
+	ContentLength int64           `json:"content_length"`
+	Host          string          `json:"host"`
+	IP            string          `json:"ip"`
+	TLS           json.RawMessage `json:"tls"`
+}
+
+func (s *scanIngest) addHttpx(line []byte) {
+	var r httpxResult
+	if s.full() {
+		return
+	}
+	if json.Unmarshal(line, &r) != nil {
+		s.Skipped++
+		return
+	}
+	u, host := scanURL(r.URL)
+	if u == "" {
+		s.Skipped++
+		return
+	}
+	s.Events++
+	s.hosts[host] = true
+	s.urls[u] = true
+	item := assetInputItem{Type: "service", URL: u, PageTitle: r.Title, Technologies: r.Tech}
+	for _, c := range []string{r.IP, r.Host} {
+		if ip := net.ParseIP(strings.TrimSpace(c)); ip != nil {
+			item.IP = ip.String()
+			break
+		}
+	}
+	if r.StatusCode > 0 {
+		item.StatusCode = &r.StatusCode
+	}
+	if r.ContentLength > 0 {
+		item.ContentLength = &r.ContentLength
+	}
+	s.Assets = append(s.Assets, item)
+	s.note("urls", fmt.Sprintf("%s %d", u, r.StatusCode))
+	s.fact(fmt.Sprintf("httpx: %s responded with status %d", u, r.StatusCode),
+		map[string]any{"title": r.Title, "tech": r.Tech, "webserver": r.Webserver, "content_length": r.ContentLength,
+			"host": r.Host, "ip": r.IP, "tls": r.TLS})
+}
+
+// ---- ffuf -of json ----
+
+type ffufResult struct {
+	Input    json.RawMessage `json:"input"`
+	Status   int             `json:"status"`
+	Length   int64           `json:"length"`
+	Words    int             `json:"words"`
+	Lines    int             `json:"lines"`
+	URL      string          `json:"url"`
+	Redirect string          `json:"redirectlocation"`
+}
+
+// readFfufJSON walks the top-level object and decodes results[] one element at
+// a time. Other keys are skipped. A file cut short keeps the results read
+// before the cut and is marked truncated.
+func readFfufJSON(r io.Reader, s *scanIngest) error {
+	dec := json.NewDecoder(r)
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return errors.New("not a JSON object")
+	}
+	err := func() error {
+		for dec.More() {
+			key, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			if key != "results" {
+				var skip json.RawMessage
+				if err := dec.Decode(&skip); err != nil {
+					return err
+				}
+				continue
+			}
+			if tok, err := dec.Token(); err != nil || tok != json.Delim('[') {
+				return errors.New("results is not an array")
+			}
+			for dec.More() {
+				var raw json.RawMessage
+				if err := dec.Decode(&raw); err != nil {
+					return err
+				}
+				s.addFfuf(raw)
+			}
+			if _, err := dec.Token(); err != nil { // ']'
+				return err
+			}
+		}
+		_, err := dec.Token() // '}'
+		return err
+	}()
+	if err != nil {
+		s.Truncated = true
+	}
+	return nil
+}
+
+func (s *scanIngest) addFfuf(raw json.RawMessage) {
+	var r ffufResult
+	if s.full() {
+		return
+	}
+	if json.Unmarshal(raw, &r) != nil {
+		s.Skipped++
+		return
+	}
+	u, host := scanURL(r.URL)
+	if u == "" {
+		s.Skipped++
+		return
+	}
+	s.Events++
+	s.hosts[host] = true
+	s.urls[u] = true
+	item := assetInputItem{Type: "service", URL: u}
+	if r.Status > 0 {
+		item.StatusCode = &r.Status
+	}
+	if r.Length > 0 {
+		item.ContentLength = &r.Length
+	}
+	s.Assets = append(s.Assets, item)
+	s.note("urls", fmt.Sprintf("%s %d", u, r.Status))
+	s.fact(fmt.Sprintf("ffuf: %s returned status %d, %d bytes, %d words, %d lines", u, r.Status, r.Length, r.Words, r.Lines),
+		map[string]any{"input": r.Input, "redirectlocation": r.Redirect})
 }
