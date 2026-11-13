@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"testing"
 	"time"
 )
@@ -331,19 +332,36 @@ func TestCompanyScopeAttribution(t *testing.T) {
 		d.Close()
 		t.Fatalf("startMax: %v", err)
 	}
+	// Remove everything the test creates, or the next pass on the same database
+	// finds this company's scope and attributes its assets to it. Assets first
+	// (they reference the company), then the company; its scope rows cascade.
+	var cid int64
 	t.Cleanup(func() {
-		_, _ = d.Exec(`DELETE FROM assets WHERE id > $1`, startMax)
-		d.Close()
+		defer d.Close()
+		if _, err := d.Exec(`DELETE FROM assets WHERE id > $1`, startMax); err != nil {
+			t.Errorf("cleanup assets: %v", err)
+		}
+		if cid != 0 {
+			if _, err := d.Exec(`DELETE FROM companies WHERE id = $1`, cid); err != nil {
+				t.Errorf("cleanup company %d: %v", cid, err)
+			}
+		}
 	})
 
-	uniq := startMax + 1
-	root := fmt.Sprintf("scopetest%d.com", uniq)
+	// Unique per run: MAX(assets.id) comes back to the same value after cleanup,
+	// so it cannot tell one pass from the next. The in-scope /24 is picked per
+	// run from 198.18.0.0/15 so a scope left by an interrupted run cannot claim
+	// this run's IP.
+	uniq := fmt.Sprintf("%d%d", time.Now().UnixNano(), rand.Uint32())
+	n := rand.IntN(512)
+	cidr := fmt.Sprintf("198.%d.%d.0/24", 18+n/256, n%256)
+	root := fmt.Sprintf("scopetest%s.com", uniq)
 	sub := "api." + root
-	ipIn := "198.51.100.9"
+	ipIn := fmt.Sprintf("198.%d.%d.9", 18+n/256, n%256)
 	ipOut := "203.0.113.9"
-	outDomain := fmt.Sprintf("other%d.net", uniq)
+	outDomain := fmt.Sprintf("other%s.net", uniq)
 
-	cid, _, err := cs.UpsertCompany(fmt.Sprintf("ScopeCo %d", uniq), "")
+	cid, _, err = cs.UpsertCompany(fmt.Sprintf("ScopeCo %s", uniq), "")
 	if err != nil {
 		t.Fatalf("UpsertCompany: %v", err)
 	}
@@ -359,7 +377,7 @@ func TestCompanyScopeAttribution(t *testing.T) {
 		t.Fatalf("pre-scope asset should be unattributed, got %v", *preCompanyID)
 	}
 
-	cs.AddScope(cid, []string{root, "198.51.100.0/24"}, "unit test")
+	cs.AddScope(cid, []string{root, cidr}, "unit test")
 
 	mustCid := func(id int64, want int64, label string) {
 		var cID *int64
