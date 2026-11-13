@@ -677,6 +677,8 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// bbot output by path: in-scope assets via insert_assets, the rest as
 		// third_party_intel facts (never auto-scoped).
 		t.ingestBbot(),
+		// scanner output (nmap -oX) by path, without the raw output.
+		t.ingestScanOutput(),
 		// Task credentials (#3): reuse user-declared test accounts, record
 		// self-registered ones so they are not forgotten.
 		t.saveTaskCredential(), t.listTaskCredentials(),

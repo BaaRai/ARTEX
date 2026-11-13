@@ -28,7 +28,7 @@ var noTargetTools = toolSet(
 	"set_goals", "set_constraints", "list_goals", "prove_goal", "goal_met",
 	"insert_assets", "add_company_scope", "add_task_scope", "list_assets",
 	"list_untested_assets", "list_companies", "report_finding", "record_fact",
-	"save_task_credential", "list_task_credentials", "ingest_bbot", "record_coverage",
+	"save_task_credential", "list_task_credentials", "ingest_bbot", "ingest_scan_output", "record_coverage",
 	// cross-task orchestration, findings and retests (server)
 	"list_tasks", "list_llm_profiles", "spawn_task", "pause_task", "get_task_graph",
 	"list_task_findings", "add_task_hint", "get_task_worker_trace",
