@@ -74,7 +74,7 @@ func (s *Server) pgCreateCustomTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var err error
-	if req.Exec, err = unmaskToolExec(nil, req.Exec); err != nil { // nothing stored: a placeholder is refused
+	if req.Exec, err = unmaskToolExec("", nil, req.Kind, req.Exec); err != nil { // nothing stored: a placeholder is refused
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -116,7 +116,7 @@ func (s *Server) pgUpdateCustomTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "http tools must provide a parameter JSON Schema (cannot be left empty)")
 		return
 	}
-	if req.Exec, err = unmaskToolExec(existing.Exec, req.Exec); err != nil {
+	if req.Exec, err = unmaskToolExec(existing.Kind, existing.Exec, req.Kind, req.Exec); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -167,6 +167,7 @@ func (s *Server) pgTestCustomTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid request body")
 		return
 	}
+	var storedKind string
 	var stored json.RawMessage
 	if req.Key != "" {
 		t, err := pg.GetTool(req.Key)
@@ -175,11 +176,11 @@ func (s *Server) pgTestCustomTool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if t != nil && !t.System {
-			stored = t.Exec
+			storedKind, stored = t.Kind, t.Exec
 		}
 	}
 	var err error
-	if req.Exec, err = unmaskToolExec(stored, req.Exec); err != nil {
+	if req.Exec, err = unmaskToolExec(storedKind, stored, req.Kind, req.Exec); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -294,14 +295,16 @@ func maskToolExec(raw json.RawMessage) json.RawMessage {
 // unmaskToolExec puts the stored value back for every header, proxy or body sent
 // as the placeholder, so a client echoing the list response keeps the stored
 // secret; an explicit value replaces it and "" clears it. A placeholder with
-// nothing stored to keep (stored nil on create) is refused.
-func unmaskToolExec(stored, in json.RawMessage) (json.RawMessage, error) {
+// nothing stored to keep (stored nil on create) is refused. As for the MCP env,
+// a stored secret is only kept for the destination it was configured for: when
+// the url (exact string) or the kind changes, a placeholder is refused.
+func unmaskToolExec(storedKind string, stored json.RawMessage, kind string, in json.RawMessage) (json.RawMessage, error) {
 	var e, old map[string]any
 	if json.Unmarshal(in, &e) != nil || e == nil {
 		return in, nil // not an object: stored or refused as before
 	}
 	_ = json.Unmarshal(stored, &old)
-	changed := false
+	changed, kept := false, false
 	for _, k := range toolExecFlags {
 		if _, ok := e[k]; ok {
 			delete(e, k)
@@ -318,7 +321,7 @@ func unmaskToolExec(stored, in json.RawMessage) (json.RawMessage, error) {
 		if !ok {
 			return nil, fmt.Errorf("header %q: masked value but nothing stored to keep", k)
 		}
-		headers[k], changed = prev, true
+		headers[k], changed, kept = prev, true, true
 	}
 	for _, k := range []string{"proxy", "body"} {
 		if s, ok := e[k].(string); !ok || !isMaskedSecret(s) {
@@ -328,7 +331,12 @@ func unmaskToolExec(stored, in json.RawMessage) (json.RawMessage, error) {
 		if prev == "" {
 			return nil, fmt.Errorf("%s: masked value but nothing stored to keep", k)
 		}
-		e[k], changed = prev, true
+		e[k], changed, kept = prev, true, true
+	}
+	oldURL, _ := old["url"].(string)
+	newURL, _ := e["url"].(string)
+	if kept && (oldURL != newURL || storedKind != kind) {
+		return nil, fmt.Errorf("destination changed (url or kind) while a stored secret was kept: re-enter the masked header/proxy/body or clear it; stored secrets are not sent to a new destination")
 	}
 	if !changed {
 		return in, nil

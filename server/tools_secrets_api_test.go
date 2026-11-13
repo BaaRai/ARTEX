@@ -7,8 +7,90 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+// A placeholder keeps the stored secret only for the url and kind it was saved
+// with: a changed destination is refused before any write or request.
+func TestCustomToolExecDestinationGuard(t *testing.T) {
+	s, _, request := trafficEvidenceServer(t)
+	pg := s.m.PG()
+	var hits atomic.Int32
+	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		io.WriteString(w, "auth="+r.Header.Get("Authorization"))
+	}))
+	t.Cleanup(echo.Close)
+	t.Cleanup(func() { pg.Exec(`DELETE FROM tools WHERE key LIKE 't_secguard%'`) })
+	const secret = "Bearer guard-plain-0001"
+	schema := `{"type":"object","properties":{"q":{"type":"string"}}}`
+	body := func(kind, url, hdr string) string {
+		e, _ := json.Marshal(map[string]any{"method": "GET", "url": url, "headers": map[string]string{"Authorization": hdr}})
+		return `{"key":"t_secguard","kind":"` + kind + `","enabled":true,"schema":` + schema + `,"exec":` + string(e) + `}`
+	}
+	storedExec := func() (url, auth string) {
+		tl, err := pg.GetTool("t_secguard")
+		if err != nil || tl == nil {
+			t.Fatalf("GetTool: %v", err)
+		}
+		var e struct {
+			URL     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
+		}
+		_ = json.Unmarshal(tl.Exec, &e)
+		return e.URL, e.Headers["Authorization"]
+	}
+	if resp := request("POST", "/api/tools/custom", body("http", echo.URL, secret)); resp.Code != 200 {
+		t.Fatalf("create: HTTP %d %s", resp.Code, resp.Body.String())
+	}
+	moved := echo.URL + "/elsewhere"
+
+	// 1. Masked header, changed url: refused, nothing written.
+	if resp := request("PUT", "/api/tools/custom/t_secguard", body("http", moved, "__masked__")); resp.Code != 400 {
+		t.Fatalf("masked header with a changed url must be refused, got HTTP %d", resp.Code)
+	}
+	if url, auth := storedExec(); url != echo.URL || auth != secret {
+		t.Fatalf("a refused update changed the stored exec: %s %s", url, auth)
+	}
+	// An empty url against a stored one is a change too.
+	if resp := request("PUT", "/api/tools/custom/t_secguard", body("http", "", "__masked__")); resp.Code != 400 {
+		t.Fatalf("masked header with an emptied url must be refused, got HTTP %d", resp.Code)
+	}
+
+	// 2. Masked header, same url: kept.
+	if resp := request("PUT", "/api/tools/custom/t_secguard", body("http", echo.URL, "__masked__")); resp.Code != 200 {
+		t.Fatalf("masked header with the same url: HTTP %d %s", resp.Code, resp.Body.String())
+	}
+	if url, auth := storedExec(); url != echo.URL || auth != secret {
+		t.Fatalf("the stored secret was not kept: %s %s", url, auth)
+	}
+
+	// 3. Test endpoint, masked header, changed url: refused, no request sent.
+	e, _ := json.Marshal(map[string]any{"method": "GET", "url": moved, "headers": map[string]string{"Authorization": "__masked__"}})
+	if resp := request("POST", "/api/tools/custom/test", `{"key":"t_secguard","kind":"http","exec":`+string(e)+`}`); resp.Code != 400 {
+		t.Fatalf("test endpoint with a changed url must be refused, got HTTP %d %s", resp.Code, resp.Body.String())
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("the echo server received %d request(s); the stored secret left", n)
+	}
+
+	// 4. Kind change while keeping a placeholder: refused.
+	if resp := request("PUT", "/api/tools/custom/t_secguard", body("command", echo.URL, "__masked__")); resp.Code != 400 {
+		t.Fatalf("a kind change with a placeholder must be refused, got HTTP %d", resp.Code)
+	}
+	if tl, _ := pg.GetTool("t_secguard"); tl == nil || tl.Kind != "http" {
+		t.Fatalf("a refused kind change was written: %v", tl)
+	}
+
+	// 5. An explicit value with a changed url is allowed.
+	if resp := request("PUT", "/api/tools/custom/t_secguard", body("http", moved, "Bearer typed-0002")); resp.Code != 200 {
+		t.Fatalf("explicit header with a changed url: HTTP %d %s", resp.Code, resp.Body.String())
+	}
+	if url, auth := storedExec(); url != moved || auth != "Bearer typed-0002" {
+		t.Fatalf("explicit replace not stored: %s %s", url, auth)
+	}
+}
 
 // A custom tool's exec: headers, proxy and body are masked by GET /api/tools;
 // the placeholder keeps the stored value on update and in the test endpoint, a
