@@ -15,6 +15,7 @@ require (
 	golang.org/x/net v0.62.0
 	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.52.0
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (
@@ -31,7 +32,6 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

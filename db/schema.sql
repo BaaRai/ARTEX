@@ -1076,7 +1076,7 @@ CREATE TABLE IF NOT EXISTS intercept_rules (
     enabled         BOOLEAN NOT NULL DEFAULT true,
     priority        INTEGER NOT NULL DEFAULT 0,
     match_target    TEXT NOT NULL CHECK (match_target IN ('tool_name', 'tool_input')),
-    match_type      TEXT NOT NULL CHECK (match_type IN ('string', 'regex')),
+    match_type      TEXT NOT NULL CHECK (match_type IN ('string', 'regex', 'argv')),
     pattern         TEXT NOT NULL,
     action          TEXT NOT NULL CHECK (action IN ('allow', 'deny', 'ask')),
     message         TEXT NOT NULL DEFAULT '',
@@ -1086,6 +1086,10 @@ CREATE TABLE IF NOT EXISTS intercept_rules (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Allow argv prefix rules on databases created before them (pattern = JSON array of tokens).
+ALTER TABLE intercept_rules DROP CONSTRAINT IF EXISTS intercept_rules_match_type_check;
+ALTER TABLE intercept_rules ADD CONSTRAINT intercept_rules_match_type_check
+    CHECK (match_type IN ('string','regex','argv'));
 DROP TRIGGER IF EXISTS trg_intercept_rules_upd ON intercept_rules;
 CREATE TRIGGER trg_intercept_rules_upd BEFORE UPDATE ON intercept_rules
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

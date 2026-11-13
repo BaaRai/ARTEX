@@ -149,7 +149,7 @@ type RuleForm = {
   enabled: boolean;
   priority: number;
   match_target: "tool_name" | "tool_input";
-  match_type: "string" | "regex";
+  match_type: "string" | "regex" | "argv";
   pattern: string;
   action: InterceptAction;
   message: string;
@@ -171,6 +171,17 @@ const defaultForm = (): RuleForm => ({
   timeout_seconds: 60,
   timeout_action: "deny",
 });
+
+// An argv pattern (JSON array of tokens) shown as a prefix: ["nmap"] -> "nmap *".
+function argvLabel(pattern: string): string {
+  try {
+    const tokens: unknown = JSON.parse(pattern);
+    if (Array.isArray(tokens)) return `${tokens.join(" ")} *`;
+  } catch {
+    // not a JSON array: show the raw pattern
+  }
+  return pattern;
+}
 
 // ---- small components ----
 
@@ -720,12 +731,12 @@ export default function InterceptPage() {
                     </TableCell>
                     <TableCell>
                       <span className="text-xs text-muted-foreground">
-                        {rule.match_type === "regex" ? "Regex" : "String"}
+                        {rule.match_type === "regex" ? "Regex" : rule.match_type === "argv" ? "Argv prefix" : "String"}
                       </span>
                     </TableCell>
                     <TableCell className="max-w-[220px]">
                       <code className="block truncate rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
-                        {rule.pattern}
+                        {rule.match_type === "argv" ? argvLabel(rule.pattern) : rule.pattern}
                       </code>
                     </TableCell>
                     <TableCell>
@@ -814,19 +825,24 @@ export default function InterceptPage() {
             <Field label="Match type">
               <Select
                 value={form.match_type}
-                onValueChange={(v) => set({ match_type: v as RuleForm["match_type"] })}
+                onValueChange={(v) => {
+                  const match_type = v as RuleForm["match_type"];
+                  // An argv rule always matches the Bash command in tool_input.
+                  set(match_type === "argv" ? { match_type, match_target: "tool_input" } : { match_type });
+                }}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="string">String contains</SelectItem>
                   <SelectItem value="regex">Regular expression</SelectItem>
+                  <SelectItem value="argv">Argv prefix (Bash only)</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
 
             <Field label="Pattern">
               <Input
-                placeholder={form.match_type === "regex" ? "^Bash$" : "rm -rf"}
+                placeholder={form.match_type === "regex" ? "^Bash$" : form.match_type === "argv" ? '["git","push"]' : "rm -rf"}
                 value={form.pattern}
                 onChange={(e) => set({ pattern: e.target.value })}
                 className={regexErr ? "border-destructive focus-visible:ring-destructive" : ""}
@@ -836,6 +852,13 @@ export default function InterceptPage() {
               )}
               {regexWarn && (
                 <p className="text-xs text-amber-600 mt-1">Contains Go RE2 extended syntax (e.g. <code className="font-mono">(?i)</code>); the browser cannot preview it, and the server validates on submission</p>
+              )}
+              {form.match_type === "argv" && (
+                <p className="text-xs text-amber-600 mt-1">
+                  JSON array of 1 to 8 tokens: the program and its subcommands, no flags. Matches a single simple Bash command
+                  whose prefix is exactly <code className="font-mono">{argvLabel(form.pattern)}</code>. Flags are not constrained:
+                  <code className="font-mono"> [&quot;git&quot;,&quot;push&quot;]</code> also covers <code className="font-mono">git push --force</code>.
+                </p>
               )}
             </Field>
 
