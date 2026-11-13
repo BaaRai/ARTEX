@@ -25,8 +25,11 @@ type ReviewInput struct {
 	Version    int               `json:"version"`
 	WorkingDir string            `json:"working_directory,omitempty"`
 	Background *ReviewBackground `json:"background,omitempty"`
-	Tool       string            `json:"tool_name"`
-	Arguments  json.RawMessage   `json:"arguments"`
+	// OperatorPolicy is set in closed mode only: the operator's custom judge
+	// prompt, carried as bounded data for the operator_policy question.
+	OperatorPolicy *ReviewPolicy   `json:"operator_policy,omitempty"`
+	Tool           string          `json:"tool_name"`
+	Arguments      json.RawMessage `json:"arguments"`
 }
 
 type reviewContextKey struct{}

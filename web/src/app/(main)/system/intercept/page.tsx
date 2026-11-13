@@ -197,10 +197,11 @@ const FOLLOW_ACTIVE = "0"; // profile_id 0 = follow the active/default profile
 
 const defaultJudge = (): JudgeConfig => ({
   enabled: false,
+  mode: "closed",
   profile_id: 0,
   prompt: "",
   timeout_seconds: 15,
-  fail_action: "allow",
+  fail_action: "ask",
   ask_timeout_seconds: 300,
   ask_timeout_action: "deny",
 });
@@ -372,6 +373,15 @@ function JudgeCard() {
                           {p.name} ({p.model})
                         </SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Judge mode">
+                  <Select value={cfg.mode ?? "closed"} onValueChange={(v) => patch({ mode: v as JudgeConfig["mode"] })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="closed">Closed questions (code decides; prompt is the operator policy; failure asks)</SelectItem>
+                      <SelectItem value="freeform">Free-form prompt (model decides)</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>

@@ -364,7 +364,7 @@ func (g *gateDB) judge(action string) {
 	g.t.Helper()
 	cfg := g.ic.GetJudgeConfig()
 	on := cfg
-	on.Enabled = true
+	on.Enabled, on.Mode = true, intercept.JudgeModeFreeform
 	if err := g.ic.SetJudgeConfig(on); err != nil {
 		g.t.Fatal(err)
 	}

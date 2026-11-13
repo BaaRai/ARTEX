@@ -170,6 +170,11 @@ func (p *pendingManager) remove(id int64, ch chan bool) {
 // free of any llm dependency. profileID == 0 means "use the active/default profile".
 type Reviewer func(ctx context.Context, profileID int64, prompt string, input ReviewInput) (Decision, error)
 
+// Completer runs one model completion for the closed-question judge and returns
+// the raw reply text and the profile it used. The reply is parsed and decided
+// here, in code; the server layer only carries the text.
+type Completer func(ctx context.Context, profileID int64, system, user string) (text string, usedProfileID int64, err error)
+
 // Interceptor loads intercept rules from the database and evaluates them on
 // tool calls. It is safe for concurrent use.
 type Interceptor struct {
@@ -178,7 +183,8 @@ type Interceptor struct {
 	cached       []compiledRule  // sorted by priority DESC; nil means not loaded yet
 	enabledTools map[string]bool // nil means not loaded yet
 	pending      *pendingManager
-	reviewer     Reviewer // nil = LLM fallback judge not wired
+	reviewer     Reviewer  // nil = freeform LLM fallback judge not wired
+	completer    Completer // nil = closed-question judge not wired
 	// upstreamProxy reports whether target traffic leaves through an upstream
 	// egress proxy (nil = no). Injected by the server layer.
 	upstreamProxy func() bool
@@ -209,6 +215,13 @@ func (i *Interceptor) SetUpstreamProxyCheck(f func() bool) {
 func (i *Interceptor) SetReviewer(r Reviewer) {
 	i.mu.Lock()
 	i.reviewer = r
+	i.mu.Unlock()
+}
+
+// SetCompleter installs the closed-question judge callback. Passing nil disables it.
+func (i *Interceptor) SetCompleter(c Completer) {
+	i.mu.Lock()
+	i.completer = c
 	i.mu.Unlock()
 }
 
@@ -369,7 +382,8 @@ type Decision struct {
 	RuleID           int64
 	TimeoutEnabled   bool
 	TimeoutSeconds   int
-	TimeoutAction    string // "deny" | "allow"
+	TimeoutAction    string           // "deny" | "allow"
+	JudgeAnswers     []db.JudgeAnswer // closed-mode judge answers, stored in the audit
 }
 
 // --- LLM fallback judge ---
@@ -383,12 +397,21 @@ const (
 	settingJudgeFailAction       = "llm_judge_fail_action"
 	settingJudgeAskTimeoutSecs   = "llm_judge_ask_timeout_seconds"
 	settingJudgeAskTimeoutAction = "llm_judge_ask_timeout_action"
+	settingJudgeMode             = "llm_judge_mode"
 )
 
-// Judge default values.
+// Judge modes: closed asks the code-owned questions and decides in code;
+// freeform is the original allow/ask/deny prompt.
+const (
+	JudgeModeClosed   = "closed"
+	JudgeModeFreeform = "freeform"
+)
+
+// Judge default values. A judge that fails never allows by default: an invalid
+// reply or a failed call goes to a human.
 const (
 	defaultJudgeTimeoutSecs      = 15
-	defaultJudgeFailAction       = "allow"
+	defaultJudgeFailAction       = "ask"
 	defaultJudgeAskTimeoutSecs   = 300
 	defaultJudgeAskTimeoutAction = "deny"
 )
@@ -397,6 +420,7 @@ const (
 // non-empty (falls back to DefaultJudgePrompt).
 type JudgeConfig struct {
 	Enabled           bool   `json:"enabled"`
+	Mode              string `json:"mode"`       // closed|freeform
 	ProfileID         int64  `json:"profile_id"` // 0 = follow active/default
 	Prompt            string `json:"prompt"`
 	TimeoutSeconds    int    `json:"timeout_seconds"`
@@ -411,6 +435,7 @@ type JudgeConfig struct {
 func (i *Interceptor) judgeConfig() JudgeConfig {
 	c := JudgeConfig{
 		Enabled:           i.db.GetBool(settingJudgeEnabled, false),
+		Mode:              i.getSettingChoice(settingJudgeMode, JudgeModeClosed, JudgeModeClosed, JudgeModeFreeform),
 		ProfileID:         int64(i.getSettingInt(settingJudgeProfileID, 0)),
 		TimeoutSeconds:    i.getSettingInt(settingJudgeTimeoutSecs, defaultJudgeTimeoutSecs),
 		FailAction:        i.getSettingChoice(settingJudgeFailAction, defaultJudgeFailAction, "allow", "ask", "deny"),
@@ -468,6 +493,10 @@ func (i *Interceptor) SetJudgeConfig(c JudgeConfig) error {
 	if err := i.db.SetBool(settingJudgeEnabled, c.Enabled); err != nil {
 		return err
 	}
+	// An empty or unknown mode reads back as the default, closed.
+	if err := i.db.SetSetting(settingJudgeMode, c.Mode); err != nil {
+		return err
+	}
 	if err := i.db.SetSetting(settingJudgeProfileID, strconv.FormatInt(c.ProfileID, 10)); err != nil {
 		return err
 	}
@@ -498,15 +527,24 @@ func (i *Interceptor) SetJudgeConfig(c JudgeConfig) error {
 // Judge runs the LLM fallback judge for a tool call that matched no rule. It
 // returns (Decision, true) when the judge produced a terminal verdict, or
 // (Decision{}, false) when the fallback is disabled or not wired (caller then
-// keeps the current behavior: allow). On model error or an unparseable reply it
-// falls back to the configured FailAction. Ask verdicts carry the human-approval
-// timeout so the existing HandleAsk consumes them unchanged.
+// keeps the current behavior: allow). In closed mode (the default) the decision
+// is code-owned and every failure is ask (see judgeClosed). In freeform mode a
+// model error or an unparseable reply falls back to the configured FailAction.
+// Ask verdicts carry the human-approval timeout so the existing HandleAsk
+// consumes them unchanged.
 func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.RawMessage) (Decision, bool) {
 	cfg := i.judgeConfig()
 	i.mu.RLock()
-	rv := i.reviewer
+	rv, cp := i.reviewer, i.completer
 	i.mu.RUnlock()
-	if !cfg.Enabled || rv == nil {
+	return judgeWith(ctx, cfg, rv, cp, tool, arguments)
+}
+
+// judgeWith is Judge on a resolved configuration, without the database.
+func judgeWith(ctx context.Context, cfg JudgeConfig, rv Reviewer, cp Completer, tool string, arguments json.RawMessage) (Decision, bool) {
+	closed := cfg.Mode != JudgeModeFreeform
+	// Closed mode without a completer is not "off": judgeClosed answers ask.
+	if !cfg.Enabled || (!closed && rv == nil) {
 		return Decision{}, false
 	}
 
@@ -517,16 +555,26 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 		defer cancel()
 	}
 
-	input, contextErr := BuildReviewInput(cctx, tool, arguments)
+	// Closed mode checks the argument cap before building its own input.
+	var input ReviewInput
+	var contextErr error
+	if !closed {
+		input, contextErr = BuildReviewInput(cctx, tool, arguments)
+	}
+	policy := cfg.Prompt // closed mode: the stored prompt is the operator policy (data)
 	cfg.Prompt = EffectiveJudgePrompt(cfg.Prompt)
 	var out Decision
 	var err error
 	var modelInput []byte
-	if contextErr != nil {
+	switch {
+	case closed:
+		// Never sets err and always returns allow, ask or deny: every failure is ask.
+		out, modelInput = judgeClosed(cctx, cp, cfg.ProfileID, policy, tool, arguments)
+	case contextErr != nil:
 		// Invalid current arguments cannot be reviewed faithfully, regardless of
 		// the configured model-failure strategy. A human must resolve the input.
 		out = Decision{Action: "ask", ModelFallback: true, Message: "review context incomplete, manual confirmation required: " + contextErr.Error()}
-	} else {
+	default:
 		modelInput, _ = json.Marshal(input)
 		out, err = rv(cctx, cfg.ProfileID, cfg.Prompt, input)
 	}
