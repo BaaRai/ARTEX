@@ -864,6 +864,26 @@ func (s *Server) pgListMCP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"servers": ms})
 }
 
+// maskedSecret is what a response shows for a stored secret such as a proxy
+// URL: the whole value is replaced by the placeholder, "" stays "".
+func maskedSecret(v string) string {
+	if v == "" {
+		return ""
+	}
+	return notify.MaskedPrefix
+}
+
+// isMaskedSecret reports a placeholder sent back on write: keep the stored value.
+func isMaskedSecret(v string) bool { return notify.IsMasked(strings.TrimSpace(v)) }
+
+// keepIfMasked turns a placeholder in an optional field into nil (keep).
+func keepIfMasked(v *string) *string {
+	if v != nil && isMaskedSecret(*v) {
+		return nil
+	}
+	return v
+}
+
 // maskMCPEnv replaces every non-empty env value (API keys, auth headers) with
 // notify.MaskedPrefix so the API never returns it in clear.
 func maskMCPEnv(raw json.RawMessage) json.RawMessage {
@@ -1949,6 +1969,16 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	p := body.LLMProfile
 	p.APIKey = body.APIKey
 	p.Streaming = body.Streaming == nil || *body.Streaming
+	// The list returns the proxy masked: the placeholder sent back keeps the
+	// stored proxy and is never stored itself.
+	if isMaskedSecret(p.Proxy) {
+		stored, err := pg.ProfileByID(p.ID)
+		if p.ID == 0 || err != nil || stored == nil {
+			writeErr(w, 400, "proxy is a masked placeholder but no stored proxy to keep; enter the proxy or clear it")
+			return
+		}
+		p.Proxy = stored.Proxy
+	}
 	// Output cap: negative values are meaningless, clamp to zero (= do not send the
 	// field). The field-name switch only matters for Chat Completions — anthropic and
 	// openai-responses hard-code their field names; storing it would only mislead later readers, so it is cleared for any non-openai format. Unknown values are cleared too, to avoid throwing DB CHECK errors at the user.
@@ -2147,6 +2177,14 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 				apiKey = p.APIKey
 			} else {
 				withheld = p.APIKey != ""
+			}
+		}
+	}
+	if isMaskedSecret(req.Proxy) { // the form echoes the masked proxy: use the stored one
+		req.Proxy = ""
+		if req.ProfileID != nil {
+			if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
+				req.Proxy = p.Proxy
 			}
 		}
 	}
