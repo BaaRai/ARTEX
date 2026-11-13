@@ -81,3 +81,66 @@ func TestSecretsNeverReturnedInClear(t *testing.T) {
 		t.Fatal("stored credential changed")
 	}
 }
+
+// A masked MCP env value is only kept while the destination (transport,
+// command, args, url) is unchanged; otherwise the secrets must be re-entered.
+func TestMCPMaskedEnvDestinationGuard(t *testing.T) {
+	s, _, request := trafficEvidenceServer(t)
+	pg := s.m.PG()
+	const secret = "mcp-guard-secret-0006"
+	httpID, err := pg.SaveMCP(&db.MCPServer{Name: "t-guard-http", Transport: "http", URL: "http://127.0.0.1:9/a",
+		Env: json.RawMessage(`{"K":"` + secret + `"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdioID, err := pg.SaveMCP(&db.MCPServer{Name: "t-guard-stdio", Transport: "stdio", Command: "npx",
+		Args: json.RawMessage(`["pkg"]`), Env: json.RawMessage(`{"K":"` + secret + `"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pg.DeleteMCP(httpID); pg.DeleteMCP(stdioID) })
+	stored := func(id int64) db.MCPServer {
+		all, _ := pg.ListMCP()
+		for _, m := range all {
+			if m.ID == id {
+				return *m
+			}
+		}
+		t.Fatalf("mcp %d missing", id)
+		return db.MCPServer{}
+	}
+	save := func(id int64, edit func(*db.MCPServer), want int) {
+		t.Helper()
+		m := stored(id)
+		m.Env = maskMCPEnv(m.Env)
+		edit(&m)
+		body, _ := json.Marshal(m)
+		if resp := request("POST", "/api/mcp", string(body)); resp.Code != want {
+			t.Fatalf("want HTTP %d, got %d %s", want, resp.Code, resp.Body.String())
+		}
+	}
+	keeps := func(id int64, url string) {
+		t.Helper()
+		if m := stored(id); !strings.Contains(string(m.Env), secret) || m.URL != url {
+			t.Fatalf("stored row changed: url=%q", m.URL)
+		}
+	}
+
+	save(httpID, func(m *db.MCPServer) { m.Name = "t-guard-http2" }, 200)
+	keeps(httpID, "http://127.0.0.1:9/a")
+	save(httpID, func(m *db.MCPServer) { m.URL = "http://127.0.0.1:9/evil" }, 400)
+	keeps(httpID, "http://127.0.0.1:9/a")
+	save(httpID, func(m *db.MCPServer) { m.Transport = "sse" }, 400)
+	keeps(httpID, "http://127.0.0.1:9/a")
+	save(stdioID, func(m *db.MCPServer) { m.Command = "sh" }, 400)
+	save(stdioID, func(m *db.MCPServer) { m.Args = json.RawMessage(`["other"]`) }, 400)
+	keeps(stdioID, "")
+	save(stdioID, func(m *db.MCPServer) { m.Args = json.RawMessage(`[ "pkg" ]`) }, 200) // same args, other spacing
+	keeps(stdioID, "")
+	save(httpID, func(m *db.MCPServer) {
+		m.URL, m.Env = "http://127.0.0.1:9/b", json.RawMessage(`{"K":"new-explicit-value"}`)
+	}, 200)
+	if m := stored(httpID); m.URL != "http://127.0.0.1:9/b" || !strings.Contains(string(m.Env), "new-explicit-value") {
+		t.Fatal("explicit env with a new url was not saved")
+	}
+}

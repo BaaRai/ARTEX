@@ -882,8 +882,11 @@ func maskMCPEnv(raw json.RawMessage) json.RawMessage {
 
 // unmaskMCPEnv puts the stored value back for every env key sent as the mask,
 // so a client echoing the list response never overwrites the stored secret.
+// As in notify.PrepareConfigUpdate, a stored secret is only kept for the
+// destination it was configured for: when transport, command, args or url
+// change, every env value must be re-entered (or cleared) explicitly.
 func unmaskMCPEnv(pg *db.DB, m *db.MCPServer) error {
-	var env, stored map[string]any
+	var env, storedEnv map[string]any
 	if json.Unmarshal(m.Env, &env) != nil {
 		return nil // not an object: SaveMCP stores or rejects it as before
 	}
@@ -891,22 +894,42 @@ func unmaskMCPEnv(pg *db.DB, m *db.MCPServer) error {
 	if err != nil {
 		return err
 	}
+	var stored *db.MCPServer
 	for _, cur := range all {
 		if m.ID != 0 && cur.ID == m.ID {
-			_ = json.Unmarshal(cur.Env, &stored)
+			stored = cur
+			_ = json.Unmarshal(cur.Env, &storedEnv)
 		}
 	}
+	moved := stored != nil && (stored.Transport != m.Transport || stored.Command != m.Command ||
+		stored.URL != m.URL || canonicalMCPArgs(stored.Args) != canonicalMCPArgs(m.Args))
 	for k, v := range env {
 		if s, ok := v.(string); ok && notify.IsMasked(s) {
-			old, ok := stored[k]
+			old, ok := storedEnv[k]
 			if !ok {
 				return fmt.Errorf("env %q: masked value but nothing stored to keep", k)
+			}
+			if moved {
+				return fmt.Errorf("the MCP destination (transport, command, args or url) changed: re-enter the env values (%q is masked) or clear them; stored secrets are not sent to a new destination", k)
 			}
 			env[k] = old
 		}
 	}
 	m.Env, err = json.Marshal(env)
 	return err
+}
+
+// canonicalMCPArgs normalizes args JSON for comparison; empty means [] as in SaveMCP.
+func canonicalMCPArgs(raw json.RawMessage) string {
+	var v any
+	if len(raw) == 0 || string(raw) == "null" {
+		return "[]"
+	}
+	if json.Unmarshal(raw, &v) != nil {
+		return string(raw)
+	}
+	out, _ := json.Marshal(v)
+	return string(out)
 }
 
 func (s *Server) pgSaveMCP(w http.ResponseWriter, r *http.Request) {
