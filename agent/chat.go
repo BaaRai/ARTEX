@@ -89,7 +89,7 @@ func chatWorkDirSpec(workDir string) string {
 func chatSystem(agentKey, dataDir, workDir string) string {
 	body := renderSystem(agentKey, DefaultAssistantPrompt, chatVars{DataDir: dataDir, Now: nowStr()})
 	body += untrustedContentTail(body)
-	return body + chatWorkDirSpec(workDir)
+	return body + chatWorkDirSpec(workDir) + noiseProfileBlock()
 }
 
 // chatVars carries the runtime variables a custom agent's prompt may reference.
