@@ -662,7 +662,8 @@ function CustomToolDialog({
     setTesting(true);
     setTestResult(null);
     try {
-      const r = await api.testCustomTool({ kind, exec: buildExec(), params });
+      // key: a saved tool's stored secrets replace the masked placeholders.
+      const r = await api.testCustomTool({ key: tool?.key, kind, exec: buildExec(), params });
       setTestResult(r);
     } catch (e) {
       setTestResult({ output: (e as Error).message, is_error: true });

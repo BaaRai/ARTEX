@@ -46,17 +46,21 @@ func (c secretColumn) aad() string {
 }
 
 // rowFilter limits a settings entry to its own row; the key is a code-owned
-// constant from secretSettingKeys, never input.
+// constant from secretSettingKeys, never input. tools.exec covers the
+// user-created tools only: the seeds rewrite the built-in rows in clear.
 func (c secretColumn) rowFilter() string {
 	if c.setting != "" {
 		return ` AND key='` + c.setting + `'`
 	}
+	if c == colToolExec {
+		return ` AND system=false`
+	}
 	return ""
 }
 
-// idCol names the row key: settings rows are keyed by name, the rest by id.
+// idCol names the row key: settings and tools rows are keyed by name, the rest by id.
 func (c secretColumn) idCol() string {
-	if c.setting != "" {
+	if c.setting != "" || c == colToolExec {
 		return "key"
 	}
 	return "id"
@@ -76,7 +80,8 @@ var (
 	colMCPEnv      = secretColumn{"mcp_servers", "env", true, ""}
 	colCredPass    = secretColumn{"task_credentials", "password", false, ""}
 	colNotifConfig = secretColumn{"notification_channels", "config", true, ""}
-	secretColumns  = append([]secretColumn{colLLMKey, colLLMProxy, colMCPEnv, colCredPass, colNotifConfig}, secretSettingColumns()...)
+	colToolExec    = secretColumn{"tools", "exec", true, ""} // system=false rows: headers, proxy, body, code, command
+	secretColumns  = append([]secretColumn{colLLMKey, colLLMProxy, colMCPEnv, colCredPass, colNotifConfig, colToolExec}, secretSettingColumns()...)
 )
 
 // secretSettingKeys are the settings stored encrypted, AAD "settings.<key>".

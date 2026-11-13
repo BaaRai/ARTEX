@@ -754,6 +754,11 @@ func (s *Server) pgListTools(w http.ResponseWriter, r *http.Request) {
 	if ts == nil {
 		ts = []*db.Tool{}
 	}
+	for _, tool := range ts {
+		if !tool.System {
+			tool.Exec = maskToolExec(tool.Exec)
+		}
+	}
 	// Usage is best-effort decoration. Runtime tool resolution keeps using the plain
 	// catalog query, so agent assembly never pays for this aggregate.
 	counts, countErr := pg.ToolUsageCounts()
