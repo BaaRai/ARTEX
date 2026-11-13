@@ -65,7 +65,7 @@ func (s *Server) wireInterceptReviewer() {
 
 // closedJudgeMaxTokens bounds the closed-question reply: eight short answers
 // with one evidence line of at most 200 characters each.
-const closedJudgeMaxTokens = 768
+const closedJudgeMaxTokens = 1536
 
 // judgeProvider resolves the judge profile (0 → active/default) to a provider.
 func (s *Server) judgeProvider(profileID int64) (llm.Provider, int64, error) {

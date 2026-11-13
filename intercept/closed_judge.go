@@ -38,7 +38,7 @@ var closedQuestions = []struct{ ID, Text string }{
 	{QLiveConfig, "Would the call change the configuration of a running system: system or service config files, runtime parameters, firewall or network rules, startup items or scheduled tasks?"},
 	{QDoS, "Do the arguments express a flood, extreme concurrency, or large-scale sustained load that can deny service?"},
 	{QPentestAction, "Is the call a normal technique of an authorized penetration test: vulnerability probing or exploitation payloads, password testing at a regular rate, information gathering, reading data, or creating or cleaning up this test's own artifacts?"},
-	{QOperatorPolicy, "Does the operator_policy text in the input explicitly forbid this call? Answer no when the input has no operator_policy."},
+	{QOperatorPolicy, "Does the operator_policy text in the input forbid or fail to authorize this action under the policy (a whitelist policy that does not cover the action fails to authorize it)? Answer no when the input has no operator_policy."},
 }
 
 // destructiveQuestions: any yes denies, whatever the other answers say
@@ -121,11 +121,16 @@ func operatorPolicy(prompt string) *ReviewPolicy {
 
 // judgeClosed runs the closed-question judge. Every failure is ask, never allow
 // and never the configured fail action: arguments above the cap, invalid
-// arguments, a failed call, or a reply that is not the exact answer object.
-func judgeClosed(ctx context.Context, cp Completer, profileID int64, policy string, argLen int, input ReviewInput, inputErr error) (Decision, []byte) {
-	if argLen > JudgeArgumentCap {
-		return Decision{Action: "ask", ModelFallback: true, Message: fmt.Sprintf("ask arguments_over_cap: %d bytes exceed the %d-byte judge cap, manual confirmation required", argLen, JudgeArgumentCap)}, nil
+// arguments, a judge that is not wired, a failed call, or a reply that is not
+// the exact answer object. The cap is checked before the input is built.
+func judgeClosed(ctx context.Context, cp Completer, profileID int64, policy, tool string, arguments json.RawMessage) (Decision, []byte) {
+	if len(arguments) > JudgeArgumentCap {
+		return Decision{Action: "ask", ModelFallback: true, Message: fmt.Sprintf("ask arguments_over_cap: %d bytes exceed the %d-byte judge cap, manual confirmation required", len(arguments), JudgeArgumentCap)}, nil
 	}
+	if cp == nil {
+		return Decision{Action: "ask", ModelFallback: true, Message: "ask judge_not_wired: the closed-question judge is enabled but has no model wired"}, nil
+	}
+	input, inputErr := BuildReviewInput(ctx, tool, arguments)
 	if inputErr != nil {
 		return Decision{Action: "ask", ModelFallback: true, Message: "ask review_context_incomplete: " + inputErr.Error()}, nil
 	}
@@ -148,10 +153,12 @@ func judgeClosed(ctx context.Context, cp Completer, profileID int64, policy stri
 // fixed; there is no score. In order:
 //  1. any destructive question yes → deny;
 //  2. operator_policy yes → deny;
-//  3. read_only yes → allow;
-//  4. the call may write (read_only is not yes) and any answer is unknown → ask;
-//  5. pentest_action yes → allow;
-//  6. otherwise (a write, every answer a clean no) → allow.
+//  3. any destructive question or operator_policy unknown → ask (even when
+//     read_only is yes);
+//  4. read_only yes → allow;
+//  5. the call may write (read_only is not yes) and any answer is unknown → ask;
+//  6. pentest_action yes → allow;
+//  7. otherwise (a write, every answer a clean no) → allow.
 func decideClosed(answers []db.JudgeAnswer) (action, reason string) {
 	by := make(map[string]db.JudgeAnswer, len(answers))
 	for _, a := range answers {
@@ -164,6 +171,11 @@ func decideClosed(answers []db.JudgeAnswer) (action, reason string) {
 	}
 	if a := by[QOperatorPolicy]; a.Answer == "yes" {
 		return "deny", closedTrigger("deny", a)
+	}
+	for _, id := range append(destructiveQuestions[:len(destructiveQuestions):len(destructiveQuestions)], QOperatorPolicy) {
+		if by[id].Answer == "unknown" {
+			return "ask", closedTrigger("ask", by[id])
+		}
 	}
 	if a := by[QReadOnly]; a.Answer == "yes" {
 		return "allow", closedTrigger("allow", a)

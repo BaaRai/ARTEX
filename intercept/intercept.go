@@ -543,7 +543,8 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 // judgeWith is Judge on a resolved configuration, without the database.
 func judgeWith(ctx context.Context, cfg JudgeConfig, rv Reviewer, cp Completer, tool string, arguments json.RawMessage) (Decision, bool) {
 	closed := cfg.Mode != JudgeModeFreeform
-	if !cfg.Enabled || (closed && cp == nil) || (!closed && rv == nil) {
+	// Closed mode without a completer is not "off": judgeClosed answers ask.
+	if !cfg.Enabled || (!closed && rv == nil) {
 		return Decision{}, false
 	}
 
@@ -554,7 +555,12 @@ func judgeWith(ctx context.Context, cfg JudgeConfig, rv Reviewer, cp Completer, 
 		defer cancel()
 	}
 
-	input, contextErr := BuildReviewInput(cctx, tool, arguments)
+	// Closed mode checks the argument cap before building its own input.
+	var input ReviewInput
+	var contextErr error
+	if !closed {
+		input, contextErr = BuildReviewInput(cctx, tool, arguments)
+	}
 	policy := cfg.Prompt // closed mode: the stored prompt is the operator policy (data)
 	cfg.Prompt = EffectiveJudgePrompt(cfg.Prompt)
 	var out Decision
@@ -563,7 +569,7 @@ func judgeWith(ctx context.Context, cfg JudgeConfig, rv Reviewer, cp Completer, 
 	switch {
 	case closed:
 		// Never sets err and always returns allow, ask or deny: every failure is ask.
-		out, modelInput = judgeClosed(cctx, cp, cfg.ProfileID, policy, len(arguments), input, contextErr)
+		out, modelInput = judgeClosed(cctx, cp, cfg.ProfileID, policy, tool, arguments)
 	case contextErr != nil:
 		// Invalid current arguments cannot be reviewed faithfully, regardless of
 		// the configured model-failure strategy. A human must resolve the input.

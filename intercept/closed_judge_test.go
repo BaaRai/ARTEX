@@ -61,7 +61,9 @@ func TestClosedJudgeDecisionTable(t *testing.T) {
 		noCall      bool
 	}{
 		{name: "read-only allows", reply: closedReply(map[string]string{QReadOnly: "yes", QPentestAction: "yes"}), action: "allow", reason: "[model] allow read_only=yes: ev read_only"},
-		{name: "read-only with unknown destructive allows", reply: closedReply(map[string]string{QReadOnly: "yes", QDataLoss: "unknown"}), action: "allow", reason: "[model] allow read_only=yes"},
+		{name: "read-only with unknown data_loss asks", reply: closedReply(map[string]string{QReadOnly: "yes", QDataLoss: "unknown"}), action: "ask", reason: "[model] ask data_loss=unknown: ev data_loss"},
+		{name: "read-only with unknown policy asks", reply: closedReply(map[string]string{QReadOnly: "yes", QOperatorPolicy: "unknown"}), action: "ask", reason: "[model] ask operator_policy=unknown"},
+		{name: "read-only with destructive and policy no allows", reply: closedReply(map[string]string{QReadOnly: "yes", QPentestAction: "unknown"}), action: "allow", reason: "[model] allow read_only=yes"},
 		{name: "destructive overrides pentest", reply: closedReply(map[string]string{QPentestAction: "yes", QDataLoss: "yes"}), action: "deny", reason: "[model] deny data_loss=yes: ev data_loss"},
 		{name: "destructive overrides read-only", reply: closedReply(map[string]string{QReadOnly: "yes", QAvailability: "yes"}), action: "deny", reason: "[model] deny availability=yes"},
 		{name: "dos denies", reply: closedReply(map[string]string{QPentestAction: "yes", QDoS: "yes"}), action: "deny", reason: "[model] deny dos=yes"},
@@ -86,6 +88,7 @@ func TestClosedJudgeDecisionTable(t *testing.T) {
 		{name: "multi-line evidence asks", reply: strings.Replace(valid, `"ev dos"`, `"a\nb"`, 1), action: "ask", reason: "[model] ask invalid_output", fallback: true},
 		{name: "judge failure asks", err: errors.New("provider down"), action: "ask", reason: "[model] ask judge_failed: provider down", fallback: true},
 		{name: "arguments above the cap ask", reply: valid, args: bigArgs, action: "ask", reason: "[model] ask arguments_over_cap", fallback: true, noCall: true},
+		{name: "cap checked before the input is built", reply: valid, args: json.RawMessage(`{"a":"` + strings.Repeat("x", JudgeArgumentCap)), action: "ask", reason: "[model] ask arguments_over_cap", fallback: true, noCall: true},
 		{name: "invalid arguments ask", reply: valid, args: json.RawMessage(`{"a":`), action: "ask", reason: "[model] ask review_context_incomplete", fallback: true, noCall: true},
 	}
 	for _, tc := range cases {
@@ -145,14 +148,15 @@ func TestClosedJudgeAuditRecordsAnswers(t *testing.T) {
 	}
 }
 
-// An empty mode is the default, closed; closed mode never uses the freeform reviewer.
+// An empty mode is the default, closed; closed mode never uses the freeform
+// reviewer, and an enabled closed judge with no completer asks.
 func TestClosedJudgeIsTheDefaultMode(t *testing.T) {
 	cfg, f := closedCfg(), &fakeCompleter{reply: closedReply(nil)}
 	cfg.Mode = ""
-	if _, ok := judgeWith(t.Context(), cfg, func(context.Context, int64, string, ReviewInput) (Decision, error) {
+	if dec, ok := judgeWith(t.Context(), cfg, func(context.Context, int64, string, ReviewInput) (Decision, error) {
 		return Decision{Action: "allow"}, nil
-	}, nil, "Bash", benignArgs); ok {
-		t.Fatal("closed mode without a completer used the freeform reviewer")
+	}, nil, "Bash", benignArgs); !ok || dec.Action != "ask" || !strings.HasPrefix(dec.Message, "[model] ask judge_not_wired") {
+		t.Fatalf("closed mode without a completer: ok=%v %+v, want ask judge_not_wired", ok, dec)
 	}
 	if dec, ok := judgeWith(t.Context(), cfg, nil, f.complete, "Bash", benignArgs); !ok || f.calls != 1 || dec.JudgeAnswers == nil {
 		t.Fatal("an empty mode did not run the closed judge")
@@ -173,7 +177,7 @@ func TestClosedJudgePromptGolden(t *testing.T) {
 	}
 }
 
-const closedPromptSHA256 = "eebe12fd72c14fee2932f84e9d39f773506d34b637a3aa29be718b04779b2bbb"
+const closedPromptSHA256 = "8328bb7e3bcb1dbf109b57496d11e1907b21933af3fdfeaeb7b6f8516f445186"
 
 // Golden of the existing behaviour: freeform sends the unchanged prompt and
 // review input, honours the reviewer's verdict and the configured fail action,
