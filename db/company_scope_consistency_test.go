@@ -10,7 +10,8 @@ import (
 
 func TestAssetUpsertWaitsForCompanyScopeMutation(t *testing.T) {
 	d, assets, companies := testSetup(t)
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanup below.
+	t.Cleanup(func() { d.Close() })
 
 	stamp := time.Now().UnixNano()
 	domain := fmt.Sprintf("scope-lock-%d.example", stamp)
@@ -23,8 +24,8 @@ func TestAssetUpsertWaitsForCompanyScopeMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = d.Exec(`DELETE FROM assets WHERE domain = $1`, domain)
-		_, _ = d.Exec(`DELETE FROM companies WHERE id IN ($1,$2)`, oldCompany, newCompany)
+		cleanupExec(t, d, `DELETE FROM assets WHERE domain = $1`, domain)
+		cleanupExec(t, d, `DELETE FROM companies WHERE id IN ($1,$2)`, oldCompany, newCompany)
 	})
 	if added, _, invalid, validationErrors, err := companies.AddScopeInputsChecked(oldCompany, []ScopeInput{
 		{Kind: "domain", Value: domain},
@@ -90,7 +91,8 @@ func TestAssetUpsertWaitsForCompanyScopeMutation(t *testing.T) {
 
 func TestResolveAndRecomputeUseStableCompanyIDTieBreak(t *testing.T) {
 	d, assets, companies := testSetup(t)
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanup below.
+	t.Cleanup(func() { d.Close() })
 
 	stamp := time.Now().UnixNano()
 	first, _, err := companies.UpsertCompany(fmt.Sprintf("Tie Break First %d", stamp), "")
@@ -109,8 +111,8 @@ func TestResolveAndRecomputeUseStableCompanyIDTieBreak(t *testing.T) {
 	icp := fmt.Sprintf("ICP-TIE-%d", stamp)
 	appName := fmt.Sprintf("Tie Break App %d", stamp)
 	t.Cleanup(func() {
-		_, _ = d.Exec(`DELETE FROM assets WHERE domain=$1 OR ip=$2 OR app_name=$3`, domain, ip, appName)
-		_, _ = d.Exec(`DELETE FROM companies WHERE id IN ($1,$2)`, first, second)
+		cleanupExec(t, d, `DELETE FROM assets WHERE domain=$1 OR ip=$2 OR app_name=$3`, domain, ip, appName)
+		cleanupExec(t, d, `DELETE FROM companies WHERE id IN ($1,$2)`, first, second)
 	})
 
 	rules := []ScopeInput{

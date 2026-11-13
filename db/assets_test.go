@@ -1010,7 +1010,8 @@ func TestAssetIPRejectsHostname(t *testing.T) {
 // are excluded. Direct source tasks' scope is included.
 func TestQueryDSLInScopeMembership(t *testing.T) {
 	d, assets, _ := testSetup(t)
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanups below.
+	t.Cleanup(func() { d.Close() })
 
 	task, err := d.CreateTask("scope membership", "goal", nil, 0, 0)
 	if err != nil {
@@ -1020,7 +1021,10 @@ func TestQueryDSLInScopeMembership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.DeleteTask(task.ID); _ = d.DeleteTask(src.ID) })
+	t.Cleanup(func() {
+		cleanupErr(t, "task", d.DeleteTask(task.ID))
+		cleanupErr(t, "source task", d.DeleteTask(src.ID))
+	})
 	// task ← src is a direct source relation.
 	if _, err := d.Exec(`INSERT INTO task_relations(task_id, source_task_id) VALUES ($1,$2)`, task.ID, src.ID); err != nil {
 		t.Fatal(err)
@@ -1079,7 +1083,7 @@ func TestQueryDSLInScopeMembership(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = d.Exec(`DELETE FROM assets WHERE id=ANY($1::bigint[]) OR id=ANY($2::bigint[])`, inScopeIDs, outIDs)
+		cleanupExec(t, d, `DELETE FROM assets WHERE id=ANY($1::bigint[]) OR id=ANY($2::bigint[])`, inScopeIDs, outIDs)
 	})
 
 	got, err := assets.QueryDSLInScope(marker, "", task.ID, 50, 0)
