@@ -54,6 +54,19 @@ func BaseDir() string {
 	return dir
 }
 
+// KeyDir holds jwt.key and secret.key: ARTEX_JWT_KEY_DIR (the Docker image points
+// it at the /app/keys volume) or the base dir. Never the browsable data dir.
+func KeyDir() string {
+	dir := strings.TrimSpace(os.Getenv("ARTEX_JWT_KEY_DIR"))
+	if dir == "" {
+		dir = BaseDir()
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	return dir
+}
+
 // isGoRunDir reports whether dir is where `go run` parked its executable: under
 // the system temp dir (cache miss), or anywhere inside a Go build cache
 // (…/go-build/…, the cache-hit case — NOT under os.TempDir(), which is why the

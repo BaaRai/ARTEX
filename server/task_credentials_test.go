@@ -63,7 +63,7 @@ func TestTaskCredentialsFlow(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("want 2 credentials, got %d: %s", len(list), resp.Body.String())
 	}
-	if list[0].Domain != "target.example.com" || list[0].Username != "alias@test" || list[0].Password != "s3cret!" || list[0].Note != "program alias account" {
+	if list[0].Domain != "target.example.com" || list[0].Username != "alias@test" || list[0].Password != "__masked__" || list[0].Note != "program alias account" {
 		t.Fatalf("declared credential mismatch: %+v", list[0])
 	}
 	if list[1].Password != "" {

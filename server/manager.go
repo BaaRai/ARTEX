@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/config"
 	pgdb "github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/enrich"
 	"github.com/Autumn-27/artex/guard"
@@ -390,6 +391,11 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	pg, err := pgdb.Open(dsn)
 	if err != nil {
 		return nil, err
+	}
+	// Before anything reads a stored secret: load the key, encrypt legacy plaintext.
+	if err := pg.InitSecrets(config.KeyDir()); err != nil {
+		pg.Close()
+		return nil, fmt.Errorf("secrets at rest: %w", err)
 	}
 	if err := pg.RecoverFindingRetests(); err != nil {
 		pg.Close()

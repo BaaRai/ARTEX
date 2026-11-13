@@ -10,9 +10,8 @@ import (
 // task creation (source=user, e.g. a program-provided alias account) or registered
 // by the agent itself and recorded so it is not forgotten (source=agent).
 //
-// Passwords are stored in the local Postgres, plaintext — the same trust domain as
-// captured traffic evidence, which already contains credentials by nature. The UI
-// masks them by default; anything injected into agent context transits to the LLM
+// Passwords are encrypted at rest (secrets.go) and masked by the HTTP API; the
+// agent tools read them decrypted. Anything injected into agent context transits to the LLM
 // provider, so only dedicated test accounts belong here.
 type TaskCredential struct {
 	ID        int64     `json:"id"`
@@ -64,6 +63,10 @@ func (d *DB) UpsertTaskCredential(taskID int64, in TaskCredentialInput) (TaskCre
 	if err != nil {
 		return TaskCredential{}, err
 	}
+	pass, err := sealSecret(colCredPass, in.Password)
+	if err != nil {
+		return TaskCredential{}, err
+	}
 	var c TaskCredential
 	err = d.QueryRow(`
 		INSERT INTO task_credentials (task_id, domain, username, password, source, note)
@@ -74,8 +77,9 @@ func (d *DB) UpsertTaskCredential(taskID int64, in TaskCredentialInput) (TaskCre
 		    note     = CASE WHEN EXCLUDED.note = '' THEN task_credentials.note ELSE EXCLUDED.note END,
 		    updated_at = now()
 		RETURNING id, task_id, domain, username, password, source, note, created_at, updated_at`,
-		taskID, in.Domain, in.Username, in.Password, in.Source, in.Note).
+		taskID, in.Domain, in.Username, pass, in.Source, in.Note).
 		Scan(&c.ID, &c.TaskID, &c.Domain, &c.Username, &c.Password, &c.Source, &c.Note, &c.CreatedAt, &c.UpdatedAt)
+	c.Password = in.Password
 	return c, err
 }
 
@@ -93,6 +97,9 @@ func (d *DB) TaskCredentials(taskID int64) ([]TaskCredential, error) {
 	for rows.Next() {
 		var c TaskCredential
 		if err := rows.Scan(&c.ID, &c.TaskID, &c.Domain, &c.Username, &c.Password, &c.Source, &c.Note, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if c.Password, err = openSecret(colCredPass, c.Password); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

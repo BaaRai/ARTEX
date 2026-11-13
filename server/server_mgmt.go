@@ -25,6 +25,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/notify"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/skill"
 )
@@ -857,7 +858,55 @@ func (s *Server) pgListMCP(w http.ResponseWriter, r *http.Request) {
 	if ms == nil {
 		ms = []*db.MCPServer{}
 	}
+	for _, m := range ms {
+		m.Env = maskMCPEnv(m.Env)
+	}
 	writeJSON(w, 200, map[string]any{"servers": ms})
+}
+
+// maskMCPEnv replaces every non-empty env value (API keys, auth headers) with
+// notify.MaskedPrefix so the API never returns it in clear.
+func maskMCPEnv(raw json.RawMessage) json.RawMessage {
+	var env map[string]any
+	if json.Unmarshal(raw, &env) != nil || env == nil {
+		return json.RawMessage(`{}`)
+	}
+	for k, v := range env {
+		if v != "" {
+			env[k] = notify.MaskedPrefix
+		}
+	}
+	out, _ := json.Marshal(env)
+	return out
+}
+
+// unmaskMCPEnv puts the stored value back for every env key sent as the mask,
+// so a client echoing the list response never overwrites the stored secret.
+func unmaskMCPEnv(pg *db.DB, m *db.MCPServer) error {
+	var env, stored map[string]any
+	if json.Unmarshal(m.Env, &env) != nil {
+		return nil // not an object: SaveMCP stores or rejects it as before
+	}
+	all, err := pg.ListMCP()
+	if err != nil {
+		return err
+	}
+	for _, cur := range all {
+		if m.ID != 0 && cur.ID == m.ID {
+			_ = json.Unmarshal(cur.Env, &stored)
+		}
+	}
+	for k, v := range env {
+		if s, ok := v.(string); ok && notify.IsMasked(s) {
+			old, ok := stored[k]
+			if !ok {
+				return fmt.Errorf("env %q: masked value but nothing stored to keep", k)
+			}
+			env[k] = old
+		}
+	}
+	m.Env, err = json.Marshal(env)
+	return err
 }
 
 func (s *Server) pgSaveMCP(w http.ResponseWriter, r *http.Request) {
@@ -871,6 +920,10 @@ func (s *Server) pgSaveMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	isNew := m.ID == 0
+	if err := unmaskMCPEnv(pg, &m); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	id, err := pg.SaveMCP(&m)
 	if err != nil {
 		writeErr(w, 500, err.Error())

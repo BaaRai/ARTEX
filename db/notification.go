@@ -88,6 +88,11 @@ func scanNotificationChannel(sc interface{ Scan(...any) error }) (*NotificationC
 	if err := sc.Scan(&c.ID, &c.Name, &c.Kind, &enabled, &c.Config, &c.Mode, &c.Filter, &c.RatePerMin, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
 	}
+	cfg, err := openSecret(colNotifConfig, string(c.Config))
+	if err != nil {
+		return nil, err
+	}
+	c.Config = json.RawMessage(cfg)
 	c.Enabled = &enabled
 	return &c, nil
 }
@@ -152,19 +157,23 @@ func (d *DB) SaveNotificationChannel(ctx context.Context, c *NotificationChannel
 	if c.Filter == nil {
 		c.Filter = json.RawMessage(`{}`)
 	}
+	cfg, err := sealSecret(colNotifConfig, string(c.Config))
+	if err != nil {
+		return 0, err
+	}
 	enabled := c.IsEnabled()
 
 	if c.ID == 0 {
 		var id int64
 		err := d.QueryRowContext(ctx, `INSERT INTO notification_channels(name,kind,enabled,config,mode,filter,rate_per_min)
 VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-			c.Name, c.Kind, enabled, string(c.Config), c.Mode, string(c.Filter), c.RatePerMin).Scan(&id)
+			c.Name, c.Kind, enabled, string(cfg), c.Mode, string(c.Filter), c.RatePerMin).Scan(&id)
 		return id, err
 	}
 	res, err := d.ExecContext(ctx, `UPDATE notification_channels
 SET name=$2, kind=$3, enabled=$4, config=$5, mode=$6, filter=$7, rate_per_min=$8
 WHERE id=$1`,
-		c.ID, c.Name, c.Kind, enabled, string(c.Config), c.Mode, string(c.Filter), c.RatePerMin)
+		c.ID, c.Name, c.Kind, enabled, string(cfg), c.Mode, string(c.Filter), c.RatePerMin)
 	if err != nil {
 		return 0, err
 	}
@@ -393,6 +402,11 @@ FROM notification_channels WHERE enabled ORDER BY id`)
 		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.Config, &c.Mode, &c.Filter, &c.RatePerMin); err != nil {
 			return nil, err
 		}
+		cfg, err := openSecret(colNotifConfig, string(c.Config))
+		if err != nil {
+			return nil, err
+		}
+		c.Config = json.RawMessage(cfg)
 		out = append(out, &c)
 	}
 	return out, rows.Err()

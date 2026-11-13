@@ -95,6 +95,11 @@ func scanNotificationDelivery(sc interface{ Scan(...any) error }) (*Notification
 		&channel.ID, &channel.Name, &channel.Kind, &chEnabled, &channel.Config, &channel.Mode, &channel.Filter, &channel.RatePerMin); err != nil {
 		return nil, err
 	}
+	cfg, err := openSecret(colNotifConfig, string(channel.Config))
+	if err != nil {
+		return nil, err
+	}
+	channel.Config = json.RawMessage(cfg)
 	dl.LastError = lastErr.String
 	if batchID.Valid {
 		dl.BatchID = &batchID.Int64

@@ -6,18 +6,23 @@ import (
 	"strconv"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/notify"
 )
 
 // Task credential HTTP handlers (#3). The agent-side write path is the
 // save_task_credential tool; these routes serve the UI (task detail tab) and the
 // creation dialog.
 
-// taskCredentialDTO masks nothing — the admin is the credential owner — but the
-// frontend renders passwords masked with an explicit reveal.
+// taskCredentialDTO masks the password server-side; an empty password stays
+// empty (the "agent generates" mode). Agent tools read the stored value directly.
 func taskCredentialDTO(c db.TaskCredential) map[string]any {
+	pass := c.Password
+	if pass != "" {
+		pass = notify.MaskedPrefix
+	}
 	return map[string]any{
 		"id": c.ID, "task_id": c.TaskID, "domain": c.Domain, "username": c.Username,
-		"password": c.Password, "source": c.Source, "note": c.Note,
+		"password": pass, "source": c.Source, "note": c.Note,
 		"created_at": c.CreatedAt, "updated_at": c.UpdatedAt,
 	}
 }
@@ -61,6 +66,10 @@ func (s *Server) addTaskCredential(w http.ResponseWriter, r *http.Request) {
 	var req taskCredentialReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if notify.IsMasked(req.Password) {
+		writeErr(w, 400, "password is a masked placeholder; enter the real password")
 		return
 	}
 	// source=user: manual adds from the UI (e.g. relaying an OTP-verified account).

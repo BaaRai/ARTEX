@@ -17,6 +17,8 @@ func TestMain(m *testing.M) {
 	// contending on shared tables and the advisory lock below stops
 	// serializing go test ./... across packages.
 	db.SuffixTestDatabase("server")
+	// Fixed test key via env: NewManager's InitSecrets then writes no key file.
+	os.Setenv("ARTEX_SECRET_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	dsn, _, err := db.DSN()
 	if err != nil {
 		os.Exit(m.Run())
