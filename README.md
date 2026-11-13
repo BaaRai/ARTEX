@@ -183,7 +183,7 @@ gunzip -c backups/artex-db-<timestamp>.sql.gz | docker compose exec -T postgres 
 
 Stored secrets (LLM API keys and proxies, MCP env, task credentials,
 notification channel config, the Brave and Tavily search keys, the web search
-and global proxies) are encrypted in the database with the key in `keys/secret.key`
+and global proxies, the execution spec of custom tools) are encrypted in the database with the key in `keys/secret.key`
 (generated at first start, mode 0600, next to `jwt.key`). **A database backup
 without that key can no longer restore those secrets**: back up `keys/` with the
 dump, separately. Deployments without a persistent disk set `ARTEX_SECRET_KEY`

@@ -21,6 +21,7 @@ import (
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/notify"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -72,6 +73,11 @@ func (s *Server) pgCreateCustomTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, "this key already exists (built-in or custom tool)")
 		return
 	}
+	var err error
+	if req.Exec, err = unmaskToolExec(nil, req.Exec); err != nil { // nothing stored: a placeholder is refused
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if err := pg.CreateCustomTool(&db.Tool{
 		Key: req.Key, Description: req.Description, Schema: req.Schema, Agents: req.Agents,
 		Enabled: req.Enabled, Kind: req.Kind, Exec: req.Exec, Deferred: req.Deferred,
@@ -110,6 +116,10 @@ func (s *Server) pgUpdateCustomTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "http tools must provide a parameter JSON Schema (cannot be left empty)")
 		return
 	}
+	if req.Exec, err = unmaskToolExec(existing.Exec, req.Exec); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if err := pg.UpdateCustomTool(&db.Tool{
 		Key: key, Description: req.Description, Schema: req.Schema, Agents: req.Agents,
 		Enabled: req.Enabled, Kind: req.Kind, Exec: req.Exec, Deferred: req.Deferred,
@@ -138,6 +148,7 @@ func (s *Server) pgDeleteCustomTool(w http.ResponseWriter, r *http.Request) {
 // real tool call — it runs arbitrary command/script/http on the server, which the
 // custom-tool feature already allows, so no new capability is granted.
 type testToolReq struct {
+	Key    string          `json:"key"`  // the saved tool being edited, if any: its stored values replace placeholders
 	Kind   string          `json:"kind"` // command | script | http
 	Exec   json.RawMessage `json:"exec"`
 	Params map[string]any  `json:"params"`
@@ -154,6 +165,22 @@ func (s *Server) pgTestCustomTool(w http.ResponseWriter, r *http.Request) {
 	var req testToolReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "invalid request body")
+		return
+	}
+	var stored json.RawMessage
+	if req.Key != "" {
+		t, err := pg.GetTool(req.Key)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if t != nil && !t.System {
+			stored = t.Exec
+		}
+	}
+	var err error
+	if req.Exec, err = unmaskToolExec(stored, req.Exec); err != nil {
+		writeErr(w, 400, err.Error())
 		return
 	}
 	params := req.Params
@@ -234,6 +261,79 @@ type httpExec struct {
 	TimeoutMs         int               `json:"timeout_ms"`
 	Proxy             string            `json:"proxy"`
 	UseRecordingProxy bool              `json:"use_recording_proxy"`
+}
+
+// toolExecFlags are the response-only *_set flags of maskToolExec; never stored.
+var toolExecFlags = []string{"headers_set", "proxy_set", "body_set"}
+
+// maskToolExec is what the API shows of a custom tool's exec: every header value,
+// the proxy and the body become the placeholder, each with a *_set flag.
+func maskToolExec(raw json.RawMessage) json.RawMessage {
+	var e map[string]any
+	if json.Unmarshal(raw, &e) != nil || e == nil {
+		return raw
+	}
+	if h, ok := e["headers"].(map[string]any); ok {
+		set := false
+		for k, v := range h {
+			if v != "" {
+				h[k], set = notify.MaskedPrefix, true
+			}
+		}
+		e["headers_set"] = set
+	}
+	for _, k := range []string{"proxy", "body"} {
+		if s, ok := e[k].(string); ok {
+			e[k], e[k+"_set"] = maskedSecret(s), s != ""
+		}
+	}
+	out, _ := json.Marshal(e)
+	return out
+}
+
+// unmaskToolExec puts the stored value back for every header, proxy or body sent
+// as the placeholder, so a client echoing the list response keeps the stored
+// secret; an explicit value replaces it and "" clears it. A placeholder with
+// nothing stored to keep (stored nil on create) is refused.
+func unmaskToolExec(stored, in json.RawMessage) (json.RawMessage, error) {
+	var e, old map[string]any
+	if json.Unmarshal(in, &e) != nil || e == nil {
+		return in, nil // not an object: stored or refused as before
+	}
+	_ = json.Unmarshal(stored, &old)
+	changed := false
+	for _, k := range toolExecFlags {
+		if _, ok := e[k]; ok {
+			delete(e, k)
+			changed = true
+		}
+	}
+	oldHeaders, _ := old["headers"].(map[string]any)
+	headers, _ := e["headers"].(map[string]any)
+	for k, v := range headers {
+		if s, ok := v.(string); !ok || !isMaskedSecret(s) {
+			continue
+		}
+		prev, ok := oldHeaders[k]
+		if !ok {
+			return nil, fmt.Errorf("header %q: masked value but nothing stored to keep", k)
+		}
+		headers[k], changed = prev, true
+	}
+	for _, k := range []string{"proxy", "body"} {
+		if s, ok := e[k].(string); !ok || !isMaskedSecret(s) {
+			continue
+		}
+		prev, _ := old[k].(string)
+		if prev == "" {
+			return nil, fmt.Errorf("%s: masked value but nothing stored to keep", k)
+		}
+		e[k], changed = prev, true
+	}
+	if !changed {
+		return in, nil
+	}
+	return json.Marshal(e)
 }
 
 func timeoutOr(ms, def int) time.Duration {

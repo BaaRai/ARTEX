@@ -216,6 +216,10 @@ func (s *Server) toolCreateCustomTool() actool.CoreTool {
 			if exist, _ := s.m.pg.GetTool(a.Key); exist != nil {
 				return actool.Errorf("this key already exists: " + a.Key), nil
 			}
+			var err error
+			if a.Exec, err = unmaskToolExec(nil, a.Exec); err != nil { // nothing stored: a placeholder is refused
+				return actool.Errorf(err.Error()), nil
+			}
 			if err := s.m.pg.CreateCustomTool(toDBTool(a)); err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
@@ -238,6 +242,10 @@ func (s *Server) toolUpdateCustomTool() actool.CoreTool {
 			}
 			if a.Kind == "http" && !hasSchemaProps(a.Schema) {
 				return actool.Errorf("http tools must provide a parameter JSON Schema (cannot be empty)"), nil
+			}
+			var err error
+			if a.Exec, err = unmaskToolExec(existing.Exec, a.Exec); err != nil {
+				return actool.Errorf(err.Error()), nil
 			}
 			if err := s.m.pg.UpdateCustomTool(toDBTool(a)); err != nil {
 				return actool.Errorf(err.Error()), nil
