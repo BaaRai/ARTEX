@@ -1439,7 +1439,7 @@ CREATE TABLE IF NOT EXISTS notification_channels (
     -- dingtalk DingTalk / feishu Feishu (Lark) / wecom WeCom (WeChat Work) / webhook generic / telegram / email
     kind         TEXT NOT NULL,
     enabled      BOOLEAN NOT NULL DEFAULT true,
-    -- Credentials (stored in plaintext, masked when echoed to the UI; see maskChannelSecrets on the server side).
+    -- Credentials (encrypted at rest by db/secrets.go, masked when echoed to the UI; see notify.MaskConfig).
     -- The six channel kinds differ wildly in fields, so one JSONB column + strict per-kind validation on the Go
     -- side avoids a pile of NULL columns per channel:
     --   dingtalk {webhook,secret}

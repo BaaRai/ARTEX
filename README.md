@@ -181,6 +181,14 @@ gunzip -c backups/artex-db-<timestamp>.sql.gz | docker compose exec -T postgres 
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
 
+Stored secrets (LLM API keys, MCP env, task credentials, notification channel
+config) are encrypted in the database with the key in `keys/secret.key`
+(generated at first start, mode 0600, next to `jwt.key`). **A database backup
+without that key can no longer restore those secrets**: back up `keys/` with the
+dump, separately. Deployments without a persistent disk set `ARTEX_SECRET_KEY`
+(32 bytes, base64 or hex, e.g. `openssl rand -base64 32`) instead. ARTEX refuses
+to start when the database holds encrypted secrets and no key is available.
+
 Daily cron example (03:20, operator crontab):
 
 ```

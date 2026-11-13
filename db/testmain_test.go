@@ -18,6 +18,8 @@ func TestMain(m *testing.M) {
 	// contending on shared tables and the advisory lock below stops
 	// serializing go test ./... across packages.
 	SuffixTestDatabase("db")
+	box, _ := newSecretBox(testSecretKey)
+	activeSecretBox.Store(box)
 	dsn, _, err := DSN()
 	if err != nil {
 		// No DB configured — tests that need PG will skip themselves.

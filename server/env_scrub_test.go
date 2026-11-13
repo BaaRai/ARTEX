@@ -46,6 +46,7 @@ func TestNewAppliesSecretScrubOption(t *testing.T) {
 	if dsn := os.Getenv("ARTEX_PG_DSN"); dsn != "" {
 		t.Setenv("ARTEX_PG_DSN", dsn)
 	}
+	t.Setenv("ARTEX_SECRET_KEY", os.Getenv("ARTEX_SECRET_KEY"))
 	t.Setenv("ANTHROPIC_API_KEY", "scrub-probe")
 	t.Setenv("OPENAI_API_KEY", "scrub-probe")
 
