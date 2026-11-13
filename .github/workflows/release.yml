@@ -2,6 +2,9 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Dry run: builds, SBOM, attestations and workflow artifacts only. The GitHub
+  # Release and the image push are gated on github.event_name == 'push'.
+  workflow_dispatch:
 
 permissions:
   contents: write # required to create the Release
@@ -81,6 +84,10 @@ jobs:
   release:
     needs: binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the Release (softprops/action-gh-release)
+      id-token: write # Sigstore signing of the provenance attestation
+      attestations: write # store the attestation on the repository
     steps:
       - uses: actions/checkout@v4 # CHANGELOG.md and the extractor script
       - uses: actions/download-artifact@v4
@@ -91,6 +98,39 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: sha256sum *.zip > SHA256SUMS
+      # SBOM of what ships: the Go modules embedded in the linux/amd64 binary, plus
+      # the frontend lockfile and the Go module files.
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-linux-amd64
+          path: ${{ runner.temp }}/sbom-src/bin
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+        with:
+          syft-version: v1.54.0
+      - name: Generate CycloneDX SBOM
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          SRC: ${{ runner.temp }}/sbom-src
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p "$SRC/web"
+          cp go.mod go.sum "$SRC/"
+          cp web/package-lock.json "$SRC/web/"
+          sbom="dist/artex-${TAG}.cdx.json"
+          "$SYFT" scan "dir:$SRC" --source-name artex --source-version "$TAG" -o "cyclonedx-json=$sbom"
+          grep -q '"pkg:golang/' "$sbom" || { echo "::error::SBOM has no pkg:golang entries"; exit 1; }
+          grep -q '"pkg:npm/' "$sbom" || { echo "::error::SBOM has no pkg:npm entries"; exit 1; }
+          echo "SBOM_PATH=$sbom" >> "$GITHUB_ENV"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: |
+            dist/SHA256SUMS
+            ${{ env.SBOM_PATH }}
       - name: Release body from CHANGELOG.md
         env:
           TAG: ${{ github.ref_name }}
@@ -103,10 +143,12 @@ jobs:
             echo "Release $TAG. See CHANGELOG.md for the list of changes in this release." > "$RUNNER_TEMP/release-body.md"
           fi
       - uses: softprops/action-gh-release@v2
+        if: github.event_name == 'push'
         with:
           files: |
             dist/*.zip
             dist/SHA256SUMS
+            ${{ env.SBOM_PATH }}
           generate_release_notes: false
           body_path: ${{ runner.temp }}/release-body.md
 
@@ -118,7 +160,7 @@ jobs:
   # and provide DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets plus DOCKERHUB_IMAGE).
   docker:
     needs: binaries
-    if: ${{ vars.DOCKERHUB_ENABLED == 'true' }}
+    if: ${{ vars.DOCKERHUB_ENABLED == 'true' && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # fetch the Dockerfile and skills/

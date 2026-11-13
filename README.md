@@ -134,6 +134,15 @@ cp config.example.json config.json   # fill in the database connection
 > Please start with `start.sh` / `start.bat` instead of running `./artex` directly. It is a daemon script: if the process crashes, it restarts it after a backoff.
 > To keep it running in the background: `nohup ./start.sh >artex.log 2>&1 &`.
 
+#### Verifying a release
+
+Each release attaches `SHA256SUMS` and a CycloneDX SBOM, `artex-<tag>.cdx.json` (Go modules embedded in the linux/amd64 binary, the frontend `package-lock.json`, and `go.mod`/`go.sum`), next to the zips. The zips also carry a GitHub build provenance attestation. Releases published before this was added have neither the SBOM nor the attestation.
+
+```bash
+sha256sum -c SHA256SUMS                           # add --ignore-missing if you downloaded only some zips
+gh attestation verify <zip> --repo BaaRai/ARTEX   # provenance: built by this repository's release workflow
+```
+
 ### Option 4: build the single binary from source
 
 ```bash
