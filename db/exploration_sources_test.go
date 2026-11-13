@@ -10,13 +10,14 @@ func TestInheritedActivityReadsRequireTerminalIntent(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) - skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanups below.
+	t.Cleanup(func() { d.Close() })
 
 	expID, err := d.CreateExploration("source activity boundary", "source activity boundary")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM explorations WHERE id=$1`, expID) })
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM explorations WHERE id=$1`, expID) })
 	store := d.Exploration(expID)
 	intentID, err := store.AddIntent(map[string]any{"summary": "source work"}, 1, nil, "planner")
 	if err != nil {
@@ -93,7 +94,8 @@ func TestExplorationDirectSourceReadView(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) - skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanups below.
+	t.Cleanup(func() { d.Close() })
 
 	grand, err := d.CreateTask("grand source", "grand goal", nil, 0, 0)
 	if err != nil {
@@ -112,9 +114,9 @@ func TestExplorationDirectSourceReadView(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = d.DeleteTask(current.ID)
-		_ = d.DeleteTask(source.ID)
-		_ = d.DeleteTask(grand.ID)
+		cleanupErr(t, "current task", d.DeleteTask(current.ID))
+		cleanupErr(t, "source task", d.DeleteTask(source.ID))
+		cleanupErr(t, "grand task", d.DeleteTask(grand.ID))
 	})
 
 	grandStore := d.Exploration(grand.ExplorationID)
@@ -315,7 +317,8 @@ func TestTaskAssetContextUsesDirectSourceScopeAndAnchors(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) - skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanups below.
+	t.Cleanup(func() { d.Close() })
 
 	grand, err := d.CreateTask("grand assets", "grand goal", nil, 0, 0)
 	if err != nil {
@@ -351,10 +354,11 @@ func TestTaskAssetContextUsesDirectSourceScopeAndAnchors(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = d.DeleteTask(current.ID)
-		_ = d.DeleteTask(source.ID)
-		_ = d.DeleteTask(grand.ID)
-		_, _ = assets.DeleteByIDs([]int64{sourceTestedID, sourceUntestedID, sourceAnchoredOnlyID, grandID})
+		cleanupErr(t, "current task", d.DeleteTask(current.ID))
+		cleanupErr(t, "source task", d.DeleteTask(source.ID))
+		cleanupErr(t, "grand task", d.DeleteTask(grand.ID))
+		_, err := assets.DeleteByIDs([]int64{sourceTestedID, sourceUntestedID, sourceAnchoredOnlyID, grandID})
+		cleanupErr(t, "assets", err)
 	})
 	if _, err := assets.AddAgentScope(source.ID, "root_domain", sourceTestedDomain, "test", "agent"); err != nil {
 		t.Fatal(err)

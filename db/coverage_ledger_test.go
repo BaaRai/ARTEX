@@ -102,12 +102,13 @@ func TestRecordCoverageUpsertHistory(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanup below.
+	t.Cleanup(func() { d.Close() })
 	task, err := d.CreateTaskWithOptions("coverage ledger", "g", TaskCreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
 	as := d.Assets()
 	store := d.Exploration(task.ExplorationID)
 	for _, vc := range []string{"SQLi", "XSS"} {
@@ -158,12 +159,13 @@ func TestCoverageCompletenessBudgetThenReviveDone(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanup below.
+	t.Cleanup(func() { d.Close() })
 	task, err := d.CreateTaskWithOptions("coverage revive", "g", TaskCreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
 	as, store := d.Assets(), d.Exploration(task.ExplorationID)
 	state := func() string {
 		t.Helper()
@@ -221,12 +223,13 @@ func TestRecordCoverageRowCap(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
-	defer d.Close()
+	// Registered FIRST so it runs LAST, after the row cleanup below.
+	t.Cleanup(func() { d.Close() })
 	task, err := d.CreateTaskWithOptions("coverage cap", "g", TaskCreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
 	if _, err := d.Exec(`INSERT INTO coverage_ledger(task_id, surface, risk_area, outcome)
 SELECT $1, '/s' || g, 'xss', 'needs_follow_up' FROM generate_series(1, $2::int) g`, task.ID, MaxCoverageRowsPerTask); err != nil {
 		t.Fatal(err)
