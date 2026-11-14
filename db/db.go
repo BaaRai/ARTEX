@@ -1,6 +1,15 @@
 // Package db is the PostgreSQL data source for ARTEX (replacing the old graph
 // single-file SQLite). It opens the connection, applies the schema, and seeds
 // the built-in agents and variable catalog.
+//
+// Schema changes:
+//   - schema.sql remains the idempotent base, executed on every startup.
+//   - Any new DDL goes in a numbered migration, migrations/NNNN_slug.sql.
+//     Open applies pending migrations once, in version order, and records
+//     each in schema_migrations with the SHA-256 of its file.
+//   - A published migration is never edited: Open refuses to start when an
+//     applied migration's checksum no longer matches its file. Fix forward
+//     with a new migration instead.
 package db
 
 import (
@@ -9,6 +18,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"strings"
@@ -153,8 +163,15 @@ func ensureDatabase(dsn string) error {
 	return nil
 }
 
-// Open connects, applies the schema (idempotent), and seeds builtin rows.
+// Open connects, applies the schema (idempotent) and the embedded versioned
+// migrations, and seeds builtin rows.
 func Open(dsn string) (*DB, error) {
+	return openWithMigrations(dsn, migrationsFS())
+}
+
+// openWithMigrations is Open with the migration set as a parameter, so tests
+// can pass an fstest.MapFS.
+func openWithMigrations(dsn string, migrations fs.FS) (*DB, error) {
 	if err := ensureDatabase(dsn); err != nil {
 		return nil, err
 	}
@@ -186,6 +203,11 @@ func Open(dsn string) (*DB, error) {
 	err = withSchemaMigrationLock(context.Background(), sqlDB, func(conn *sql.Conn) error {
 		if err := applySchemaWithRetry(context.Background(), conn, time.Sleep); err != nil {
 			return fmt.Errorf("apply schema: %w", err)
+		}
+		// Runs on conn, the lock holder; it must not call EnsureLLM*Table,
+		// whose own lock request would wait on conn forever.
+		if err := applyMigrations(context.Background(), conn, migrations); err != nil {
+			return fmt.Errorf("apply migrations: %w", err)
 		}
 		if err := d.seedBuiltins(); err != nil {
 			return fmt.Errorf("seed builtins: %w", err)
