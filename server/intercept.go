@@ -231,6 +231,17 @@ func (s *Server) interceptToggleRule(w http.ResponseWriter, r *http.Request) {
 
 // --- pending (ask) ---
 
+// interceptPendingDTO is a pending row plus its risk score. The embedded row
+// keeps every existing JSON field; the score is computed on read, never stored.
+type interceptPendingDTO struct {
+	db.InterceptPending
+	Risk intercept.RiskReport `json:"risk"`
+}
+
+func pendingDTO(p db.InterceptPending) interceptPendingDTO {
+	return interceptPendingDTO{InterceptPending: p, Risk: intercept.ScoreRisk(p.ToolName, p.ToolInput)}
+}
+
 func (s *Server) interceptListPending(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -241,10 +252,11 @@ func (s *Server) interceptListPending(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if pending == nil {
-		pending = []db.InterceptPending{}
+	out := make([]interceptPendingDTO, 0, len(pending))
+	for _, p := range pending {
+		out = append(out, pendingDTO(p))
 	}
-	writeJSON(w, 200, map[string]any{"pending": pending})
+	writeJSON(w, 200, map[string]any{"pending": out})
 }
 
 func (s *Server) interceptGetOne(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +278,7 @@ func (s *Server) interceptGetOne(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "not found")
 		return
 	}
-	writeJSON(w, 200, p)
+	writeJSON(w, 200, pendingDTO(*p))
 }
 
 func (s *Server) interceptListTaskItems(w http.ResponseWriter, r *http.Request) {
@@ -412,6 +424,64 @@ func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// maxBatchDecide bounds one batch decision request.
+const maxBatchDecide = 100
+
+type batchDecideResult struct {
+	ID    int64  `json:"id"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// interceptBatchDecide applies one human decision to several pending requests.
+// Each id goes through the same Interceptor.Decide as the single decide route,
+// with the same approver and address: target pins, the decided_by=human audit
+// and the waiter wake-up are identical. One id failing (already decided, empty
+// target pin) is reported for that id and does not stop the others.
+func (s *Server) interceptBatchDecide(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs      []int64 `json:"ids"`
+		Decision string  `json:"decision"` // "allowed" | "denied"
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.Decision != "allowed" && req.Decision != "denied" {
+		writeErr(w, 400, "decision must be allowed or denied")
+		return
+	}
+	if len(req.IDs) == 0 || len(req.IDs) > maxBatchDecide {
+		writeErr(w, 400, fmt.Sprintf("ids must list between 1 and %d pending ids", maxBatchDecide))
+		return
+	}
+	seen := make(map[int64]bool, len(req.IDs))
+	ids := make([]int64, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		if id <= 0 {
+			writeErr(w, 400, fmt.Sprintf("bad pending id %d", id))
+			return
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	approver, addr := s.approver(r), clientIP(r, s.trustedProxies)
+	results := make([]batchDecideResult, 0, len(ids))
+	decided := 0
+	for _, id := range ids {
+		res := batchDecideResult{ID: id, OK: true}
+		if err := s.m.interceptor.Decide(id, req.Decision == "allowed", approver, addr); err != nil {
+			res.OK, res.Error = false, err.Error()
+		} else {
+			decided++
+		}
+		results = append(results, res)
+	}
+	writeJSON(w, 200, map[string]any{"decided": decided, "failed": len(ids) - decided, "results": results})
 }
 
 // alwaysAllowPriority places "always allow" rules below every default and

@@ -1368,6 +1368,20 @@ export interface InterceptPending {
   reason: string; // the rule's message or the model's verdict reason (model verdicts carry a [model] prefix)
   decided_at?: string;
   created_at: string;
+  // Deterministic risk score, computed by the server when a pending row is read.
+  risk?: InterceptRisk;
+}
+
+export interface InterceptRisk {
+  score: number; // 0..100
+  level: "low" | "medium" | "high";
+  reasons: string[];
+}
+
+export interface InterceptBatchDecideResult {
+  decided: number;
+  failed: number;
+  results: { id: number; ok: boolean; error?: string }[];
 }
 
 // JudgeConfig: global config for model fallback approval (the model decides only when no interception rule matches).
