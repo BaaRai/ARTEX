@@ -23,6 +23,9 @@ func TestTaskOutcomeCard(t *testing.T) {
 	}
 	taskID, _ := strconv.ParseInt(task.ID, 10, 64)
 	defer func() { _ = m.pg.DeleteTask(taskID) }()
+	// skill_usage has no foreign keys, so DeleteTask leaves these rows behind,
+	// and their misses would outrank TestSkillGapsReport's fixture in later runs.
+	defer func() { _, _ = m.pg.Exec(`DELETE FROM skill_usage WHERE task_id=$1`, taskID) }()
 
 	if _, err := m.pg.Exec(`
 INSERT INTO findings(task_id,vulnclass,name,severity,status) VALUES
@@ -57,7 +60,9 @@ INSERT INTO skill_usage(skill,task_id,found) VALUES ('api-recon',$1,true),('grap
 		t.Fatal(err)
 	}
 
-	s := New(context.Background(), m, t.TempDir(), t.TempDir(), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	defer stopTestServer(t, s, cancel)
 	token, err := signJWT(s.jwtKey)
 	if err != nil {
 		t.Fatal(err)

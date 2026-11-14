@@ -50,7 +50,9 @@ SELECT id,'completed','fixed','{}'::jsonb FROM findings WHERE task_id=$1 AND nam
 		t.Fatal(err)
 	}
 
-	s := New(context.Background(), m, t.TempDir(), t.TempDir(), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	defer stopTestServer(t, s, cancel)
 	token, err := signJWT(s.jwtKey)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +146,9 @@ VALUES ($1,'xss','Reflected XSS','reflected in search','high','confirmed')`, tas
 		t.Fatal(err)
 	}
 
-	s := New(context.Background(), m, t.TempDir(), t.TempDir(), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	defer stopTestServer(t, s, cancel)
 	token, err := signJWT(s.jwtKey)
 	if err != nil {
 		t.Fatal(err)

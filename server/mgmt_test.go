@@ -18,8 +18,14 @@ func TestMgmtAPI(t *testing.T) {
 	if m.pg == nil {
 		t.Skip("postgres unavailable — skipping management API test")
 	}
+	// New starts the notifier and task-archive workers on context.Background();
+	// closing the pool stops them from claiming later tests' digest batches
+	// and archive jobs.
+	defer m.Close()
 	td := t.TempDir()
-	s := New(context.Background(), m, td, td, td)
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, td, td, td)
+	defer stopTestServer(t, s, cancel)
 	h := s.Handler()
 	tok, err := signJWT(s.jwtKey)
 	if err != nil {
