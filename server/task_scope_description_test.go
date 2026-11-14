@@ -23,7 +23,7 @@ func TestTaskScopeDescriptionUpgrade(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
-	t.Cleanup(func() { agent.ToolResolve = nil })
+	t.Cleanup(func() { agent.SetToolResolve(nil) })
 	pg := m.pg
 
 	var want string
@@ -84,7 +84,7 @@ func TestTaskScopeDescriptionUpgrade(t *testing.T) {
 // ToolResolve serves it to the planner.
 func resolvedTaskScopeDescription(t *testing.T) string {
 	t.Helper()
-	tools := agent.ToolResolve(context.Background(), "planner", agent.NewToolSet(nil, "").PlannerTools())
+	tools := agent.ToolResolve()(context.Background(), "planner", agent.NewToolSet(nil, "").PlannerTools())
 	for _, tl := range tools {
 		if tl.Name() == "add_task_scope" {
 			return tl.Description()

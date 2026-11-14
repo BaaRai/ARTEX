@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"sync"
 
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -23,15 +24,36 @@ type DeferredInfo struct {
 	UnlockSkill     func(skillName string)
 }
 
-// ToolAugment, if set, returns the EXTRA tools an agent should see beyond its
-// built-in base set — the agent's visible skills (packed into one Skill meta-tool)
+// ToolAugmentFunc is the ToolAugment hook. If set, it returns the EXTRA tools
+// an agent should see beyond its built-in base set — the agent's visible skills (packed into one Skill meta-tool)
 // and visible MCP servers (expanded to mcp__server__tool). It also returns the
 // DeferredInfo describing how those MCP tools are deferred/gated. The server wires
 // it to the PG agent_visibility table. cleanup releases any spawned MCP clients.
 //
 // When nil, agents run with only their built-in tools — behavior is unchanged
 // until a user assigns a skill/MCP to the agent in the UI.
-var ToolAugment func(ctx context.Context, agentKey string) (extra []actool.CoreTool, def DeferredInfo, cleanup func())
+type ToolAugmentFunc func(ctx context.Context, agentKey string) (extra []actool.CoreTool, def DeferredInfo, cleanup func())
+
+// The hook is set by server wiring while restored tasks may already be
+// assembling tools on other goroutines, so every access goes through the lock.
+var (
+	toolAugmentMu sync.RWMutex
+	toolAugment   ToolAugmentFunc
+)
+
+// SetToolAugment installs (or, with nil, removes) the ToolAugment hook.
+func SetToolAugment(f ToolAugmentFunc) {
+	toolAugmentMu.Lock()
+	toolAugment = f
+	toolAugmentMu.Unlock()
+}
+
+// ToolAugment returns the current ToolAugment hook, or nil when none is set.
+func ToolAugment() ToolAugmentFunc {
+	toolAugmentMu.RLock()
+	defer toolAugmentMu.RUnlock()
+	return toolAugment
+}
 
 // AugmentTools returns base plus the agent's visible skill/MCP tools, the
 // DeferredInfo, and a cleanup func the caller must defer (closes MCP clients).
@@ -42,10 +64,11 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 		cleanup = func() {}
 		out     = base
 	)
-	if ToolAugment != nil {
+	// Copy each hook once under its lock, then call it outside the lock.
+	if augment := ToolAugment(); augment != nil {
 		var extra []actool.CoreTool
 		var cl func()
-		extra, def, cl = ToolAugment(ctx, agentKey)
+		extra, def, cl = augment(ctx, agentKey)
 		if cl != nil {
 			cleanup = cl
 		}
@@ -57,8 +80,8 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	// agent isn't bound to (or that are disabled) and swap in overridden
 	// descriptions/schemas + default injection. MCP/skill/host tools have no row
 	// and pass through untouched, so deferred/unlock wiring stays consistent.
-	if ToolResolve != nil {
-		out = ToolResolve(ctx, agentKey, out)
+	if resolve := ToolResolve(); resolve != nil {
+		out = resolve(ctx, agentKey, out)
 	}
 	// Tool RAG (off by default): lexical projection of the bound list; only removes.
 	out = applyToolRAG(ctx, agentKey, out, def.Deferred, bm25Score)

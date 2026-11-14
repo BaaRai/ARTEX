@@ -49,7 +49,7 @@ func TestAssembleVisibleSkill(t *testing.T) {
 	}
 
 	wireAgentAugment(pg, skillDir, nil)
-	t.Cleanup(func() { agent.ToolAugment = nil })
+	t.Cleanup(func() { agent.SetToolAugment(nil) })
 
 	ag, _ := pg.GetAgentByKey("planner")
 	if ag == nil {
@@ -65,7 +65,7 @@ func TestAssembleVisibleSkill(t *testing.T) {
 	t.Cleanup(func() { _ = pg.SetAgentSkillVisibility(ag.ID, orig) })
 
 	// before: skill not visible → no Skill meta-tool
-	extra, _, cleanup := agent.ToolAugment(context.Background(), "planner")
+	extra, _, cleanup := agent.ToolAugment()(context.Background(), "planner")
 	cleanup()
 	if hasSkillTool(extra) {
 		t.Fatalf("expected no Skill meta-tool before the skill is made visible")
@@ -78,7 +78,7 @@ func TestAssembleVisibleSkill(t *testing.T) {
 	t.Cleanup(func() { _ = pg.ToggleSkillVisibility(ag.ID, skillName, false) })
 
 	// after: the Skill meta-tool is packed in
-	extra, _, cleanup = agent.ToolAugment(context.Background(), "planner")
+	extra, _, cleanup = agent.ToolAugment()(context.Background(), "planner")
 	defer cleanup()
 	if !hasSkillTool(extra) {
 		t.Fatalf("expected the Skill meta-tool after making the skill visible")

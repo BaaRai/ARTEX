@@ -82,12 +82,17 @@ func TestToolRAGCoreKeptAndKRespected(t *testing.T) {
 // The projection runs after ToolResolve, so a tool the binding/enabled filter
 // dropped is never selected even when it is the best lexical match.
 func TestToolRAGNeverSelectsUnboundOrDisabled(t *testing.T) {
-	oldResolve, oldAugment, oldPolicy := ToolResolve, ToolAugment, FindingTrafficBindingEnabled
-	t.Cleanup(func() { ToolResolve, ToolAugment, FindingTrafficBindingEnabled = oldResolve, oldAugment, oldPolicy })
-	ToolAugment, FindingTrafficBindingEnabled = nil, nil
+	oldResolve, oldAugment, oldPolicy := ToolResolve(), ToolAugment(), FindingTrafficBindingEnabled()
+	t.Cleanup(func() {
+		SetToolResolve(oldResolve)
+		SetToolAugment(oldAugment)
+		SetFindingTrafficBindingEnabled(oldPolicy)
+	})
+	SetToolAugment(nil)
+	SetFindingTrafficBindingEnabled(nil)
 	t.Setenv(toolRAGEnv, "on")
 	t.Setenv(toolRAGTopKEnv, "2")
-	ToolResolve = func(_ context.Context, _ string, in []actool.CoreTool) []actool.CoreTool {
+	SetToolResolve(func(_ context.Context, _ string, in []actool.CoreTool) []actool.CoreTool {
 		var out []actool.CoreTool
 		for _, tool := range in {
 			if tool.Name() != "sql_injection_exploit" {
@@ -95,7 +100,7 @@ func TestToolRAGNeverSelectsUnboundOrDisabled(t *testing.T) {
 			}
 		}
 		return out
-	}
+	})
 	base := append(ragCatalog(25), ragTool("sql_injection_exploit", "Exploit SQL injection in web login form", "url"))
 	out, _, cleanup := AugmentTools(WithToolQuery(t.Context(), ragQuery), "worker", base)
 	defer cleanup()

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -121,13 +122,34 @@ func BuiltinToolSeeds() []ToolSeed {
 	return out
 }
 
-// ToolResolve, if set, post-processes an agent's fully-assembled tool list against
+// ToolResolveFunc is the ToolResolve hook. If set, it post-processes an agent's
+// fully-assembled tool list against
 // the DB tools table: it drops tools not bound to this agent (or globally disabled)
 // and wraps the rest so the model sees the DB-overridden description/schema and
 // default inputs get injected. Tools with no matching DB row (MCP/skill/host tools
 // like traffic) pass through untouched. nil = tools unchanged. Wired in
 // server/assembly.go.
-var ToolResolve func(ctx context.Context, agentKey string, tools []actool.CoreTool) []actool.CoreTool
+type ToolResolveFunc func(ctx context.Context, agentKey string, tools []actool.CoreTool) []actool.CoreTool
+
+// Guarded like toolAugment: wiring can run while tasks assemble tools.
+var (
+	toolResolveMu sync.RWMutex
+	toolResolve   ToolResolveFunc
+)
+
+// SetToolResolve installs (or, with nil, removes) the ToolResolve hook.
+func SetToolResolve(f ToolResolveFunc) {
+	toolResolveMu.Lock()
+	toolResolve = f
+	toolResolveMu.Unlock()
+}
+
+// ToolResolve returns the current ToolResolve hook, or nil when none is set.
+func ToolResolve() ToolResolveFunc {
+	toolResolveMu.RLock()
+	defer toolResolveMu.RUnlock()
+	return toolResolve
+}
 
 // DecorateTool wraps t so Description()/InputSchema() report the DB overrides and
 // Call() injects scalar parameter defaults (from schema's "default" props) whenever
