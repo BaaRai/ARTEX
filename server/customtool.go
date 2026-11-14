@@ -566,13 +566,14 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	client := &http.Client{Timeout: timeoutOr(spec.TimeoutMs, 30000)}
 	// Every redirect hop goes through the target gate, as the rendered URL did.
 	client.CheckRedirect = intercept.RedirectCheck(key)
-	// The shared egress governor paces every request and redirect hop per host
-	// under the noise profile (off by default: the base transport itself).
+	// The current egress governor paces every request and redirect hop per host
+	// under the noise profile (off by default: the base transport itself). It is
+	// resolved per request, so a changed profile applies to the next call.
 	var base http.RoundTripper = http.DefaultTransport
 	if tr := s.httpToolTransport(ctx, key, spec); tr != nil {
 		base = tr
 	}
-	client.Transport = egress.Shared().Transport(key, base)
+	client.Transport = egress.Current().Transport(key, base)
 	resp, err := client.Do(req)
 	if err != nil {
 		return actool.Errorf("request failed: " + err.Error()), nil

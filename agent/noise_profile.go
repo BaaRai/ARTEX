@@ -14,10 +14,11 @@ import (
 // prompts stay byte-for-byte unchanged by default.
 const noiseProfileHeader = "[Noise profile: "
 
-// noiseProfileBlock returns the low-and-slow guidance for the active noise
-// profile (ARTEX_NOISE_PROFILE), or "" when the profile is off. The text is
-// code-owned and carries no target data.
-func noiseProfileBlock() string { return renderNoiseProfile(egress.ProfileFromEnv()) }
+// noiseProfileBlock returns the low-and-slow guidance for the current noise
+// profile (the noise_profile setting, else ARTEX_NOISE_PROFILE), or "" when the
+// profile is off. It is read at each prompt build, so a changed setting shows in
+// the next prompt. The text is code-owned and carries no target data.
+func noiseProfileBlock() string { return renderNoiseProfile(egress.CurrentProfile()) }
 
 // renderNoiseProfile renders the block for one profile. It is pure: tests cover
 // every profile without touching the environment.

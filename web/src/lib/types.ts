@@ -962,6 +962,23 @@ export interface Settings {
   // Render limits of IM messages; 0 = no truncation. The backend answers 400 outside the bounds.
   notify_summary_max_runes?: number; // summary characters per finding, 0-4000, default 120
   notify_assets_max_shown?: number; // asset names listed per finding, 0-50, default 3
+  // Target noise profile; the stored setting wins over ARTEX_NOISE_PROFILE. Applies to the next request.
+  noise_profile?: NoiseProfileName;
+}
+
+export type NoiseProfileName = "off" | "quiet" | "balanced" | "aggressive";
+
+// GET /api/settings/noise: the current profile and its per-host counters (current minute, no reset).
+export interface NoiseStatus {
+  profile: NoiseProfileName;
+  hosts: {
+    host: string;
+    rpm: number;
+    peak_rpm: number;
+    peak_inflight: number;
+    inflight: number;
+    duplicates_avoided: number;
+  }[];
 }
 
 // ---- Vulnerability IM push ----

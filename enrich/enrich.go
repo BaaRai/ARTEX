@@ -99,7 +99,8 @@ func New(as *db.AssetStore, proxy func() string, workers int) *Engine {
 // probe without a scope is refused. When the scope's gate is on, the probe
 // connects to the target itself, without the proxy, so that the dialer decides
 // on the target and connects only to the addresses a pin covers. Every request
-// goes through the shared egress governor (the noise profile; off by default).
+// goes through the egress governor current at that request (the noise profile;
+// off by default), so a changed profile applies without rebuilding the client.
 func buildClient(proxy func() string) *http.Client {
 	tr := &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
@@ -120,7 +121,7 @@ func buildClient(proxy func() string) *http.Client {
 		}
 	}
 	return &http.Client{
-		Transport: egress.Shared().Transport("enrich", tr),
+		Transport: egress.Dynamic("enrich", tr),
 		Timeout:   httpTimeout,
 		// cap redirects; keep them within scope by re-checking at probe time
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },

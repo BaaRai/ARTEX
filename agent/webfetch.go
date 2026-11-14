@@ -27,11 +27,12 @@ func withWebFetch(ctx context.Context, tools []actool.CoreTool, proxy, caCert st
 	gated := scoped && scope.Enabled != nil && scope.Enabled()
 	webFetch := actool.NewWebFetch(actool.WebFetchConfig{Proxy: proxy, CACert: caCert, CheckRedirect: intercept.RedirectCheck("WebFetch"),
 		DialContext: intercept.PinnedDialer("WebFetch", scoped), DisableDirectRetry: gated})
-	return append(tools[:len(tools):len(tools)], governedFetch{webFetch, egressGovernor()})
+	return append(tools[:len(tools):len(tools)], governedFetch{webFetch})
 }
 
-// egressGovernor is the governor of WebFetch; a test may pin it.
-var egressGovernor = egress.Shared
+// egressGovernor resolves the governor of a WebFetch call, once per call so a
+// changed noise profile applies to the next call; a test may pin it.
+var egressGovernor = egress.Current
 
 // governedFetch runs each WebFetch call as one send under the egress governor
 // (off by default; then the call runs unchanged). Under a noise profile it
@@ -42,7 +43,6 @@ var egressGovernor = egress.Shared
 // 429/503 is not retried.
 type governedFetch struct {
 	actool.CoreTool
-	g *egress.Governor
 }
 
 func (f governedFetch) Call(ctx context.Context, input json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
@@ -56,7 +56,7 @@ func (f governedFetch) Call(ctx context.Context, input json.RawMessage, tc *acto
 	if err != nil || u.Host == "" {
 		return f.CoreTool.Call(ctx, input, tc) // the tool reports the bad URL
 	}
-	return egress.Do(f.g, ctx, u, func() (actool.Result, error) {
+	return egress.Do(egressGovernor(), ctx, u, func() (actool.Result, error) {
 		return f.CoreTool.Call(ctx, input, tc)
 	})
 }

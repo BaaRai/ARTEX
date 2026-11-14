@@ -22,6 +22,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
@@ -833,6 +834,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm/records/{id}", s.pgGetLLMRecord)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/settings/noise", s.noiseStatus) // current noise profile + per-host counters (no reset)
 	// Vulnerability IM push. Channels are "multi-instance + per-instance filter rules" resources, so they get their own group of
 	// REST endpoints instead of being stuffed into the flat /api/settings key-value store.
 	mux.HandleFunc("GET /api/notify/meta", s.notifyMeta)
@@ -3528,6 +3530,8 @@ func (s *Server) settingsPayload() map[string]any {
 		// Render limits of IM messages; 0 = no truncation.
 		"notify_summary_max_runes": limits.SummaryRunes,
 		"notify_assets_max_shown":  limits.AssetsShown,
+		// Effective target noise profile (off by default): the stored setting, else ARTEX_NOISE_PROFILE.
+		"noise_profile": egress.CurrentProfile().Name,
 	}
 }
 
@@ -3603,10 +3607,26 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// Render limits of IM messages: summary characters (0-4000) and asset names listed (0-50); 0 = no truncation.
 		NotifySummaryMaxRunes *int `json:"notify_summary_max_runes"`
 		NotifyAssetsMaxShown  *int `json:"notify_assets_max_shown"`
+		// Target noise profile: off|quiet|balanced|aggressive; null = unchanged. Applies to the next request, no agent rebuild.
+		NoiseProfile *string `json:"noise_profile"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
+	}
+	// Validated before any other field is written, so a bad value changes nothing.
+	var noise egress.Profile
+	if req.NoiseProfile != nil {
+		var ok bool
+		if noise, ok = egress.ProfileByName(*req.NoiseProfile); !ok {
+			writeErr(w, 400, "noise_profile must be off, quiet, balanced or aggressive")
+			return
+		}
+		if err := s.m.pg.SetSetting(settingNoiseProfile, noise.Name); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		egress.SetProfile(noise)
 	}
 	// A masked placeholder echoed back keeps the stored secret, like null.
 	req.BraveKey, req.TavilyKey = keepIfMasked(req.BraveKey), keepIfMasked(req.TavilyKey)

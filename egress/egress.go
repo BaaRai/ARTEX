@@ -1,6 +1,7 @@
 // Package egress is the governor the platform-owned HTTP requests to a target
 // pass through (WebFetch, the http custom tools, the enrich probe). A noise
-// profile (ARTEX_NOISE_PROFILE) sets every lever: a token bucket, a jitter and a
+// profile (the noise_profile setting, else ARTEX_NOISE_PROFILE; SetProfile
+// changes it at runtime) sets every lever: a token bucket, a jitter and a
 // concurrency cap per host, a global concurrency cap, backoff on 429/503, and,
 // for the GET requests of one task, coalescing and a short cache. The default
 // profile, off, is a strict passthrough: requests and timing are unchanged.
@@ -22,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -54,42 +56,91 @@ var Profiles = map[string]Profile{
 	"aggressive": {Name: "aggressive", RPS: 20, Burst: 40, MaxPerHost: 4, MaxGlobal: 32, Jitter: 0.1, CacheTTL: 10 * time.Second, MaxRetries: 2, BaseDelay: 500 * time.Millisecond, MaxDelay: 10 * time.Second},
 }
 
-// ProfileFromEnv returns the profile ARTEX_NOISE_PROFILE names; unset, "off" or
-// unknown is off.
-func ProfileFromEnv() Profile {
-	name := strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_NOISE_PROFILE")))
-	p, ok := Profiles[name]
-	if !ok {
-		if name != "" && name != "off" {
-			log.Printf("[egress] ARTEX_NOISE_PROFILE=%q is not off, quiet, balanced or aggressive; using off", name)
-		}
-		return Profile{Name: "off"}
+// ProfileByName returns the profile name names (off, quiet, balanced or
+// aggressive, any case); ok is false for any other name, "" included. A profile
+// other than off carries ARTEX_TARGET_USER_AGENT; off stays a strict passthrough.
+func ProfileByName(name string) (p Profile, ok bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "off" {
+		return Profile{Name: "off"}, true
+	}
+	if p, ok = Profiles[name]; !ok {
+		return Profile{Name: "off"}, false
 	}
 	if ua := strings.TrimSpace(os.Getenv("ARTEX_TARGET_USER_AGENT")); strings.ContainsFunc(ua, unicode.IsControl) {
 		log.Printf("[egress] ARTEX_TARGET_USER_AGENT contains a control character; ignored")
 	} else {
 		p.UserAgent = ua
 	}
+	return p, true
+}
+
+// ProfileFromEnv returns the profile ARTEX_NOISE_PROFILE names; unset, "off" or
+// unknown is off.
+func ProfileFromEnv() Profile {
+	name := strings.TrimSpace(os.Getenv("ARTEX_NOISE_PROFILE"))
+	p, ok := ProfileByName(name)
+	if !ok && name != "" {
+		log.Printf("[egress] ARTEX_NOISE_PROFILE=%q is not off, quiet, balanced or aggressive; using off", name)
+	}
 	return p
 }
 
-// Shared is the one governor of the process, built from the environment on
-// first use; WebFetch, the http custom tools and the enrich probe all use it.
-// Under a profile it logs the noise counter of each host once a minute.
-var Shared = sync.OnceValue(func() *Governor {
-	g := New(ProfileFromEnv())
+// current is the governor new requests use. SetProfile replaces it; a request
+// already in flight keeps the governor it started on, so its slots are
+// released where they were taken.
+var (
+	current      atomic.Pointer[Governor]
+	initCurrent  sync.Once
+	reporterOnce sync.Once
+)
+
+// Current returns the governor of the process: the one SetProfile published
+// last, or, before any SetProfile, one built from the environment on first use.
+// WebFetch, the http custom tools and the enrich probe resolve it per request.
+func Current() *Governor {
+	if g := current.Load(); g != nil {
+		return g
+	}
+	initCurrent.Do(func() {
+		g := New(ProfileFromEnv())
+		if current.CompareAndSwap(nil, g) {
+			log.Printf("[egress] noise profile: %s", g.p.Name)
+		}
+		startReporter()
+	})
+	return current.Load()
+}
+
+// CurrentProfile is the profile of Current.
+func CurrentProfile() Profile { return Current().p }
+
+// SetProfile builds a governor for p and publishes it: new requests use it,
+// requests in flight finish on the previous one. The counters start afresh.
+func SetProfile(p Profile) *Governor {
+	g := New(p)
+	current.Store(g)
 	log.Printf("[egress] noise profile: %s", g.p.Name)
-	if !g.off() {
+	startReporter()
+	return g
+}
+
+// startReporter starts the one package-level ticker that logs, once a minute,
+// the noise counter of each host of the current governor. SetProfile never
+// starts another.
+func startReporter() {
+	reporterOnce.Do(func() {
 		go func() {
-			for range time.Tick(time.Minute) {
-				for _, l := range g.report() {
+			t := time.NewTicker(time.Minute)
+			defer t.Stop()
+			for range t.C {
+				for _, l := range Current().report() {
 					log.Print(l)
 				}
 			}
 		}()
-	}
-	return g
-})
+	})
+}
 
 // Governor holds the per-host state and the per-task response cache.
 type Governor struct {
@@ -122,6 +173,9 @@ func New(p Profile) *Governor {
 }
 
 func (g *Governor) off() bool { return g.p.RPS <= 0 }
+
+// Profile is the profile g was built for.
+func (g *Governor) Profile() Profile { return g.p }
 
 // HostKey is the lowercased host, with the port when it is not the default.
 func HostKey(u *url.URL) string {
@@ -240,6 +294,35 @@ func (g *Governor) report() []string {
 	return out
 }
 
+// HostNoise is the noise counter of one host: the current minute (RPM,
+// DuplicatesAvoided, PeakInflight), the peak per minute so far, and the
+// requests in flight now.
+type HostNoise struct {
+	Host              string `json:"host"`
+	RPM               int    `json:"rpm"`
+	PeakRPM           int    `json:"peak_rpm"`
+	PeakInflight      int    `json:"peak_inflight"`
+	Inflight          int    `json:"inflight"`
+	DuplicatesAvoided int    `json:"duplicates_avoided"`
+}
+
+// Snapshot returns the counter of every host that has sent or deduplicated a
+// request, sorted by host. Unlike report it starts no new minute.
+func (g *Governor) Snapshot() []HostNoise {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := []HostNoise{}
+	for key, h := range g.hosts {
+		if h.sent == 0 && h.dupes == 0 && h.inflight == 0 && h.peakRPM == 0 {
+			continue
+		}
+		out = append(out, HostNoise{Host: key, RPM: h.sent, PeakRPM: max(h.peakRPM, h.sent),
+			PeakInflight: h.peakInflight, Inflight: h.inflight, DuplicatesAvoided: h.dupes})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out
+}
+
 var errNotShared = errors.New("egress: response not shared")
 
 // share runs fn once for the concurrent callers of key and keeps its value for
@@ -342,6 +425,25 @@ type transport struct {
 	g         *Governor
 	namespace string
 	base      http.RoundTripper
+}
+
+// Dynamic returns base (nil: http.DefaultTransport) governed by the governor
+// current at each request, for a client built once and kept: a later
+// SetProfile applies to its next request. Off, the request goes to base as is.
+func Dynamic(namespace string, base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return dynamicTransport{namespace, base}
+}
+
+type dynamicTransport struct {
+	namespace string
+	base      http.RoundTripper
+}
+
+func (d dynamicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return Current().Transport(d.namespace, d.base).RoundTrip(req)
 }
 
 const maxSharedBody = 2 << 20 // a larger response is neither coalesced nor cached

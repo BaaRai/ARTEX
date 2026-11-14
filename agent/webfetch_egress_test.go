@@ -27,7 +27,11 @@ func TestWebFetchProfileDoesNotCache(t *testing.T) {
 		checks.Add(1)
 		return nil
 	}})
-	tool := governedFetch{inner, egress.New(egress.Profiles["balanced"])}
+	balanced := egress.New(egress.Profiles["balanced"])
+	old := egressGovernor
+	egressGovernor = func() *egress.Governor { return balanced }
+	t.Cleanup(func() { egressGovernor = old })
+	tool := governedFetch{inner}
 	ctx := intercept.WithTargetScope(t.Context(), intercept.TargetScope{TaskID: "7"})
 	for range 2 {
 		res, err := tool.Call(ctx, json.RawMessage(fetchInputJSON(pair.start)), &actool.ToolContext{})
