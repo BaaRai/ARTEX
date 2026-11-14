@@ -53,7 +53,7 @@ func TestInterceptBatchDecideHTTP(t *testing.T) {
 		}
 		return id
 	}
-	id1, id2, id3 := pending("ls"), pending("rm -rf /tmp/x"), pending("sudo rm -rf / ; cat /etc/shadow")
+	id1, id2, id3 := pending("ls"), pending("nmap -sV target.example"), pending("sudo rm -rf / ; cat /etc/shadow")
 
 	// The pending JSON keeps every historical field and adds risk.
 	var historical map[string]any

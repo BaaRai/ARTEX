@@ -642,6 +642,9 @@ function serverColumnCount() {
 
 type Selection = { selected: Set<number>; toggle: (id: number) => void; toggleAll: () => void };
 
+// Server limit on ids per batch-decide call (maxBatchDecide in server/intercept.go).
+const batchDecideMax = 100;
+
 function ApprovalTable({
   rows,
   busy,
@@ -938,24 +941,39 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       setSelected(selectedRows.length === pending.length ? new Set() : new Set(pending.map((row) => row.id))),
   };
 
-  // Each id is decided by the server exactly like a single decision; a failed
-  // id stays pending and selected, with its error listed.
+  // Each id is decided by the server exactly like a single decision. The server
+  // takes at most 100 ids per call (maxBatchDecide in server/intercept.go) and
+  // the pending queue is not paginated, so the selection goes out in sequential
+  // chunks of at most batchDecideMax ids. If a chunk cannot be sent (network
+  // error, 400), sending stops: its ids and the later ones stay selected with
+  // the error, and chunks already decided stay decided. A failed id stays
+  // pending and selected, with its error listed.
   const batchDecide = async (decision: "allowed" | "denied") => {
     const ids = selectedRows.map((row) => row.id);
     if (!ids.length || decisionLock.current) return;
     decisionLock.current = true;
     setDeciding(true);
+    let decided = 0;
+    const failed: { id: number; error: string }[] = [];
     try {
-      const res = await api.interceptBatchDecide(ids, decision);
+      for (let start = 0; start < ids.length; start += batchDecideMax) {
+        try {
+          const res = await api.interceptBatchDecide(ids.slice(start, start + batchDecideMax), decision);
+          decided += res.decided;
+          for (const r of res.results) if (!r.ok) failed.push({ id: r.id, error: r.error || "Not decided" });
+        } catch (e) {
+          const error = `Not sent: ${(e as Error).message || "request failed"}`;
+          for (const id of ids.slice(start)) failed.push({ id, error });
+          break;
+        }
+      }
       request.current++;
-      const failed = res.results.filter((r) => !r.ok).map((r) => ({ id: r.id, error: r.error || "Not decided" }));
       setBatchErrors(failed);
       setSelected(new Set(failed.map((f) => f.id)));
       setRevision((v) => v + 1);
-      if (res.decided) toast.success(`${res.decided} ${decision === "allowed" ? "allowed" : "denied"}`);
-      if (res.failed) toast.error(`${res.failed} not decided, see the errors above the pending list`);
-    } catch (e) {
-      toast.error((e as Error).message);
+      const verb = decision === "allowed" ? "allowed" : "denied";
+      if (failed.length) toast.error(`${decided} ${verb}, ${failed.length} not decided (see the errors listed above)`);
+      else toast.success(`${decided} ${verb}`);
     } finally {
       decisionLock.current = false;
       setDeciding(false);

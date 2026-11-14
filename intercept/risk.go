@@ -47,7 +47,8 @@ const shellBase = 10
 
 // shellSignals are additive; each counts once, and reasons follow this order.
 var shellSignals = []riskSignal{
-	reSignal("destructive command (rm -r, dd, mkfs, shred, truncate, DROP TABLE, DELETE FROM, shutdown)", 50,
+	// 60 so that a destructive command alone reaches high: 10 + 60 = 70.
+	reSignal("destructive command (rm -r, dd, mkfs, shred, truncate, DROP TABLE, DELETE FROM, shutdown)", 60,
 		`(?i)\brm\s+([^;&|]*\s)?(-[a-z]*r[a-z]*|--recursive)(\s|$)|\bdd\s+[^;&|]*\b(if|of)=|\bmkfs\b|\bshred\b|\btruncate\b|\bdrop\s+table\b|\bdelete\s+from\b|\bshutdown\b`),
 	reSignal("privilege change (sudo, su, chmod 777, setcap)", 40,
 		`(^|[\s;&|(])(sudo|su)(\s|$)|\bchmod\s+(-\w+\s+)*0?777\b|\bsetcap\b`),
