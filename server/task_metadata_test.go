@@ -24,7 +24,9 @@ func TestTaskMetadataPatchReturnsRenameAndPin(t *testing.T) {
 	}
 	taskID, _ := strconv.ParseInt(task.ID, 10, 64)
 	defer func() { _ = m.pg.DeleteTask(taskID) }()
-	s := New(context.Background(), m, t.TempDir(), t.TempDir(), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	defer stopTestServer(t, s, cancel)
 	token, err := signJWT(s.jwtKey)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +68,9 @@ func TestConversationBatchDeleteReportsMissing(t *testing.T) {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
 	defer m.Close()
-	s := New(context.Background(), m, t.TempDir(), t.TempDir(), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	defer stopTestServer(t, s, cancel)
 	first, err := m.pg.CreateConversation("mainagent", "batch-http-first", nil)
 	if err != nil {
 		t.Fatal(err)
