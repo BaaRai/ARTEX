@@ -26,41 +26,11 @@ type LLMUsage struct {
 	Status        string `json:"status"` // ok | error
 }
 
-const llmUsageSchema = `
-CREATE TABLE IF NOT EXISTS llm_usage (
-    id             BIGSERIAL PRIMARY KEY,
-    ts             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    task_id        TEXT,
-    exploration_id BIGINT,
-    worker         TEXT,
-    model          TEXT,
-    profile_name   TEXT,
-    latency_ms     INTEGER,
-    input_tokens   INTEGER NOT NULL DEFAULT 0,
-    output_tokens  INTEGER NOT NULL DEFAULT 0,
-    cache_read     INTEGER NOT NULL DEFAULT 0,
-    cache_write    INTEGER NOT NULL DEFAULT 0,
-    status         TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_llm_usage_task  ON llm_usage(task_id);
-CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(task_id, model);
-CREATE INDEX IF NOT EXISTS idx_llm_usage_exp   ON llm_usage(exploration_id);
-`
-
-// EnsureLLMUsageTable creates the llm_usage metering table if it does not exist.
+// EnsureLLMUsageTable creates the llm_usage metering table if it does not exist,
+// by re-running the idempotent migration 0002_llm_usage.sql (see
+// EnsureLLMRecordsTable for the locking rule).
 func (d *DB) EnsureLLMUsageTable() error {
-	tx, err := d.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback() //nolint:errcheck
-	if err := coordinateWithSchemaMigration(tx); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(llmUsageSchema); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return d.execEmbeddedMigration(llmUsageMigration)
 }
 
 // InsertLLMUsage appends one metering row. Best-effort: callers log and continue on
