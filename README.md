@@ -207,7 +207,7 @@ Daily cron example (03:20, operator crontab):
 
 ## Updating and upgrading
 
-> Upgrading only swaps the program and never touches data: the Postgres volume `pgdata`, `./data` (traffic index, task files, transcripts, etc.), `./keys` (jwt.key), and `./skills` are all preserved. **No manual database migration is needed**: `artex` idempotently re-runs `schema.sql` on every start (with `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`), i.e. "restart equals migrate". It is still recommended to back up `./data` and the database before upgrading.
+> Upgrading only swaps the program and never touches data: the Postgres volume `pgdata`, `./data` (traffic index, task files, transcripts, etc.), `./keys` (jwt.key, secret.key), and `./skills` are all preserved. **No manual database migration is needed**: `artex` idempotently re-runs `schema.sql` on every start (with `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`), i.e. "restart equals migrate". It is still recommended to back up `./data` and the database before upgrading.
 
 **Update banner (opt-in, off by default)**: start ARTEX with `ARTEX_UPDATE_CHECK=1` to have the backend ask the public GitHub releases API for the latest ARTEX tag, at most once per 24 hours (cached in memory; a failed check is not retried within that window). When the release is newer than the running version, the web UI shows a small dismissible strip linking to the Releases page. The request sends only the `User-Agent: artex-update-check` header. Unset, ARTEX makes no update request and shows no banner.
 
