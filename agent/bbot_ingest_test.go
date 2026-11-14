@@ -71,3 +71,15 @@ func TestParseBbotJSONLTypedOnly(t *testing.T) {
 		}
 	}
 }
+
+// The typed url of an in-scope URL event loses its userinfo, keeps its query.
+func TestParseBbotURLUserinfo(t *testing.T) {
+	res, err := parseBbotJSONL(strings.NewReader(`{"type":"URL","host":"www.example.com","url":"https://scanuser:s3cr3t@www.example.com/app?id=7","scope_distance":0}` + "\n"))
+	if err != nil || len(res.InScope) != 1 {
+		t.Fatalf("parse: %v, %+v", err, res)
+	}
+	want := []assetInputItem{{Type: "service", URL: "https://www.example.com/app?id=7"}}
+	if got := res.assetItems(); !reflect.DeepEqual(got, want) {
+		t.Errorf("assetItems = %+v, want %+v", got, want)
+	}
+}

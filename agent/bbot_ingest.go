@@ -114,6 +114,7 @@ func bbotTyped(raw bbotRawEvent) bbotEvent {
 	}
 	if u, err := url.Parse(strings.TrimSpace(raw.URL)); err == nil && ev.Host != "" &&
 		(u.Scheme == "http" || u.Scheme == "https") && strings.EqualFold(u.Hostname(), ev.Host) {
+		u.User = nil // credentials never reach an asset
 		ev.URL = u.String()
 	}
 	return ev
