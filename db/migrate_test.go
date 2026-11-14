@@ -358,3 +358,58 @@ SELECT 1/0;
 		t.Error("migration_broken exists: the failed migration was not rolled back")
 	}
 }
+
+// A database already at 0003 must refuse a binary that adds 0002 below it,
+// before writing anything.
+func TestMigrationsRefuseOutOfOrderVersion(t *testing.T) {
+	dsn := scratchDSN(t, "outoforder")
+	records, err := fs.ReadFile(migrationsFS(), llmRecordsMigration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := openWithMigrations(dsn, fstest.MapFS{
+		llmRecordsMigration: {Data: records},
+		"0003_probe.sql":    probeMigration,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := readApplied(t, d)
+	d.Close()
+	if len(before) != 2 || before[0].version != 1 || before[1].version != 3 {
+		t.Fatalf("setup schema_migrations = %+v, want versions 1 and 3", before)
+	}
+
+	d, err = openWithMigrations(dsn, withEmbedded(t, fstest.MapFS{"0003_probe.sql": probeMigration}))
+	if err == nil {
+		d.Close()
+		t.Fatal("Open succeeded with 0002 pending below applied 0003")
+	}
+	for _, w := range []string{llmUsageMigration, "(0002)", "0003_probe.sql", "(0003)", "never inserted"} {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("error %q does not mention %q", err, w)
+		}
+	}
+
+	raw, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	after := readApplied(t, &DB{raw})
+	if len(after) != len(before) {
+		t.Fatalf("schema_migrations changed: before %+v, after %+v", before, after)
+	}
+	for i := range before {
+		if after[i].version != before[i].version || after[i].checksum != before[i].checksum || !after[i].appliedAt.Equal(before[i].appliedAt) {
+			t.Errorf("schema_migrations row %d changed: before %+v, after %+v", i, before[i], after[i])
+		}
+	}
+	var usage bool
+	if err := raw.QueryRow(`SELECT to_regclass('llm_usage') IS NOT NULL`).Scan(&usage); err != nil {
+		t.Fatal(err)
+	}
+	if usage {
+		t.Error("llm_usage exists: the refused 0002 migration ran")
+	}
+}

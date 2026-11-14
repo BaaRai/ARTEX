@@ -98,7 +98,8 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 //
 // It fails closed before applying anything when the database records a version
 // this binary does not ship, or an applied migration whose name or checksum
-// differs from the file. Each pending migration then runs in its own
+// differs from the file, or a pending migration is older than the newest
+// applied one. Each pending migration then runs in its own
 // transaction together with its schema_migrations row; a failure rolls that one
 // back and stops, leaving earlier migrations applied.
 func applyMigrations(ctx context.Context, conn *sql.Conn, fsys fs.FS) error {
@@ -149,6 +150,18 @@ func applyMigrations(ctx context.Context, conn *sql.Conn, fsys fs.FS) error {
 		}
 		if r.checksum != m.checksum {
 			return fmt.Errorf("migration %04d (%s): checksum changed since it was applied (database %s, file %s); published migrations must not be edited", v, m.name, r.checksum, m.checksum)
+		}
+	}
+
+	// A pending version below the newest applied one would run out of order on
+	// this database: refuse it before writing anything.
+	if len(appliedVersions) > 0 {
+		maxVersion := appliedVersions[len(appliedVersions)-1]
+		for _, m := range migrations {
+			if _, done := applied[m.version]; !done && m.version < maxVersion {
+				return fmt.Errorf("migration %s (%04d) is older than the applied migration %s (%04d); migrations must be appended, never inserted",
+					m.name, m.version, applied[maxVersion].name, maxVersion)
+			}
 		}
 	}
 
