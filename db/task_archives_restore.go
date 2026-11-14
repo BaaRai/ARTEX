@@ -447,6 +447,14 @@ func restoreArchiveAssets(tx *sql.Tx, taskID int64, raw json.RawMessage) (map[in
 			row["company_source"] = "explicit"
 			warnings = append(warnings, fmt.Sprintf("asset %d's company %d has been deleted; restored as unaffiliated", oldID, companyID))
 		}
+		// Archives taken before normalizeURL stripped userinfo can hold
+		// http://user:pass@host URLs. Normalise like the live upserts so the
+		// restore neither stores the credential nor misses the clean row.
+		if typeName, _ := row["type"].(string); typeName == "service" || typeName == "endpoint" {
+			if rawURL, ok := row["url"].(string); ok {
+				row["url"] = normalizeURL(rawURL)
+			}
+		}
 		if existing, found, err := findArchiveAssetNaturalID(tx, row); err != nil {
 			return nil, nil, err
 		} else if found {
