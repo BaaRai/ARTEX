@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -174,8 +175,8 @@ function InterceptPendingBadge() {
       } catch { /* ignore */ }
     }
     poll();
-    const t = setInterval(poll, 5000);
-    return () => { live = false; clearInterval(t); };
+    const t = setVisibleInterval(poll, 5000);
+    return () => { live = false; t(); };
   }, []);
   if (count === 0) return null;
   return (

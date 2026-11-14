@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import {
@@ -402,15 +403,15 @@ export function OverviewTab({ taskId }: { taskId: string }) {
     void loadTokens();
     void loadGoals();
     void loadConstraints();
-    const timer = setInterval(() => {
+    const timer = setVisibleInterval(() => {
       void load();
       void loadTokens();
       void loadGoals();
       void loadConstraints();
-    }, 3000);
+    }, 10_000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      timer();
     };
   }, [taskId, loadScope, loadTokens, loadGoals, loadConstraints]);
 

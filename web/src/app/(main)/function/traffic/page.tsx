@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import {
@@ -227,13 +228,13 @@ export default function TrafficPage() {
         });
     };
     load();
-    const t = setInterval(() => {
+    const t = setVisibleInterval(() => {
       if (page !== 0) return; // only auto-refresh the newest page
       load();
     }, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      t();
     };
   }, [page, size, hostQ, method, queryQ, bodyQ, pathQ, statusFilter, respMinQ, respMaxQ, sort, reloadTick]);
 

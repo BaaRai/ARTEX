@@ -1,5 +1,6 @@
 "use client";
 
+import { setVisibleInterval } from "@/lib/polling";
 import * as React from "react";
 
 import Link from "next/link";
@@ -456,7 +457,7 @@ export default function TasksPage() {
   const lastRef = React.useRef<string>("");
 
   const load = React.useCallback(() => {
-    api
+    return api
       .tasks()
       .then((r) => {
         const next = r.tasks.map((t) => (t.id === r.active ? { ...t, active: true } : t));
@@ -485,8 +486,8 @@ export default function TasksPage() {
   React.useEffect(() => {
     load();
     loadCategories();
-    const i = setInterval(load, POLL_MS);
-    return () => clearInterval(i);
+    const i = setVisibleInterval(load, POLL_MS);
+    return () => i();
   }, [load, loadCategories]);
 
   const refreshCategoriesAndTasks = React.useCallback(() => {
@@ -523,8 +524,8 @@ export default function TasksPage() {
   React.useEffect(() => {
     if (!hasRunning) return;
     setNowSec(Math.floor(Date.now() / 1000));
-    const i = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
-    return () => clearInterval(i);
+    const i = setVisibleInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
+    return () => i();
   }, [hasRunning]);
 
   const deleteTask = React.useCallback(
@@ -1694,8 +1695,8 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
 
   React.useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), 2_000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(() => load(), 2_000);
+    return () => timer();
   }, [load]);
 
   const selectable = React.useMemo(
