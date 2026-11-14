@@ -51,9 +51,9 @@ func TestReportFindingOptionalTrafficWithoutCapture(t *testing.T) {
 }
 
 func TestReportFindingAtomicContract(t *testing.T) {
-	old := FindingTrafficBindingEnabled
-	FindingTrafficBindingEnabled = func() bool { return true }
-	t.Cleanup(func() { FindingTrafficBindingEnabled = old })
+	old := FindingTrafficBindingEnabled()
+	SetFindingTrafficBindingEnabled(func() bool { return true })
+	t.Cleanup(func() { SetFindingTrafficBindingEnabled(old) })
 	d := testDB(t)
 	defer d.Close()
 	task, err := d.CreateTask("report contract", "fixture", nil, 0, 0)

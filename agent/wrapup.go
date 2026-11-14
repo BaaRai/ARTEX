@@ -2,6 +2,7 @@ package agent
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/Autumn-27/norma/harness"
 )
@@ -17,15 +18,47 @@ import (
 // [prompt body] is editable; which tools are disabled and how many turns the
 // wrap-up itself gets are code-fixed policy.
 
-// WrapupOverride, if set, returns the stored wrap-up prompt for an agent key and
+// wrapupHooksMu guards the four wrap-up hooks in this file: server wiring can run
+// while agents build their settlement config on other goroutines.
+var wrapupHooksMu sync.RWMutex
+
+// wrapupOverride, if set, returns the stored wrap-up prompt for an agent key and
 // whether a non-empty one exists. Wired by the server to the agents table (like
 // PromptOverride for system prompts). nil / empty → the built-in default is used.
-var WrapupOverride func(agentKey string) (string, bool)
+var wrapupOverride func(agentKey string) (string, bool)
 
-// WrapupMaxTurnsOverride, if set, returns the admin-configured turn budget for the
+// SetWrapupOverride installs (or, with nil, removes) the WrapupOverride hook.
+func SetWrapupOverride(f func(agentKey string) (string, bool)) {
+	wrapupHooksMu.Lock()
+	wrapupOverride = f
+	wrapupHooksMu.Unlock()
+}
+
+// WrapupOverride returns the current hook, or nil when none is set.
+func WrapupOverride() func(agentKey string) (string, bool) {
+	wrapupHooksMu.RLock()
+	defer wrapupHooksMu.RUnlock()
+	return wrapupOverride
+}
+
+// wrapupMaxTurnsOverride, if set, returns the admin-configured turn budget for the
 // wrap-up phase of an agent and whether a positive one exists. Wired to the agents
 // table. nil / ≤0 → the built-in per-agent default (wrapupTurnDefaults) is used.
-var WrapupMaxTurnsOverride func(agentKey string) (int, bool)
+var wrapupMaxTurnsOverride func(agentKey string) (int, bool)
+
+// SetWrapupMaxTurnsOverride installs (or, with nil, removes) the WrapupMaxTurnsOverride hook.
+func SetWrapupMaxTurnsOverride(f func(agentKey string) (int, bool)) {
+	wrapupHooksMu.Lock()
+	wrapupMaxTurnsOverride = f
+	wrapupHooksMu.Unlock()
+}
+
+// WrapupMaxTurnsOverride returns the current hook, or nil when none is set.
+func WrapupMaxTurnsOverride() func(agentKey string) (int, bool) {
+	wrapupHooksMu.RLock()
+	defer wrapupHooksMu.RUnlock()
+	return wrapupMaxTurnsOverride
+}
 
 // Built-in default wrap-up prompts, keyed by agent key. worker reuses the
 // historically hardcoded settleWrapUpPrompt (defined in worker.go); planner and
@@ -75,8 +108,8 @@ func WrapupTurnsDefault(agentKey string) int {
 // resolveWrapup returns the effective wrap-up prompt: the DB override (if set and
 // non-empty) over the built-in default.
 func resolveWrapup(agentKey string) string {
-	if WrapupOverride != nil {
-		if t, ok := WrapupOverride(agentKey); ok && strings.TrimSpace(t) != "" {
+	if override := WrapupOverride(); override != nil {
+		if t, ok := override(agentKey); ok && strings.TrimSpace(t) != "" {
 			return t
 		}
 	}
@@ -86,8 +119,8 @@ func resolveWrapup(agentKey string) string {
 // resolveWrapupTurns returns the effective wrap-up turn budget: a positive DB
 // override over the built-in per-agent default.
 func resolveWrapupTurns(agentKey string) int {
-	if WrapupMaxTurnsOverride != nil {
-		if v, ok := WrapupMaxTurnsOverride(agentKey); ok && v > 0 {
+	if override := WrapupMaxTurnsOverride(); override != nil {
+		if v, ok := override(agentKey); ok && v > 0 {
 			return v
 		}
 	}
@@ -117,10 +150,39 @@ func wrapupSettlement(agentKey string, disabledTools []string) *harness.Settleme
 // WrapupTaskTimeoutOverride / …TurnsOverride: DB overrides for the task-timeout
 // wrap-up prompt and turns (wired to agents.task_timeout_wrapup_prompt /
 // _max_turns, worker/planner only).
+// Guarded by wrapupHooksMu, like the per-run hooks above.
 var (
-	WrapupTaskTimeoutOverride      func(agentKey string) (string, bool)
-	WrapupTaskTimeoutTurnsOverride func(agentKey string) (int, bool)
+	wrapupTaskTimeoutOverride      func(agentKey string) (string, bool)
+	wrapupTaskTimeoutTurnsOverride func(agentKey string) (int, bool)
 )
+
+// SetWrapupTaskTimeoutOverride installs (or, with nil, removes) the hook.
+func SetWrapupTaskTimeoutOverride(f func(agentKey string) (string, bool)) {
+	wrapupHooksMu.Lock()
+	wrapupTaskTimeoutOverride = f
+	wrapupHooksMu.Unlock()
+}
+
+// WrapupTaskTimeoutOverride returns the current hook, or nil when none is set.
+func WrapupTaskTimeoutOverride() func(agentKey string) (string, bool) {
+	wrapupHooksMu.RLock()
+	defer wrapupHooksMu.RUnlock()
+	return wrapupTaskTimeoutOverride
+}
+
+// SetWrapupTaskTimeoutTurnsOverride installs (or, with nil, removes) the hook.
+func SetWrapupTaskTimeoutTurnsOverride(f func(agentKey string) (int, bool)) {
+	wrapupHooksMu.Lock()
+	wrapupTaskTimeoutTurnsOverride = f
+	wrapupHooksMu.Unlock()
+}
+
+// WrapupTaskTimeoutTurnsOverride returns the current hook, or nil when none is set.
+func WrapupTaskTimeoutTurnsOverride() func(agentKey string) (int, bool) {
+	wrapupHooksMu.RLock()
+	defer wrapupHooksMu.RUnlock()
+	return wrapupTaskTimeoutTurnsOverride
+}
 
 var taskTimeoutWrapupDefaults = map[string]string{
 	"worker":  workerTaskTimeoutDefault,
@@ -141,8 +203,8 @@ func TaskTimeoutWrapupDefault(agentKey string) string {
 // string means this agent has no task-timeout prompt (not worker/planner) — the
 // caller should then fall back to the per-run prompt.
 func resolveTaskTimeoutWrapup(agentKey string) string {
-	if WrapupTaskTimeoutOverride != nil {
-		if t, ok := WrapupTaskTimeoutOverride(agentKey); ok && strings.TrimSpace(t) != "" {
+	if override := WrapupTaskTimeoutOverride(); override != nil {
+		if t, ok := override(agentKey); ok && strings.TrimSpace(t) != "" {
 			return t
 		}
 	}
@@ -150,8 +212,8 @@ func resolveTaskTimeoutWrapup(agentKey string) string {
 }
 
 func resolveTaskTimeoutTurns(agentKey string) int {
-	if WrapupTaskTimeoutTurnsOverride != nil {
-		if v, ok := WrapupTaskTimeoutTurnsOverride(agentKey); ok && v > 0 {
+	if override := WrapupTaskTimeoutTurnsOverride(); override != nil {
+		if v, ok := override(agentKey); ok && v > 0 {
 			return v
 		}
 	}
