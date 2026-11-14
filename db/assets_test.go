@@ -893,12 +893,149 @@ func TestNormalizeURL(t *testing.T) {
 		{"HTTPS://Example.COM/path", "https://example.com/path"},
 		{"http://example.com/", "http://example.com"},
 		{"http://example.com/page", "http://example.com/page"},
+		{"https://u:p@Example.com/app?x=1", "https://example.com/app?x=1"},
+		{"https://user@example.com/", "https://example.com"},
+		{"https://u:p@example.com:8443/users/@alice?x=1", "https://example.com:8443/users/@alice?x=1"},
+		{"https://example.com/@me?r=http://a:b@x/", "https://example.com/@me?r=http://a:b@x/"},
 	}
 	for _, tc := range tests {
 		got := normalizeURL(tc.raw)
 		if got != tc.want {
 			t.Errorf("normalizeURL(%q): want %q, got %q", tc.raw, tc.want, got)
 		}
+	}
+}
+
+// storedURLRow reads back the url, domain and port of one asset row.
+func storedURLRow(t *testing.T, d *DB, id int64) (string, string, int) {
+	t.Helper()
+	var u, domain *string
+	var port *int
+	if err := d.QueryRow(`SELECT url, domain, port FROM assets WHERE id = $1`, id).Scan(&u, &domain, &port); err != nil {
+		t.Fatalf("read asset %d: %v", id, err)
+	}
+	var us, ds string
+	var p int
+	if u != nil {
+		us = *u
+	}
+	if domain != nil {
+		ds = *domain
+	}
+	if port != nil {
+		p = *port
+	}
+	return us, ds, p
+}
+
+func TestUpsertHTTPServiceStripsUserinfo(t *testing.T) {
+	d, av2, _ := testSetup(t)
+	defer d.Close()
+	cleanup := func() {
+		d.Exec(`DELETE FROM assets WHERE url LIKE '%storeuserinfo-svc.com%' OR domain LIKE '%storeuserinfo-svc.com' OR root_domain = 'storeuserinfo-svc.com'`)
+	}
+	cleanup()
+	defer cleanup()
+
+	id1, err := av2.UpsertHTTPService(UpsertHTTPServiceReq{URL: "https://alice:s3cr3t-one@App.storeuserinfo-svc.com/app?x=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, domain, port := storedURLRow(t, d, id1)
+	if u != "https://app.storeuserinfo-svc.com/app?x=1" || domain != "app.storeuserinfo-svc.com" || port != 443 {
+		t.Fatalf("stored url=%q domain=%q port=%d", u, domain, port)
+	}
+
+	// Same URL, different credentials: deduplicated onto the same row.
+	id2, err := av2.UpsertHTTPService(UpsertHTTPServiceReq{URL: "https://bob:s3cr3t-two@app.storeuserinfo-svc.com/app?x=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id2 != id1 {
+		t.Errorf("dedup across credentials failed: %d vs %d", id2, id1)
+	}
+	var n int
+	d.QueryRow(`SELECT count(*) FROM assets WHERE type = 'service' AND service_type = 'http' AND url LIKE '%storeuserinfo-svc.com/app%'`).Scan(&n)
+	if n != 1 {
+		t.Errorf("want 1 http service row, got %d", n)
+	}
+	d.QueryRow(`SELECT count(*) FROM assets WHERE url LIKE '%s3cr3t%' AND url LIKE '%storeuserinfo-svc.com%'`).Scan(&n)
+	if n != 0 {
+		t.Errorf("credentials stored in %d asset url(s)", n)
+	}
+
+	// @ in the path is kept; only the userinfo goes.
+	id3, err := av2.UpsertHTTPService(UpsertHTTPServiceReq{URL: "https://u:p@app.storeuserinfo-svc.com:8443/users/@alice?x=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, domain, port = storedURLRow(t, d, id3)
+	if u != "https://app.storeuserinfo-svc.com:8443/users/@alice?x=1" || domain != "app.storeuserinfo-svc.com" || port != 8443 {
+		t.Errorf("@ path: stored url=%q domain=%q port=%d", u, domain, port)
+	}
+
+	// Regression: a URL without userinfo is stored unchanged.
+	plain := "https://plain.storeuserinfo-svc.com/@me?q=1"
+	id4, err := av2.UpsertHTTPService(UpsertHTTPServiceReq{URL: plain})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, _, _ = storedURLRow(t, d, id4); u != plain {
+		t.Errorf("plain url: want %q, got %q", plain, u)
+	}
+}
+
+func TestUpsertEndpointStripsUserinfo(t *testing.T) {
+	d, av2, _ := testSetup(t)
+	defer d.Close()
+	cleanup := func() {
+		d.Exec(`DELETE FROM assets WHERE url LIKE '%storeuserinfo-ep.com%' OR domain LIKE '%storeuserinfo-ep.com' OR root_domain = 'storeuserinfo-ep.com'`)
+	}
+	cleanup()
+	defer cleanup()
+
+	id1, err := av2.UpsertEndpoint(UpsertEndpointReq{URL: "https://alice:s3cr3t-one@api.storeuserinfo-ep.com/users?id=1", Method: "GET"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, domain, port := storedURLRow(t, d, id1)
+	if u != "https://api.storeuserinfo-ep.com/users?id=1" || domain != "api.storeuserinfo-ep.com" || port != 443 {
+		t.Fatalf("stored url=%q domain=%q port=%d", u, domain, port)
+	}
+
+	id2, err := av2.UpsertEndpoint(UpsertEndpointReq{URL: "https://bob:s3cr3t-two@api.storeuserinfo-ep.com/users?id=1", Method: "GET"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id2 != id1 {
+		t.Errorf("endpoint dedup across credentials failed: %d vs %d", id2, id1)
+	}
+	var n int
+	d.QueryRow(`SELECT count(*) FROM assets WHERE type = 'endpoint' AND url LIKE '%storeuserinfo-ep.com/users%'`).Scan(&n)
+	if n != 1 {
+		t.Errorf("want 1 endpoint row, got %d", n)
+	}
+	d.QueryRow(`SELECT count(*) FROM assets WHERE url LIKE '%s3cr3t%' AND url LIKE '%storeuserinfo-ep.com%'`).Scan(&n)
+	if n != 0 {
+		t.Errorf("credentials stored in %d asset url(s)", n)
+	}
+
+	id3, err := av2.UpsertEndpoint(UpsertEndpointReq{URL: "http://u:p@api.storeuserinfo-ep.com/users/@alice?x=1", Method: "POST"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _, port = storedURLRow(t, d, id3)
+	if u != "http://api.storeuserinfo-ep.com/users/@alice?x=1" || port != 80 {
+		t.Errorf("@ path: stored url=%q port=%d", u, port)
+	}
+
+	plain := "https://plain.storeuserinfo-ep.com/@me?q=1"
+	id4, err := av2.UpsertEndpoint(UpsertEndpointReq{URL: plain, Method: "GET"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, _, _ = storedURLRow(t, d, id4); u != plain {
+		t.Errorf("plain url: want %q, got %q", plain, u)
 	}
 }
 
