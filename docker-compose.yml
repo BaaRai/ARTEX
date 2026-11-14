@@ -54,10 +54,10 @@ services:
       - "${ARTEX_BIND_ADDR:-127.0.0.1}:8787:8787"
       - "127.0.0.1:8788:8788"
     volumes:
-      # Bind the data directory (SQLite, task files, etc.) to data/ in the project root,
+      # Bind the runtime data directory (traffic index, task files, transcripts, etc.) to data/ in the project root,
       # so it is easy to inspect/back up on the host and survives container rebuilds.
       - ./data:/app/data
-      # JWT signing key (jwt.key), kept out of data/, which the file manager browses.
+      # JWT signing key and secret key (jwt.key, secret.key), kept out of data/, which the file manager browses.
       # Persisting it keeps users signed in across container rebuilds.
       - ./keys:/app/keys
       # Mount skills/ from the project root into the container (overriding the image's built-in /app/skills);
