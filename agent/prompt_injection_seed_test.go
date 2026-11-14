@@ -18,9 +18,9 @@ func TestPromptSeedsDoNotCarryInjectionBlock(t *testing.T) {
 // tail: the #49 block for the roles that read target output, the untrusted-data
 // rule for the planner and the cold-digest compactor.
 func TestInjectionTailSurvivesPromptOverride(t *testing.T) {
-	prev := PromptOverride
-	t.Cleanup(func() { PromptOverride = prev })
-	PromptOverride = func(string) (string, bool) { return "BARE BODY", true }
+	prev := PromptOverride()
+	t.Cleanup(func() { SetPromptOverride(prev) })
+	SetPromptOverride(func(string) (string, bool) { return "BARE BODY", true })
 
 	content := map[string]string{
 		"worker":    workerSystem("", "", "/data", "/run"),
@@ -64,8 +64,8 @@ func TestInjectionTailSurvivesPromptOverride(t *testing.T) {
 // A body that already carries the block (a DB row seeded before the move) does
 // not get it twice; the code defaults carry it exactly once.
 func TestInjectionTailNotDuplicated(t *testing.T) {
-	prev := PromptOverride
-	t.Cleanup(func() { PromptOverride = prev })
+	prev := PromptOverride()
+	t.Cleanup(func() { SetPromptOverride(prev) })
 
 	render := func() map[string]string {
 		return map[string]string{
@@ -78,16 +78,16 @@ func TestInjectionTailNotDuplicated(t *testing.T) {
 		}
 	}
 
-	PromptOverride = func(string) (string, bool) {
+	SetPromptOverride(func(string) (string, bool) {
 		return "LEGACY BODY\n\n" + untrustedContentRules + "\n\nMore rules.", true
-	}
+	})
 	for role, sys := range render() {
 		if n := strings.Count(sys, untrustedContentRules); n != 1 {
 			t.Errorf("legacy %s: untrusted-content block rendered %d times, want 1", role, n)
 		}
 	}
 
-	PromptOverride = nil
+	SetPromptOverride(nil)
 	for role, sys := range render() {
 		if n := strings.Count(sys, untrustedContentRules); n != 1 {
 			t.Errorf("default %s: untrusted-content block rendered %d times, want 1", role, n)
