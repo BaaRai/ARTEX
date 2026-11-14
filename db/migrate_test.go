@@ -119,8 +119,8 @@ func readApplied(t *testing.T, d *DB) []appliedMigration {
 	return out
 }
 
-// assertEmbeddedApplied checks that both LLM tables exist and that 0001 and
-// 0002 are recorded with the SHA-256 of their embedded files.
+// assertEmbeddedApplied checks that both LLM tables exist and that every
+// embedded migration is recorded with the SHA-256 of its file.
 func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 	t.Helper()
 	for _, table := range []string{"llm_records", "llm_usage"} {
@@ -136,9 +136,9 @@ func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 	want := []struct {
 		version int
 		name    string
-	}{{1, llmRecordsMigration}, {2, llmUsageMigration}}
+	}{{1, llmRecordsMigration}, {2, llmUsageMigration}, {3, "0003_task_scope_icp_index.sql"}}
 	if len(applied) != len(want) {
-		t.Fatalf("schema_migrations = %+v, want versions 1 and 2", applied)
+		t.Fatalf("schema_migrations = %+v, want versions 1 to 3", applied)
 	}
 	for i, w := range want {
 		content, err := fs.ReadFile(migrationsFS(), w.name)
@@ -301,7 +301,7 @@ func TestMigrationsFailClosed(t *testing.T) {
 	}{
 		{"checksum changed", withEmbedded(t, fstest.MapFS{"0003_probe.sql": {Data: append([]byte("-- edited\n"), probeMigration.Data...)}}),
 			[]string{"0003", "0003_probe.sql", "checksum"}},
-		{"version missing from binary", migrationsFS(),
+		{"version missing from binary", withEmbedded(t, fstest.MapFS{}),
 			[]string{"0003", "0003_probe.sql", "missing from this binary"}},
 		{"name changed", withEmbedded(t, fstest.MapFS{"0003_renamed.sql": probeMigration}),
 			[]string{"0003", "0003_probe.sql", "0003_renamed.sql"}},
