@@ -4,11 +4,7 @@
 
 ARTEX is an autonomous penetration-testing tool. Security fixes are provided only for the latest official release line. The `main` branch is not considered a stable release and may change at any time.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.5.x   | :white_check_mark: |
-| 0.4.x   | :x:                |
-| < 0.4   | :x:                |
+Only the latest release line receives security fixes. Older releases do not receive fixes; please upgrade to the latest release.
 
 Notes:
 - Please upgrade to the latest release before reporting a vulnerability.
@@ -18,10 +14,7 @@ Notes:
 
 **Do not open a public issue for a security vulnerability.**
 
-Preferred channels:
-1. Use **GitHub Security Advisories** → **Security** tab → **Report a vulnerability** in the `[owner]/ARTEX` repository.
-2. If GitHub Advisories are unavailable, email **security@[your-domain]**.  
-   PGP key: `[link or fingerprint]`
+Report through **GitHub Security Advisories**: **Security** tab → **Report a vulnerability** in the `BaaRai/ARTEX` repository. This is the only reporting channel.
 
 Please include:
 - A description of the vulnerability and its expected impact.
@@ -44,18 +37,7 @@ Testing, scanning, or exploiting third-party systems without explicit authorizat
 
 ## What to Expect
 
-We aim to respond on a best-effort basis, as an open-source project:
-
-| Stage | Expected timeframe |
-|---|---|
-| Acknowledgement of report | within 3 business days |
-| Initial triage / severity classification | within 7 business days |
-| Progress update | every 7–14 days, or when there is a material change |
-| Fix for Critical severity | target 7–14 days |
-| Fix for High severity | target 30 days |
-| Fix for Medium/Low severity | aligned with release schedule, typically 60–90 days |
-
-These timelines may change depending on complexity, third-party dependencies, or maintainer capacity.
+This is an open-source project maintained on a best-effort basis. We aim to acknowledge a report within about a week and keep you updated, but we cannot guarantee specific response or fix timeframes.
 
 ## If a Report Is Accepted
 
