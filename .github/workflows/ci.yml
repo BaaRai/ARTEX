@@ -45,8 +45,9 @@ jobs:
         # keeps the database state deterministic.
         run: go test -p 1 ./...
       - name: go test -race
-        # Race detector on the packages that pass under -race today. ./server is
-        # left out until it has been checked with -race against postgres.
+        # Race detector on the packages that pass under -race today. ./server
+        # joined once its suite was checked with -race against postgres and its
+        # test teardown fixed (#227, #228).
         # Its own database: the plain run above leaves rows behind and the db tests
         # are not idempotent across runs (duplicate llm_profiles names).
         env:
@@ -54,7 +55,8 @@ jobs:
 
         run: >-
           go test -race -p 1 ./agent ./cmd/artex ./config ./db ./evidence ./guard
-          ./intercept ./llmpool ./llmrec ./mcphttp ./notify ./sidequestion ./traffic
+          ./intercept ./llmpool ./llmrec ./mcphttp ./notify ./server ./sidequestion
+          ./traffic
 
   shell:
     runs-on: ubuntu-latest
