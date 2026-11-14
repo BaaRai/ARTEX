@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestTaskDetailReturnsListMetrics(t *testing.T) {
@@ -38,7 +39,25 @@ VALUES ($1,'goal','{}','met'), ($1,'goal','{}','open')`, task.ExpID); err != nil
 		t.Fatal(err)
 	}
 
-	s := New(context.Background(), m, t.TempDir(), t.TempDir(), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	// New restores every unfinished task in the shared database and runs its
+	// planner and worker loops, which write transcripts under m.dir. Stop and
+	// join them before m.Close and the TempDir cleanup run.
+	defer func() {
+		cancel()
+		for _, lt := range s.m.List() {
+			s.engine.BeginDelete(lt.ID)
+			waitCtx, waitCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := s.waitTaskQuiescent(waitCtx, lt.ID); err != nil {
+				t.Errorf("task %s still running at teardown: %v", lt.ID, err)
+			}
+			waitCancel()
+			s.engine.StopTask(lt.ID)
+		}
+		s.archiveWG.Wait()
+		<-s.side.done
+	}()
 	token, err := signJWT(s.jwtKey)
 	if err != nil {
 		t.Fatal(err)
