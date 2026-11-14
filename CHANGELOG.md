@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file. The format is b
 ### Added
 
 - **Noise profile at runtime**: System settings has a **Target noise** card. It sets the profile (`off`, `quiet`, `balanced`, `aggressive`) through the `noise_profile` setting, which takes precedence over `ARTEX_NOISE_PROFILE`. The change applies to the next WebFetch, http custom tool and enrich request, and to the next agent prompt, without a restart. The card also shows the per-host counters, which `GET /api/settings/noise` returns.
+- **Bash requests paced through the capture proxy**: with traffic capture on, the Bash proxy URL carries a marker userinfo. The recording proxy paces each request of a marked connection by the noise profile's per-host rate and jitter, and counts it, before it goes upstream. This applies inside CONNECT tunnels too. WebFetch, the http custom tools and enrich keep the unmarked URL and are not paced twice. The proxy now drops `Proxy-Authorization` from every request it forwards or records. This is best effort: only clients that honour the proxy are covered, with capture on.
 
 ### Changed
 

@@ -383,10 +383,12 @@ func (t *Traffic) stopping() bool {
 }
 func (t *Traffic) DB() *sql.DB { return t.db }
 
-// sink is the go-mitmproxy addon that records completed exchanges.
+// sink is the go-mitmproxy addon that records completed exchanges, and paces
+// the requests of client connections marked for pacing (see pace.go).
 type sink struct {
 	mproxy.BaseAddon
-	t *Traffic
+	t     *Traffic
+	paced sync.Map // ClientConn.Id of a marked connection -> struct{}
 }
 
 func (s *sink) Response(f *mproxy.Flow) {
