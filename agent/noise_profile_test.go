@@ -59,18 +59,23 @@ func TestPromptBuildersNoiseBlock(t *testing.T) {
 		"mainagent": func() string { return mainAgentSystem("goal", "/data", "/work") },
 		"chat":      func() string { return chatSystem("auto", "/data", "/work") },
 	}
-	for _, env := range []string{"", "off"} {
-		t.Setenv("ARTEX_NOISE_PROFILE", env)
-		for name, build := range builders {
-			if got := build(); strings.Contains(got, noiseProfileHeader) {
-				t.Errorf("%s with profile %q contains the noise block", name, env)
-			}
+	prev := egress.CurrentProfile()
+	t.Cleanup(func() { egress.SetProfile(prev) })
+	// The block follows the current profile, not the environment.
+	t.Setenv("ARTEX_NOISE_PROFILE", "aggressive")
+	egress.SetProfile(egress.Profile{Name: "off"})
+	for name, build := range builders {
+		if got := build(); strings.Contains(got, noiseProfileHeader) {
+			t.Errorf("%s with profile off contains the noise block", name)
 		}
 	}
-	t.Setenv("ARTEX_NOISE_PROFILE", "quiet")
-	for name, build := range builders {
-		if got := build(); !strings.Contains(got, noiseProfileHeader+"quiet") {
-			t.Errorf("%s with quiet is missing the noise block", name)
+	for _, profile := range []string{"quiet", "balanced"} {
+		egress.SetProfile(egress.Profiles[profile])
+		for name, build := range builders {
+			got := build()
+			if !strings.Contains(got, noiseProfileHeader+profile) || strings.Contains(got, noiseProfileHeader+"aggressive") {
+				t.Errorf("%s after SetProfile(%s) is missing its block or shows the env profile", name, profile)
+			}
 		}
 	}
 }

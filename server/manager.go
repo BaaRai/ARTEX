@@ -19,6 +19,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/config"
 	pgdb "github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/enrich"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
@@ -304,6 +305,9 @@ const (
 	// when on, the four agent kinds wired into the platform (planner/worker/main
 	// agent/chat) have context compaction taken over by noa, replacing the built-in compaction. Read once per run; toggling affects only runs started afterwards.
 	settingNoaCompaction = "noa_compaction"
+	// Target noise profile (off|quiet|balanced|aggressive). When stored it wins over
+	// ARTEX_NOISE_PROFILE, which stays the fallback; applied at startup and on PUT.
+	settingNoiseProfile = "noise_profile"
 	// defaultWebSearchBackend is used when web search is on but no backend was picked.
 	defaultWebSearchBackend = "ddgs"
 	// deepSeekWebSearchBackend borrows the active LLM profile instead of its own
@@ -401,6 +405,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		pg.Close()
 		return nil, fmt.Errorf("recover finding retests: %w", err)
 	}
+	egress.SetProfile(startupNoiseProfile(pg))
 	if err := pg.EnsureLLMRecordsTable(); err != nil {
 		log.Printf("[llmrec] create table: %v", err)
 	}

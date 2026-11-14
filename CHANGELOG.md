@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- **Noise profile at runtime**: System settings has a **Target noise** card. It sets the profile (`off`, `quiet`, `balanced`, `aggressive`) through the `noise_profile` setting, which takes precedence over `ARTEX_NOISE_PROFILE`. The change applies to the next WebFetch, http custom tool and enrich request, and to the next agent prompt, without a restart. The card also shows the per-host counters, which `GET /api/settings/noise` returns.
+
 ### Changed
 
 - **Untrusted-output boundary is now on by default**: Norma frames tool results for the worker, planner, chat and main agent unless `ARTEX_UNTRUSTED_BOUNDARY` is set to `0`, `false`, `off` or `no`. It was opt-in via `ARTEX_UNTRUSTED_BOUNDARY=1` in 0.6.0 (#166).

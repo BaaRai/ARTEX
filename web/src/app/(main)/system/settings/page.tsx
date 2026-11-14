@@ -15,6 +15,8 @@ import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
 import type { Settings } from "@/lib/types";
 
+import { NoiseProfileCard } from "./noise-profile-card";
+
 export default function SystemSettingsPage() {
   const [trafficCapture, setTrafficCapture] = React.useState(false);
   const [agentTrafficBinding, setAgentTrafficBinding] = React.useState(false);
@@ -291,6 +293,8 @@ export default function SystemSettingsPage() {
             />
           </CardContent>
         </Card>
+
+        <NoiseProfileCard />
 
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>

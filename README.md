@@ -407,6 +407,8 @@ in-flight GETs and caches them briefly (60/30/10 s; never POST/PUT/PATCH/DELETE)
 per-host noise line each minute. `ARTEX_TARGET_USER_AGENT` sets a User-Agent on target requests
 that carry none. Bash-launched tools are not paced yet; the low-and-slow prompt block supplies
 their rate flags.
+The **Target noise** card in System settings sets the profile at runtime (no restart) and shows the
+per-host counters; once saved, that setting takes precedence over `ARTEX_NOISE_PROFILE`.
 
 **Low-and-slow agent guidance (off by default)**: when a noise profile is set, the planner, worker,
 main agent and chat agents receive a code-owned prompt block with the profile's per-host limits and
