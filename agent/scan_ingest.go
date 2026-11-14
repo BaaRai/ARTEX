@@ -83,8 +83,8 @@ func scanHost(h string) string {
 	return ""
 }
 
-// scanURL returns raw re-serialized and its host when it is an http(s) URL
-// with a valid host, "" otherwise.
+// scanURL returns raw re-serialized without its userinfo, and its host, when
+// it is an http(s) URL with a valid host, "" otherwise.
 func scanURL(raw string) (string, string) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -94,7 +94,29 @@ func scanURL(raw string) (string, string) {
 	if h == "" {
 		return "", ""
 	}
+	u.User = nil // credentials never reach an asset, a note or a fact
 	return u.String(), h
+}
+
+// stripUserinfo removes the userinfo (user:pass@) from raw, a URL or a bare
+// host[:port] as a scanner prints it, and keeps every other byte. It is for
+// the raw values kept in a fact detail: unlike scanURL it never rejects, and a
+// value with no userinfo, or a path with no authority, is returned unchanged.
+func stripUserinfo(raw string) string {
+	start := 0 // the authority follows "scheme://" or "//"; a bare value is all authority
+	if i := strings.Index(raw, "//"); i == 0 || i > 0 && raw[i-1] == ':' && !strings.ContainsAny(raw[:i-1], "/?#@") {
+		start = i + 2
+	} else if strings.ContainsAny(raw, "/?#") {
+		return raw
+	}
+	auth := raw[start:]
+	if j := strings.IndexAny(auth, "/?#"); j >= 0 {
+		auth = auth[:j]
+	}
+	if at := strings.LastIndex(auth, "@"); at >= 0 {
+		return raw[:start] + raw[start+at+1:]
+	}
+	return raw
 }
 
 // scanHostOf reads a host from a URL, a host:port or a bare host.
@@ -342,7 +364,7 @@ func (s *scanIngest) addNuclei(line []byte) {
 	}
 	s.note("results", tid+" ("+sev+") on "+host)
 	s.fact(fmt.Sprintf("nuclei: template %s (severity %s) matched on %s; unverified scanner result", tid, sev, host),
-		map[string]any{"name": r.Info.Name, "host": r.Host, "matched_at": r.MatchedAt,
+		map[string]any{"name": r.Info.Name, "host": stripUserinfo(r.Host), "matched_at": stripUserinfo(r.MatchedAt),
 			"matcher_name": r.MatcherName, "extracted_results": r.Extracted})
 }
 
@@ -394,7 +416,7 @@ func (s *scanIngest) addHttpx(line []byte) {
 	s.note("urls", fmt.Sprintf("%s %d", u, r.StatusCode))
 	s.fact(fmt.Sprintf("httpx: %s responded with status %d", u, r.StatusCode),
 		map[string]any{"title": r.Title, "tech": r.Tech, "webserver": r.Webserver, "content_length": r.ContentLength,
-			"host": r.Host, "ip": r.IP, "tls": r.TLS})
+			"host": stripUserinfo(r.Host), "ip": r.IP, "tls": r.TLS})
 }
 
 // ---- ffuf -of json ----
@@ -480,5 +502,5 @@ func (s *scanIngest) addFfuf(raw json.RawMessage) {
 	s.Assets = append(s.Assets, item)
 	s.note("urls", fmt.Sprintf("%s %d", u, r.Status))
 	s.fact(fmt.Sprintf("ffuf: %s returned status %d, %d bytes, %d words, %d lines", u, r.Status, r.Length, r.Words, r.Lines),
-		map[string]any{"input": r.Input, "redirectlocation": r.Redirect})
+		map[string]any{"input": r.Input, "redirectlocation": stripUserinfo(r.Redirect)})
 }

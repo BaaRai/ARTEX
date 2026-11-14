@@ -248,6 +248,137 @@ func TestScanIngestJSONLLineLimits(t *testing.T) {
 	}
 }
 
+// scanURL drops the userinfo and keeps scheme, host, port, path and query; an
+// @ in the path is not userinfo; a URL it refused before is still refused.
+func TestScanURLUserinfo(t *testing.T) {
+	cases := []struct{ raw, url, host string }{
+		{"http://scanuser:s3cr3t@scan-ingest.example.com:8080/app?id=7&x=y", "http://scan-ingest.example.com:8080/app?id=7&x=y", "scan-ingest.example.com"},
+		{"https://scanuser@scan-ingest.example.com/app", "https://scan-ingest.example.com/app", "scan-ingest.example.com"},
+		{"https://scan-ingest.example.com/a@b/c?x=@y", "https://scan-ingest.example.com/a@b/c?x=@y", "scan-ingest.example.com"},
+		{"http://scanuser:s3cr3t@scan-ingest.example.com/%zz", "", ""},
+		{"javascript:alert(1)", "", ""},
+		{"http://scanuser:s3cr3t@bad host/", "", ""},
+		{"not a url", "", ""},
+	}
+	for _, c := range cases {
+		if u, h := scanURL(c.raw); u != c.url || h != c.host {
+			t.Errorf("scanURL(%q) = %q, %q; want %q, %q", c.raw, u, h, c.url, c.host)
+		}
+	}
+}
+
+func TestStripUserinfo(t *testing.T) {
+	cases := map[string]string{
+		"https://scanuser:s3cr3t@scan-ingest.example.com:443/login?next=1": "https://scan-ingest.example.com:443/login?next=1",
+		"http://scanuser:s3cr3t@scan-ingest.example.com/%zz":               "http://scan-ingest.example.com/%zz",
+		"//scanuser:s3cr3t@scan-ingest.example.com/":                       "//scan-ingest.example.com/",
+		"scanuser:s3cr3t@scan-ingest.example.com:443":                      "scan-ingest.example.com:443",
+		"https://scan-ingest.example.com/a@b?x=@y":                         "https://scan-ingest.example.com/a@b?x=@y",
+		"https://scan-ingest.example.com/?r=http://scanuser:s3cr3t@x/":     "https://scan-ingest.example.com/?r=http://scanuser:s3cr3t@x/",
+		"/admin@x/":                   "/admin@x/",
+		"scan-ingest.example.com:443": "scan-ingest.example.com:443",
+		"198.51.100.77":               "198.51.100.77",
+		"":                            "",
+	}
+	for raw, want := range cases {
+		if got := stripUserinfo(raw); got != want {
+			t.Errorf("stripUserinfo(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// Scanner lines carrying user:pass: no asset, url, notable item or fact keeps
+// the credentials, and the query survives.
+const (
+	nucleiUserinfoFixture = `{"template-id":"tech-detect","info":{"severity":"info"},"host":"https://scanuser:s3cr3t@scan-ingest.example.com","matched-at":"https://scanuser:s3cr3t@scan-ingest.example.com/login?next=1"}
+{"template-id":"tech-detect","info":{"severity":"info"},"host":"scanuser:s3cr3t@scan-ingest.example.com:443","matched-at":"https://scanuser:s3cr3t@scan-ingest.example.com:443/x"}
+`
+	httpxUserinfoFixture = `{"url":"https://scanuser:s3cr3t@scan-ingest.example.com/app?id=7","status_code":200,"host":"198.51.100.77"}
+`
+	ffufUserinfoFixture = `{"results":[{"input":{"FUZZ":"app"},"status":301,"url":"https://scanuser:s3cr3t@scan-ingest.example.com/app?id=7","redirectlocation":"https://scanuser:s3cr3t@scan-ingest.example.com/app/"}]}
+`
+)
+
+// hasScanCreds reports whether v holds a user or password of the fixtures.
+func hasScanCreds(v string) bool {
+	for _, c := range []string{"s3cr3t", "scanuser", "alice", "bob"} {
+		if strings.Contains(v, c) {
+			return true
+		}
+	}
+	return false
+}
+
+func checkNoUserinfo(t *testing.T, format string, s *scanIngest) {
+	t.Helper()
+	var all []string
+	for _, a := range s.Assets {
+		all = append(all, a.URL)
+	}
+	for u := range s.urls {
+		all = append(all, u)
+	}
+	for _, items := range s.Notable {
+		all = append(all, items...)
+	}
+	for _, f := range s.Facts {
+		d, _ := strconv.Unquote(f.Detail)
+		all = append(all, f.Summary, d)
+	}
+	for _, v := range all {
+		if hasScanCreds(v) {
+			t.Fatalf("%s: credentials kept in %q", format, v)
+		}
+	}
+}
+
+func TestScanIngestStripsUserinfo(t *testing.T) {
+	cases := []struct {
+		format, content string
+		want            string // events urls facts assets
+		url             string // first asset URL
+	}{
+		{"nuclei-jsonl", nucleiUserinfoFixture, "[2 2 2 2]", "https://scan-ingest.example.com"},
+		{"httpx-jsonl", httpxUserinfoFixture, "[1 1 1 1]", "https://scan-ingest.example.com/app?id=7"},
+		{"ffuf-json", ffufUserinfoFixture, "[1 1 1 1]", "https://scan-ingest.example.com/app?id=7"},
+	}
+	for _, c := range cases {
+		s := parseScan(t, c.format, c.content)
+		if got := fmt.Sprint([]int{s.Events, len(s.urls), len(s.Facts), len(s.Assets)}); got != c.want || s.Skipped != 0 {
+			t.Fatalf("%s: events,urls,facts,assets = %s, want %s (skipped %d)", c.format, got, c.want, s.Skipped)
+		}
+		if s.Assets[0].URL != c.url {
+			t.Fatalf("%s: asset URL %q, want %q", c.format, s.Assets[0].URL, c.url)
+		}
+		checkNoUserinfo(t, c.format, s)
+	}
+	// The raw values kept in the fact detail lose only their userinfo.
+	s := parseScan(t, "nuclei-jsonl", nucleiUserinfoFixture)
+	if d, _ := strconv.Unquote(s.Facts[1].Detail); !strings.Contains(d, `"host":"scan-ingest.example.com:443"`) ||
+		!strings.Contains(d, `"matched_at":"https://scan-ingest.example.com:443/x"`) {
+		t.Fatalf("nuclei detail %s", d)
+	}
+	s = parseScan(t, "ffuf-json", ffufUserinfoFixture)
+	if d, _ := strconv.Unquote(s.Facts[0].Detail); !strings.Contains(d, `"redirectlocation":"https://scan-ingest.example.com/app/"`) {
+		t.Fatalf("ffuf detail %s", d)
+	}
+}
+
+// The same URL with different credentials is one URL after normalisation:
+// both events are counted, both assets carry the same URL.
+func TestScanIngestUserinfoDedup(t *testing.T) {
+	s := parseScan(t, "httpx-jsonl", httpxUserinfoDedupFixture)
+	if s.Events != 2 || len(s.urls) != 1 || len(s.Assets) != 2 || s.Assets[0].URL != s.Assets[1].URL ||
+		s.Assets[0].URL != "https://scan-ingest.example.com/app?id=7" {
+		t.Fatalf("events=%d urls=%d assets=%+v", s.Events, len(s.urls), s.Assets)
+	}
+	checkNoUserinfo(t, "httpx-jsonl", s)
+}
+
+const httpxUserinfoDedupFixture = `{"url":"https://alice:s3cr3t-one@scan-ingest.example.com/app?id=7","status_code":200}
+{"url":"https://bob:s3cr3t-two@scan-ingest.example.com/app?id=7","status_code":200}
+`
+
 // Past scanMaxItems assets and facts, records are counted, not ingested.
 func TestScanIngestItemCap(t *testing.T) {
 	var b strings.Builder

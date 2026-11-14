@@ -199,3 +199,78 @@ func TestIngestScanOutputJSONPG(t *testing.T) {
 		t.Fatalf("re-ingestion: %d assets and %d facts, first run %d and %d", a, f, assets, facts)
 	}
 }
+
+// ingest_scan_output (PG), credentials in URLs: no asset row and no fact keeps
+// them, and the same URL with different credentials is one asset row and one
+// fact.
+func TestIngestScanOutputUserinfoPG(t *testing.T) {
+	d := testDB(t)
+	t.Cleanup(func() { _ = d.Close() })
+	task, err := d.CreateTaskWithOptions("ingest_scan_output_userinfo", "scan-ingest.example.com", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const assetsWhere = `domain LIKE '%scan-ingest.example.com' OR url LIKE '%scan-ingest.example.com%'`
+	t.Cleanup(func() {
+		_ = d.DeleteTask(task.ID)
+		_, _ = d.Exec(`DELETE FROM assets WHERE ` + assetsWhere)
+	})
+	store := d.Exploration(task.ExplorationID)
+	tsx := NewToolSet(store, "worker-1")
+	tsx.SetTaskID(task.ID)
+	tsx.SetAssetStore(d.Assets(), d.Companies())
+	dir := t.TempDir()
+	tool := tsx.ingestScanOutput()
+	ingest := func(format, content string) map[string]any {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "scan.out"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		in, _ := json.Marshal(map[string]string{"format": format, "path": "scan.out"})
+		res, err := tool.Call(context.Background(), in, &actool.ToolContext{WorkingDir: dir})
+		var out map[string]any
+		if err != nil || res.IsError || json.Unmarshal([]byte(res.Flatten()), &out) != nil ||
+			out["asset_errors"] != nil || out["fact_errors"] != nil {
+			t.Fatalf("%s: %v %s", format, err, res.Flatten())
+		}
+		return out
+	}
+	count := func(q string) int {
+		t.Helper()
+		var n int
+		if err := d.QueryRow(q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	out := ingest("httpx-jsonl", httpxUserinfoDedupFixture)
+	if out["events"] != 2.0 || out["urls"] != 1.0 || out["facts_written"] != 1.0 || out["facts_existing"] != 1.0 {
+		t.Fatalf("same URL, different credentials: %v", out)
+	}
+	const appURL = `SELECT count(*) FROM assets WHERE type='service' AND url='https://scan-ingest.example.com/app?id=7'`
+	if n := count(appURL); n != 1 {
+		t.Fatalf("%d asset rows for the normalised URL, want 1", n)
+	}
+	ingest("httpx-jsonl", httpxUserinfoFixture)
+	ingest("ffuf-json", ffufUserinfoFixture)
+	ingest("nuclei-jsonl", nucleiUserinfoFixture)
+	if n := count(appURL); n != 1 {
+		t.Fatalf("%d asset rows for the normalised URL after httpx and ffuf, want 1", n)
+	}
+	if n := count(`SELECT count(*) FROM assets a WHERE (` + assetsWhere + `) AND row_to_json(a)::text ~ 's3cr3t|scanuser|alice|bob'`); n != 0 {
+		t.Fatalf("%d asset rows keep credentials", n)
+	}
+	facts, err := store.ListByKind(db.KindFact, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts) == 0 {
+		t.Fatal("no facts written")
+	}
+	for _, f := range facts {
+		if hasScanCreds(string(f.Payload)) {
+			t.Fatalf("fact keeps credentials: %s", f.Payload)
+		}
+	}
+}
