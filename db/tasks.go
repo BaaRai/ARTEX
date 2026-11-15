@@ -28,19 +28,19 @@ type Task struct {
 	LLMProfileID  *int64     `json:"llm_profile_id,omitempty"`
 	// Task-level ordered LLM chain. LLMProfileID remains the compatibility alias
 	// for ActiveLLMProfileID while older API clients still send one profile id.
-	LLMProfileIDs      []int64    `json:"llm_profile_ids,omitempty"`
-	ActiveLLMProfileID *int64     `json:"active_llm_profile_id,omitempty"`
-	LLMChainRevision   int64      `json:"-"`
-	LLMFailoverState   string     `json:"llm_failover_state,omitempty"`
-	LLMFailoverReason  string     `json:"llm_failover_reason,omitempty"`
+	LLMProfileIDs      []int64 `json:"llm_profile_ids,omitempty"`
+	ActiveLLMProfileID *int64  `json:"active_llm_profile_id,omitempty"`
+	LLMChainRevision   int64   `json:"-"`
+	LLMFailoverState   string  `json:"llm_failover_state,omitempty"`
+	LLMFailoverReason  string  `json:"llm_failover_reason,omitempty"`
 	// LLMRotate: per-intent chain-head rotation switch (#85); false = classic
 	// ordered failover from the active head.
-	LLMRotate bool `json:"llm_rotate"`
-	SourceTaskIDs      []int64    `json:"source_task_ids,omitempty"`
-	CompanyIDs         []int64    `json:"company_ids,omitempty"`
-	ParentRef          string     `json:"parent_ref,omitempty"` // parent task id (recorded by orchestration spawn; empty=top level)
-	CreatedAt          time.Time  `json:"created_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"` // when it entered a terminal state (done/failed/timeout); nil for non-terminal
+	LLMRotate     bool       `json:"llm_rotate"`
+	SourceTaskIDs []int64    `json:"source_task_ids,omitempty"`
+	CompanyIDs    []int64    `json:"company_ids,omitempty"`
+	ParentRef     string     `json:"parent_ref,omitempty"` // parent task id (recorded by orchestration spawn; empty=top level)
+	CreatedAt     time.Time  `json:"created_at"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"` // when it entered a terminal state (done/failed/timeout); nil for non-terminal
 	// Task-level timeout (see the task-level timeout and wrap-up design doc).
 	TimeoutSeconds int        `json:"timeout_seconds"`        // 0=no time limit
 	FirstRunAt     *time.Time `json:"first_run_at,omitempty"` // when it first actually started running (not created_at); nil=not yet run

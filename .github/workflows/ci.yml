@@ -29,6 +29,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: gofmt
+        run: |
+          files=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$files" ]; then echo "gofmt required:"; echo "$files"; exit 1; fi
       - run: go build ./...
       - run: go vet ./...
       # Skipped tests, tracked in issue #9:

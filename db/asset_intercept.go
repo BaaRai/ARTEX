@@ -7,12 +7,12 @@ import "time"
 // these match the *target asset*: an exact/fuzzy domain·ip·url, or a CIDR range.
 // This layer only stores rules; the matching/enforcement logic lives elsewhere.
 type AssetInterceptRule struct {
-	ID        int64     `json:"id"`
-	Enabled   bool      `json:"enabled"`
-	Kind      string    `json:"kind"` // exact_domain|exact_ip|exact_url|fuzzy_domain|fuzzy_ip|fuzzy_url|cidr
-	Pattern   string    `json:"pattern"`
-	Note      string    `json:"note"`
-	Builtin   bool      `json:"builtin"`
+	ID      int64  `json:"id"`
+	Enabled bool   `json:"enabled"`
+	Kind    string `json:"kind"` // exact_domain|exact_ip|exact_url|fuzzy_domain|fuzzy_ip|fuzzy_url|cidr
+	Pattern string `json:"pattern"`
+	Note    string `json:"note"`
+	Builtin bool   `json:"builtin"`
 	// Action is only used by task-level rules: 'block'=intercept, 'allow'=allow (whitelist).
 	// Global rules (asset_intercept_rules) do not have this column; it is always empty and treated as intercept.
 	Action    string    `json:"action,omitempty"`

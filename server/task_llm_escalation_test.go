@@ -77,4 +77,3 @@ func TestEscalationAdvancesAfterConsecutiveFailures(t *testing.T) {
 		t.Fatalf("exhaust calls=%d want 2", exhaustCalls)
 	}
 }
-
