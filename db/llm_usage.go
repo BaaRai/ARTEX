@@ -341,11 +341,12 @@ func applyCostEur(d *DB, out []ProfileUsage) error {
 		if !ok || (pr.in == 0 && pr.outp == 0 && pr.cr == 0 && pr.cw == 0) {
 			continue
 		}
-		// InputTokens includes the cached subset (Anthropic and OpenAI usage
-		// semantics), so the fresh share is input minus cache reads; charging
-		// both buckets at full input price double-counts the cache. Clamped at
-		// zero for gateways that report the buckets disjointly.
-		fresh := out[i].InputTokens - out[i].CacheReadTokens
+		// InputTokens already includes both cached subsets: Norma normalizes it to
+		// input + cache read + cache write (OpenAI prompt_tokens semantics). The
+		// fresh share is therefore input minus cache reads minus cache writes;
+		// charging either subset at full input price as well bills it twice.
+		// Clamped at zero for gateways that report the buckets disjointly.
+		fresh := out[i].InputTokens - out[i].CacheReadTokens - out[i].CacheWriteTokens
 		if fresh < 0 {
 			fresh = 0
 		}
