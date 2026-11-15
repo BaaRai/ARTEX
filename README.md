@@ -6,6 +6,8 @@
 
 **Autonomous penetration testing that keeps its receipts.**
 
+(upstream: [Autumn-27/ARTEX](https://github.com/Autumn-27), AGPL-3.0)
+
 Self-hosted multi-agent offensive security. A planner explores, workers run real tools,
 and every finding stays bound to the assets and HTTP traffic that prove it.
 
@@ -690,6 +692,12 @@ Operational security properties:
 - **Untrusted tool output**: framed as data for every agent by default (prompt-injection boundary).
 - **Release integrity**: SHA-256 sums, CycloneDX SBOM and GitHub build provenance attestations for
   release archives.
+
+---
+
+## About this fork
+
+This repository is the English translation and continuation of ARTEX, originally by [Autumn-27](https://github.com/Autumn-27). The upstream repository is no longer public, so the link points to the author profile. Changes in this fork are tracked in [CHANGELOG.md](CHANGELOG.md), under the same AGPL-3.0 license.
 
 ---
 
