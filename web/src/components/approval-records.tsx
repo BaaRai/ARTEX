@@ -47,6 +47,7 @@ import type {
   InterceptRisk,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { setVisibleInterval } from "@/lib/polling";
 
 function fmtTime(value?: string) {
   if (!value) return "—";
@@ -863,10 +864,10 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
 
   React.useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), 5000);
+    const stopPolling = setVisibleInterval(() => void load(), 5000);
     return () => {
       request.current++;
-      clearInterval(timer);
+      stopPolling();
     };
   }, [load]);
 

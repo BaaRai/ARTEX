@@ -119,6 +119,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { setVisibleInterval } from "@/lib/polling";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { type SortDirection, useStoredSortPreference } from "@/lib/sort-preference";
@@ -485,8 +486,8 @@ export default function TasksPage() {
   React.useEffect(() => {
     load();
     loadCategories();
-    const i = setInterval(load, POLL_MS);
-    return () => clearInterval(i);
+    const stopPolling = setVisibleInterval(load, POLL_MS);
+    return stopPolling;
   }, [load, loadCategories]);
 
   const refreshCategoriesAndTasks = React.useCallback(() => {
@@ -1694,8 +1695,8 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
 
   React.useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), 2_000);
-    return () => clearInterval(timer);
+    const stopPolling = setVisibleInterval(() => void load(), 2_000);
+    return stopPolling;
   }, [load]);
 
   const selectable = React.useMemo(

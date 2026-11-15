@@ -16,6 +16,7 @@ import { useStoredSortPreference } from "@/lib/sort-preference";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { setVisibleInterval } from "@/lib/polling";
 
 type FindingSortField = "time";
 
@@ -159,10 +160,10 @@ export function FindingsTab({ taskId }: { taskId: string }) {
         });
     };
     load();
-    const t = setInterval(load, 3000);
+    const stopPolling = setVisibleInterval(load, 3000);
     return () => {
       active = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, [taskId]);
 

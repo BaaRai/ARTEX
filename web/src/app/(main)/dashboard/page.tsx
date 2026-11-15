@@ -40,6 +40,7 @@ import type {
   UsageStats,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { setVisibleInterval } from "@/lib/polling";
 
 // ── chart constants ───────────────────────────────────────────────────────────
 
@@ -172,10 +173,10 @@ export default function DashboardPage() {
       }
     };
     void load();
-    const t = setInterval(load, 5000);
+    const stopPolling = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, []);
 
@@ -211,10 +212,10 @@ export default function DashboardPage() {
       }
     };
     void load();
-    const timer = setInterval(load, 5000);
+    const stopPolling = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(timer);
+      stopPolling();
     };
   }, []);
 
@@ -247,10 +248,10 @@ export default function DashboardPage() {
       }
     };
     void load();
-    const t = setInterval(load, 15000);
+    const stopPolling = setVisibleInterval(load, 15000);
     return () => {
       alive = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, []);
 

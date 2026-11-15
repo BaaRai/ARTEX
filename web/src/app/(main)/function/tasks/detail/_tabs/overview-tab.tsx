@@ -40,6 +40,7 @@ import type {
   TaskNode,
   TaskScopeRow,
 } from "@/lib/types";
+import { setVisibleInterval } from "@/lib/polling";
 
 // Compact token count formatting (12345 → 12.3k, 2000000 → 2M).
 function fmtTokens(n: number): string {
@@ -402,7 +403,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
     void loadTokens();
     void loadGoals();
     void loadConstraints();
-    const timer = setInterval(() => {
+    const stopPolling = setVisibleInterval(() => {
       void load();
       void loadTokens();
       void loadGoals();
@@ -410,7 +411,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
     }, 3000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stopPolling();
     };
   }, [taskId, loadScope, loadTokens, loadGoals, loadConstraints]);
 

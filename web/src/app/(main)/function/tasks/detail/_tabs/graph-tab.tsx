@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ExplorationGraph } from "@/components/exploration-graph";
 import { api } from "@/lib/api";
 import type { Edge, TaskNode } from "@/lib/types";
+import { setVisibleInterval } from "@/lib/polling";
 
 export function GraphTab({ taskId }: { taskId: string }) {
   const [nodes, setNodes] = React.useState<TaskNode[]>([]);
@@ -38,10 +39,10 @@ export function GraphTab({ taskId }: { taskId: string }) {
         });
     };
     load();
-    const timer = setInterval(load, 20000);
+    const stopPolling = setVisibleInterval(load, 20000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stopPolling();
     };
   }, [taskId]);
 
