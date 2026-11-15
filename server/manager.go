@@ -55,13 +55,13 @@ type Task struct {
 	LLMChainRevision   int64   `json:"-"`
 	LLMFailoverState   string  `json:"llm_failover_state,omitempty"`
 	// LLMRotate (#85): per-intent round-robin over the task's LLM chain heads.
-	LLMRotate  bool `json:"llm_rotate,omitempty"`
-	rotateMu   sync.Mutex
-	rotateNext int
-	LLMFailoverReason  string  `json:"llm_failover_reason,omitempty"`
-	SourceTaskIDs      []int64 `json:"source_task_ids,omitempty"`
-	CompanyIDs         []int64 `json:"company_ids,omitempty"`
-	Status             string  `json:"status"` // persisted lifecycle status (done/failed/timeout are terminal; empty/other is derived from runtime state)
+	LLMRotate         bool `json:"llm_rotate,omitempty"`
+	rotateMu          sync.Mutex
+	rotateNext        int
+	LLMFailoverReason string  `json:"llm_failover_reason,omitempty"`
+	SourceTaskIDs     []int64 `json:"source_task_ids,omitempty"`
+	CompanyIDs        []int64 `json:"company_ids,omitempty"`
+	Status            string  `json:"status"` // persisted lifecycle status (done/failed/timeout are terminal; empty/other is derived from runtime state)
 	// Task-level timeout (see docs/task-timeout-and-settle-design.md). DeadlineAt/FirstRunAt are unix seconds, 0 = unset/not yet run.
 	TimeoutSeconds       int                    `json:"timeout_seconds"`
 	PlanHeartbeatSeconds int                    `json:"plan_heartbeat_seconds"` // planner heartbeat trigger interval (seconds)
