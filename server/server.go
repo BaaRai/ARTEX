@@ -1927,11 +1927,11 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := taskDTO(t, s.resolvedTaskStatus(t))
-	metrics, err := s.m.PG().TaskListMetricsAll()
+	metrics, err := s.m.PG().TaskListMetrics(t.ExpID)
 	if err != nil {
 		log.Printf("[tasks] detail metrics query failed for %s — metrics zeroed: %v", t.ID, err)
 	}
-	s.applyTaskMetrics(&dto, t, metrics[t.ExpID])
+	s.applyTaskMetrics(&dto, t, metrics)
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	applyTaskArchiveBlocker(&dto, archiveBlockers)
 	writeJSON(w, 200, dto)
