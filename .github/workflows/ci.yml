@@ -48,6 +48,19 @@ jobs:
         # as rotating failures in the agent package). Serial package execution
         # keeps the database state deterministic.
         run: go test -p 1 ./...
+      - name: online index scripts
+        # Apply and roll back scripts/sql on a database built here from
+        # db/schema.sql and db/migrations. The job-level artextest database
+        # never gets the schema (packages use suffixed databases), and cached
+        # test results mean no test database is guaranteed to exist.
+        env:
+          SQL_DSN: postgres://artex:testpass@localhost:5432/artextest_sqlscripts?sslmode=disable
+        run: |
+          psql "$ARTEX_PG_DSN" -X -v ON_ERROR_STOP=1 -c 'CREATE DATABASE artextest_sqlscripts'
+          psql "$SQL_DSN" -X -q -v ON_ERROR_STOP=1 -f db/schema.sql
+          for f in db/migrations/*.sql; do psql "$SQL_DSN" -X -q -v ON_ERROR_STOP=1 -f "$f"; done
+          psql "$SQL_DSN" -X -v ON_ERROR_STOP=1 -f scripts/sql/20261115-task-query-indexes.sql
+          psql "$SQL_DSN" -X -v ON_ERROR_STOP=1 -f scripts/sql/20261115-task-query-indexes.rollback.sql
       - name: go test -race
         # Race detector on the packages that pass under -race today. ./server
         # joined once its suite was checked with -race against postgres and its
