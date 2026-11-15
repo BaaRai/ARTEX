@@ -79,8 +79,10 @@ var errWorkControlConflict = errors.New("work control conflict")
 // retryableWorkerModelError excludes errors already handled by the task router.
 // In particular, a quota error after partial streaming advances the task cursor
 // for the next LLM call but must not replay this whole intent on the backup.
+// A NOA budget refusal is deterministic and never reached the provider, so a
+// rerun would only fail the same way.
 func retryableWorkerModelError(reason harness.TerminalReason, err error) bool {
-	return reason == harness.ReasonModelError && !isTaskLLMRuntimeError(err)
+	return reason == harness.ReasonModelError && !isTaskLLMRuntimeError(err) && !errors.Is(err, agent.ErrNoaBudget)
 }
 
 // Engine drives the event-driven exploration loop with real LLM agents
