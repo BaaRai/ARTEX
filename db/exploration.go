@@ -1486,11 +1486,13 @@ type TaskListMetrics struct {
 	Findings       FindingSeverityCounts // this task's vulnerability count in the findings table (bucketed by severity)
 }
 
-// TaskListMetricsAll returns list aggregates for every live task in one query.
-// The lateral lookups use the per-exploration indexes instead of grouping the
-// complete activity history on every poll.
-func (d *DB) TaskListMetricsAll() (map[int64]TaskListMetrics, error) {
-	rows, err := d.Query(`
+// taskListMetricsQuery is the select shared by TaskListMetricsAll and
+// TaskListMetrics; each appends its own WHERE on task. The lateral lookups use
+// the per-exploration indexes instead of grouping the complete activity history
+// on every poll. latest_activity orders by the column activity.created_at, so
+// idx_act_latest (exploration_id, created_at DESC) serves the LIMIT 1; ordering
+// by the output alias would sort every activity row of the task.
+const taskListMetricsQuery = `
 		SELECT task.exploration_id,
 		       COALESCE(token_metrics.input_tokens,0),
 		       COALESCE(token_metrics.output_tokens,0),
@@ -1514,10 +1516,10 @@ func (d *DB) TaskListMetricsAll() (map[int64]TaskListMetrics, error) {
 			WHERE exploration_id=task.exploration_id AND kind='result'
 		) token_metrics ON true
 		LEFT JOIN LATERAL (
-			SELECT EXTRACT(EPOCH FROM created_at)::bigint AS created_at
+			SELECT EXTRACT(EPOCH FROM activity.created_at)::bigint AS created_at
 			FROM activity
-			WHERE exploration_id=task.exploration_id
-			ORDER BY created_at DESC
+			WHERE activity.exploration_id=task.exploration_id
+			ORDER BY activity.created_at DESC
 			LIMIT 1
 		) latest_activity ON true
 		LEFT JOIN LATERAL (
@@ -1539,35 +1541,57 @@ func (d *DB) TaskListMetricsAll() (map[int64]TaskListMetrics, error) {
 			FROM findings
 			WHERE task_id=task.id
 		) finding_metrics ON true
-		WHERE task.deleted_at IS NULL`)
+		WHERE task.deleted_at IS NULL`
+
+// scanTaskListMetrics reads one row of taskListMetricsQuery.
+func scanTaskListMetrics(row interface{ Scan(...any) error }) (int64, TaskListMetrics, error) {
+	var explorationID int64
+	var metrics TaskListMetrics
+	err := row.Scan(
+		&explorationID,
+		&metrics.Tokens.InputTokens,
+		&metrics.Tokens.OutputTokens,
+		&metrics.Tokens.CacheReadTokens,
+		&metrics.Tokens.CacheWriteTokens,
+		&metrics.LastActivity,
+		&metrics.Goals.Total,
+		&metrics.Goals.Met,
+		&metrics.RunningIntents,
+		&metrics.Findings.Critical,
+		&metrics.Findings.High,
+		&metrics.Findings.Medium,
+		&metrics.Findings.Low,
+	)
+	return explorationID, metrics, err
+}
+
+// TaskListMetricsAll returns list aggregates for every live task in one query.
+func (d *DB) TaskListMetricsAll() (map[int64]TaskListMetrics, error) {
+	rows, err := d.Query(taskListMetricsQuery)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[int64]TaskListMetrics{}
 	for rows.Next() {
-		var explorationID int64
-		var metrics TaskListMetrics
-		if err := rows.Scan(
-			&explorationID,
-			&metrics.Tokens.InputTokens,
-			&metrics.Tokens.OutputTokens,
-			&metrics.Tokens.CacheReadTokens,
-			&metrics.Tokens.CacheWriteTokens,
-			&metrics.LastActivity,
-			&metrics.Goals.Total,
-			&metrics.Goals.Met,
-			&metrics.RunningIntents,
-			&metrics.Findings.Critical,
-			&metrics.Findings.High,
-			&metrics.Findings.Medium,
-			&metrics.Findings.Low,
-		); err != nil {
+		explorationID, metrics, err := scanTaskListMetrics(rows)
+		if err != nil {
 			return nil, err
 		}
 		out[explorationID] = metrics
 	}
 	return out, rows.Err()
+}
+
+// TaskListMetrics returns the same aggregates for the one live task of
+// exploration expID, with the same laterals as TaskListMetricsAll. A missing or
+// deleted task gives zero metrics, as a missing key of TaskListMetricsAll does.
+func (d *DB) TaskListMetrics(expID int64) (TaskListMetrics, error) {
+	_, metrics, err := scanTaskListMetrics(d.QueryRow(taskListMetricsQuery+` AND task.exploration_id=$1`, expID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskListMetrics{}, nil
+	}
+	return metrics, err
 }
 
 // GoalCountsAll returns goal totals (total / met) per exploration id, one query
