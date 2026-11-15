@@ -6,12 +6,40 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
-- **Noise profile at runtime**: System settings has a **Target noise** card. It sets the profile (`off`, `quiet`, `balanced`, `aggressive`) through the `noise_profile` setting, which takes precedence over `ARTEX_NOISE_PROFILE`. The change applies to the next WebFetch, http custom tool and enrich request, and to the next agent prompt, without a restart. The card also shows the per-host counters, which `GET /api/settings/noise` returns.
-- **Bash requests paced through the capture proxy**: with traffic capture on, the Bash proxy URL carries a marker userinfo. The recording proxy paces each request of a marked connection by the noise profile's per-host rate and jitter, and counts it, before it goes upstream. This applies inside CONNECT tunnels too. WebFetch, the http custom tools and enrich keep the unmarked URL and are not paced twice. The proxy now drops `Proxy-Authorization` from every request it forwards or records. This is best effort: only clients that honour the proxy are covered, with capture on.
+- **Target noise governor**: one shared egress governor paces ARTEX's own HTTP requests (WebFetch, the http custom tools and the enrich probe) against a noise profile (`off` by default, `quiet`, `balanced`, `aggressive`): a per-host token bucket with jitter, per-host and global in-flight caps, 429/503 backoff, GET deduplication with a short cache, and a configurable target User-Agent (`ARTEX_TARGET_USER_AGENT`). Off is a strict passthrough (#205).
+- **Low-and-slow prompt block**: when a noise profile is set, the planner, worker, main agent and chat prompts carry the per-host limits of the profile and the exact rate or delay flags for nmap, nuclei, httpx, katana, ffuf, dalfox and sqlmap; with the profile off the prompts are unchanged (#212).
+- **Noise profile at runtime**: System settings has a **Target noise** card. It sets the profile (`off`, `quiet`, `balanced`, `aggressive`) through the `noise_profile` setting, which takes precedence over `ARTEX_NOISE_PROFILE`. The change applies to the next WebFetch, http custom tool and enrich request, and to the next agent prompt, without a restart. The card also shows the per-host counters, which `GET /api/settings/noise` returns (#233).
+- **Bash requests paced through the capture proxy**: with traffic capture on, the Bash proxy URL carries a marker userinfo. The recording proxy paces each request of a marked connection by the noise profile's per-host rate and jitter, and counts it, before it goes upstream. This applies inside CONNECT tunnels too. WebFetch, the http custom tools and enrich keep the unmarked URL and are not paced twice. The proxy now drops `Proxy-Authorization` from every request it forwards or records. This is best effort: only clients that honour the proxy are covered, with capture on (#234).
+- **Hierarchical budgets**, off by default: a task budget and a per-intent budget take the minimum of their own budget and the parent's remaining budget above the wrap-up reserve, planner calls count inside the task, and reaching the reserve forces a wrap-up (#206).
+- **Coverage ledger**: the worker records what it examined, ruled out or left open for each surface and risk class with `record_coverage`; gaps, unexamined classes and completeness appear in the planner context, `GET /api/tasks/{id}/coverage`, the coverage card and the Markdown report (#207).
+- **Closed-question judge**: the LLM fallback judge answers eight fixed questions that the code owns and the code takes the decision; every failure now leads to ask instead of allow, and the previous behaviour stays available as `llm_judge_mode = freeform` (#208).
+- **argv interception rules**: a new `match_type = argv` matches the parsed prefix of a Bash command exactly, and a pending Bash approval can create such a rule in one click; a code-owned denylist refuses programs where a prefix would allow arbitrary code (#210, #211).
+- **Scanner output ingestion**: `ingest_scan_output` parses nmap XML, nuclei JSONL, httpx JSONL and ffuf JSON, and writes assets and facts deterministically, so the model never reads the raw output (#214, #215).
+- **bbot ingestion**: a typed parser splits bbot JSONL events by `scope_distance`, only in-scope events go through `insert_assets`, and `ingest_bbot` reads the file line by line with a 64 KiB cap (#199, #200).
+- **Tool RAG**, off by default: when the bound tool list of an agent is large, only the subset relevant to the current intent is injected, as a projection that never adds or edits a tool (`ARTEX_TOOL_RAG`) (#204).
+- **Fact provenance**: `record_fact` takes a closed `source` enum (default `inference`) and every fact carries the server-set `origin`, both shown in `recent_facts`, `list_facts` and `expand_digest` (#194).
+- **Per-message nonce envelope**: agent- and target-derived fields reach the planner and worker user messages inside a code-owned data envelope with a random nonce per message; operator input stays outside it (#195).
+- **Intercept risk score and batch approval**: a deterministic risk score (low, medium, high) is shown on each pending approval, and up to 100 pending decisions can be settled in one call, each through the existing single-decision path (#232).
+- **`ask_operator` target warning**: a request whose question names a host or URL outside the goal targets is tagged as containing target-derived text (#197).
+- **Opt-in update banner**: `ARTEX_UPDATE_CHECK` makes the backend check the latest GitHub release at most once per 24 hours and the UI show a banner; off by default (#202).
+- **Release provenance**: release archives carry GitHub build provenance attestations and a CycloneDX SBOM (`gh attestation verify <zip> --repo BaaRai/ARTEX`); release notes are the matching `CHANGELOG.md` section (#219, #201).
 
 ### Changed
 
-- **Untrusted-output boundary is now on by default**: Norma frames tool results for the worker, planner, chat and main agent unless `ARTEX_UNTRUSTED_BOUNDARY` is set to `0`, `false`, `off` or `no`. It was opt-in via `ARTEX_UNTRUSTED_BOUNDARY=1` in 0.6.0 (#166).
+- **Untrusted-output boundary is now on by default**: Norma frames tool results for the worker, planner, chat and main agent unless `ARTEX_UNTRUSTED_BOUNDARY` is set to `0`, `false`, `off` or `no`. It was opt-in via `ARTEX_UNTRUSTED_BOUNDARY=1` in 0.6.0 (#166); the default flips here (#203).
+- **Versioned migrations**: the `db` package applies numbered `db/migrations/NNNN_slug.sql` files once, in order, under the schema advisory lock, and records a SHA-256 checksum in `schema_migrations`; missing, renamed, changed or out-of-order migrations fail closed (#226).
+- **Coverage graph performance**: the coverage graph batches its connector lookups (three queries instead of one per root and per company) and adds the partial index `idx_ts_icp`; on a task of about 3,000 assets the p50 dropped from 126 ms to 27 ms and the queries per call from 221 to 3 (#230).
+
+### Fixed
+
+- **Auto-scope hygiene**: auto `task_scope` rows count for coverage and untested assets only under a declared root, and direct coverage counts anchored assets through fact anchors only; the scope is described as "coverage scope, not enforced" (#196).
+- **Enrich HTTP probe**: it now dials through `intercept.PinnedDialer`, so the target gate applies and a probe without a target scope is refused (#198).
+- **Agent hook data races**: the eight package-level hooks are synchronised, so a second wire-up no longer races tasks that already read them (#227).
+
+### Security
+
+- **Secrets at rest**: the credential-bearing columns and settings (LLM API keys and proxy, task credentials, MCP server env, notification channel config, search and proxy settings), the exec spec of custom tools and the evidence snapshot heads are encrypted in PostgreSQL with AES-256-GCM (`enc:v1:`) using `ARTEX_SECRET_KEY`, else `keys/secret.key`; existing plaintext rows are backfilled once at startup, and a missing or wrong key while encrypted data exists refuses to start. This protects database dumps and backups, not a running instance (#213, #216, #217, #218).
+- **URL credentials are dropped before storage**: scan and bbot ingestion, the asset store and archive restore strip URL userinfo, so `https://user:pass@host/app` is stored and matched as `https://host/app` (#222, #223, #224).
 
 ## [0.6.0] - 2026-11-12
 
