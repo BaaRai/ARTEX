@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
@@ -212,9 +213,18 @@ func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 // honor the proxy vars. ALL_PROXY is set too so a socks5 egress proxy (which curl
 // only reads from ALL_PROXY, not HTTP(S)_PROXY) works in the capture-off path.
 // Empty proxyAddr → nil (direct, unchanged env).
+//
+// With a MITM CA (capture on) the proxy URL carries the pace marker userinfo
+// (egress.MarkProxyURL): the recording proxy then paces this connection's
+// requests by the noise profile. Only Bash gets the marker; WebFetch, the http
+// custom tools and enrich keep the plain URL, since egress paces them already.
+// The global proxy (capture off) is left as configured.
 func proxyEnv(proxyAddr, caCert string) []string {
 	if proxyAddr == "" {
 		return nil
+	}
+	if caCert != "" {
+		proxyAddr = egress.MarkProxyURL(proxyAddr)
 	}
 	env := []string{
 		"HTTP_PROXY=" + proxyAddr, "HTTPS_PROXY=" + proxyAddr,

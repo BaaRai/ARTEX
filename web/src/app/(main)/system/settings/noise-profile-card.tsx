@@ -78,8 +78,11 @@ export function NoiseProfileCard() {
         </CardTitle>
         <CardDescription>
           Paces the requests ARTEX itself sends to targets (WebFetch, http custom tools, the enrich probe) and sets the
-          low-and-slow guidance in agent prompts. Commands run through Bash are not paced. This setting takes
-          precedence over ARTEX_NOISE_PROFILE and applies to the next request.
+          low-and-slow guidance in agent prompts. With traffic capture on, Bash commands that use the proxy (curl,
+          wget, python-requests…) are paced too, by rate and jitter only: the in-flight, cache and retry limits apply
+          to ARTEX's own requests. Raw scanners such as nmap, and commands that bypass the proxy, are not paced; this
+          is best effort, not a security boundary. This setting takes precedence over ARTEX_NOISE_PROFILE and applies
+          to the next request.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

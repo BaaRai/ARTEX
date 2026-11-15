@@ -405,8 +405,13 @@ flight), `aggressive` = 20 req/s (burst 40, 4 in flight). A profile adds jitter,
 429/503 (honours `Retry-After`, bounded retries, GET/HEAD/OPTIONS only), deduplicates identical
 in-flight GETs and caches them briefly (60/30/10 s; never POST/PUT/PATCH/DELETE), and logs a
 per-host noise line each minute. `ARTEX_TARGET_USER_AGENT` sets a User-Agent on target requests
-that carry none. Bash-launched tools are not paced yet; the low-and-slow prompt block supplies
-their rate flags.
+that carry none. With traffic capture on, Bash commands that use the proxy (curl, wget,
+python-requests) are paced too, per host by the same rate and jitter, and counted in the same
+per-host lines. The in-flight caps, retries and cache apply only to ARTEX's own requests. This is
+best effort, not a security boundary. Raw scanners such as nmap are not paced, and neither is a
+command that bypasses the proxy (`--noproxy`, a removed proxy variable). With capture off,
+nothing launched from Bash is paced. The low-and-slow prompt block supplies the rate flags in
+every case.
 The **Target noise** card in System settings sets the profile at runtime (no restart) and shows the
 per-host counters; once saved, that setting takes precedence over `ARTEX_NOISE_PROFILE`.
 

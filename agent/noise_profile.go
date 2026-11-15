@@ -64,6 +64,6 @@ func renderNoiseProfile(p egress.Profile) string {
 	fmt.Fprintf(&b, "- sqlmap: --delay=%s --threads=1\n", delaySec)
 	fmt.Fprintf(&b, "For any other tool, stay at or below %d requests per second per host, at most %s in flight, and at least %d ms between requests, using the tool's own rate or delay flag. Keep bbot within the same limits with its own rate settings, and do not enable active modules the program policy does not allow.\n", rps, inFlight, delayMS)
 	b.WriteString("Prefer passive and read-only checks; test one host at a time; do not run two scanners against the same host in parallel; on 429 or 503 stop and back off; never raise the rate to meet a deadline.\n")
-	b.WriteString("ARTEX paces its own WebFetch, http custom tool and enrich traffic with this profile, but commands launched through Bash are not paced: these flags are the only brake.\n")
+	b.WriteString("ARTEX paces its own WebFetch, http custom tool and enrich traffic with this profile. With traffic capture on, Bash commands that use the capture proxy (curl, wget, python-requests) are paced too, by rate and jitter; raw scanners such as nmap and commands that bypass the proxy are not. These flags remain the brake: do not rely on the proxy.\n")
 	return b.String()
 }
