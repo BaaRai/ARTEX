@@ -8,9 +8,24 @@ import (
 	"testing"
 
 	"github.com/Autumn-27/norma/agentcore"
+	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/noaadapter"
 )
+
+// A worker whose protected context exceeds a tiny NOA window ends with
+// model_error and an error that still wraps ErrNoaBudget after the Norma harness
+// and the capture layer: the engine's retry check relies on that.
+func TestWorkerNoaBudgetRefusalKeepsSentinelThroughHarness(t *testing.T) {
+	f := newSessionFixture(t)
+	inner := &countingProvider{}
+	w := NewWorker(inner, "test-model", t.TempDir(), nil, 2000, 3)
+	w.SetNoaEnabled(func() bool { return true })
+	reason, _, err := w.Execute(t.Context(), "work#1", f.expID, nil, f.ts, f.intent, passHooks{}, nil, nil, nil)
+	if reason != harness.ReasonModelError || !errors.Is(err, ErrNoaBudget) || inner.calls != 0 {
+		t.Fatalf("reason=%q err=%v provider calls=%d; want model_error wrapping ErrNoaBudget and no call", reason, err, inner.calls)
+	}
+}
 
 // countingProvider answers with one text turn and counts the calls it receives.
 type countingProvider struct{ calls int }
@@ -83,6 +98,9 @@ func TestNoaBudgetRefusesIrreducibleRequestBeforeTransport(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "exceeds configured budget 32000") || inner.calls != 0 {
 			t.Fatalf("err=%v provider calls=%d", err, inner.calls)
 		}
+		if !errors.Is(err, ErrNoaBudget) {
+			t.Fatalf("atomic refusal does not wrap ErrNoaBudget: %v", err)
+		}
 		if _, _, _, err := p.Complete(t.Context(), llm.CompletionRequest{System: []string{"short"}, MaxTokens: 1000}); err != nil || inner.calls != 1 {
 			t.Fatalf("a request that fits was refused or not sent: err=%v calls=%d", err, inner.calls)
 		}
@@ -102,6 +120,9 @@ func TestNoaBudgetRefusesIrreducibleRequestBeforeTransport(t *testing.T) {
 		}
 		if err == nil || !strings.Contains(err.Error(), "exceeds configured budget 32000") || events != 0 || inner.calls != 0 {
 			t.Fatalf("err=%v events=%d provider calls=%d", err, events, inner.calls)
+		}
+		if !errors.Is(err, ErrNoaBudget) {
+			t.Fatalf("stream refusal does not wrap ErrNoaBudget: %v", err)
 		}
 		for _, e := range p.Stream(t.Context(), llm.CompletionRequest{System: []string{"short"}, MaxTokens: 1000}) {
 			if e != nil {
