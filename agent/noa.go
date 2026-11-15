@@ -39,10 +39,17 @@ func enableNoa(opts *agentcore.Options, enabled func() bool, archiveRoot, sessio
 	if opts.OnWarn == nil {
 		opts.OnWarn = onWarn
 	}
-	if err := noaadapter.Enable(opts, noaadapter.Options{
-		ArchiveBaseDir: filepath.Join(archiveRoot, "noa"),
-		SessionID:      sessionID,
-		OnWarn:         onWarn,
+	// noa sizes its thresholds to the window this agent is configured for, read
+	// before Compaction is cleared below; without it noa assumes its own default.
+	window := defaultWindowK * 1000
+	if opts.Compaction != nil && opts.Compaction.ContextWindow > 0 {
+		window = opts.Compaction.ContextWindow
+	}
+	if err := noaEnable(opts, noaadapter.Options{
+		ArchiveBaseDir:    filepath.Join(archiveRoot, "noa"),
+		SessionID:         sessionID,
+		OnWarn:            onWarn,
+		ModelContextLimit: window,
 	}); err != nil {
 		if onWarn != nil {
 			onWarn("failed to enable noa compression, falling back to built-in compaction: " + err.Error())
@@ -52,4 +59,10 @@ func enableNoa(opts *agentcore.Options, enabled func() bool, archiveRoot, sessio
 	// Compactor overrides Compaction, but agentcore warns on every run when both are
 	// set; clear it explicitly.
 	opts.Compaction = nil
+	// noa can only trim what it may drop; a request whose protected part alone
+	// exceeds the window is refused here instead of by the provider.
+	opts.Provider = &noaBudgetProvider{Provider: opts.Provider, window: window}
 }
+
+// noaEnable is noaadapter.Enable; tests replace it to observe the options.
+var noaEnable = noaadapter.Enable
