@@ -45,6 +45,7 @@ import { api } from "@/lib/api";
 import { useStoredSortPreference } from "@/lib/sort-preference";
 import type { TrafficDetail, TrafficExchange, TrafficHost, TrafficResp } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { setVisibleInterval } from "@/lib/polling";
 
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString("zh-CN", {
@@ -227,13 +228,13 @@ export default function TrafficPage() {
         });
     };
     load();
-    const t = setInterval(() => {
+    const stopPolling = setVisibleInterval(() => {
       if (page !== 0) return; // only auto-refresh the newest page
       load();
     }, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, [page, size, hostQ, method, queryQ, bodyQ, pathQ, statusFilter, respMinQ, respMaxQ, sort, reloadTick]);
 

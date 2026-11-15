@@ -69,6 +69,7 @@ import type {
   TokenTotal,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { setVisibleInterval } from "@/lib/polling";
 
 // resolutionLabel names the LLM a session runs on. The badge shows this alone and
 // keeps the model id in its tooltip. Env-backed configs can arrive without a name,
@@ -794,10 +795,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           // Polling is best-effort; the next interval retries automatically.
         });
     void load();
-    const t = setInterval(load, 5000);
+    const stopPolling = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, [taskId]);
 
@@ -817,10 +818,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
         });
     };
     void load();
-    const timer = setInterval(load, 2000);
+    const stopPolling = setVisibleInterval(load, 2000);
     return () => {
       alive = false;
-      clearInterval(timer);
+      stopPolling();
     };
   }, [taskId]);
 
@@ -836,10 +837,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           // Polling is best-effort; the next interval retries automatically.
         });
     void load();
-    const timer = setInterval(load, 10_000);
+    const stopPolling = setVisibleInterval(load, 10_000);
     return () => {
       alive = false;
-      clearInterval(timer);
+      stopPolling();
     };
   }, [taskId]);
 
@@ -855,10 +856,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           // Polling is best-effort; the next interval retries automatically.
         });
     void load();
-    const t = setInterval(load, 5000);
+    const stopPolling = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, [taskId]);
 
@@ -1059,10 +1060,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           // The next poll retries; Worker controls and transcripts remain available.
         });
     void load();
-    const timer = setInterval(load, 5000);
+    const stopPolling = setVisibleInterval(load, 5000);
     return () => {
       active = false;
-      clearInterval(timer);
+      stopPolling();
     };
   }, [taskId]);
 
@@ -1099,10 +1100,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           // Polling is best-effort; the next interval retries automatically.
         });
     void load();
-    const t = setInterval(load, 5000);
+    const stopPolling = setVisibleInterval(load, 5000);
     return () => {
       active = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, [taskId]);
 

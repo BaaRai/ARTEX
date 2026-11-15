@@ -43,6 +43,7 @@ import { parseCompanyScopeText } from "@/lib/company-scope";
 import { taskAssetSourceLabel } from "@/lib/task-assets";
 import type { Asset, NewAssetType } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { setVisibleInterval } from "@/lib/polling";
 
 const PAGE_SIZES = [25, 50, 100, 200];
 
@@ -415,11 +416,11 @@ export function AssetsTab({ taskId }: { taskId: string }) {
     };
     // Debounce DSL keystrokes; plain (re)loads and polling run immediately.
     const debounce = setTimeout(() => void load(), dsl ? 400 : 0);
-    const timer = setInterval(() => void load(), 10_000);
+    const stopPolling = setVisibleInterval(() => void load(), 10_000);
     return () => {
       active = false;
       clearTimeout(debounce);
-      clearInterval(timer);
+      stopPolling();
     };
   }, [page, query, refreshKey, size, tab, taskId]);
 

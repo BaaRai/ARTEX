@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { sseUrl } from "@/lib/api";
 import { isBtwCommand, type SideExchange, type SideHistory, sideAPI } from "@/lib/side-questions";
+import { setVisibleInterval } from "@/lib/polling";
 
 // crypto.randomUUID is only available in secure contexts (https/localhost); it degrades when accessed via IP+http.
 function newSideRequestID(): string {
@@ -120,8 +121,8 @@ export function useSideQuestions(parent: string | null) {
   useEffect(() => {
     if (!open || !parent) return;
     void load();
-    const timer = setInterval(() => void load(), 2000);
-    return () => clearInterval(timer);
+    const stopPolling = setVisibleInterval(() => void load(), 2000);
+    return stopPolling;
   }, [open, parent, load]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Reconnect after a clear attempt invalidates older callbacks.

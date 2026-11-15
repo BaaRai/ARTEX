@@ -67,6 +67,7 @@ import {
   VERIFICATION_META,
   VERIFICATION_STATUSES,
 } from "./_components/findings-table";
+import { setVisibleInterval } from "@/lib/polling";
 
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
 
@@ -573,8 +574,8 @@ export default function FindingsPage() {
     };
     refresh();
     if (view === "asset") return;
-    const timer = setInterval(refresh, 5000);
-    return () => clearInterval(timer);
+    const stopPolling = setVisibleInterval(refresh, 5000);
+    return stopPolling;
   }, [activeRetestFingerprint, loadFlat, loadGroup, preferencesHydrated, refreshGroups, view]);
 
   React.useEffect(() => {
@@ -606,10 +607,10 @@ export default function FindingsPage() {
         });
     };
     load();
-    const t = setInterval(load, 5000);
+    const stopPolling = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, []);
 

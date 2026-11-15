@@ -37,6 +37,7 @@ import type {
   NavMainLinkItem,
   NavMainParentItem,
 } from "@/navigation/sidebar/sidebar-items";
+import { setVisibleInterval } from "@/lib/polling";
 
 interface NavMainProps {
   readonly items: readonly NavGroup[];
@@ -174,8 +175,8 @@ function InterceptPendingBadge() {
       } catch { /* ignore */ }
     }
     poll();
-    const t = setInterval(poll, 5000);
-    return () => { live = false; clearInterval(t); };
+    const stopPolling = setVisibleInterval(poll, 5000);
+    return () => { live = false; stopPolling(); };
   }, []);
   if (count === 0) return null;
   return (

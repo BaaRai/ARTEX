@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import type { TaskCredential } from "@/lib/types";
+import { setVisibleInterval } from "@/lib/polling";
 
 // Credentials tab (#3): the task's test accounts — user-declared (program alias
 // accounts) and agent-recorded (accounts the workers registered themselves).
@@ -38,8 +39,8 @@ export function CredentialsTab({ taskId }: { taskId: string }) {
   React.useEffect(() => {
     load();
     // Agent runs can record credentials mid-task; a light poll keeps the tab current.
-    const timer = setInterval(load, 15000);
-    return () => clearInterval(timer);
+    const stopPolling = setVisibleInterval(load, 15000);
+    return stopPolling;
   }, [load]);
 
   async function add() {

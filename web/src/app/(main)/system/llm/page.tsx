@@ -31,6 +31,7 @@ import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from 
 import { cn } from "@/lib/utils";
 
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
+import { setVisibleInterval } from "@/lib/polling";
 
 // The thinking switch (thinking.type) and the thinking effort (reasoning_effort) are two [independent] fields,
 // each set on its own — some APIs have no thinking field and activate thinking via the effort parameter alone, hence the decoupling.
@@ -125,8 +126,8 @@ function PoolSheet({
   // The cooldown countdown is the remaining seconds computed by the backend — fetched on a timer only while the drawer is open and some profile is unhealthy, to keep it ticking.
   React.useEffect(() => {
     if (!open || !pool?.enabled || !pool.chain.some((m) => m.state !== "ok")) return;
-    const t = setInterval(() => void onReload(), 10_000);
-    return () => clearInterval(t);
+    const stopPolling = setVisibleInterval(() => void onReload(), 10_000);
+    return stopPolling;
   }, [open, pool, onReload]);
 
   async function toggle(patch: { llm_pool_enabled?: boolean; llm_pool_bind_fallback?: boolean }) {

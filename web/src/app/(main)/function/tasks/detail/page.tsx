@@ -50,6 +50,7 @@ import { OverviewTab } from "./_tabs/overview-tab";
 import { ReportTab } from "./_tabs/report-tab";
 import { RetestsTab } from "./_tabs/retests-tab";
 import { SessionsTab } from "./_tabs/sessions-tab";
+import { setVisibleInterval } from "@/lib/polling";
 
 const TABS = [
   { value: "sessions", label: "Sessions" },
@@ -235,10 +236,10 @@ function TaskDetailInner() {
           // Polling is best-effort; the next interval retries automatically.
         });
     void load();
-    const t = setInterval(load, 5000);
+    const stopPolling = setVisibleInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      stopPolling();
     };
   }, [id]);
 
@@ -273,8 +274,8 @@ function TaskDetailInner() {
   }, [id]);
   React.useEffect(() => {
     load();
-    const timer = setInterval(load, 5000);
-    return () => clearInterval(timer);
+    const stopPolling = setVisibleInterval(load, 5000);
+    return stopPolling;
   }, [load]);
 
   async function togglePause() {
