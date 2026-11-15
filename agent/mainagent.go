@@ -169,14 +169,17 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	// Segment 0 keeps the legacy "exp%d-main" name so existing transcripts still
+	// load; each new session (seg>=1) gets its own file for a clean context. The id
+	// is the provider-side identity (session header, usage metering) with or without
+	// persistence; Norma only puts it on ctx when it writes a transcript.
+	opts.SessionID = fmt.Sprintf("exp%d-main", ts.ID())
+	if mainSeg > 0 {
+		opts.SessionID = fmt.Sprintf("exp%d-main-s%d", ts.ID(), mainSeg)
+	}
+	ctx = transcript.WithSessionID(ctx, opts.SessionID)
 	if m.tx != nil { // persist raw human↔AI conversation; one accumulating file per segment
 		opts.Transcript = m.tx
-		// Segment 0 keeps the legacy "exp%d-main" name so existing transcripts still
-		// load; each new session (seg>=1) gets its own file for a clean context.
-		opts.SessionID = fmt.Sprintf("exp%d-main", ts.ID())
-		if mainSeg > 0 {
-			opts.SessionID = fmt.Sprintf("exp%d-main-s%d", ts.ID(), mainSeg)
-		}
 	}
 	// experimental feature: when enabled, noa takes over context compression (archive centralized under <workDir>/noa/<SessionID>, persistent).
 	// the session id follows the same rule as the transcript (segment-aware), keeping archive and resume aligned.
@@ -191,8 +194,11 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	// reload the prior conversation from the transcript so the agent has context
 	// across turns (each Chat is a fresh session; without this it can't see earlier
 	// messages). First turn: no file yet → Resume loads nothing and proceeds.
+	// A corrupt or unreadable transcript stops the turn before any model or tool call.
 	if m.tx != nil {
-		_ = s.Resume(opts.SessionID)
+		if err := resumeSession(s, opts.SessionID); err != nil {
+			return "", err
+		}
 	}
 	// C2: this session is fresh each turn; re-unlock skill-gated MCPs from prior
 	// Skill() calls in the reloaded history so revealed tools stay callable.
