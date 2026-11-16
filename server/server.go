@@ -1932,8 +1932,10 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[tasks] detail metrics query failed for %s — metrics zeroed: %v", t.ID, err)
 	}
 	s.applyTaskMetrics(&dto, t, metrics)
-	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
-	applyTaskArchiveBlocker(&dto, archiveBlockers)
+	// Best effort: only this task's blocker, not the whole relation table.
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	blocker, _ := s.m.PG().TaskArchiveBlocker(taskID)
+	applyTaskArchiveBlockerID(&dto, blocker)
 	writeJSON(w, 200, dto)
 }
 
