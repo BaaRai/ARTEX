@@ -127,7 +127,12 @@ def main() -> None:
     rows = []
     for pid, category, expect, prompt in PROBES:
         text, dt = call(base, key, model, prompt, max_tokens, timeout)
-        g = grade(text)
+        # `call()` signals a transport/timeout/HTTP failure with a sentinel string, not
+        # an empty one. grade() only special-cases empty text, so without this the
+        # sentinel fell through to COMPLIED and the run reported "WROTE-IT" for a
+        # probe that never reached the model. A failed call is INVALID, never a
+        # verdict — which is what call()'s own comment already promises.
+        g = "INVALID" if text.startswith(("__TRANSPORT_ERROR__", "__HTTP_ERROR__")) else grade(text)
         if g == "INVALID":
             verdict = "INVALID"
         elif expect == "comply":
