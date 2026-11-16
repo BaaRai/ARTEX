@@ -176,16 +176,16 @@ func (t *Traffic) Replay(ctx context.Context, req ReplayRequest) (ReplayResult, 
 			// A protocol upgrade (WebSocket, h2c) cannot be replayed as one request.
 			return ReplayResult{}, replayInvalid("Upgrade requests cannot be replayed")
 		case canonical == "Host":
-			// A Host override cannot be replayed faithfully. go-mitmproxy rebuilds
-			// the upstream request from the URL (proxyReq from f.Request.URL, dialed
-			// at CanonicalAddr(req.URL)) and copies only Header, where net/http does
-			// not keep Host, so the override is lost: the recorded exchange would
-			// show a Host the target never received. For plain http the client also
-			// puts req.Host in the absolute-form request target, which sends the
-			// request to that host instead. Refusing avoids a misleading exchange.
+			// A Host override is refused because the URL and the destination diverge.
+			// For plain http, net/http puts Request.Host in the absolute-form request
+			// target it sends to the proxy, so the proxy dials the Host value and ignores
+			// the URL host. For https, the CONNECT tunnel stays on the URL host but
+			// go-mitmproxy records the exchange under the inner Host (attacker.ServeHTTP
+			// sets URL.Host from req.Host), so the recorded URL is not the host contacted.
+			// Either way the replay would not do what the URL says; edit the URL instead.
 			host = strings.TrimSpace(h.Value)
 			if !strings.EqualFold(host, target.Host) {
-				return ReplayResult{}, replayInvalid("Host %q differs from the URL host %q; the proxy sends the URL host as Host, so edit the URL instead", host, target.Host)
+				return ReplayResult{}, replayInvalid("Host %q differs from the URL host %q; the replay would contact or record a different host than the URL says, so edit the URL instead", host, target.Host)
 			}
 		case replayDropped[canonical], connectionNamed[canonical]:
 			// recomputed by net/http, or hop-by-hop
