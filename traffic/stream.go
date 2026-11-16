@@ -30,9 +30,12 @@ const (
 	// values go-mitmproxy reports in WebSocketMessage.Type.
 	wsText   = 1
 	wsBinary = 2
-	// streamPreview caps one message's payload in a StreamMessages row when the
-	// payload spilled to the blob store; the hash points at the rest.
+	// streamPreview caps one message's payload in a StreamMessages row; a longer
+	// payload lives in the blob store and the row carries its hash.
 	streamPreview = 4 * 1024
+	// maxStreamInline is the inline threshold for message payloads: anything
+	// longer spills to the blob store, so a page of 200 rows stays bounded.
+	maxStreamInline = streamPreview
 	// toolStreamPreview caps one message's preview in traffic_messages, so a page
 	// of messages stays small in the agent's context.
 	toolStreamPreview = 1024
@@ -47,7 +50,8 @@ type streamState struct {
 	consumed int    // library messages/events already handled
 	seq      int64
 	stored   int
-	// storedBytes counts the payload bytes kept, after truncation.
+	// storedBytes counts what the kept messages occupy: the payload after
+	// truncation, plus the inline preview spill keeps for a spilled payload.
 	storedBytes  int64
 	dropped      bool
 	droppedMsgs  int64
@@ -59,7 +63,7 @@ type streamState struct {
 
 // streamRow is one stream_messages row before it is written.
 type streamRow struct {
-	ts        int64 // unix milliseconds
+	ts        int64 // unix seconds, like exchanges.ts; seq carries the order
 	direction string
 	kind      int
 	event     string
@@ -154,8 +158,9 @@ func (s *sink) startStream(f *mproxy.Flow, kind string) {
 // libMutex returns the unexported mu sync.Mutex that go-mitmproxy holds while it
 // appends to WebSocketData.Messages / SSEData.Events. The library exposes no
 // accessor, and the two WebSocket goroutines append concurrently, so reading the
-// slice without that lock is a data race. Nil when the field is absent (a library
-// change), in which case the read falls back to unlocked.
+// slice without that lock is a data race. Reaching a private field ties this to
+// the pinned go-mitmproxy v1.9.2: TestLibMutexFound is the upgrade guard. Nil
+// when the field is absent, and then nothing is read (see lockLib).
 func libMutex(v any) *sync.Mutex {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -170,23 +175,28 @@ func libMutex(v any) *sync.Mutex {
 
 var libMutexMissing sync.Once
 
-func lockLib(v any) func() {
+// lockLib takes the library's lock on v. ok is false when the lock cannot be
+// found; callers then read nothing rather than race the library.
+func lockLib(v any) (unlock func(), ok bool) {
 	mu := libMutex(v)
 	if mu == nil {
 		libMutexMissing.Do(func() {
-			log.Printf("[traffic] go-mitmproxy stream data has no mu field; reading stream messages without its lock")
+			log.Printf("[traffic] go-mitmproxy stream data has no mu field; stream messages are not recorded")
 		})
-		return func() {}
+		return nil, false
 	}
 	mu.Lock()
-	return mu.Unlock
+	return mu.Unlock, true
 }
 
 // wsMessagesSince returns every WebSocket message appended since the last call,
 // in the library's order, so each is handled exactly once whichever goroutine's
 // hook gets there first. The library slice itself is never modified.
 func wsMessagesSince(ws *mproxy.WebSocketData, st *streamState) []streamRow {
-	unlock := lockLib(ws)
+	unlock, ok := lockLib(ws)
+	if !ok {
+		return nil
+	}
 	msgs := ws.Messages
 	if st.consumed > len(msgs) {
 		st.consumed = len(msgs)
@@ -209,14 +219,17 @@ func wsMessagesSince(ws *mproxy.WebSocketData, st *streamState) []streamRow {
 		if m.Type == wsBinary {
 			ctype = "application/octet-stream"
 		}
-		rows = append(rows, streamRow{ts: m.Timestamp.UnixMilli(), direction: dir, kind: m.Type, size: len(m.Content), payload: m.Content, ctype: ctype})
+		rows = append(rows, streamRow{ts: m.Timestamp.Unix(), direction: dir, kind: m.Type, size: len(m.Content), payload: m.Content, ctype: ctype})
 	}
 	return rows
 }
 
 // sseEventsSince is wsMessagesSince for Server-Sent Events.
 func sseEventsSince(sse *mproxy.SSEData, st *streamState) []streamRow {
-	unlock := lockLib(sse)
+	unlock, ok := lockLib(sse)
+	if !ok {
+		return nil
+	}
 	events := sse.Events
 	if st.consumed > len(events) {
 		st.consumed = len(events)
@@ -230,7 +243,7 @@ func sseEventsSince(sse *mproxy.SSEData, st *streamState) []streamRow {
 			continue
 		}
 		st.respBytes += int64(len(e.Raw))
-		rows = append(rows, streamRow{ts: e.Time.UnixMilli(), direction: "s2c", event: e.Event, eventID: e.ID,
+		rows = append(rows, streamRow{ts: e.Time.Unix(), direction: "s2c", event: e.Event, eventID: e.ID,
 			retry: e.Retry, size: len(e.Data), payload: []byte(e.Data), ctype: "text/event-stream"})
 	}
 	return rows
@@ -333,7 +346,8 @@ func (t *Traffic) persistStream(st *streamState, rows []streamRow) {
 			r.payload = r.payload[:maxStreamPayload]
 			r.truncated = true
 		}
-		if st.dropped || st.stored >= maxStreamMessages || st.storedBytes+int64(len(r.payload)) > maxStreamBytes {
+		cost := streamStoredCost(r)
+		if st.dropped || st.stored >= maxStreamMessages || st.storedBytes+cost > maxStreamBytes {
 			if !st.dropped {
 				st.dropped = true
 				addMeta = true
@@ -343,7 +357,7 @@ func (t *Traffic) persistStream(st *streamState, rows []streamRow) {
 			continue
 		}
 		st.stored++
-		st.storedBytes += int64(len(r.payload))
+		st.storedBytes += cost
 		keep = append(keep, r)
 	}
 	var meta []byte
@@ -356,36 +370,52 @@ func (t *Traffic) persistStream(st *streamState, rows []streamRow) {
 
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
+	// Sequence numbers and blob writes come first, as in record(): blob writes are
+	// filesystem work and must not sit inside the SQLite transaction. Holding wmu
+	// keeps gcBlobs from collecting a blob before its reference is committed.
+	type preparedRow struct {
+		streamRow
+		seq  int64
+		body storedBody
+	}
+	prepared := make([]preparedRow, 0, len(keep))
+	for _, r := range keep {
+		st.seq++
+		prepared = append(prepared, preparedRow{streamRow: r, seq: st.seq, body: t.spillAt(r.payload, r.ctype, maxStreamInline)})
+	}
+	var metaSeq int64
+	if meta != nil {
+		st.seq++
+		metaSeq = st.seq
+	}
+
 	tx, err := t.db.Begin()
 	if err != nil {
 		log.Printf("[traffic] failed to record stream messages of %s (beginning transaction): %v", st.id, err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
-	for _, r := range keep {
-		st.seq++
-		b := t.spill(r.payload, r.ctype)
-		inline := b.inline
+	for _, p := range prepared {
+		inline := p.body.inline
 		if inline == nil {
 			inline = []byte{}
 		}
 		if _, err := tx.Exec(`INSERT INTO stream_messages(exchange_id,seq,ts,direction,kind,event,event_id,retry,size,payload,payload_blob,truncated)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, st.id, st.seq, r.ts, r.direction, r.kind, r.event, r.eventID, r.retry, r.size,
-			inline, nullIfEmpty(b.hash), boolInt(r.truncated)); err != nil {
-			log.Printf("[traffic] failed to record stream message %d of %s: %v", st.seq, st.id, err)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, st.id, p.seq, p.ts, p.direction, p.kind, p.event, p.eventID, p.retry, p.size,
+			inline, nullIfEmpty(p.body.hash), boolInt(p.truncated)); err != nil {
+			log.Printf("[traffic] failed to record stream message %d of %s: %v", p.seq, st.id, err)
 			return
 		}
-		if b.hash != "" {
-			if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_refs(hash,exchange_id) VALUES(?,?)`, b.hash, st.id); err != nil {
-				log.Printf("[traffic] failed to record stream message %d of %s (registering blob reference): %v", st.seq, st.id, err)
+		if p.body.hash != "" {
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_refs(hash,exchange_id) VALUES(?,?)`, p.body.hash, st.id); err != nil {
+				log.Printf("[traffic] failed to record stream message %d of %s (registering blob reference): %v", p.seq, st.id, err)
 				return
 			}
 		}
 	}
 	if meta != nil {
-		st.seq++
 		if _, err := tx.Exec(`INSERT INTO stream_messages(exchange_id,seq,ts,direction,kind,size,payload)
-VALUES(?,?,?,'meta',0,?,?)`, st.id, st.seq, time.Now().UnixMilli(), len(meta), meta); err != nil {
+VALUES(?,?,?,'meta',0,?,?)`, st.id, metaSeq, time.Now().Unix(), len(meta), meta); err != nil {
 			log.Printf("[traffic] failed to record stream limit marker of %s: %v", st.id, err)
 			return
 		}
@@ -393,6 +423,20 @@ VALUES(?,?,?,'meta',0,?,?)`, st.id, st.seq, time.Now().UnixMilli(), len(meta), m
 	if err := tx.Commit(); err != nil {
 		log.Printf("[traffic] failed to record stream messages of %s (committing): %v", st.id, err)
 	}
+}
+
+// streamStoredCost is what keeping r adds to the index and blob store: the
+// payload, plus the inline preview spillAt keeps when the payload spills (a text
+// prefix of at most blobPreview, or a one-line tag for binary).
+func streamStoredCost(r streamRow) int64 {
+	n := int64(len(r.payload))
+	if len(r.payload) <= maxStreamInline {
+		return n
+	}
+	if isBinaryBody(r.ctype, r.payload) {
+		return n + int64(len(binaryTag(r.ctype, r.payload)))
+	}
+	return n + int64(len(truncateUTF8(r.payload, blobPreview)))
 }
 
 func streamMetaPayload(st *streamState) []byte {
@@ -429,7 +473,7 @@ func (t *Traffic) finishStream(st *streamState) {
 // StreamMessage is one recorded WebSocket message or SSE event.
 type StreamMessage struct {
 	Seq       int64  `json:"seq"`
-	TS        int64  `json:"ts"` // unix milliseconds
+	TS        int64  `json:"ts"` // unix seconds, like an exchange's ts; Seq orders
 	Direction string `json:"direction"`
 	Kind      int    `json:"kind"`
 	// Type is "text" or "binary" (WebSocket), "event" (SSE), or "meta" (the
@@ -447,8 +491,9 @@ type StreamMessage struct {
 }
 
 // StreamMessages returns one page of an exchange's stream messages in order.
-// limit is 1..200 (default 50) and offset >= 0. A payload that spilled to the
-// blob store comes back as a preview of at most 4 KiB plus its hash.
+// limit is 1..200 (default 50) and offset >= 0. Every payload comes back as at
+// most streamPreview (4 KiB); a longer one lives in the blob store and the row
+// carries its hash for the rest (traffic_blob, GET /api/traffic/blob).
 func (t *Traffic) StreamMessages(exchangeID string, offset, limit int) ([]StreamMessage, int, error) {
 	if limit <= 0 {
 		limit = 50
@@ -490,16 +535,15 @@ FROM stream_messages WHERE exchange_id=? ORDER BY seq LIMIT ? OFFSET ?`, exchang
 		default:
 			m.Type = "event"
 		}
-		if m.Blob != "" {
-			payload = clipBytes(payload, streamPreview)
-		}
 		if m.Type == "binary" {
-			m.Payload, m.Encoding = base64.StdEncoding.EncodeToString(payload), "base64"
-		} else {
-			m.Payload = string(payload)
 			if m.Blob != "" {
-				m.Payload = truncateUTF8(payload, streamPreview)
+				// A spilled binary payload keeps only a descriptive tag inline;
+				// the preview is the payload's own leading bytes.
+				payload, _, _ = t.BlobRange(m.Blob, 0, streamPreview)
 			}
+			m.Payload, m.Encoding = base64.StdEncoding.EncodeToString(clipBytes(payload, streamPreview)), "base64"
+		} else {
+			m.Payload = truncateUTF8(payload, streamPreview)
 		}
 		out = append(out, m)
 	}

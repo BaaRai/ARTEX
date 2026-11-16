@@ -156,7 +156,7 @@ func TestWebSocketMessagesRecorded(t *testing.T) {
 		}
 		return got
 	}
-	before := time.Now().UnixMilli()
+	before := time.Now().Unix()
 	if got := exchange(websocket.TextMessage, []byte("hello")); string(got) != "echo:hello" {
 		t.Fatalf("echo %q", got)
 	}
@@ -374,7 +374,14 @@ func TestStreamMessageLimitStoresOneMetaRow(t *testing.T) {
 func TestStreamByteLimitStoresOneMetaRow(t *testing.T) {
 	tr, s, f := unitStream(t, "bytes.test")
 	chunk := bytes.Repeat([]byte{7}, maxStreamPayload)
-	n := maxStreamBytes/maxStreamPayload + 1
+	// Each kept 1 MiB payload spills and also keeps its inline tag, so the cap
+	// admits floor(maxStreamBytes / (payload + tag)) of them.
+	cost := streamStoredCost(streamRow{payload: chunk, ctype: "application/octet-stream"})
+	if cost <= maxStreamPayload {
+		t.Fatalf("cost %d does not count the inline preview", cost)
+	}
+	kept := int(maxStreamBytes / cost)
+	n := kept + 1
 	for i := 0; i < n; i++ {
 		addWS(f, false, websocket.BinaryMessage, chunk)
 	}
@@ -384,8 +391,8 @@ func TestStreamByteLimitStoresOneMetaRow(t *testing.T) {
 	s.WebSocketEnd(f)
 	id := onlyExchange(t, tr)
 	msgs := allMessages(t, tr, id)
-	if len(msgs) != n {
-		t.Fatalf("%d rows, want %d stored and one meta row", len(msgs), n-1)
+	if len(msgs) != kept+1 {
+		t.Fatalf("%d rows, want %d stored and one meta row", len(msgs), kept)
 	}
 	meta := msgs[len(msgs)-1]
 	if meta.Direction != "meta" {
@@ -394,13 +401,89 @@ func TestStreamByteLimitStoresOneMetaRow(t *testing.T) {
 	if dn, db := metaCounts(t, meta); dn != 2 || db != maxStreamPayload+1 {
 		t.Fatalf("meta dropped_messages=%d dropped_bytes=%d", dn, db)
 	}
-	var stored int64
-	if err := tr.DB().QueryRow(`SELECT SUM(size) FROM stream_messages WHERE exchange_id=? AND direction<>'meta'`, id).Scan(&stored); err != nil || stored != maxStreamBytes {
-		t.Fatalf("stored %d bytes err=%v, want %d", stored, err, maxStreamBytes)
+	var stored, inline int64
+	if err := tr.DB().QueryRow(`SELECT SUM(size), SUM(LENGTH(payload)) FROM stream_messages WHERE exchange_id=? AND direction<>'meta'`, id).Scan(&stored, &inline); err != nil ||
+		stored != int64(kept*maxStreamPayload) || stored+inline > maxStreamBytes {
+		t.Fatalf("stored %d payload bytes + %d inline err=%v, want %d within %d", stored, inline, err, kept*maxStreamPayload, maxStreamBytes)
 	}
 	var respLen int64
 	if err := tr.DB().QueryRow(`SELECT resp_len FROM exchanges WHERE id=?`, id).Scan(&respLen); err != nil || respLen != int64(n*maxStreamPayload+1) {
 		t.Fatalf("resp_len %d err=%v, want every observed byte", respLen, err)
+	}
+}
+
+// A payload over maxStreamInline goes to the blob store; the row returns at
+// most 4 KiB and the hash, and the blob holds the whole payload.
+func TestStreamPayloadSpillsAboveInlineLimit(t *testing.T) {
+	tr, s, f := unitStream(t, "spill.test")
+	bigText := []byte(strings.Repeat("0123456789", 1024)) // 10 KiB
+	bigBin := make([]byte, 10*1024)
+	for i := range bigBin {
+		bigBin[i] = byte(i)
+	}
+	small := []byte(strings.Repeat("s", 1024))
+	addWS(f, true, websocket.TextMessage, bigText)
+	addWS(f, false, websocket.BinaryMessage, bigBin)
+	addWS(f, true, websocket.TextMessage, small)
+	s.WebSocketMessage(f)
+	msgs := allMessages(t, tr, onlyExchange(t, tr))
+	if len(msgs) != 3 {
+		t.Fatalf("%d messages", len(msgs))
+	}
+	text, bin, inline := msgs[0], msgs[1], msgs[2]
+	if text.Blob == "" || len(text.Payload) > streamPreview || text.Payload != string(bigText[:streamPreview]) || text.Size != len(bigText) || text.Truncated {
+		t.Fatalf("10 KiB text row: blob %q payload %d bytes size %d truncated %v", text.Blob, len(text.Payload), text.Size, text.Truncated)
+	}
+	if data, total, err := tr.BlobRange(text.Blob, 0, int64(len(bigText))); err != nil || total != int64(len(bigText)) || !bytes.Equal(data, bigText) {
+		t.Fatalf("text blob total=%d err=%v, want the full 10 KiB", total, err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(bin.Payload)
+	if bin.Blob == "" || err != nil || !bytes.Equal(raw, bigBin[:streamPreview]) {
+		t.Fatalf("10 KiB binary row: blob %q preview %d bytes err=%v, want its first 4 KiB", bin.Blob, len(raw), err)
+	}
+	if data, total, err := tr.BlobRange(bin.Blob, 0, int64(len(bigBin))); err != nil || total != int64(len(bigBin)) || !bytes.Equal(data, bigBin) {
+		t.Fatalf("binary blob total=%d err=%v", total, err)
+	}
+	if inline.Blob != "" || inline.Payload != string(small) {
+		t.Fatalf("1 KiB row: blob %q payload %d bytes, want inline and complete", inline.Blob, len(inline.Payload))
+	}
+}
+
+// The server writes a message and closes at once; the message the client read
+// must be recorded even though WebSocketEnd fires as soon as one direction ends.
+func TestWebSocketFinalMessageOnClose(t *testing.T) {
+	tr, _, proxyURL := startProxy(t)
+	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := up.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		_ = c.WriteMessage(websocket.TextMessage, []byte("final"))
+		_ = c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		_ = c.Close()
+	}))
+	t.Cleanup(srv.Close)
+	c, _, err := wsDialer(t, tr, proxyURL).Dial("wss://"+strings.TrimPrefix(localhostURL(srv.URL), "https://")+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, got, err := c.ReadMessage(); err != nil || string(got) != "final" {
+		t.Fatalf("read %q err=%v", got, err)
+	}
+	_ = c.Close()
+	var id string
+	waitFor(t, "websocket end", func() bool {
+		exs := streamExchanges(t, tr, "websocket")
+		if len(exs) != 1 || exs[0].respLen == 0 {
+			return false
+		}
+		id = exs[0].id
+		return true
+	})
+	msgs := allMessages(t, tr, id)
+	if len(msgs) != 1 || msgs[0].Direction != "s2c" || msgs[0].Payload != "final" {
+		t.Fatalf("messages %+v, want the final server message", msgs)
 	}
 }
 
@@ -546,5 +629,9 @@ func TestWebSocketConcurrentDirections(t *testing.T) {
 func TestLibMutexFound(t *testing.T) {
 	if libMutex(&mproxy.WebSocketData{}) == nil || libMutex(&mproxy.SSEData{}) == nil {
 		t.Fatal("go-mitmproxy WebSocketData/SSEData no longer have a sync.Mutex field named mu")
+	}
+	// Without the lock nothing is read: no unlocked fallback.
+	if _, ok := lockLib(&struct{ Messages []int }{}); ok {
+		t.Fatal("lockLib reported a lock on a type without mu")
 	}
 }

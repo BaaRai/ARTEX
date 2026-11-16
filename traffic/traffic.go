@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_blob_refs_ex ON blob_refs(exchange_id);
 CREATE TABLE IF NOT EXISTS stream_messages (
   exchange_id  TEXT NOT NULL,
   seq          INTEGER NOT NULL,
-  ts           INTEGER NOT NULL,            -- unix milliseconds
+  ts           INTEGER NOT NULL,            -- unix seconds, like exchanges.ts
   direction    TEXT NOT NULL,               -- 'c2s' | 's2c' | 'meta'
   kind         INTEGER NOT NULL,            -- WebSocket opcode (1 text, 2 binary), 0 for SSE and meta
   event        TEXT NOT NULL DEFAULT '',
@@ -558,6 +558,12 @@ type storedBody struct {
 // are handed to the full-text index in full (up to maxIndexBody) — indexing is
 // independent of where the bytes end up.
 func (t *Traffic) spill(body []byte, contentType string) storedBody {
+	return t.spillAt(body, contentType, maxInlineBody)
+}
+
+// spillAt is spill with the inline threshold as a parameter: bodies up to
+// maxInline stay inline. Stream messages use a much lower one (maxStreamInline).
+func (t *Traffic) spillAt(body []byte, contentType string, maxInline int) storedBody {
 	if len(body) == 0 {
 		return storedBody{}
 	}
@@ -568,7 +574,7 @@ func (t *Traffic) spill(body []byte, contentType string) storedBody {
 		}
 		return string(clipBytes(body, maxIndexBody))
 	}
-	if len(body) <= maxInlineBody {
+	if len(body) <= maxInline {
 		return storedBody{inline: body, index: indexText()}
 	}
 
