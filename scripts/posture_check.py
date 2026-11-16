@@ -195,7 +195,7 @@ def main() -> None:
     if hedged_comply:
         print(f"\n  {len(hedged_comply)} dual-use/benign probe(s) graded as a refusal while containing a contrast"
               f" ({', '.join(hedged_comply)}): these may be scope hedges (\"I'm not going to write a full script,"
-              f" but the one-liner is …\") rather than refusals. Read their raw files before rejecting this profile.")
+              f" but the one-liner is ...\") rather than refusals. Read their raw files before rejecting this profile.")
         print("  A contrast is not by itself grounds to reject: the same shape also carries real refuse-then-explain answers.")
     if flagged:
         print(f"  PARTIAL verdicts need hand review (refusal language plus code is ambiguous): {', '.join(flagged)} — read the raw files.")
