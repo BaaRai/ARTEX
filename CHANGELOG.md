@@ -32,6 +32,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **bbot on arm64**: the image now builds on arm64 hosts such as Apple Silicon. bbot's `gowitness` downloaded an x86-64 Chrome and `retirejs` an x86-64 Node, which can't run there, so the build failed. On arm64 the image uses Debian's `chromium` for gowitness and an arm64 Node for retirejs, and the build check now covers `retirejs` too. amd64 builds are unchanged.
 - **Auto-scope hygiene**: auto `task_scope` rows count for coverage and untested assets only under a declared root, and direct coverage counts anchored assets through fact anchors only; the scope is described as "coverage scope, not enforced" (#196).
 - **Enrich HTTP probe**: it now dials through `intercept.PinnedDialer`, so the target gate applies and a probe without a target scope is refused (#198).
 - **Agent hook data races**: the eight package-level hooks are synchronised, so a second wire-up no longer races tasks that already read them (#227).
