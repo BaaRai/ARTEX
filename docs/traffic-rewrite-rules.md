@@ -79,6 +79,12 @@ On update, a sensitive action sent without `value` keeps the stored value, provi
 rule has a sensitive action of the same type and header name at the same position. Otherwise the
 update is refused and the value must be sent again. An explicit `"value": ""` is a value.
 
+A stored sensitive value is not written to a new destination. When an update keeps at least one
+stored value, the `host` matcher must stay the same (compared case-insensitively); otherwise the
+update is refused with HTTP 400 and the value must be sent again or cleared. The `url_regex`
+matcher is not part of this comparison, an accepted limit: a kept value follows a rule whose
+`url_regex` changes on the same host.
+
 The flag covers the action's value only. Matchers are not masked. A value an action places in the
 URL, marked sensitive or not, is sent to the target as part of the URL.
 

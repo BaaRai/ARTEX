@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Autumn-27/artex/db"
@@ -82,8 +83,14 @@ func encodeRewriteRule(r rewrite.Rule) db.TrafficRewriteRule {
 
 // rule builds the rule a request describes. stored is the rule being updated,
 // nil on create: it supplies the sensitive values the request left out.
+//
+// A stored sensitive value is not written to a new destination: when one is
+// kept, the host matcher must not change (compared case-insensitively). The
+// url_regex matcher is not compared, an accepted limit: a kept value can follow
+// a rule whose url_regex changes on the same host.
 func (req rewriteRuleReq) rule(stored *rewrite.Rule) (rewrite.Rule, error) {
 	r := rewrite.Rule{Name: req.Name, Enabled: req.Enabled, Phase: req.Phase, Priority: req.Priority, Matchers: req.Matchers, Note: req.Note}
+	kept := false
 	for i, a := range req.Actions {
 		out := rewrite.Action{Type: a.Type, Name: a.Name, Regex: a.Regex, Sensitive: a.Sensitive}
 		switch {
@@ -98,8 +105,12 @@ func (req rewriteRuleReq) rule(stored *rewrite.Rule) (rewrite.Rule, error) {
 				return r, fmt.Errorf("action %d (%s): no stored value to keep, send the value", i+1, a.Type)
 			}
 			out.Value = old.Value
+			kept = true
 		}
 		r.Actions = append(r.Actions, out)
+	}
+	if kept && !strings.EqualFold(stored.Matchers.Host, req.Matchers.Host) {
+		return r, errors.New("destination changed (host matcher) while a stored sensitive value was kept: send the value again or clear it; stored secrets are not written to a new destination")
 	}
 	return r, nil
 }

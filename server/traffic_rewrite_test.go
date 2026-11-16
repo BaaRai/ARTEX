@@ -247,6 +247,44 @@ func TestRewriteRulesCRUD(t *testing.T) {
 	}
 }
 
+// An update that keeps a stored sensitive value cannot change the host matcher:
+// the value is not written to a new destination.
+func TestRewriteRulesKeptValueHostChange400(t *testing.T) {
+	s, request := rewriteServer(t)
+	const secret = "Bearer rwapi-plain-host"
+	body := func(host, value string) string {
+		return `{"name":"t-rwapi-host","enabled":true,"phase":"request","matchers":{"host":"` + host + `"},
+"actions":[{"type":"set_header","name":"Authorization",` + value + `"sensitive":true}]}`
+	}
+	r := decodeRewriteRuleJSON(t, request(true, "POST", rewriteAPI, body("api.example", `"value":"`+secret+`",`)))
+	path := fmt.Sprintf("%s/%d", rewriteAPI, r.ID)
+	if resp := request(true, "POST", path+"/toggle", `{"enabled":true}`); resp.Code != 200 {
+		t.Fatalf("toggle: HTTP %d %s", resp.Code, resp.Body.String())
+	}
+
+	for _, host := range []string{"evil.example", "*.example", ""} {
+		resp := request(true, "PUT", path, body(host, ""))
+		if resp.Code != 400 || !strings.Contains(resp.Body.String(), "destination changed (host matcher)") || strings.Contains(resp.Body.String(), "rwapi-plain") {
+			t.Fatalf("host %q with the stored value kept: HTTP %d %s, want 400", host, resp.Code, resp.Body.String())
+		}
+	}
+	if stored, _ := listRewriteRules(t, request); len(stored) != 1 || stored[0].Matchers.Host != "api.example" {
+		t.Fatalf("a refused update changed the rule: %+v", stored)
+	}
+	if got := sentToTarget(s).Header.Get("Authorization"); got != secret {
+		t.Fatalf("after the refused updates: Authorization=%q, want the stored value", got)
+	}
+
+	// Same host in another case: kept. A new host with the value sent again: accepted.
+	decodeRewriteRuleJSON(t, request(true, "PUT", path, body("API.Example", "")))
+	if got := sentToTarget(s).Header.Get("Authorization"); got != secret {
+		t.Fatalf("host in another case: Authorization=%q, want the stored value kept", got)
+	}
+	if r2 := decodeRewriteRuleJSON(t, request(true, "PUT", path, body("evil.example", `"value":"other",`))); r2.Matchers.Host != "evil.example" {
+		t.Fatalf("new host with the value sent again: %+v", r2)
+	}
+}
+
 // The validation refuses a rule with HTTP 400 on create and on update, and
 // stores nothing.
 func TestRewriteRulesValidation400(t *testing.T) {
