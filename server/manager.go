@@ -24,6 +24,7 @@ import (
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/traffic"
+	"github.com/Autumn-27/artex/traffic/rewrite"
 	actool "github.com/Autumn-27/norma/tool"
 )
 
@@ -260,6 +261,12 @@ type Manager struct {
 	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
 
+	// Capture-proxy rewrite rules: rewriteMu serializes reloads, rewriteSet is
+	// the snapshot last compiled, rewriteErrors outlives the reloads.
+	rewriteMu     sync.Mutex
+	rewriteSet    atomic.Pointer[rewrite.Set]
+	rewriteErrors rewrite.ErrorLog
+
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
 	// their in-memory mirrors. lifecycleMu makes snapshots race-free, but without
@@ -449,6 +456,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		}
 		if tr != nil {
 			m.traffic = tr
+			m.reloadRewriteRules() // in place before the proxy accepts a connection
 			go func() {
 				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
 				if err := tr.Start(); err != nil {
