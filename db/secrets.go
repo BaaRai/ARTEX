@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -84,7 +86,11 @@ var (
 	// Evidence head blocks carry the captured Cookie and Authorization headers.
 	colEvReqHead  = secretColumn{"traffic_evidence_snapshots", "req_head", false, ""}
 	colEvRespHead = secretColumn{"traffic_evidence_snapshots", "resp_head", false, ""}
-	secretColumns = append([]secretColumn{colLLMKey, colLLMProxy, colMCPEnv, colCredPass, colNotifConfig, colToolExec, colEvReqHead, colEvRespHead}, secretSettingColumns()...)
+
+	// Capture-proxy rewrite rules: an action may carry a token, a matcher a header value.
+	colRewriteMatchers = secretColumn{"traffic_rewrite_rules", "matchers", true, ""}
+	colRewriteActions  = secretColumn{"traffic_rewrite_rules", "actions", true, ""}
+	secretColumns      = append([]secretColumn{colLLMKey, colLLMProxy, colMCPEnv, colCredPass, colNotifConfig, colToolExec, colEvReqHead, colEvRespHead, colRewriteMatchers, colRewriteActions}, secretSettingColumns()...)
 )
 
 // secretSettingKeys are the settings stored encrypted, AAD "settings.<key>".
@@ -113,6 +119,29 @@ func secretSetting(key string) (secretColumn, bool) {
 type secretBox struct{ aead cipher.AEAD }
 
 var activeSecretBox atomic.Pointer[secretBox]
+
+// trafficTraceDomain separates the rewrite-trace fingerprint key from the
+// secret key it is derived from.
+const trafficTraceDomain = "artex-traffic-trace"
+
+var trafficTraceKey atomic.Pointer[[]byte]
+
+// TrafficTraceKey returns the instance sub-key that fingerprints the sensitive
+// values of the capture proxy's rewrite trace: HMAC-SHA256 of the domain under
+// the secret key. Nil until InitSecrets ran. It lives in memory only: it is
+// never written to the database, the trace or an archive.
+func TrafficTraceKey() []byte {
+	if k := trafficTraceKey.Load(); k != nil {
+		return *k
+	}
+	return nil
+}
+
+func deriveSubKey(key []byte, domain string) []byte {
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte(domain))
+	return m.Sum(nil)
+}
 
 func newSecretBox(key []byte) (*secretBox, error) { // key: 32 bytes, see parseSecretKey
 	block, err := aes.NewCipher(key)
@@ -273,6 +302,8 @@ func (d *DB) InitSecrets(keyDir string) error {
 		}
 		log.Printf("[secrets] at-rest encryption ready; backfill encrypted %d plaintext value(s)", n)
 		activeSecretBox.Store(box)
+		sub := deriveSubKey(key, trafficTraceDomain)
+		trafficTraceKey.Store(&sub)
 		return nil
 	})
 }
