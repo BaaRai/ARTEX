@@ -4219,14 +4219,35 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
 			counts[ty] = len(ns)
 		}
 	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	var ledger *db.CoverageLedger
 	if t.CoverageEnabled {
-		taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 		ledger, _ = s.m.Assets().CoverageLedger(taskID)
+	}
+	// The exploration node payload carries only name/summary/evidence/severity/
+	// vulnclass. Everything the report says about proof strength (poe level,
+	// verification state and note, counterevidence, confidence rationale, both
+	// evidence versions, the reporter-written body) lives on the standalone findings
+	// row, joined by node_id, and one report-only query fetches all of it. The
+	// findings list keeps its own lean meta query: folding report bodies into it
+	// would fetch multi-KB text for rows that never render it.
+	//
+	// A lookup failure is not an absence. The report is generated on demand and can
+	// be retried, so a failed read fails loudly instead of rendering every finding as
+	// "not assessed" — a database error must never become a claim about the finding.
+	quality := map[int64]db.FindingQuality{} // pg-less deployments have no standalone rows at all
+	if s.m.pg != nil {
+		var err error
+		if quality, err = s.m.pg.FindingQualityByNodeID(taskID); err != nil {
+			log.Printf("[report] task=%s finding quality: %v", t.ID, err)
+			writeErr(w, 500, "report unavailable: the finding quality lookup failed, retry")
+			return
+		}
 	}
 	md := report.Markdown(report.Input{
 		Title: t.Description, Goal: t.Goal, GeneratedAt: time.Now(),
 		AssetCounts: counts, Findings: findings, Coverage: ledger,
+		Quality: quality,
 	})
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.WriteHeader(200)
