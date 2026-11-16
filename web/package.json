@@ -13,7 +13,8 @@
     "check:fix": "biome check --write",
     "prepare": "husky",
     "generate:presets": "ts-node -P tsconfig.scripts.json src/scripts/generate-theme-presets.ts",
-    "test:polling": "node --test scripts/polling.test.mjs"
+    "test:polling": "node --test scripts/polling.test.mjs",
+    "test:replay": "node --test scripts/replay.test.mjs"
   },
   "lint-staged": {
     "*.{js,ts,jsx,tsx}": [
