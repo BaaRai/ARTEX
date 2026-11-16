@@ -124,7 +124,8 @@ export function ReplayPanel({
       });
   };
 
-  const canSend = !sending && !form.binary && form.method.trim() !== "" && form.url.trim() !== "";
+  const canSend =
+    !sending && !form.binary && !form.bodyPreviewOnly && form.method.trim() !== "" && form.url.trim() !== "";
   // Repeated headers (Set-Cookie) share a name, so each keeps its original position as key.
   const sortedHeaders = (result?.headers ?? [])
     .map((h, position) => ({ ...h, position }))
@@ -218,7 +219,8 @@ export function ReplayPanel({
             />
             {form.bodyPreviewOnly && (
               <p className="text-amber-700 text-xs dark:text-amber-400">
-                The recorded body was too large to keep inline: only its preview is loaded here.
+                The recorded body was too large to keep inline; only its preview is loaded, so replay is disabled for
+                this exchange.
               </p>
             )}
           </>
