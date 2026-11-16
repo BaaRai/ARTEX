@@ -1064,13 +1064,20 @@ func (d *DB) SkillAgents(skillName string) ([]int64, error) {
 }
 
 // SetAgentSkillVisibility replaces all skill visibility for an agent.
+//
+// Rows are disabled rather than deleted. Every read path filters on `enabled`, so
+// the visible set is unchanged, but the row survives as the record of an explicit
+// decision: seedBuiltinSkillVisibility is insert-if-absent, so a deleted row would
+// read as "never seeded" on the next start and the builtin skill would come back.
+// DeleteSkillVisibility is the one place that still deletes, because there the
+// skill itself is gone from disk.
 func (d *DB) SetAgentSkillVisibility(agentID int64, names []string) error {
 	tx, err := d.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM agent_skill_visibility WHERE agent_id=$1`, agentID); err != nil {
+	if _, err := tx.Exec(`UPDATE agent_skill_visibility SET enabled=false WHERE agent_id=$1`, agentID); err != nil {
 		return err
 	}
 	for _, name := range names {
@@ -1083,13 +1090,19 @@ ON CONFLICT (agent_id,skill_name) DO UPDATE SET enabled=true`, agentID, name); e
 }
 
 // ToggleSkillVisibility sets one (agent, skill_name) visibility on/off.
+//
+// Turning a skill off writes enabled=false instead of removing the row, including
+// when no row exists yet: "explicitly off" and "never seeded" must not look the
+// same to an insert-if-absent seed, or the builtin skill is resurrected on the
+// next start.
 func (d *DB) ToggleSkillVisibility(agentID int64, skillName string, on bool) error {
 	if on {
 		_, err := d.Exec(`INSERT INTO agent_skill_visibility(agent_id,skill_name,enabled) VALUES ($1,$2,true)
 ON CONFLICT (agent_id,skill_name) DO UPDATE SET enabled=true`, agentID, skillName)
 		return err
 	}
-	_, err := d.Exec(`DELETE FROM agent_skill_visibility WHERE agent_id=$1 AND skill_name=$2`, agentID, skillName)
+	_, err := d.Exec(`INSERT INTO agent_skill_visibility(agent_id,skill_name,enabled) VALUES ($1,$2,false)
+ON CONFLICT (agent_id,skill_name) DO UPDATE SET enabled=false`, agentID, skillName)
 	return err
 }
 
