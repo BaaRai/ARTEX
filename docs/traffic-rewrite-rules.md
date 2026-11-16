@@ -76,8 +76,10 @@ An action marked `"sensitive": true` keeps its `value` out of every API response
 the action without `value` and with `"value_set": true`.
 
 On update, a sensitive action sent without `value` keeps the stored value, provided the stored
-rule has a sensitive action of the same type and header name at the same position. Otherwise the
-update is refused and the value must be sent again. An explicit `"value": ""` is a value.
+rule has exactly one sensitive action with the same type, header name (case-insensitive) and
+`regex`, whatever its position: actions can be reordered without sending their values. When the
+stored rule has no such action, or several (same type, same name, same `regex`), the update is
+refused with HTTP 400 and the value must be sent again. An explicit `"value": ""` is a value.
 
 A stored sensitive value is not written to a new destination. When an update keeps at least one
 stored value, the `host` matcher must stay the same (compared case-insensitively); otherwise the

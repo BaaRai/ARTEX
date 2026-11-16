@@ -23,8 +23,8 @@ import (
 // rewriteActionDTO is an action on the wire. The value of a sensitive action is
 // never returned: a read leaves Value out and sets ValueSet. On update, a
 // sensitive action sent without a value keeps the stored one, provided the
-// stored rule has a sensitive action of the same type and header name at the
-// same position.
+// stored rule has exactly one sensitive action of the same type, canonical
+// header name and regex, wherever it stands; none or several is refused.
 type rewriteActionDTO struct {
 	Type      string  `json:"type"`
 	Name      string  `json:"name,omitempty"`
@@ -97,14 +97,19 @@ func (req rewriteRuleReq) rule(stored *rewrite.Rule) (rewrite.Rule, error) {
 		case a.Value != nil:
 			out.Value = *a.Value
 		case a.Sensitive && a.Type != rewrite.ActionDeleteHeader:
-			if stored == nil || i >= len(stored.Actions) {
+			if stored == nil {
 				return r, fmt.Errorf("action %d (%s): a sensitive action needs a value", i+1, a.Type)
 			}
-			old := stored.Actions[i]
-			if !old.Sensitive || old.Type != a.Type || http.CanonicalHeaderKey(old.Name) != http.CanonicalHeaderKey(a.Name) {
-				return r, fmt.Errorf("action %d (%s): no stored value to keep, send the value", i+1, a.Type)
+			var match []rewrite.Action
+			for _, old := range stored.Actions {
+				if old.Sensitive && old.Type == a.Type && http.CanonicalHeaderKey(old.Name) == http.CanonicalHeaderKey(a.Name) && old.Regex == a.Regex {
+					match = append(match, old)
+				}
 			}
-			out.Value = old.Value
+			if len(match) != 1 {
+				return r, fmt.Errorf("action %d (%s): %d stored sensitive actions match its type, header name and regex, exactly one is needed to keep a value: send the value", i+1, a.Type, len(match))
+			}
+			out.Value = match[0].Value
 			kept = true
 		}
 		r.Actions = append(r.Actions, out)

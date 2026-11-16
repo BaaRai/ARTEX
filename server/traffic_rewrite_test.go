@@ -212,7 +212,6 @@ func TestRewriteRulesCRUD(t *testing.T) {
 	for name, bad := range map[string]string{
 		"other type":   `[{"type":"set_body","sensitive":true}]`,
 		"other header": `[{"type":"set_header","name":"X-Other","sensitive":true}]`,
-		"other index":  `[{"type":"set_header","name":"X-Plain","value":"v"},{"type":"set_header","name":"Authorization","sensitive":true}]`,
 	} {
 		resp := request(true, "PUT", path, `{"name":"t-rwapi-crud2","phase":"request","actions":`+bad+`}`)
 		if resp.Code != 400 || strings.Contains(resp.Body.String(), "rwapi-plain") {
@@ -282,6 +281,60 @@ func TestRewriteRulesKeptValueHostChange400(t *testing.T) {
 	}
 	if r2 := decodeRewriteRuleJSON(t, request(true, "PUT", path, body("evil.example", `"value":"other",`))); r2.Matchers.Host != "evil.example" {
 		t.Fatalf("new host with the value sent again: %+v", r2)
+	}
+}
+
+// A kept value is matched on the action's type, header name and regex, not on
+// its position: reordering two sensitive actions keeps each value on its own
+// action.
+func TestRewriteRulesKeptValuesFollowReorder(t *testing.T) {
+	s, request := rewriteServer(t)
+	const auth, key = "Bearer rwapi-plain-auth", "rwapi-plain-key"
+	r := decodeRewriteRuleJSON(t, request(true, "POST", rewriteAPI, `{"name":"t-rwapi-order","phase":"request","matchers":{"host":"api.example"},
+"actions":[{"type":"set_header","name":"Authorization","value":"`+auth+`","sensitive":true},{"type":"set_header","name":"X-Api-Key","value":"`+key+`","sensitive":true}]}`))
+	path := fmt.Sprintf("%s/%d", rewriteAPI, r.ID)
+
+	reordered := request(true, "PUT", path, `{"name":"t-rwapi-order","enabled":true,"phase":"request","matchers":{"host":"api.example"},
+"actions":[{"type":"set_header","name":"x-api-key","sensitive":true},{"type":"set_header","name":"Authorization","sensitive":true}]}`)
+	r2 := decodeRewriteRuleJSON(t, reordered)
+	if len(r2.Actions) != 2 || r2.Actions[0].Name != "x-api-key" || r2.Actions[1].Name != "Authorization" || !r2.Actions[0].ValueSet || !r2.Actions[1].ValueSet {
+		t.Fatalf("reordered rule = %+v", r2)
+	}
+	if strings.Contains(reordered.Body.String(), "rwapi-plain") {
+		t.Fatal("the sensitive values were returned by the update")
+	}
+	if h := sentToTarget(s).Header; h.Get("Authorization") != auth || h.Get("X-Api-Key") != key {
+		t.Fatalf("after the reorder: Authorization=%q X-Api-Key=%q, want each value on its own action", h.Get("Authorization"), h.Get("X-Api-Key"))
+	}
+}
+
+// Two stored sensitive actions of the same type, header name and regex: an
+// action sent without its value cannot be told apart, the update is refused.
+func TestRewriteRulesKeptValueAmbiguous400(t *testing.T) {
+	s, request := rewriteServer(t)
+	action := func(value string) string {
+		return `{"type":"replace_header","name":"Authorization","regex":"^Bearer (.*)$",` + value + `"sensitive":true}`
+	}
+	r := decodeRewriteRuleJSON(t, request(true, "POST", rewriteAPI, `{"name":"t-rwapi-ambiguous","phase":"request","matchers":{"host":"api.example"},
+"actions":[`+action(`"value":"rwapi-plain-a",`)+`,`+action(`"value":"rwapi-plain-b",`)+`]}`))
+	path := fmt.Sprintf("%s/%d", rewriteAPI, r.ID)
+
+	for name, actions := range map[string]string{
+		"both omitted":    action("") + `,` + action(""),
+		"one omitted":     action(`"value":"rwapi-new",`) + `,` + action(""),
+		"single, omitted": action(""),
+	} {
+		resp := request(true, "PUT", path, `{"name":"t-rwapi-ambiguous","phase":"request","matchers":{"host":"api.example"},"actions":[`+actions+`]}`)
+		if resp.Code != 400 || !strings.Contains(resp.Body.String(), "send the value") || strings.Contains(resp.Body.String(), "rwapi-plain") {
+			t.Fatalf("%s: HTTP %d %s, want 400", name, resp.Code, resp.Body.String())
+		}
+	}
+	stored, err := s.m.pg.GetTrafficRewriteRule(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := string(stored.Actions); !strings.Contains(a, "rwapi-plain-a") || !strings.Contains(a, "rwapi-plain-b") || strings.Contains(a, "rwapi-new") {
+		t.Fatalf("a refused update changed the stored actions: %s", a)
 	}
 }
 
