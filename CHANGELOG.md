@@ -23,6 +23,7 @@ All notable changes to this project are documented in this file. The format is b
 - **`ask_operator` target warning**: a request whose question names a host or URL outside the goal targets is tagged as containing target-derived text (#197).
 - **Opt-in update banner**: `ARTEX_UPDATE_CHECK` makes the backend check the latest GitHub release at most once per 24 hours and the UI show a banner; off by default (#202).
 - **Release provenance**: release archives carry GitHub build provenance attestations and a CycloneDX SBOM (`gh attestation verify <zip> --repo BaaRai/ARTEX`); release notes are the matching `CHANGELOG.md` section (#219, #201).
+- **Capture-proxy rewrite rules, storage and API**: `GET`, `POST`, `PUT` and `DELETE /api/traffic/rewrite-rules` and `POST /api/traffic/rewrite-rules/{id}/toggle` manage rules that match a request or a response (method, host, URL, headers, body, status) and describe a rewrite (method, path and query, headers, body, status). Rules are validated on save, limited to 100 of which 50 enabled, created disabled, and stored in the new table `traffic_rewrite_rules` (migration `0005_traffic_rewrite_rules.sql`) with `matchers` and `actions` encrypted at rest. The value of an action marked `sensitive` is never returned, and an update sent without it keeps the stored one. The server compiles the enabled rules at startup and after every change and hands the snapshot to the proxy. **The proxy does not apply the rules yet: capture is unchanged.** See `docs/traffic-rewrite-rules.md`.
 
 ### Changed
 
