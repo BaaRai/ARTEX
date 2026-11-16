@@ -73,7 +73,7 @@ jobs:
         run: >-
           go test -race -p 1 ./agent ./cmd/artex ./config ./db ./evidence ./guard
           ./intercept ./llmpool ./llmrec ./mcphttp ./notify ./server ./sidequestion
-          ./traffic
+          ./traffic ./traffic/rewrite
 
   shell:
     runs-on: ubuntu-latest
