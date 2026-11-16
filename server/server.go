@@ -823,6 +823,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/traffic/hosts", s.deleteTrafficHosts)
 	mux.HandleFunc("DELETE /api/traffic/all", s.deleteAllTraffic)
 	mux.HandleFunc("GET /api/traffic/exchange", s.getTrafficExchange)
+	mux.HandleFunc("GET /api/traffic/stream", s.getTrafficStream)
 	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
 	mux.HandleFunc("POST /api/traffic/ingest", s.ingestTraffic)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
@@ -3451,7 +3452,37 @@ func (s *Server) getTrafficExchange(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"req": req, "resp": resp})
+	// A WebSocket or SSE exchange carries its messages separately
+	// (GET /api/traffic/stream); stream_kind is "" for an ordinary exchange.
+	count, kind, err := tr.StreamInfo(id)
+	if err != nil {
+		log.Printf("[traffic] stream info for %s: %v", id, err)
+	}
+	writeJSON(w, 200, map[string]any{"req": req, "resp": resp, "stream_count": count, "stream_kind": kind})
+}
+
+// getTrafficStream returns one page of a WebSocket/SSE exchange's messages in
+// order (limit 1..200, default 50).
+func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeErr(w, 404, "traffic disabled")
+		return
+	}
+	q := r.URL.Query()
+	id := strings.TrimSpace(q.Get("exchange"))
+	if id == "" {
+		writeErr(w, 400, "missing exchange")
+		return
+	}
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	msgs, total, err := tr.StreamMessages(id, offset, limit)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": msgs, "total": total})
 }
 
 // getTrafficBlob streams one oversized body by its sha256. Bodies past the inline

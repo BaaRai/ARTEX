@@ -49,7 +49,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 			if tool.Name() == "bind_finding_traffic" {
 				continue
 			}
-			if agentKey == "reporter" && (tool.Name() == "traffic_search" || tool.Name() == "traffic_get" || tool.Name() == "traffic_blob") {
+			if agentKey == "reporter" && (tool.Name() == "traffic_search" || tool.Name() == "traffic_get" || tool.Name() == "traffic_blob" || tool.Name() == "traffic_messages") {
 				continue
 			}
 			switch tool.Name() {
