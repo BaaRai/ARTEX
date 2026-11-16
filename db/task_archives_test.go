@@ -362,6 +362,7 @@ func TestTaskArchiveBlockersIgnoreQueuedDependents(t *testing.T) {
 	if blockers[source.ID] != dependent.ID {
 		t.Fatalf("source blocker=%d, want dependent %d", blockers[source.ID], dependent.ID)
 	}
+	assertPerTaskBlockers(t, d, blockers, map[int64]int64{source.ID: dependent.ID, dependent.ID: 0})
 	if err := d.SetPaused(dependent.ID, true); err != nil {
 		t.Fatal(err)
 	}
@@ -374,6 +375,25 @@ func TestTaskArchiveBlockersIgnoreQueuedDependents(t *testing.T) {
 	}
 	if blocker := blockers[source.ID]; blocker != 0 {
 		t.Fatalf("queued dependent must not block source, got %d", blocker)
+	}
+	assertPerTaskBlockers(t, d, blockers, map[int64]int64{source.ID: 0, dependent.ID: 0})
+}
+
+// assertPerTaskBlockers checks TaskArchiveBlocker against the expected blocker
+// of each task and against the global TaskArchiveBlockers map.
+func assertPerTaskBlockers(t *testing.T, d *DB, global map[int64]int64, want map[int64]int64) {
+	t.Helper()
+	for taskID, wantBlocker := range want {
+		got, err := d.TaskArchiveBlocker(taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != wantBlocker {
+			t.Fatalf("TaskArchiveBlocker(%d)=%d, want %d", taskID, got, wantBlocker)
+		}
+		if got != global[taskID] {
+			t.Fatalf("TaskArchiveBlocker(%d)=%d, TaskArchiveBlockers()[%d]=%d", taskID, got, taskID, global[taskID])
+		}
 	}
 }
 
