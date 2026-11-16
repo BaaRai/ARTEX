@@ -400,7 +400,9 @@ export default function LLMRecordsPage() {
                 ) : records.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
-                      No LLM call records yet
+                      {!recEnabled
+                        ? "LLM call recording is disabled — enable the toggle at the top to start capturing."
+                        : "No LLM call records yet"}
                     </TableCell>
                   </TableRow>
                 ) : (
