@@ -76,12 +76,16 @@ func applyTaskLLMContext(
 	t.ActiveLLMProfileID = activeProfileID
 	t.LLMChainRevision = revision
 	t.LLMProfileIDs = make([]int64, 0, len(chain))
+	t.ReadyLLMProfileIDs = nil
 	t.LLMFailoverState = "default"
 	t.LLMFailoverReason = ""
 	var latest *TaskLLMProfile
 	activeReady := false
 	for i := range chain {
 		entry := chain[i]
+		if entry.Status == "ready" {
+			t.ReadyLLMProfileIDs = append(t.ReadyLLMProfileIDs, entry.ProfileID)
+		}
 		t.LLMProfileIDs = append(t.LLMProfileIDs, entry.ProfileID)
 		if t.ActiveLLMProfileID != nil && entry.ProfileID == *t.ActiveLLMProfileID && entry.Status == "ready" {
 			activeReady = true
@@ -405,7 +409,7 @@ FROM task_llm_profiles WHERE task_id=$1 ORDER BY position`, taskID)
 // Terminal (done/failed/timeout) tasks may also edit the chain: after a task ends the
 // main agent conversation still uses this chain, so it must be replaceable when the
 // models on it become unavailable — otherwise a completed task could never be interacted with again.
-func (d *DB) ReplaceTaskLLMProfiles(taskID int64, profileIDs []int64, activeProfileID int64) error {
+func (d *DB) ReplaceTaskLLMProfiles(taskID int64, profileIDs []int64, activeProfileID int64, rotate ...*bool) error {
 	tx, err := d.Begin()
 	if err != nil {
 		return err
@@ -445,9 +449,14 @@ func (d *DB) ReplaceTaskLLMProfiles(taskID int64, profileIDs []int64, activeProf
 	if activeProfileID > 0 {
 		active = activeProfileID
 	}
+	var rotation any
+	if len(rotate) > 0 && rotate[0] != nil {
+		rotation = *rotate[0]
+	}
 	if _, err := tx.Exec(`UPDATE tasks
-SET active_llm_profile_id=$2, llm_profile_id=$2, llm_chain_revision=llm_chain_revision+1
-WHERE id=$1`, taskID, active); err != nil {
+SET active_llm_profile_id=$2, llm_profile_id=$2, llm_chain_revision=llm_chain_revision+1,
+llm_rotate=COALESCE($3::boolean,llm_rotate)
+WHERE id=$1`, taskID, active, rotation); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -476,8 +485,9 @@ func (d *DB) markTaskLLMProfileQuotaExhausted(taskID, profileID, revision int64,
 	var (
 		active          sql.NullInt64
 		currentRevision int64
+		rotate          bool
 	)
-	if err := tx.QueryRow(`SELECT active_llm_profile_id, llm_chain_revision FROM tasks WHERE id=$1 FOR UPDATE`, taskID).Scan(&active, &currentRevision); err != nil {
+	if err := tx.QueryRow(`SELECT active_llm_profile_id, llm_chain_revision, llm_rotate FROM tasks WHERE id=$1 FOR UPDATE`, taskID).Scan(&active, &currentRevision, &rotate); err != nil {
 		return out, err
 	}
 	out.PreviousProfileID = profileID
@@ -520,8 +530,8 @@ WHERE task_id=$1 AND profile_id=$2`, taskID, profileID, reason); err != nil {
 	}
 	var next int64
 	err = tx.QueryRow(`SELECT profile_id FROM task_llm_profiles
-WHERE task_id=$1 AND position>$2 AND status='ready'
-ORDER BY position LIMIT 1`, taskID, position).Scan(&next)
+WHERE task_id=$1 AND ($3 OR position>$2) AND status='ready'
+ORDER BY position LIMIT 1`, taskID, position, rotate).Scan(&next)
 	switch err {
 	case nil:
 		out.Advanced = true

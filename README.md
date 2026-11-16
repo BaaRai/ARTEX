@@ -62,6 +62,28 @@ docker compose logs artex | grep "Setup token"
 
 ---
 
+## Multi-provider workers
+
+In **System → LLM**, configure the profiles you want to use. In **System → Settings**,
+set the concurrent worker count to at least **2** before starting a task (the count
+applies to subsequently started tasks). In **System → Agents → Worker**, leave the
+model set to follow the task; a fixed Worker model takes precedence over rotation.
+
+When creating a task, select both profiles in **LLM config chain**, arrange their
+order, and enable **Enable multi-LLM worker rotation**. For an existing task, open
+its LLM config control, change the switch or profile order, and save.
+
+Rotation assigns successive worker intents A, B, A, B, regardless of completion
+order. Separate intents can run concurrently on different providers; each intent
+keeps its selected provider unless it fails over. Planner and other unbound roles
+continue using the task's current profile. Turning rotation off restores ordered
+task-level failover. Exhausted providers are skipped; saving the chain resets their
+failure state. Changes do not interrupt in-flight calls. The rotation cursor starts
+again after a server restart; the profile order and switch remain persisted.
+
+The task creation and `PUT /api/tasks/{id}/llm` APIs accept `llm_rotate: true` alongside
+the ordered `llm_profile_ids`. Omitting `llm_rotate` on an update preserves its value.
+
 ## Screenshots
 
 | Tasks | Findings |

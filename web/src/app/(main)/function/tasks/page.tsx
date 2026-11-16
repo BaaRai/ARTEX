@@ -3085,6 +3085,7 @@ function CreateTaskSheet({
   const [sourceTaskIDs, setSourceTaskIDs] = React.useState<string[]>([]);
   const [companyIDs, setCompanyIDs] = React.useState<number[]>([]);
   const [llmProfileIDs, setLLMProfileIDs] = React.useState<string[]>([]);
+  const [llmRotate, setLLMRotate] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [timeoutMin, setTimeoutMin] = React.useState(""); // task-level timeout (minutes); empty/0 = no limit
   const [heartbeatMin, setHeartbeatMin] = React.useState("10"); // planner heartbeat (minutes); default 10, minimum 10 (matching the backend)
@@ -3152,6 +3153,7 @@ function CreateTaskSheet({
         description: description.trim(),
         goal: goal.trim(),
         llmProfileIds: llmProfileIDs.map(Number),
+        llmRotate,
         sourceTaskIds: sourceTaskIDs,
         companyIds: companyIDs,
         timeoutSeconds: timeoutSec,
@@ -3174,6 +3176,7 @@ function CreateTaskSheet({
       setSourceTaskIDs([]);
       setCompanyIDs([]);
       setLLMProfileIDs([]);
+      setLLMRotate(false);
       setTimeoutMin("");
       setHeartbeatMin("10");
       setSeedFirstIntent(false);
@@ -3330,11 +3333,13 @@ function CreateTaskSheet({
               <TaskLLMProfileChain
                 profiles={profiles}
                 value={llmProfileIDs}
+                rotate={llmRotate}
+                onRotateChange={setLLMRotate}
                 onValueChange={setLLMProfileIDs}
                 inputId="llm-profiles"
                 portalContainer={sheetContentRef}
               />
-              <FieldDescription>Failover follows the list order; the first entry is the current config, and the next one is used only when the quota is clearly insufficient.</FieldDescription>
+              <FieldDescription>Reorder profiles to choose worker rotation order or failover priority. Saving the chain resets exhausted profiles.</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="task-credentials">Test accounts (optional)</FieldLabel>

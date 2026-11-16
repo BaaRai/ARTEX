@@ -32,6 +32,7 @@ export interface Task {
   tokens?: TokenTotal; // whole-task token consumption
   llm_profile_id?: number; // LLM profile used; absent = default profile
   llm_profile_ids?: number[]; // ordered task-level failover chain
+  llm_rotate?: boolean;
   active_llm_profile_id?: number; // profile used by the next LLM call
   llm_failover_state?: "default" | "ready" | "chain_exhausted" | string;
   llm_failover_reason?: string;

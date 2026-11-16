@@ -29,6 +29,7 @@ type Task struct {
 	// Task-level ordered LLM chain. LLMProfileID remains the compatibility alias
 	// for ActiveLLMProfileID while older API clients still send one profile id.
 	LLMProfileIDs      []int64 `json:"llm_profile_ids,omitempty"`
+	ReadyLLMProfileIDs []int64 `json:"-"`
 	ActiveLLMProfileID *int64  `json:"active_llm_profile_id,omitempty"`
 	LLMChainRevision   int64   `json:"-"`
 	LLMFailoverState   string  `json:"llm_failover_state,omitempty"`
@@ -256,6 +257,7 @@ VALUES ($1, 'fact', $2, 0, 'origin', 'system')`, expID, string(originPayload)); 
 	if opts.LLMRotate != nil {
 		rotate = *opts.LLMRotate
 	}
+	t.LLMRotate = rotate
 	t.TargetGate = opts.TargetGate != nil && *opts.TargetGate
 	if err := tx.QueryRow(`
 INSERT INTO tasks(name, category_id, description, goal, exploration_id, llm_profile_id, active_llm_profile_id, timeout_seconds, plan_heartbeat_seconds, plan_quiet_mode, coverage_enabled, llm_rotate, target_gate)
