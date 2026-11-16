@@ -102,6 +102,7 @@ import type {
   TrafficEvidenceRole,
   TrafficHost,
   TrafficResp,
+  TrafficStreamPage,
   UsageStats,
   WorkspaceFile,
   WorkspaceListing,
@@ -816,6 +817,20 @@ export const api = {
         (opts.order ? `&order=${encodeURIComponent(opts.order)}` : ""),
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
+  // One page of a WebSocket/SSE exchange's messages, in order.
+  trafficStream: (id: string, offset = 0, limit = 50) =>
+    get<TrafficStreamPage>(`/traffic/stream?exchange=${encodeURIComponent(id)}&offset=${offset}&limit=${limit}`),
+  // Raw bytes of one stored blob (a full message payload or an oversized body).
+  // The JSON-only `get` cannot carry binary, hence the direct fetch.
+  trafficBlob: async (hash: string) => {
+    if (MOCK) throw new Error("Blob download is not available in mock mode");
+    const token = getToken();
+    const r = await fetch(`/api/traffic/blob?hash=${encodeURIComponent(hash)}`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!r.ok) throw new Error(`Blob download failed: ${r.status}`);
+    return new Uint8Array(await r.arrayBuffer());
+  },
   trafficHosts: () => get<{ hosts: TrafficHost[] }>(`/traffic/hosts`),
   trafficDeleteHost: (host: string) => del<{ deleted: number }>(`/traffic?host=${encodeURIComponent(host)}`),
   trafficDeleteHosts: (hosts: string[]) => del<{ deleted: number }>(`/traffic/hosts`, { hosts }),

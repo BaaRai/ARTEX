@@ -911,6 +911,34 @@ export interface TrafficResp {
 export interface TrafficDetail {
   req: string;
   resp: string;
+  // WebSocket/SSE exchanges carry their messages separately (trafficStream);
+  // stream_kind is "" for an ordinary exchange.
+  stream_count?: number;
+  stream_kind?: "websocket" | "sse" | "";
+}
+
+// One recorded WebSocket message or SSE event. ts is in Unix seconds; seq
+// orders. payload is a preview of at most 4 KiB (base64 when encoding is
+// "base64"); blob names the full payload when it was stored separately.
+export interface TrafficStreamMessage {
+  seq: number;
+  ts: number;
+  direction: "c2s" | "s2c" | "meta" | (string & {});
+  kind: number;
+  type: "text" | "binary" | "event" | "meta" | (string & {});
+  event?: string;
+  event_id?: string;
+  retry?: number;
+  size: number;
+  payload: string;
+  encoding?: string;
+  blob?: string;
+  truncated?: boolean;
+}
+
+export interface TrafficStreamPage {
+  items: TrafficStreamMessage[];
+  total: number;
 }
 
 // One distinct recorded host with its exchange count (target picker).
