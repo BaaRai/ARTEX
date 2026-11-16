@@ -92,7 +92,17 @@ function truncate(s) {
 
 async function queueExchange(info, response) {
   const respHeaders = {};
-  for (const h of response.headers || []) respHeaders[h.name.toLowerCase()] = h.value;
+  // CDP hands back response.headers as a plain object (dict), not an array of
+  // {name,value} records; iterating it with for...of throws "object is not
+  // iterable" and no exchange is ever queued. Accept both shapes.
+  const rawHeaders = response.headers || {};
+  if (Array.isArray(rawHeaders)) {
+    for (const h of rawHeaders) {
+      if (h && h.name != null) respHeaders[String(h.name).toLowerCase()] = h.value;
+    }
+  } else {
+    for (const [k, v] of Object.entries(rawHeaders)) respHeaders[String(k).toLowerCase()] = v;
+  }
   const mime = respHeaders["content-type"] || "";
 
   let reqBody = info.postData || "";
