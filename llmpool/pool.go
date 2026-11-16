@@ -268,6 +268,20 @@ func trimErr(err error) string {
 	return s
 }
 
+// ShouldFailover is the exported form of shouldFailover, for callers outside
+// this package that run a single profile directly (task_llm) and need to
+// classify failures the same way the Pool does so their Registry updates stay
+// consistent with the pool's.
+func ShouldFailover(ctx context.Context, err error) bool { return shouldFailover(ctx, err) }
+
+// IsHardFailure is the exported form of isHardFailure. Same motivation as
+// ShouldFailover.
+func IsHardFailure(err error) bool { return isHardFailure(err) }
+
+// TrimErr is the exported form of trimErr, so health rows persisted outside
+// this package carry the same shortened error text the Pool would write.
+func TrimErr(err error) string { return trimErr(err) }
+
 // estimateTokens roughly sizes a request so members whose context window clearly
 // can't hold it are skipped. Deliberately crude (~3.5 chars/token) and biased to
 // over-estimate slightly; it only needs to tell "fits" from "nowhere near".
