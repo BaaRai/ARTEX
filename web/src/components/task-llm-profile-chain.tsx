@@ -60,12 +60,13 @@ export function TaskLLMProfileChain({
   portalContainer,
 }: TaskLLMProfileChainProps) {
   const rotationID = React.useId();
-  const [workerBinding, setWorkerBinding] = React.useState<number | null | undefined>(undefined);
+  const [workerBinding, setWorkerBinding] = React.useState<number | null>(null);
+  const [bindingCheckFailed, setBindingCheckFailed] = React.useState(false);
   React.useEffect(() => {
     api
       .agents()
       .then((agents) => setWorkerBinding(agents.find((a) => a.key === "worker")?.llm_profile_id ?? null))
-      .catch(() => setWorkerBinding(undefined));
+      .catch(() => setBindingCheckFailed(true));
   }, []);
   const profilesByID = React.useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
   const itemIDs = React.useMemo(() => profiles.map((profile) => profile.id), [profiles]);
@@ -126,7 +127,7 @@ export function TaskLLMProfileChain({
               settings to use these profiles.
             </p>
           )}
-          {rotate && workerBinding === undefined && (
+          {rotate && bindingCheckFailed && (
             <p className="text-amber-600 text-xs">
               Worker binding could not be checked. A fixed Worker model overrides rotation; verify Agent settings.
             </p>

@@ -77,9 +77,12 @@ Rotation assigns successive worker intents A, B, A, B, regardless of completion
 order. Separate intents can run concurrently on different providers; each intent
 keeps its selected provider unless it fails over. Planner and other unbound roles
 continue using the task's current profile. Turning rotation off restores ordered
-task-level failover. Exhausted providers are skipped; saving the chain resets their
-failure state. Changes do not interrupt in-flight calls. The rotation cursor starts
-again after a server restart; the profile order and switch remain persisted.
+task-level failover. An excluded provider is skipped, so an intent pinned to an
+exhausted profile falls back to the task's current profile instead of retrying it;
+rotation keeps cycling the whole list and does not rebalance around a dead provider.
+Saving the chain resets their failure state. Changes do not interrupt in-flight
+calls. The rotation cursor starts again after a server restart and saving the chain
+does not reset it; the profile order and switch remain persisted.
 
 The task creation and `PUT /api/tasks/{id}/llm` APIs accept `llm_rotate: true` alongside
 the ordered `llm_profile_ids`. Omitting `llm_rotate` on an update preserves its value.

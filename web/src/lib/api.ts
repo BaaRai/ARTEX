@@ -316,6 +316,7 @@ export const api = {
     put<{
       id: string;
       llm_profile_ids: number[];
+      llm_rotate: boolean;
       active_llm_profile_id?: number;
       llm_failover_state: string;
       reopened_intents: number;
