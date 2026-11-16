@@ -24,6 +24,8 @@ type echoed struct {
 	ContentLength int64  `json:"content_length"`
 	Body          string `json:"body"`
 	Host          string `json:"host"`
+	XHop          string `json:"x_hop"`
+	ProxyAuth     string `json:"proxy_auth"`
 }
 
 func echoHandler(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +35,7 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(echoed{
 		Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Custom: r.Header.Get("X-Custom"),
 		Connection: r.Header.Get("Connection"), ContentLength: r.ContentLength, Body: string(b), Host: r.Host,
+		XHop: r.Header.Get("X-Hop"), ProxyAuth: r.Header.Get("Proxy-Authorization"),
 	})
 }
 
@@ -81,8 +84,18 @@ func TestReplayThroughProxy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if res.Status != 200 || res.Truncated || !strings.HasPrefix(res.Raw, "HTTP/1.1 200 OK\n") || !strings.Contains(res.Raw, "X-Echo: yes") {
-				t.Fatalf("result status=%d truncated=%v raw:\n%s", res.Status, res.Truncated, res.Raw)
+			if res.Status != 200 || res.Truncated || !res.Recorded || !strings.HasPrefix(res.Raw, "HTTP/1.1 200 OK\n") || !strings.Contains(res.Raw, "X-Echo: yes") {
+				t.Fatalf("result status=%d truncated=%v recorded=%v raw:\n%s", res.Status, res.Truncated, res.Recorded, res.Raw)
+			}
+			echoHeader := false
+			for i, h := range res.Headers {
+				if i > 0 && res.Headers[i-1].Name > h.Name {
+					t.Fatalf("headers not sorted: %+v", res.Headers)
+				}
+				echoHeader = echoHeader || (h.Name == "X-Echo" && h.Value == "yes")
+			}
+			if !echoHeader {
+				t.Fatalf("headers %+v lack X-Echo: yes", res.Headers)
 			}
 			got := replayBody(t, res)
 			if got.Method != "PATCH" || got.Path != "/edited/path" || got.Query != "q=1&r=two" || got.Custom != "edited" || got.Body != "edited body" {
@@ -101,7 +114,9 @@ func TestReplayDropsHopByHopHeaders(t *testing.T) {
 		Method: "POST",
 		URL:    srv.URL + "/hop",
 		Headers: []ReplayHeader{
-			{Name: "Connection", Value: "close"},
+			{Name: "Connection", Value: "close, X-Hop"},
+			{Name: "X-Hop", Value: "v"},
+			{Name: "Proxy-Authorization", Value: "Basic dXNlcjpwYXNz"},
 			{Name: "Content-Length", Value: "999"},
 			{Name: "Keep-Alive", Value: "timeout=5"},
 			{Name: "Host", Value: strings.TrimPrefix(srv.URL, "http://")},
@@ -114,6 +129,9 @@ func TestReplayDropsHopByHopHeaders(t *testing.T) {
 	got := replayBody(t, res)
 	if got.Connection != "" || got.ContentLength != 3 || got.Body != "abc" {
 		t.Fatalf("target received connection=%q content_length=%d body=%q, want no Connection and a recomputed length", got.Connection, got.ContentLength, got.Body)
+	}
+	if got.XHop != "" || got.ProxyAuth != "" {
+		t.Fatalf("target received X-Hop=%q Proxy-Authorization=%q, want neither", got.XHop, got.ProxyAuth)
 	}
 	if got.Host != strings.TrimPrefix(srv.URL, "http://") {
 		t.Fatalf("target saw Host %q", got.Host)
@@ -211,7 +229,6 @@ func TestReplayRejectsInvalidRequests(t *testing.T) {
 		"empty method":      {Method: " ", URL: "http://example.com/"},
 		"CONNECT":           {Method: "CONNECT", URL: "http://example.com/"},
 		"method not token":  {Method: "GE T", URL: "http://example.com/"},
-		"body too large":    {Method: "POST", URL: "http://example.com/", Body: make([]byte, maxReplayBody+1)},
 		"too many headers":  {Method: "GET", URL: "http://example.com/", Headers: many},
 		"CR in header":      {Method: "GET", URL: "http://example.com/", Headers: []ReplayHeader{{Name: "X-A", Value: "a\r\nX-Injected: 1"}}},
 		"LF in header":      {Method: "GET", URL: "http://example.com/", Headers: []ReplayHeader{{Name: "X-A", Value: "a\nb"}}},
@@ -221,6 +238,28 @@ func TestReplayRejectsInvalidRequests(t *testing.T) {
 	} {
 		if _, err := tr.Replay(t.Context(), req); !errors.Is(err, ErrReplayInvalid) {
 			t.Errorf("%s: err = %v, want ErrReplayInvalid", name, err)
+		}
+	}
+	_, err = tr.Replay(t.Context(), ReplayRequest{Method: "POST", URL: "http://example.com/", Body: make([]byte, maxReplayBody+1)})
+	if !errors.Is(err, ErrReplayTooLarge) || errors.Is(err, ErrReplayInvalid) {
+		t.Errorf("body too large: err = %v, want ErrReplayTooLarge", err)
+	}
+}
+
+// Only an https host in passthrough is reported as not recorded.
+func TestReplayRecordedHelper(t *testing.T) {
+	tr := &Traffic{}
+	tr.pass.Store("localhost", struct{}{})
+	for _, c := range []struct {
+		scheme, host string
+		want         bool
+	}{
+		{"https", "localhost:443", false},
+		{"https", "example.com:443", true},
+		{"http", "localhost:80", true},
+	} {
+		if got := tr.replayRecorded(c.scheme, c.host); got != c.want {
+			t.Errorf("replayRecorded(%s, %s) = %v, want %v", c.scheme, c.host, got, c.want)
 		}
 	}
 }

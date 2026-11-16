@@ -3534,6 +3534,9 @@ func (s *Server) replayTraffic(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	res, err := tr.Replay(ctx, traffic.ReplayRequest{Method: body.Method, URL: body.URL, Headers: body.Headers, Body: payload})
 	switch {
+	case errors.Is(err, traffic.ErrReplayTooLarge):
+		writeErr(w, 413, err.Error())
+		return
 	case errors.Is(err, traffic.ErrReplayInvalid):
 		writeErr(w, 400, err.Error())
 		return
@@ -3544,7 +3547,10 @@ func (s *Server) replayTraffic(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 502, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"status": res.Status, "raw": res.Raw, "duration_ms": res.DurationMS, "truncated": res.Truncated})
+	writeJSON(w, 200, map[string]any{
+		"status": res.Status, "headers": res.Headers, "raw": res.Raw, "duration_ms": res.DurationMS,
+		"truncated": res.Truncated, "recorded": res.Recorded,
+	})
 }
 
 // getTrafficBlob streams one oversized body by its sha256. Bodies past the inline

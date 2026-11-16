@@ -99,7 +99,7 @@ func TestTrafficReplayRouteValidation(t *testing.T) {
 		"header CRLF":  {`{"method":"GET","url":"http://example.com/","headers":[{"name":"X-A","value":"a\r\nb"}]}`, 400},
 		"too large":    {`{"method":"POST","url":"http://example.com/","body":"` + strings.Repeat("a", 17<<20) + `"}`, 413},
 		"proxy down":   {`{"method":"GET","url":"http://127.0.0.1:1/"}`, 502},
-		"body too big": {`{"method":"POST","url":"http://example.com/","body":"` + base64.StdEncoding.EncodeToString(make([]byte, 9<<20)) + `","body_base64":true}`, 400},
+		"body too big": {`{"method":"POST","url":"http://example.com/","body":"` + base64.StdEncoding.EncodeToString(make([]byte, 9<<20)) + `","body_base64":true}`, 413},
 	} {
 		if w := replay(c.body); w.Code != c.want {
 			t.Errorf("%s: %d %s, want %d", name, w.Code, strings.TrimSpace(w.Body.String()), c.want)
@@ -126,16 +126,25 @@ func TestTrafficReplayRouteEndToEnd(t *testing.T) {
 		t.Fatalf("replay = %d %s", w.Code, w.Body)
 	}
 	var res struct {
-		Status     int    `json:"status"`
-		Raw        string `json:"raw"`
-		DurationMS int64  `json:"duration_ms"`
-		Truncated  bool   `json:"truncated"`
+		Status     int                    `json:"status"`
+		Headers    []traffic.ReplayHeader `json:"headers"`
+		Raw        string                 `json:"raw"`
+		DurationMS int64                  `json:"duration_ms"`
+		Truncated  bool                   `json:"truncated"`
+		Recorded   bool                   `json:"recorded"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != 200 || res.Truncated || !strings.Contains(res.Raw, "X-Seen: PUT edited") || !strings.HasSuffix(res.Raw, "got:payload") {
+	if res.Status != 200 || res.Truncated || !res.Recorded || !strings.Contains(res.Raw, "X-Seen: PUT edited") || !strings.HasSuffix(res.Raw, "got:payload") {
 		t.Fatalf("result %+v", res)
+	}
+	seen := false
+	for _, h := range res.Headers {
+		seen = seen || (h.Name == "X-Seen" && h.Value == "PUT edited")
+	}
+	if !seen {
+		t.Fatalf("headers %+v lack X-Seen", res.Headers)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {

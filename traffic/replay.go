@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -32,6 +33,9 @@ const (
 // ErrReplayInvalid marks a replay request rejected before anything is sent.
 var ErrReplayInvalid = errors.New("invalid replay request")
 
+// ErrReplayTooLarge marks a request body over maxReplayBody.
+var ErrReplayTooLarge = errors.New("replay body too large")
+
 // ReplayHeader is one request header line, kept as a list so duplicates and
 // their order survive.
 type ReplayHeader struct {
@@ -49,24 +53,41 @@ type ReplayRequest struct {
 
 // ReplayResult is the response as received by the client side of the proxy.
 type ReplayResult struct {
-	Status     int
+	Status int
+	// Headers are the response headers, keys sorted, every value kept.
+	Headers    []ReplayHeader
 	Raw        string // status line, headers and (possibly truncated) body
 	DurationMS int64
 	Truncated  bool // the body exceeded maxReplayResponse and was cut
+	// Recorded reports whether the proxy records this exchange: false for an
+	// https host the proxy tunnels without interception (passthrough).
+	Recorded bool
 }
 
 // replayDropped are the headers the client must not send as given: hop-by-hop
 // fields and framing that net/http recomputes (Content-Length,
-// Transfer-Encoding). Upgrade is rejected rather than dropped, see Replay.
+// Transfer-Encoding). Headers named in Connection are dropped too. Upgrade is
+// rejected rather than dropped, see Replay.
 var replayDropped = map[string]bool{
-	"Content-Length":    true,
-	"Transfer-Encoding": true,
-	"Connection":        true,
-	"Proxy-Connection":  true,
-	"Keep-Alive":        true,
-	"Te":                true,
-	"Trailer":           true,
-	"Expect":            true,
+	"Content-Length":      true,
+	"Transfer-Encoding":   true,
+	"Connection":          true,
+	"Proxy-Connection":    true,
+	"Proxy-Authorization": true,
+	"Keep-Alive":          true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Expect":              true,
+}
+
+// replayRecorded reports whether the proxy records a request to scheme://host:
+// plain http is always intercepted, https is unless the host is in passthrough.
+func (t *Traffic) replayRecorded(scheme, host string) bool {
+	if scheme != "https" {
+		return true
+	}
+	_, tunneled := t.pass.Load(hostOnly(host))
+	return !tunneled
 }
 
 func replayInvalid(format string, args ...any) error {
@@ -93,7 +114,7 @@ func validHeaderName(name string) bool {
 // Replay sends req through the recording proxy and returns the response. The
 // proxy's sink records the exchange; Replay never calls record() itself. A host
 // the proxy tunnels without interception (passthrough, see maybePassthrough)
-// still answers, but that exchange is not recorded.
+// still answers, but that exchange is not recorded (Recorded is false).
 //
 // Redirects are not followed, no cookie jar is kept, and compression is not
 // negotiated: the edited headers go out as given, without an Accept-Encoding
@@ -120,10 +141,23 @@ func (t *Traffic) Replay(ctx context.Context, req ReplayRequest) (ReplayResult, 
 		return ReplayResult{}, replayInvalid("url must not carry user info; send an Authorization header instead")
 	}
 	if len(req.Body) > maxReplayBody {
-		return ReplayResult{}, replayInvalid("body is %d bytes, over the %d-byte limit", len(req.Body), maxReplayBody)
+		return ReplayResult{}, fmt.Errorf("%w: body is %d bytes, over the %d-byte limit", ErrReplayTooLarge, len(req.Body), maxReplayBody)
 	}
 	if len(req.Headers) > maxReplayHeaders {
 		return ReplayResult{}, replayInvalid("%d headers, over the limit of %d", len(req.Headers), maxReplayHeaders)
+	}
+
+	// Headers named in Connection are hop-by-hop too (RFC 9110 §7.6.1).
+	connectionNamed := map[string]bool{}
+	for _, h := range req.Headers {
+		if http.CanonicalHeaderKey(strings.TrimSpace(h.Name)) != "Connection" {
+			continue
+		}
+		for _, token := range strings.Split(h.Value, ",") {
+			if token = strings.TrimSpace(token); token != "" {
+				connectionNamed[http.CanonicalHeaderKey(token)] = true
+			}
+		}
 	}
 
 	header := http.Header{}
@@ -142,13 +176,18 @@ func (t *Traffic) Replay(ctx context.Context, req ReplayRequest) (ReplayResult, 
 			// A protocol upgrade (WebSocket, h2c) cannot be replayed as one request.
 			return ReplayResult{}, replayInvalid("Upgrade requests cannot be replayed")
 		case canonical == "Host":
-			// The recording proxy routes a request by its Host, not by the URL, so
-			// a different Host would silently send the request to another server.
+			// A Host override cannot be replayed faithfully. go-mitmproxy rebuilds
+			// the upstream request from the URL (proxyReq from f.Request.URL, dialed
+			// at CanonicalAddr(req.URL)) and copies only Header, where net/http does
+			// not keep Host, so the override is lost: the recorded exchange would
+			// show a Host the target never received. For plain http the client also
+			// puts req.Host in the absolute-form request target, which sends the
+			// request to that host instead. Refusing avoids a misleading exchange.
 			host = strings.TrimSpace(h.Value)
 			if !strings.EqualFold(host, target.Host) {
-				return ReplayResult{}, replayInvalid("Host %q differs from the URL host %q; the proxy routes by Host, so edit the URL instead", host, target.Host)
+				return ReplayResult{}, replayInvalid("Host %q differs from the URL host %q; the proxy sends the URL host as Host, so edit the URL instead", host, target.Host)
 			}
-		case replayDropped[canonical]:
+		case replayDropped[canonical], connectionNamed[canonical]:
 			// recomputed by net/http, or hop-by-hop
 		default:
 			header.Add(canonical, h.Value)
@@ -190,7 +229,18 @@ func (t *Traffic) Replay(ctx context.Context, req ReplayRequest) (ReplayResult, 
 	if err != nil {
 		return ReplayResult{}, fmt.Errorf("replay %s %s: reading response: %w", method, target.Redacted(), err)
 	}
-	res := ReplayResult{Status: resp.StatusCode}
+	res := ReplayResult{Status: resp.StatusCode, Recorded: t.replayRecorded(target.Scheme, target.Host)}
+	keys := make([]string, 0, len(resp.Header))
+	for k := range resp.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	res.Headers = make([]ReplayHeader, 0, len(keys))
+	for _, k := range keys {
+		for _, v := range resp.Header[k] {
+			res.Headers = append(res.Headers, ReplayHeader{Name: k, Value: v})
+		}
+	}
 	if len(data) > maxReplayResponse {
 		data = data[:maxReplayResponse]
 		res.Truncated = true
