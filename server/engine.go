@@ -1109,10 +1109,8 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// Per-intent LLM rotation (#85): each claimed worker intent runs on the
 	// next chain head. The pin travels through the run context into the
 	// provider resolver; non-worker roles and failover keep the active head.
-	if t.LLMRotate {
-		if head, ok := t.nextRotatedProfile(); ok {
-			ctx = withLLMProfilePin(ctx, head)
-		}
+	if head, ok := t.nextRotatedProfile(); ok {
+		ctx = withLLMProfilePin(ctx, head)
 	}
 	hasChatMessage := message != ""
 	e.stampFirstRun(t) // first real execution → stamp first_run_at + compute the deadline (only for tasks with a timeout)

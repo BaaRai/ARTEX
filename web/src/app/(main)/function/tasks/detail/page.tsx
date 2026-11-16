@@ -76,6 +76,7 @@ function taskProfileIDs(task: Task): string[] {
 function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: LLMProfile[]; onUpdated: () => void }) {
   const [open, setOpen] = React.useState(false);
   const [profileIDs, setProfileIDs] = React.useState<string[]>(() => taskProfileIDs(task));
+  const [llmRotate, setLLMRotate] = React.useState(task.llm_rotate ?? false);
   const [activeProfileID, setActiveProfileID] = React.useState(
     task.active_llm_profile_id ? String(task.active_llm_profile_id) : (taskProfileIDs(task)[0] ?? ""),
   );
@@ -96,13 +97,15 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
   const activeProfile = profiles.find((profile) => profile.id === activeID);
   const currentLabel = exhausted
     ? "Configuration chain exhausted"
-    : (activeProfile?.name ?? (activeID ? `Config #${activeID}` : "Follow default config"));
+    : task.llm_rotate
+      ? `Worker rotation (${chain.length})`
+      : (activeProfile?.name ?? (activeID ? `Config #${activeID}` : "Follow default config"));
   const activeIndex = chain.indexOf(activeID);
   const backupCount = activeIndex >= 0 ? Math.max(0, chain.length - activeIndex - 1) : 0;
   const currentTitle = [currentLabel, activeProfile?.model, backupCount > 0 ? `${backupCount} backups` : ""]
     .filter(Boolean)
     .join(" · ");
-  let editorDescription = "Changes to the order or the current config take effect from the next LLM call.";
+  let editorDescription = "Rotation changes apply to new worker intents. Profile changes apply to subsequent LLM calls; in-flight calls keep their provider. Saving resets exhausted profiles.";
   if (terminal) editorDescription = "The task has ended; changes only affect subsequent main agent conversations.";
   let saveLabel = "Save";
   if (exhausted) saveLabel = "Save and reset";
@@ -110,6 +113,7 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
 
   const syncDraft = React.useCallback(() => {
     const next = taskProfileIDs(task);
+    setLLMRotate(task.llm_rotate ?? false);
     setProfileIDs(next);
     setActiveProfileID(task.active_llm_profile_id ? String(task.active_llm_profile_id) : (next[0] ?? ""));
   }, [task]);
@@ -131,6 +135,7 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
         task.id,
         profileIDs.map(Number),
         activeProfileID ? Number(activeProfileID) : undefined,
+        llmRotate,
       );
       if (result.switch_event) {
         toast.info(result.switch_event.summary, { id: `task-${task.id}-llm-${result.switch_event.seq}` });
@@ -161,12 +166,12 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
         >
           <BrainIcon data-icon="inline-start" />
           <span className="hidden max-w-36 truncate lg:inline">{currentLabel}</span>
-          {backupCount > 0 && <span className="hidden text-muted-foreground xl:inline">+{backupCount}</span>}
+          {!task.llm_rotate && backupCount > 0 && <span className="hidden text-muted-foreground xl:inline">+{backupCount}</span>}
         </Button>
       </PopoverTrigger>
       <PopoverContent ref={popoverContentRef} align="start" className="w-[min(28rem,calc(100vw-2rem))] gap-4 p-4">
         <PopoverHeader>
-          <PopoverTitle>Task LLM config chain</PopoverTitle>
+          <PopoverTitle>Task LLM config chain{task.llm_rotate ? " · Worker rotation on" : ""}</PopoverTitle>
           <PopoverDescription>{editorDescription}</PopoverDescription>
         </PopoverHeader>
 
@@ -183,6 +188,8 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
         <TaskLLMProfileChain
           profiles={profiles}
           value={profileIDs}
+          rotate={llmRotate}
+          onRotateChange={setLLMRotate}
           onValueChange={handleProfileIDsChange}
           activeProfileId={activeProfileID}
           onActiveProfileChange={setActiveProfileID}

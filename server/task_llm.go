@@ -206,7 +206,7 @@ func (r *taskLLMRuntime) currentFor(ctx context.Context) (taskLLMSelection, erro
 		}
 		sel.profileID = *pt.ActiveLLMProfileID
 		if pin, ok := llmProfilePinFrom(ctx); ok && pin != sel.profileID {
-			for _, id := range pt.LLMProfileIDs {
+			for _, id := range pt.ReadyLLMProfileIDs {
 				if id == pin {
 					sel.profileID = pin
 					break
@@ -794,7 +794,7 @@ func (s *Server) syncTaskLLMState(pt *db.Task) {
 	id := fmt.Sprintf("%d", pt.ID)
 	s.m.mu.Lock()
 	if task := s.m.tasks[id]; task != nil {
-		task.setLLMState(pt.LLMProfileID, pt.ActiveLLMProfileID, pt.LLMProfileIDs, pt.LLMChainRevision, pt.LLMFailoverState, pt.LLMFailoverReason)
+		task.setLLMState(pt.LLMProfileID, pt.ActiveLLMProfileID, pt.LLMProfileIDs, pt.LLMChainRevision, pt.LLMFailoverState, pt.LLMFailoverReason, pt.LLMRotate)
 	}
 	s.m.mu.Unlock()
 }
