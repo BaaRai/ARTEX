@@ -39,7 +39,7 @@ var noTargetTools = toolSet(
 	// the operator runs the command, not the platform
 	"ask_operator",
 	// recorded traffic
-	"traffic_search", "traffic_get", "traffic_blob",
+	"traffic_search", "traffic_get", "traffic_blob", "traffic_messages",
 )
 
 func toolSet(names ...string) map[string]bool {

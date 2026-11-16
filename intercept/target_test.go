@@ -191,7 +191,7 @@ func TestExtractSkipsNoTargetTools(t *testing.T) {
 		"web_search", "Read", "Write", "Edit", "MultiEdit", "LS", "Glob", "Grep", "TodoWrite", "sleep",
 		"TaskOutput", "TaskStop", "TaskList",
 		"add_intent", "insert_assets", "report_finding", "record_fact", "add_task_scope", "graph_overview",
-		"spawn_task", "ask_operator", "traffic_search", "traffic_get", "traffic_blob",
+		"spawn_task", "ask_operator", "traffic_search", "traffic_get", "traffic_blob", "traffic_messages",
 	} {
 		wantTargets(t, tool, targetsOf(tool, input))
 	}
