@@ -274,6 +274,36 @@ func TestLoginLimiterCapsEntries(t *testing.T) {
 	}
 }
 
+func TestEvictOldestKeepsBlockedEntries(t *testing.T) {
+	clk := newFakeClock()
+	l := newLoginLimiter(clk.now)
+	now := clk.now()
+	l.entries["blocked"] = &loginEntry{lastSeen: now.Add(-2 * time.Hour), blockedUntil: now.Add(time.Hour), block: time.Minute}
+	l.entries["idle"] = &loginEntry{lastSeen: now.Add(-time.Hour)}
+	l.evictOldest()
+	if _, ok := l.entries["blocked"]; !ok {
+		t.Fatal("evicted a blocked address while an idle one existed")
+	}
+	if _, ok := l.entries["idle"]; ok {
+		t.Fatal("kept the idle address")
+	}
+}
+
+func TestEvictOldestDropsSoonestBlockWhenAllBlocked(t *testing.T) {
+	clk := newFakeClock()
+	l := newLoginLimiter(clk.now)
+	now := clk.now()
+	l.entries["long"] = &loginEntry{lastSeen: now, blockedUntil: now.Add(2 * time.Hour)}
+	l.entries["short"] = &loginEntry{lastSeen: now.Add(-time.Hour), blockedUntil: now.Add(time.Minute)}
+	l.evictOldest()
+	if _, ok := l.entries["short"]; ok {
+		t.Fatal("kept the block that ends sooner")
+	}
+	if _, ok := l.entries["long"]; !ok {
+		t.Fatal("evicted the longer block")
+	}
+}
+
 func TestHealthHidesVersionWithoutToken(t *testing.T) {
 	key := []byte("0123456789abcdef0123456789abcdef")
 	s := &Server{jwtKey: key}

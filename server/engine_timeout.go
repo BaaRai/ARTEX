@@ -161,6 +161,10 @@ func (e *Engine) startDeadlineCoordinator(ctx context.Context, t *Task) {
 	}
 	rt := e.registerTaskRoutines(ctx, t.ID, 1)
 	e.deleteMu.RUnlock()
+	if rt == nil {
+		e.coordStarted.Delete(t.ID)
+		return
+	}
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.deadlineCoordinator(loopCtx, t) })
 }
 

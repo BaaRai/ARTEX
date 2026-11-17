@@ -354,7 +354,10 @@ WHERE exploration_id=$1 AND kind='intent' AND state='running'
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
 	return n, nil
 }
 

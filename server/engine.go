@@ -118,6 +118,7 @@ type Engine struct {
 	// runs under one task-scoped context. Successful deletion cancels that context,
 	// waits for all goroutines, then releases every task-level Engine reference.
 	runtimeMu sync.Mutex
+	draining  bool
 	runtimes  map[string]*taskRuntime
 
 	// per-task execution context: each planner.Plan / worker.Execute runs under it,
@@ -231,6 +232,9 @@ func (e *Engine) IsDeleting(taskID string) bool {
 func (e *Engine) registerTaskRoutines(parent context.Context, taskID string, count int) *taskRuntime {
 	e.runtimeMu.Lock()
 	defer e.runtimeMu.Unlock()
+	if e.draining {
+		return nil
+	}
 	rt := e.runtimes[taskID]
 	if rt == nil {
 		ctx, cancel := context.WithCancel(parent)
@@ -246,6 +250,42 @@ func runTaskRoutine(rt *taskRuntime, fn func(context.Context)) {
 		defer rt.wg.Done()
 		fn(rt.ctx)
 	}()
+}
+
+// Wait blocks until the task goroutines registered at the moment of the call
+// have finished, or until ctx ends. It refuses new registrations first so Add
+// cannot race Wait. Goroutines that were already running are cancelled with
+// their task context.
+func (e *Engine) Wait(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	e.runtimeMu.Lock()
+	e.draining = true
+	groups := make([]*sync.WaitGroup, 0, len(e.runtimes))
+	for _, rt := range e.runtimes {
+		if rt == nil {
+			continue
+		}
+		if rt.cancel != nil {
+			rt.cancel()
+		}
+		groups = append(groups, &rt.wg)
+	}
+	e.runtimeMu.Unlock()
+	for _, wg := range groups {
+		done := make(chan struct{})
+		go func(wg *sync.WaitGroup) {
+			wg.Wait()
+			close(done)
+		}(wg)
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // StopTask permanently stops every long-lived goroutine and removes all Engine
@@ -664,6 +704,23 @@ func (e *Engine) emitActivity(t *Task, r db.Activity) db.Activity {
 		}
 		log.Printf("[activity] task %s dropping activity record (%d dropped for this task so far) worker=%s kind=%s tool=%s tuid=%s reason=%s summary=%q: %v%s",
 			t.ID, n, r.Worker, r.Kind, r.Tool, r.ToolUseID, dropReason(err), preview(r.Summary, 80), err, diag)
+		if t.Store != nil {
+			if qerr := t.Store.EnqueueActivity(r, err.Error()); qerr != nil {
+				log.Printf("[activity] task %s outbox: %v", t.ID, qerr)
+			}
+		}
+		// The row has no database id. Publish an error copy so a live session
+		// does not stay on "Running" while the original return value is unchanged.
+		notice := r
+		notice.IsError = true
+		if notice.Summary == "" {
+			notice.Summary = "activity was not stored"
+		} else {
+			notice.Summary += " (not stored)"
+		}
+		if e.bc != nil {
+			e.bc.Publish(t.ID, notice)
+		}
 		e.touch(t.ID)
 		return r
 	}
@@ -762,6 +819,10 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	}
 	rt := e.registerTaskRoutines(ctx, t.ID, 2+workers)
 	e.deleteMu.RUnlock()
+	if rt == nil {
+		e.started.Delete(t.ID)
+		return
+	}
 	e.touch(t.ID)
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.plannerLoop(loopCtx, t) })
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.claimSweepLoop(loopCtx, t) })

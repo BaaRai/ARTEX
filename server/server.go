@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
@@ -52,6 +53,10 @@ type Server struct {
 
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
+	// pwdEpoch is auth.password_epoch in Unix seconds. Zero means the setting
+	// is absent and every valid token is accepted. A token issued before the
+	// stored second is rejected.
+	pwdEpoch atomic.Int64
 
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	trustedProxies []netip.Prefix // ARTEX_TRUSTED_PROXIES; see clientIP
@@ -169,6 +174,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		o(s)
 	}
 	s.initSetupToken()
+	s.loadPwdEpoch()
 	s.initSideQuestions()
 	// Circuit-breaker thresholds/cooldowns are hot parameters on the failure path; push the global retry policy to the Registry once at startup,
 	// and again on every policy save (saveLLMRetryPolicy).
@@ -295,8 +301,15 @@ func (s *Server) restoreTaskRuntimes() {
 		lifecycle := t.lifecycleSnapshot()
 		// clear stale 'running' intents from a prior crash/restart (no live worker
 		// owns them) so they re-claim instead of spinning forever in the UI.
-		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
+		if n, err := t.Store.ResetRunningIntents(); err != nil {
+			log.Printf("[engine] task %s reset leftover running intents: %v", t.ID, err)
+		} else if n > 0 {
 			log.Printf("[engine] task %s reset %d leftover running intents to open", t.ID, n)
+		}
+		if n, err := t.Store.FlushActivityOutbox(); err != nil {
+			log.Printf("[activity] task %s outbox: %v", t.ID, err)
+		} else if n > 0 {
+			log.Printf("[activity] task %s stored %d activities recovered from the outbox", t.ID, n)
 		}
 		if lifecycle.Paused {
 			s.engine.Pause(t.ID, agent.AbortPausedOnReload)
@@ -316,6 +329,30 @@ func (s *Server) restoreTaskRuntimes() {
 		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) {
 			s.engine.Run(s.ctx, t)
 		}
+	}
+}
+
+// Wait blocks until the task goroutines snapshotted now, and the archive
+// worker, have finished, or until ctx ends.
+func (s *Server) Wait(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.engine != nil {
+		if err := s.engine.Wait(ctx); err != nil {
+			return err
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		s.archiveWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -991,7 +1028,7 @@ func (s *Server) Handler() http.Handler {
 // with a valid token gets the service name and version; the web UI's top bar
 // reads the version, and sends its token.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	if !verifyJWT(extractToken(r), s.jwtKey) {
+	if !verifyJWT(extractToken(r), s.jwtKey, s.pwdEpoch.Load()) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}

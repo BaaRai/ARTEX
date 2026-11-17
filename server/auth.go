@@ -19,13 +19,15 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Autumn-27/artex/config"
+	"github.com/Autumn-27/artex/db"
 )
 
 const (
-	jwtKeyFilename = "jwt.key"
-	authPassKey    = "auth.password_hash"
-	jwtTTL         = 7 * 24 * time.Hour
-	keyChars       = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	jwtKeyFilename  = "jwt.key"
+	authPassKey     = "auth.password_hash"
+	authPwdEpochKey = "auth.password_epoch"
+	jwtTTL          = 7 * 24 * time.Hour
+	keyChars        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 	// The lower bound matches the setup page's frontend validation — validation that
 	// lives only in the frontend is as good as none: hitting the API directly bypasses
@@ -167,15 +169,24 @@ func signJWT(key []byte) (string, error) {
 	}).SignedString(key)
 }
 
-// verifyJWT returns true when tokenStr is a valid, non-expired HS256 token.
-func verifyJWT(tokenStr string, key []byte) bool {
-	t, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
+// verifyJWT returns true when tokenStr is a valid, non-expired HS256 token
+// issued at or after notBefore. notBefore is Unix seconds; 0 means no cutoff,
+// so a deployment that has never stored a password epoch keeps existing sessions.
+func verifyJWT(tokenStr string, key []byte, notBefore int64) bool {
+	claims := &jwt.RegisteredClaims{}
+	t, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return key, nil
 	})
-	return err == nil && t.Valid
+	if err != nil || !t.Valid {
+		return false
+	}
+	if notBefore > 0 && (claims.IssuedAt == nil || claims.IssuedAt.Unix() < notBefore) {
+		return false
+	}
+	return true
 }
 
 // jwtSubject returns the subject of tokenStr when it is a valid, non-expired
@@ -197,7 +208,11 @@ func jwtSubject(tokenStr string, key []byte) string {
 // approver is who a human decision is recorded for: the subject of the
 // request's session token.
 func (s *Server) approver(r *http.Request) string {
-	return jwtSubject(extractToken(r), s.jwtKey)
+	tok := extractToken(r)
+	if !verifyJWT(tok, s.jwtKey, s.pwdEpoch.Load()) {
+		return ""
+	}
+	return jwtSubject(tok, s.jwtKey)
 }
 
 // extractToken reads the JWT from Authorization: Bearer header,
@@ -226,7 +241,7 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 			writeErr(w, 401, "Unauthorized")
 			return
 		}
-		if !verifyJWT(tok, s.jwtKey) {
+		if !verifyJWT(tok, s.jwtKey, s.pwdEpoch.Load()) {
 			writeErr(w, 401, "token is invalid or expired")
 			return
 		}
@@ -258,15 +273,72 @@ func (s *Server) initSetupToken() {
 	if s.m == nil || s.m.pg == nil {
 		return
 	}
-	if hash, _, err := s.m.pg.GetSetting(authPassKey); err == nil && hash != "" {
+	var hash string
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		var ok bool
+		hash, ok, err = s.m.pg.GetSetting(authPassKey)
+		if err == nil {
+			if ok && hash != "" {
+				return
+			}
+			break
+		}
+		log.Printf("[auth] password lookup attempt %d/3: %v", attempt, err)
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+		}
+	}
+	if err != nil {
+		log.Printf("[auth] password lookup failed; not issuing a setup token: %v", err)
 		return
 	}
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
 		log.Fatalf("[auth] generate setup token: %v", err)
 	}
-	s.setupToken = hex.EncodeToString(buf)
-	log.Printf("[auth] no admin password is set. Setup token for the /setup page: %s", s.setupToken)
+	token := hex.EncodeToString(buf)
+	s.setupMu.Lock()
+	s.setupToken = token
+	s.setupMu.Unlock()
+	log.Printf("[auth] no admin password is set. Setup token for the /setup page: %s", token)
+}
+
+// loadPwdEpoch reads auth.password_epoch. A missing key leaves the cutoff at
+// zero, which accepts every valid token.
+func (s *Server) loadPwdEpoch() {
+	if s.m == nil || s.m.pg == nil {
+		return
+	}
+	raw, ok, err := s.m.pg.GetSetting(authPwdEpochKey)
+	if err != nil {
+		log.Printf("[auth] password epoch: %v", err)
+		return
+	}
+	if !ok || raw == "" {
+		return
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		log.Printf("[auth] password epoch %q: %v", raw, err)
+		return
+	}
+	s.pwdEpoch.Store(n)
+}
+
+// bumpPwdEpoch records the current second as the oldest token that is still
+// valid. A token signed in that same second still passes. A failed write leaves
+// the previous cutoff in place and is logged; the password change itself stands.
+func (s *Server) bumpPwdEpoch(pg *db.DB) {
+	if pg == nil {
+		return
+	}
+	epoch := time.Now().Unix()
+	if err := pg.SetSetting(authPwdEpochKey, strconv.FormatInt(epoch, 10)); err != nil {
+		log.Printf("[auth] save password epoch: %v", err)
+		return
+	}
+	s.pwdEpoch.Store(epoch)
 }
 
 // checkSetupToken compares got with the active setup token in constant time.
@@ -330,6 +402,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	s.setupMu.Lock()
 	s.setupToken = ""
 	s.setupMu.Unlock()
+	s.bumpPwdEpoch(pg)
 	tok, err := signJWT(s.jwtKey)
 	if err != nil {
 		writeErr(w, 500, "token generation failed")
@@ -346,7 +419,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	if !verifyJWT(extractToken(r), s.jwtKey) {
+	if !verifyJWT(extractToken(r), s.jwtKey, s.pwdEpoch.Load()) {
 		writeErr(w, 401, "Unauthorized")
 		return
 	}
@@ -388,6 +461,9 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "Save failed: "+err.Error())
 		return
 	}
+	// Sessions issued before this second stop working. This response does not
+	// include a replacement token; the next request asks for a new login.
+	s.bumpPwdEpoch(pg)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
