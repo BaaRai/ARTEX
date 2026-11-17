@@ -48,6 +48,11 @@ Rules:
 Pending and in-progress findings produce nothing: there is no outcome yet.
 Empty cue, action, or source is refused by the gate.
 
+A task with more than one company in `task_scope` is skipped. A generic
+(`company_id` NULL) lesson would be visible to every later task, including
+those of the other companies on this one. Per-finding company attribution is
+a later change.
+
 ## Selection
 
 `GET /api/tasks/{id}/lessons` returns the lessons visible to a task plus the
@@ -55,7 +60,8 @@ rendered block. Selection is scoped:
 
 - generic lessons (no company, no category) are visible to every task;
 - company scope comes from `task_scope`, not `tasks.company_id`; a lesson is
-  company-scoped only when the source task had exactly one company;
+  company-scoped only when the source task had exactly one company, and a
+  task with several companies is not extracted;
 - lessons from the same company or the same task category rank first
   (company/category matches sort ahead of generic rows);
 - within a scope: positive before negative before caution, then support, then

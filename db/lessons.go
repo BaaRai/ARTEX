@@ -72,7 +72,7 @@ func taskLessonScope(ctx context.Context, d *DB, taskID int64) (categoryID int64
 	if cat.Valid {
 		categoryID = cat.Int64
 	}
-	companyIDs, err = d.TaskCompanyIDs(taskID)
+	companyIDs, err = d.TaskCompanyIDsContext(ctx, taskID)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -83,9 +83,8 @@ func taskLessonScope(ctx context.Context, d *DB, taskID int64) (categoryID int64
 }
 
 // lessonExtractCompanyID is the company written onto a new lesson. The row has
-// one company_id; a task can have several. Scope only when the task has exactly
-// one company. Zero or several → generic (NULL), which is the remaining product
-// call for multi-company tasks.
+// one company_id. Scope only when the task has exactly one company. Zero
+// companies → generic (NULL). ExtractLessonsForTask skips when there are several.
 func lessonExtractCompanyID(companyIDs []int64) int64 {
 	if len(companyIDs) == 1 {
 		return companyIDs[0]
@@ -95,11 +94,16 @@ func lessonExtractCompanyID(companyIDs []int64) int64 {
 
 // ExtractLessonsForTask derives candidate lessons from one task's findings and
 // retests. It is idempotent: the evidence primary key means a second run adds
-// no support. Returns the number of distinct lessons touched.
+// no support. A task with more than one company is skipped so a generic
+// (NULL company_id) lesson cannot leak across companies. Returns the number of
+// distinct lessons touched.
 func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, error) {
 	categoryID, companyIDs, err := taskLessonScope(ctx, d, taskID)
 	if err != nil {
 		return 0, err
+	}
+	if len(companyIDs) > 1 {
+		return 0, nil
 	}
 	companyID := lessonExtractCompanyID(companyIDs)
 	rows, err := d.QueryContext(ctx, `

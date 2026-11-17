@@ -114,12 +114,6 @@ func TestTaskLessonsUsesTaskScopeAndRanksCompanyFirst(t *testing.T) {
 	var genericID, aID, bID int64
 	if err := d.QueryRow(`
 		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,company_id)
-		VALUES ($1,'positive','xss','generic prior',NULL) RETURNING id`, genericKey).Scan(&genericID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, genericID) })
-	if err := d.QueryRow(`
-		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,company_id)
 		VALUES ($1,'positive','xss','company A prior',$2) RETURNING id`, aKey, companyA).Scan(&aID); err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +124,13 @@ func TestTaskLessonsUsesTaskScopeAndRanksCompanyFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, bID) })
+	// Generic last: without the company rank term, id DESC would put this first.
+	if err := d.QueryRow(`
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,company_id)
+		VALUES ($1,'positive','xss','generic prior',NULL) RETURNING id`, genericKey).Scan(&genericID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, genericID) })
 
 	got, err := d.TaskLessons(t.Context(), taskA.ID, 8)
 	if err != nil {
@@ -220,4 +221,235 @@ func TestExtractLessonsScopesSingleCompanyFromTaskScope(t *testing.T) {
 		t.Fatalf("extracted lesson was not scoped to company %d: %+v", companyID, lessons)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, scoped.ID) })
+}
+
+func TestExtractLessonsSkipsMultiCompanyTask(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	cs := d.Companies()
+	companyA, _, err := cs.UpsertCompany(fmt.Sprintf("LessonMultiA %d", stamp), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupCompany(d, companyA) })
+	companyB, _, err := cs.UpsertCompany(fmt.Sprintf("LessonMultiB %d", stamp), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupCompany(d, companyB) })
+
+	task, err := d.CreateTaskWithOptions("extract multi company", "goal", TaskCreateOptions{
+		Name: fmt.Sprintf("lesson-multi-%d", stamp), CompanyIDs: []int64{companyA, companyB},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "multi-company task", d.DeleteTask(task.ID)) })
+	findingID := insertLessonFinding(t, d, task.ID, "confirmed")
+
+	n, err := d.ExtractLessonsForTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("extracted=%d, want 0 for a multi-company task", n)
+	}
+	var evidence int
+	if err := d.QueryRow(`
+		SELECT COUNT(*) FROM rsi_lesson_evidence
+		WHERE source_kind='finding' AND source_id=$1`, findingID).Scan(&evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence != 0 {
+		t.Fatalf("multi-company extract wrote %d evidence rows", evidence)
+	}
+}
+
+func TestExtractLessonsGenericWhenTaskHasNoCompany(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTaskWithOptions("extract no company", "goal", TaskCreateOptions{
+		Name: fmt.Sprintf("lesson-nocompany-%d", stamp),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "no-company task", d.DeleteTask(task.ID)) })
+	findingID := insertLessonFinding(t, d, task.ID, "confirmed")
+
+	n, err := d.ExtractLessonsForTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("extracted=%d, want 1", n)
+	}
+	var lessonID, companyID int64
+	if err := d.QueryRow(`
+		SELECT l.id, COALESCE(l.company_id,0)
+		FROM rsi_lessons l
+		JOIN rsi_lesson_evidence e ON e.lesson_id=l.id
+		WHERE e.source_kind='finding' AND e.source_id=$1`, findingID).Scan(&lessonID, &companyID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, lessonID) })
+	if companyID != 0 {
+		t.Fatalf("no-company extract scoped lesson to company %d", companyID)
+	}
+}
+
+func TestTaskLessonsRanksCategoryBeforeGeneric(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	category, err := d.CreateTaskCategory(fmt.Sprintf("LessonCat %d", stamp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, err := d.DeleteTaskCategory(category.ID)
+		cleanupErr(t, "category", err)
+	})
+	task, err := d.CreateTaskWithOptions("lesson category rank", "goal", TaskCreateOptions{
+		Name: fmt.Sprintf("lesson-cat-%d", stamp), CategoryID: &category.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "category task", d.DeleteTask(task.ID)) })
+
+	var catID, genericID int64
+	if err := d.QueryRow(`
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,category_id)
+		VALUES ($1,'positive','xss','category prior',$2) RETURNING id`,
+		fmt.Sprintf("lesson-cat-%d", stamp), category.ID).Scan(&catID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, catID) })
+	// Generic last: without the category rank term, id DESC would put this first.
+	if err := d.QueryRow(`
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action)
+		VALUES ($1,'positive','xss','generic prior') RETURNING id`,
+		fmt.Sprintf("lesson-cat-generic-%d", stamp)).Scan(&genericID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, genericID) })
+
+	got, err := d.TaskLessons(t.Context(), task.ID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 {
+		t.Fatal("categorized task saw no lessons")
+	}
+	if got[0].ID != catID {
+		t.Fatalf("category-scoped lesson should rank first, got id=%d category=%d (want %d)",
+			got[0].ID, got[0].CategoryID, catID)
+	}
+	var sawCat, sawGeneric bool
+	for _, l := range got {
+		switch l.ID {
+		case catID:
+			sawCat = true
+		case genericID:
+			sawGeneric = true
+		}
+	}
+	if !sawCat || !sawGeneric {
+		t.Fatalf("want category and generic lessons, sawCat=%v sawGeneric=%v", sawCat, sawGeneric)
+	}
+}
+
+func TestLogLessonUsageRecordsOnlyRendered(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTaskWithOptions("lesson usage", "goal", TaskCreateOptions{
+		Name: fmt.Sprintf("lesson-usage-%d", stamp),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "usage task", d.DeleteTask(task.ID)) })
+
+	var firstID, secondID int64
+	if err := d.QueryRow(`
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action)
+		VALUES ($1,'positive','xss',$2) RETURNING id`,
+		fmt.Sprintf("lesson-usage-a-%d", stamp),
+		"Confirmed xss: "+strings.Repeat("a", 80)).Scan(&firstID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, firstID) })
+	if err := d.QueryRow(`
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action)
+		VALUES ($1,'negative','ssrf',$2) RETURNING id`,
+		fmt.Sprintf("lesson-usage-b-%d", stamp),
+		"Do not re-report: "+strings.Repeat("b", 80)).Scan(&secondID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, secondID) })
+
+	lessons := []Lesson{
+		{ID: firstID, Kind: "positive", Cue: "xss", Action: "Confirmed xss: " + strings.Repeat("a", 80), Support: 1},
+		{ID: secondID, Kind: "negative", Cue: "ssrf", Action: "Do not re-report: " + strings.Repeat("b", 80), Support: 1},
+	}
+	_, ids := RenderLessons(lessons, 250)
+	if len(ids) != 1 || ids[0] != firstID {
+		t.Fatalf("rendered IDs=%v, want only %d", ids, firstID)
+	}
+	if err := d.LogLessonUsage(t.Context(), task.ID, ids, "shadow"); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := d.Query(`SELECT lesson_id FROM rsi_lesson_usage WHERE task_id=$1 ORDER BY lesson_id`, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var logged []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		logged = append(logged, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(logged) != 1 || logged[0] != firstID {
+		t.Fatalf("usage log=%v, want only rendered lesson %d (dropped %d)", logged, firstID, secondID)
+	}
+}
+
+func insertLessonFinding(t *testing.T, d *DB, taskID int64, status string) int64 {
+	t.Helper()
+	var id int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,'xss','Reflected XSS','reflected in search','high',$2)
+		RETURNING id`, taskID, status).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, id) })
+	return id
 }

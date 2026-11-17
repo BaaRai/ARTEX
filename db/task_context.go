@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -344,7 +345,12 @@ func (d *DB) TaskSourceIDs(taskID int64) ([]int64, error) {
 // TaskCompanyIDs returns the companies whose asset scopes are available to the
 // task. The task_scope rows remain the single source of truth.
 func (d *DB) TaskCompanyIDs(taskID int64) ([]int64, error) {
-	rows, err := d.Query(`
+	return d.TaskCompanyIDsContext(context.Background(), taskID)
+}
+
+// TaskCompanyIDsContext is the context-aware form of TaskCompanyIDs.
+func (d *DB) TaskCompanyIDsContext(ctx context.Context, taskID int64) ([]int64, error) {
+	rows, err := d.QueryContext(ctx, `
 SELECT company_id FROM task_scope
 WHERE task_id=$1 AND kind='company' AND company_id IS NOT NULL
 ORDER BY id`, taskID)
