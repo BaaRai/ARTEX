@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -155,15 +156,31 @@ func (d *DB) ProfileByID(id int64) (*LLMProfile, error) {
 	return &p, err
 }
 
+// keylessFormats are the llm_profiles formats that serve requests without an
+// API key: a local Ollama server, and the Claude Code / Codex / Grok CLIs that
+// run on the host's own subscription login.
+var keylessFormats = []string{"ollama", "claude-cli", "codex-cli", "grok-cli"}
+
+// IsKeylessFormat reports whether a profile of this format is usable with no
+// API key. It is the single source of truth on the Go side; the web UI mirrors
+// the list as KEYLESS_FORMATS.
+func IsKeylessFormat(format string) bool {
+	return slices.Contains(keylessFormats, format)
+}
+
+// keylessFormatSQL is keylessFormats as an SQL IN list. The values are
+// constants, so building the literal carries no injection risk.
+var keylessFormatSQL = "('" + strings.Join(keylessFormats, "','") + "')"
+
 // PoolProfiles returns the failover chain in run order, api keys included: the
 // active profile first, then every other usable profile that isn't excluded, by
 // priority DESC (id ASC to stay stable). Profiles without an api key can't serve
-// a request — except Ollama ('ollama'), which is a keyless local server — so
-// they never enter the chain. The ordering IS the policy — callers walk the
-// slice front to back.
+// a request unless their format is keyless (IsKeylessFormat), so they never
+// enter the chain. The ordering IS the policy — callers walk the slice front to
+// back.
 func (d *DB) PoolProfiles() ([]*LLMProfile, error) {
 	rows, err := d.Query(`SELECT ` + profileColsKey + ` FROM llm_profiles
-WHERE (COALESCE(api_key,'') <> '' OR format='ollama') AND (is_default OR NOT pool_exclude)
+WHERE (COALESCE(api_key,'') <> '' OR format IN ` + keylessFormatSQL + `) AND (is_default OR NOT pool_exclude)
 ORDER BY is_default DESC, priority DESC, id ASC`)
 	if err != nil {
 		return nil, err
