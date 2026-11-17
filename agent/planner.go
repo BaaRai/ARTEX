@@ -233,8 +233,10 @@ func hintAuthor(origin string) string {
 // worker — which intent + its output conclusion; for a finding — which intent +
 // what was found. Empty for time/heartbeat wakes. Reads the store through look
 // (best-effort; a blank field never blocks the round). Worker output, finding
-// details and hints not written by the operator go inside env's frame (#124,
-// F3); operator hints are labelled operator and stay outside it.
+// details, intent summaries and hints not written by the operator go inside
+// env's frame (#124, F3); operator hints are labelled operator and stay outside
+// it. A goal line is trusted by design: the main agent composes it on behalf of
+// the operator.
 func renderTriggers(evs []TriggerEvent, env dataEnvelope, look triggerLookup) string {
 	if len(evs) == 0 {
 		return ""
@@ -266,16 +268,19 @@ func renderTriggers(evs []TriggerEvent, env dataEnvelope, look triggerLookup) st
 		case "goal_edited":
 			b.WriteString(fmt.Sprintf("\n- The human edited a goal, from \"%s\" to \"%s\" — please adjust exploration directions to the new goal (stop dispatching the old directions if they no longer apply).", ev.OldGoal, ev.NewGoal))
 		case "finding":
-			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) reported a finding:\n%s", ev.IntentID, look.intentSummary(ev.IntentID), env.wrap("finding", ev.Detail)))
+			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d reported a finding:\n%s\n%s", ev.IntentID,
+				env.wrap("intent_summary", look.intentSummary(ev.IntentID)), env.wrap("finding", ev.Detail)))
 		case "cancelled":
 			// For the intent content prefer the Summary captured at deletion time (after a real delete the node no longer exists, so intentSummary can't find it).
 			sm := ev.Summary
 			if sm == "" {
 				sm = look.intentSummary(ev.IntentID)
 			}
-			b.WriteString(fmt.Sprintf("\n- Intent #%d was deleted by the user; the intent was: %s; the deletion reason: %s. The intent has been deleted (no longer executed); please re-plan accordingly.", ev.IntentID, sm, ev.Detail))
+			b.WriteString(fmt.Sprintf("\n- Intent #%d was deleted by the user; the deletion reason: %s. The intent has been deleted (no longer executed); please re-plan accordingly.\n%s", ev.IntentID, ev.Detail,
+				env.wrap("intent_summary", sm)))
 		default: // "done"
-			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) finished; output conclusion:\n%s", ev.IntentID, look.intentSummary(ev.IntentID), env.wrap("worker_output", look.workerOutput(ev.IntentID))))
+			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d finished; output conclusion:\n%s\n%s", ev.IntentID,
+				env.wrap("intent_summary", look.intentSummary(ev.IntentID)), env.wrap("worker_output", look.workerOutput(ev.IntentID))))
 			if fids := look.factIDs(ev.IntentID); fids != "" {
 				b.WriteString(fmt.Sprintf("; new fact ids produced by this intent: %s ", fids))
 			}

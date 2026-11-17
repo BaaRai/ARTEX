@@ -71,15 +71,21 @@ func frameLessonsBlock(block string) string {
 // from agent or target text; renderOverviewSections frames each of them.
 var overviewDerivedFields = []string{"recent_facts", "finding_list", "cold_digests", "related_tasks"}
 
+// intentSummaryKeys are the graph_overview intent lists whose summary is written
+// by a planner: the structured fields stay in the plain JSON, every summary goes
+// into one frame (#124, F3).
+var intentSummaryKeys = []string{"open_intents", "running_intents", "recent_done_intents"}
+
 // operatorHintOrigin is the hint origin written by the operator: the main-agent
 // chat and the no-LLM steering fallback store "human" (see addOneHint).
 const operatorHintOrigin = "human"
 
 // renderOverviewSections splits a graph_overview snapshot by origin for a user
 // message: the operator block (task, goal nodes, the operator's own hints)
-// outside the envelope, the counters and intents as plain JSON, then each
-// derived field, and the hints of every other origin, in its own frame. Pure:
-// it reads only data and never modifies it. Empty on a marshal error.
+// outside the envelope, the counters and the structured intent fields as plain
+// JSON, then the intent summaries, each derived field and the hints of every
+// other origin in their own frame. Pure: it reads only data and never modifies
+// it. Empty on a marshal error.
 func renderOverviewSections(data map[string]any, env dataEnvelope) string {
 	operator := map[string]any{}
 	rest := map[string]any{}
@@ -110,6 +116,38 @@ func renderOverviewSections(data map[string]any, env dataEnvelope) string {
 			delete(rest, k)
 		}
 	}
+	// The intent lists stay structured in the plain JSON, but their summaries are
+	// planner-written text and move into one frame.
+	summaries := map[string]any{}
+	for _, k := range intentSummaryKeys {
+		entries, ok := rest[k].([]map[string]any)
+		if !ok {
+			continue
+		}
+		plain := make([]map[string]any, 0, len(entries))
+		framed := make([]map[string]any, 0, len(entries))
+		for _, m := range entries {
+			copied := make(map[string]any, len(m))
+			for key, v := range m {
+				copied[key] = v
+			}
+			if sm, ok := copied["summary"]; ok {
+				entry := map[string]any{"id": copied["id"], "summary": sm}
+				for _, extra := range []string{"source_task_id", "inherited"} {
+					if v, ok := copied[extra]; ok {
+						entry[extra] = v
+					}
+				}
+				framed = append(framed, entry)
+				delete(copied, "summary")
+			}
+			plain = append(plain, copied)
+		}
+		rest[k] = plain
+		if len(framed) > 0 {
+			summaries[k] = framed
+		}
+	}
 	var b strings.Builder
 	for _, sec := range []struct {
 		head string
@@ -124,6 +162,14 @@ func renderOverviewSections(data map[string]any, env dataEnvelope) string {
 		}
 		b.WriteString(sec.head)
 		b.Write(js)
+	}
+	if len(summaries) > 0 {
+		js, err := json.Marshal(summaries)
+		if err != nil {
+			return ""
+		}
+		b.WriteString("\n\n")
+		b.WriteString(env.wrap("intent_summaries", string(js)))
 	}
 	fields := overviewDerivedFields
 	if len(agentHints) > 0 {
