@@ -953,6 +953,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/intercept/rules/{id}", s.interceptDeleteRule)
 	mux.HandleFunc("POST /api/intercept/rules/{id}/toggle", s.interceptToggleRule)
 
+	// capture-proxy rewrite rule management (stored and compiled; not applied by the proxy yet)
+	mux.HandleFunc("GET /api/traffic/rewrite-rules", s.rewriteListRules)
+	mux.HandleFunc("POST /api/traffic/rewrite-rules", s.rewriteCreateRule)
+	mux.HandleFunc("PUT /api/traffic/rewrite-rules/{id}", s.rewriteUpdateRule)
+	mux.HandleFunc("DELETE /api/traffic/rewrite-rules/{id}", s.rewriteDeleteRule)
+	mux.HandleFunc("POST /api/traffic/rewrite-rules/{id}/toggle", s.rewriteToggleRule)
+
 	// asset interception rule management (global blocklist: domains/IPs/URLs/CIDRs)
 	mux.HandleFunc("GET /api/asset-intercept/rules", s.assetInterceptListRules)
 	mux.HandleFunc("POST /api/asset-intercept/rules", s.assetInterceptCreateRule)
