@@ -166,7 +166,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{},
-		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
+		taskAgents:     map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
 		loginLimit: newLoginLimiter(time.Now)}
 	s.llmHealth, s.llmHealthSync = newLLMHealthRegistry(ctx, m.pg)
 	for _, o := range opts {
