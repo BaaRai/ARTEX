@@ -88,9 +88,9 @@ type Worker struct {
 	// maxTokensFn resolves the per-reply output cap in tokens, on the same
 	// per-run basis. nil or 0 = send no cap and let the endpoint decide.
 	maxTokensFn func() int
-	// lessonsBlock is the code-owned RSI evidence block appended verbatim after
-	// the rendered system prompt. Empty = off. It is data, not instructions:
-	// the server renders it from outcome records and sets it before the run.
+	// lessonsBlock is the raw RSI evidence block. Empty = off. Execute() frames
+	// it with a per-run data envelope (field=lessons) and appends it after the
+	// rendered system prompt. The server renders the text from outcome records.
 	lessonsBlock string
 }
 
@@ -145,9 +145,9 @@ func (w *Worker) maxTokens() int {
 // constraints get injected into the worker system prompt. nil = inject (default).
 func (w *Worker) SetConstraintInject(fn func() bool) { w.injectConstraints = fn }
 
-// SetLessonsBlock sets the code-owned RSI evidence block appended after the
-// rendered system prompt. Empty disables it. The block is rendered by the
-// server from outcome records and is never editable through the prompt UI.
+// SetLessonsBlock sets the raw RSI evidence block. Empty disables it. Execute()
+// frames it as data. The server renders it from outcome records; it is never
+// editable through the prompt UI.
 func (w *Worker) SetLessonsBlock(block string) { w.lessonsBlock = block }
 
 // wantConstraints reports whether constraint injection is enabled (default yes).
@@ -447,7 +447,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), newDataEnvelope())
-	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir) + w.lessonsBlock
+	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir) + frameLessonsBlock(w.lessonsBlock)
 	if w.wantConstraints() {
 		sysBody += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
 	}
