@@ -80,6 +80,14 @@ func (s *Set) LoadErrors() map[int64]string {
 	return s.loadErrors
 }
 
+// NoteError records a run-time error of a rule seen outside the engine, such
+// as the transport failure of a request the rule rewrote.
+func (s *Set) NoteError(id int64, class string) {
+	if s != nil {
+		s.errors.record(id, class)
+	}
+}
+
 // LastError is the most recent run-time error of a rule. It lives in memory
 // only; the per-exchange trace keeps the history.
 type LastError struct {
