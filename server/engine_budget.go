@@ -26,10 +26,13 @@ func (e *Engine) budgetFor(taskID string) *agent.BudgetLedger {
 	return created
 }
 
-// seedBudget rebuilds spent tokens and turns from llm_usage the first time a
-// ledger is created in this process. The in-memory sink runs before the row is
-// inserted, so a call that happens after this seed is counted once. A nil
-// ledger means no budget is configured and nothing is read.
+// seedBudget rebuilds spent tokens and turns from llm_usage for every new
+// ledger. budgetFor calls it on first use, and again after resetSettledRun or
+// StopTask deletes the ledger in this same process. The in-memory sink runs
+// before the row is inserted, so a call that happens after this seed is
+// counted once. A nil ledger means no budget is configured and nothing is read.
+// The restore does not rebuild per-worker averages, so the next worker estimate
+// starts from the defaults until a worker finishes against this ledger.
 func (e *Engine) seedBudget(taskID string, ledger *agent.BudgetLedger) {
 	if ledger == nil || e == nil || e.m == nil || e.m.pg == nil || taskID == "" {
 		return

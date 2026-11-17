@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	pgdb "github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/llm"
 )
 
@@ -65,5 +68,66 @@ func TestResetSettledRunRestartsBudget(t *testing.T) {
 	}
 	if got := e.budgetFor(task.ID).State().Spent.Tokens; got != 0 {
 		t.Fatalf("revived run: ledger not fresh, spent %d tokens", got)
+	}
+}
+
+// With Postgres, resetSettledRun drops the ledger and the next one is seeded
+// again from llm_usage. In-memory spend that was never written does not come
+// back. A restore that lands on the wrap-up reserve leaves only that reserve,
+// and the worker estimate starts from the defaults.
+func TestResetSettledRunReseedsBudgetFromUsage(t *testing.T) {
+	for _, k := range []string{"ARTEX_TASK_BUDGET_TURNS", "ARTEX_INTENT_BUDGET_TOKENS", "ARTEX_INTENT_BUDGET_TURNS"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("ARTEX_TASK_BUDGET_TOKENS", "100000")
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+
+	taskID := strconv.FormatInt(time.Now().UnixNano(), 10)
+	t.Cleanup(func() {
+		_, _ = m.pg.Exec(`DELETE FROM llm_usage WHERE task_id=$1`, taskID)
+	})
+	// 100000 - wrap-up reserve (max(5%, 20000)) = 80000. One planner row.
+	if err := m.pg.InsertLLMUsage(&pgdb.LLMUsage{
+		TaskID: taskID, Worker: "planner", InputTokens: 80_000, Status: "ok",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(m)
+	task := &Task{ID: taskID}
+	l := e.budgetFor(task.ID)
+	st := l.State()
+	if st.Spent.Tokens != 80_000 || st.Spent.Turns != 1 {
+		t.Fatalf("seed spent=%+v, want 80000 tokens and 1 turn", st.Spent)
+	}
+	if st.Remaining.Tokens != st.Margin.Tokens || !st.AtMargin || st.Dispatch {
+		t.Fatalf("restored task near the cap: remaining=%d margin=%d at=%v dispatch=%v",
+			st.Remaining.Tokens, st.Margin.Tokens, st.AtMargin, st.Dispatch)
+	}
+	if st.Estimate.Tokens != agent.DefaultWorkerEstimateTokens || st.Estimate.Turns != agent.DefaultWorkerEstimateTurns {
+		t.Fatalf("estimate=%+v, want the defaults (worker history is not restored)", st.Estimate)
+	}
+
+	l.Record(llm.Usage{InputTokens: 1000})
+	l.BeginWrapup()
+	e.settling.Store(task.ID, true)
+	e.resetSettledRun(task.ID)
+	if e.isSettling(task.ID) {
+		t.Fatal("revived run is still marked settling")
+	}
+	again := e.budgetFor(task.ID)
+	if again == l {
+		t.Fatal("revive reused the deleted ledger")
+	}
+	got := again.State()
+	if got.Spent.Tokens != 80_000 || got.Spent.Turns != 1 {
+		t.Fatalf("reseed spent=%+v, want the usage row and not the in-memory extra", got.Spent)
+	}
+	if got.Remaining.Tokens != got.Margin.Tokens || got.Dispatch {
+		t.Fatalf("reseed still past the wrap-up margin: remaining=%d margin=%d dispatch=%v",
+			got.Remaining.Tokens, got.Margin.Tokens, got.Dispatch)
 	}
 }

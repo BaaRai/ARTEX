@@ -92,7 +92,8 @@ func BudgetsFromEnv() (task, intent Budget) {
 		NewBudget(env("ARTEX_INTENT_BUDGET_TOKENS"), env("ARTEX_INTENT_BUDGET_TURNS"))
 }
 
-// BudgetLedger meters one task, in memory (a process restart starts afresh).
+// BudgetLedger meters one task. The total is restored from llm_usage when the
+// ledger is created, including after a restart. Per-worker averages are not.
 type BudgetLedger struct {
 	task, intent Budget
 	mu           sync.Mutex
@@ -110,9 +111,11 @@ func NewBudgetLedger(task, intent Budget) *BudgetLedger {
 	return &BudgetLedger{task: task, intent: intent}
 }
 
-// RestoreSpend adds usage that was already recorded before this process started.
-// It is applied once, to a ledger that has not recorded anything yet. A nil
-// ledger (no budget configured) is a no-op.
+// RestoreSpend adds usage that was already recorded before this ledger existed.
+// It only adds to the task total. Per-worker averages stay at the defaults
+// until a worker finishes against this ledger, because llm_usage rows do not
+// mark where one worker run ends and the next begins. A nil ledger (no budget
+// configured) is a no-op.
 func (l *BudgetLedger) RestoreSpend(spent Spend) {
 	if l == nil || (spent.Tokens == 0 && spent.Turns == 0) {
 		return
