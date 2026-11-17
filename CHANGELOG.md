@@ -23,6 +23,7 @@ All notable changes to this project are documented in this file. The format is b
 - **`ask_operator` target warning**: a request whose question names a host or URL outside the goal targets is tagged as containing target-derived text (#197).
 - **Opt-in update banner**: `ARTEX_UPDATE_CHECK` makes the backend check the latest GitHub release at most once per 24 hours and the UI show a banner; off by default (#202).
 - **Release provenance**: release archives carry GitHub build provenance attestations and a CycloneDX SBOM (`gh attestation verify <zip> --repo BaaRai/ARTEX`); release notes are the matching `CHANGELOG.md` section (#219, #201).
+- **Capture-proxy rewrite rules, storage and API**: `GET`, `POST`, `PUT` and `DELETE /api/traffic/rewrite-rules` and `POST /api/traffic/rewrite-rules/{id}/toggle` manage rules that match a request or a response (method, host, URL, headers, body, status) and describe a rewrite (method, path and query, headers, body, status). Rules are validated on save, limited to 100 of which 50 enabled, created disabled, and stored in the new table `traffic_rewrite_rules` (migration `0005_traffic_rewrite_rules.sql`) with `matchers` and `actions` encrypted at rest. The value of an action marked `sensitive` is never returned, and an update sent without it keeps the stored one. The server compiles the enabled rules at startup and after every change and hands the snapshot to the proxy. **The proxy does not apply the rules yet: capture is unchanged.** See `docs/traffic-rewrite-rules.md`.
 
 ### Changed
 
@@ -32,6 +33,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Skill visibility survives restarts**: turning a skill off now writes an explicit disabled row instead of deleting it, so the startup seed, which only inserts missing rows, can no longer bring the skill back. Skills that were turned off before this version have no row to keep, so they come back once after the upgrade and must be turned off again.
+- **Browser extension traffic capture**: CDP delivers `Network.responseReceived` response headers as an object, not an array of `{name, value}` records, so the extension threw on every response and never queued an exchange. It now accepts both shapes and lower-cases names before the body-capture gate, so captures work again and `content-type` correctly controls body capture.
+- **bbot on arm64**: the image now builds on arm64 hosts such as Apple Silicon. bbot's `gowitness` downloaded an x86-64 Chrome and `retirejs` an x86-64 Node, which can't run there, so the build failed. On arm64 the image uses Debian's `chromium` for gowitness and an arm64 Node for retirejs, and the build check now covers `retirejs` too. amd64 builds are unchanged.
 - **Auto-scope hygiene**: auto `task_scope` rows count for coverage and untested assets only under a declared root, and direct coverage counts anchored assets through fact anchors only; the scope is described as "coverage scope, not enforced" (#196).
 - **Enrich HTTP probe**: it now dials through `intercept.PinnedDialer`, so the target gate applies and a probe without a target scope is refused (#198).
 - **Agent hook data races**: the eight package-level hooks are synchronised, so a second wire-up no longer races tasks that already read them (#227).

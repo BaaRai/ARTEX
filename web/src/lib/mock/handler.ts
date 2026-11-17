@@ -1200,6 +1200,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       tokens: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 },
       llm_profile_id: profileIDs[0],
       llm_profile_ids: profileIDs,
+      llm_rotate: b.llm_rotate === true,
       active_llm_profile_id: profileIDs[0],
       llm_failover_state: profileIDs.length ? "ready" : "default",
       source_task_ids: sourceTaskIDs,
@@ -1422,6 +1423,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     const target = mockTasks.find((item) => item.id === seg[1]);
     if (target) {
       target.llm_profile_ids = ids;
+      if (typeof b.llm_rotate === "boolean") target.llm_rotate = b.llm_rotate;
       target.llm_profile_id = ids[0];
       target.active_llm_profile_id = activeID;
       target.llm_failover_state = ids.length ? "ready" : "default";

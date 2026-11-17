@@ -42,10 +42,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { setVisibleInterval } from "@/lib/polling";
 import { useStoredSortPreference } from "@/lib/sort-preference";
 import type { TrafficDetail, TrafficExchange, TrafficHost, TrafficResp } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { setVisibleInterval } from "@/lib/polling";
+
+import { ReplayPanel } from "./_components/replay-panel";
+import { StreamMessagesPanel } from "./_components/stream-messages";
 
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString("zh-CN", {
@@ -141,6 +144,9 @@ export default function TrafficPage() {
   const [selected, setSelected] = React.useState<TrafficExchange | null>(null);
   const [detail, setDetail] = React.useState<TrafficDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
+  const [detailTab, setDetailTab] = React.useState("request");
+  const streamKind = detail?.stream_kind === "websocket" || detail?.stream_kind === "sse" ? detail.stream_kind : null;
+  const hasStream = streamKind !== null;
 
   const [hosts, setHosts] = React.useState<TrafficHost[]>([]); // target picker
   const [selectedHosts, setSelectedHosts] = React.useState<string[]>([]); // checked in picker
@@ -298,8 +304,10 @@ export default function TrafficPage() {
       .finally(() => setDeleting(false));
   };
 
-  // Lazy-load the raw request/response for the selected exchange.
+  // Lazy-load the raw request/response for the selected exchange. A new
+  // selection opens on Request; a WebSocket/SSE exchange then opens on Stream.
   React.useEffect(() => {
+    setDetailTab("request");
     if (!selected) {
       setDetail(null);
       return;
@@ -310,7 +318,9 @@ export default function TrafficPage() {
     api
       .trafficExchange(selected.id)
       .then((d) => {
-        if (alive) setDetail(d);
+        if (!alive) return;
+        setDetail(d);
+        if (d.stream_kind === "websocket" || d.stream_kind === "sse") setDetailTab("stream");
       })
       .catch(() => {
         if (alive) setDetail({ req: "(failed to load the messages)", resp: "" });
@@ -742,10 +752,27 @@ export default function TrafficPage() {
                 <SheetTitle className="break-all font-mono">{selected.host}</SheetTitle>
                 <SheetDescription className="break-all font-mono">{selected.url}</SheetDescription>
               </SheetHeader>
-              <Tabs defaultValue="request" className="min-h-0 flex-1 gap-0">
-                <TabsList className="mx-5 mt-4 grid w-auto grid-cols-2">
+              <Tabs value={detailTab} onValueChange={setDetailTab} className="min-h-0 flex-1 gap-0">
+                <TabsList className={cn("mx-5 mt-4 grid w-auto", hasStream ? "grid-cols-4" : "grid-cols-3")}>
                   <TabsTrigger value="request">Request</TabsTrigger>
                   <TabsTrigger value="response">Response</TabsTrigger>
+                  {hasStream && (
+                    <TabsTrigger value="stream">
+                      Stream
+                      {(detail?.stream_count ?? 0) > 0 && (
+                        <span className="text-muted-foreground text-xs tabular-nums">{detail?.stream_count}</span>
+                      )}
+                    </TabsTrigger>
+                  )}
+                  {hasStream ? (
+                    <span title="stream replay is not supported" className="flex">
+                      <TabsTrigger value="replay" disabled>
+                        Replay
+                      </TabsTrigger>
+                    </span>
+                  ) : (
+                    <TabsTrigger value="replay">Replay</TabsTrigger>
+                  )}
                 </TabsList>
                 <TabsContent value="request" className="min-h-0 overflow-auto">
                   {detailLoading ? (
@@ -767,6 +794,29 @@ export default function TrafficPage() {
                     <HttpCodeBlock raw={detail?.resp ?? ""} />
                   )}
                 </TabsContent>
+                {streamKind && (
+                  <TabsContent value="stream" className="min-h-0 overflow-auto">
+                    <StreamMessagesPanel exchangeId={selected.id} kind={streamKind} />
+                  </TabsContent>
+                )}
+                {!hasStream && (
+                  // Kept mounted so edits survive a look at another tab.
+                  <TabsContent value="replay" forceMount className="min-h-0 overflow-auto data-[state=inactive]:hidden">
+                    {detailLoading || !detail ? (
+                      <div className="flex items-center gap-2 p-5 text-muted-foreground text-xs">
+                        <Loader2Icon className="size-3.5 animate-spin" />
+                        Loading…
+                      </div>
+                    ) : (
+                      <ReplayPanel
+                        exchange={selected}
+                        raw={requestWithHost(detail.req, selected)}
+                        methods={METHODS}
+                        onRecorded={() => setReloadTick((n) => n + 1)}
+                      />
+                    )}
+                  </TabsContent>
+                )}
               </Tabs>
             </>
           )}

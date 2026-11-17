@@ -82,9 +82,16 @@ func applyTaskArchiveBlocker(dto *TaskDTO, blockers map[int64]int64) {
 	if err != nil {
 		return
 	}
-	if dependentID := blockers[taskID]; dependentID > 0 {
-		dto.ArchiveBlockedBy = strconv.FormatInt(dependentID, 10)
+	applyTaskArchiveBlockerID(dto, blockers[taskID])
+}
+
+// applyTaskArchiveBlockerID records dependentID as the task's archive blocker;
+// 0 (nothing blocks it) leaves the DTO unchanged.
+func applyTaskArchiveBlockerID(dto *TaskDTO, dependentID int64) {
+	if dto == nil || dependentID <= 0 {
+		return
 	}
+	dto.ArchiveBlockedBy = strconv.FormatInt(dependentID, 10)
 }
 
 // TokenTotalDTO is a whole-task (all agents) token aggregate.
@@ -132,7 +139,7 @@ func taskDTO(t *Task, status string) TaskDTO {
 		LLMProfileID:       llmState.ProfileID,
 		LLMProfileIDs:      profileIDs,
 		ActiveLLMProfileID: llmState.ActiveID,
-		LLMRotate:          t.LLMRotate,
+		LLMRotate:          llmState.Rotate,
 		LLMFailoverState:   llmState.FailoverState,
 		LLMFailoverReason:  llmState.FailoverReason,
 		SourceTaskIDs:      sourceIDs,

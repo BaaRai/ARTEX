@@ -62,6 +62,31 @@ docker compose logs artex | grep "Setup token"
 
 ---
 
+## Multi-provider workers
+
+In **System → LLM**, configure the profiles you want to use. In **System → Settings**,
+set the concurrent worker count to at least **2** before starting a task (the count
+applies to subsequently started tasks). In **System → Agents → Worker**, leave the
+model set to follow the task; a fixed Worker model takes precedence over rotation.
+
+When creating a task, select both profiles in **LLM config chain**, arrange their
+order, and enable **Enable multi-LLM worker rotation**. For an existing task, open
+its LLM config control, change the switch or profile order, and save.
+
+Rotation assigns successive worker intents A, B, A, B, regardless of completion
+order. Separate intents can run concurrently on different providers; each intent
+keeps its selected provider unless it fails over. Planner and other unbound roles
+continue using the task's current profile. Turning rotation off restores ordered
+task-level failover. An excluded provider is skipped, so an intent pinned to an
+exhausted profile falls back to the task's current profile instead of retrying it;
+rotation keeps cycling the whole list and does not rebalance around a dead provider.
+Saving the chain resets their failure state. Changes do not interrupt in-flight
+calls. The rotation cursor starts again after a server restart and saving the chain
+does not reset it; the profile order and switch remain persisted.
+
+The task creation and `PUT /api/tasks/{id}/llm` APIs accept `llm_rotate: true` alongside
+the ordered `llm_profile_ids`. Omitting `llm_rotate` on an update preserves its value.
+
 ## Screenshots
 
 | Tasks | Findings |
@@ -510,7 +535,8 @@ gunzip -c backups/artex-db-<timestamp>.sql.gz | docker compose exec -T postgres 
 ```
 
 Stored secrets (LLM API keys and proxies, MCP env, task credentials, notification channel config,
-Brave/Tavily search keys, web search and global proxies, the execution spec of custom tools) are
+Brave/Tavily search keys, web search and global proxies, the execution spec of custom tools, the
+capture-proxy rewrite rules) are
 encrypted in the database with the key in `keys/secret.key` (generated at first start, mode 0600,
 next to `jwt.key`). **A database backup without that key cannot restore those secrets**: back up
 `keys/` with the dump, separately. Deployments without a persistent disk set
@@ -682,7 +708,8 @@ Please report vulnerabilities privately through GitHub Security Advisories; see
 Operational security properties:
 
 - **Secrets at rest**: LLM keys/proxies, MCP environment, task credentials, notification config,
-  search keys, proxies, custom-tool execution specs and traffic evidence snapshots are encrypted
+  search keys, proxies, custom-tool execution specs, capture-proxy rewrite rules and traffic
+  evidence snapshots are encrypted
   with AES-256-GCM using `keys/secret.key` (or `ARTEX_SECRET_KEY`). ARTEX refuses to start when
   encrypted data exists and no usable key is available.
 - **First-run claim**: `/setup` requires a one-time token printed at startup; the UI binds to

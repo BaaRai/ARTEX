@@ -88,7 +88,7 @@ func (s *Server) seedFindingWorkflowTools() {
 	// Upgrade only the original default binding. Customized lists and enabled
 	// flags survive; the one-time flag also preserves future user unbinding.
 	readers := `["worker","reporter"]`
-	for _, key := range []string{"traffic_search", "traffic_get", "traffic_blob"} {
+	for _, key := range []string{"traffic_search", "traffic_get", "traffic_blob", "traffic_messages"} {
 		if _, err := s.m.pg.Exec(`UPDATE tools SET agents=$2::jsonb WHERE key=$1 AND system AND (agents='["worker"]'::jsonb OR (agents @> '["worker","planner","mainagent","auto","pentest"]'::jsonb AND jsonb_array_length(agents)=5))`, key, readers); err != nil {
 			return
 		}

@@ -32,6 +32,7 @@ export interface Task {
   tokens?: TokenTotal; // whole-task token consumption
   llm_profile_id?: number; // LLM profile used; absent = default profile
   llm_profile_ids?: number[]; // ordered task-level failover chain
+  llm_rotate?: boolean;
   active_llm_profile_id?: number; // profile used by the next LLM call
   llm_failover_state?: "default" | "ready" | "chain_exhausted" | string;
   llm_failover_reason?: string;
@@ -911,6 +912,58 @@ export interface TrafficResp {
 export interface TrafficDetail {
   req: string;
   resp: string;
+  // WebSocket/SSE exchanges carry their messages separately (trafficStream);
+  // stream_kind is "" for an ordinary exchange.
+  stream_count?: number;
+  stream_kind?: "websocket" | "sse" | "";
+}
+
+// One recorded WebSocket message or SSE event. ts is in Unix seconds; seq
+// orders. payload is a preview of at most 4 KiB (base64 when encoding is
+// "base64"); blob names the full payload when it was stored separately.
+export interface TrafficStreamMessage {
+  seq: number;
+  ts: number;
+  direction: "c2s" | "s2c" | "meta" | (string & {});
+  kind: number;
+  type: "text" | "binary" | "event" | "meta" | (string & {});
+  event?: string;
+  event_id?: string;
+  retry?: number;
+  size: number;
+  payload: string;
+  encoding?: string;
+  blob?: string;
+  truncated?: boolean;
+}
+
+export interface TrafficStreamPage {
+  items: TrafficStreamMessage[];
+  total: number;
+}
+
+export interface TrafficReplayHeader {
+  name: string;
+  value: string;
+}
+
+// POST /api/traffic/replay. Host is not sent: the server takes it from url.
+export interface TrafficReplayRequest {
+  method: string;
+  url: string;
+  headers: TrafficReplayHeader[];
+  body: string;
+  body_base64: boolean;
+}
+
+export interface TrafficReplayResult {
+  status: number;
+  headers: TrafficReplayHeader[];
+  raw: string;
+  duration_ms: number;
+  truncated: boolean;
+  // false when the host is in passthrough: the response was not recorded.
+  recorded: boolean;
 }
 
 // One distinct recorded host with its exchange count (target picker).

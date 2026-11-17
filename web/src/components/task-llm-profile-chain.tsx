@@ -18,9 +18,13 @@ import {
   ComboboxValue,
 } from "@/components/ui/combobox";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { api } from "@/lib/api";
 import type { LLMProfile } from "@/lib/types";
 
 interface TaskLLMProfileChainProps {
+  rotate?: boolean;
+  onRotateChange?: (rotate: boolean) => void;
   profiles: LLMProfile[];
   value: string[];
   onValueChange: (value: string[]) => void;
@@ -44,6 +48,8 @@ function ProfileRoleBadge({ index, currentIndex }: { index: number; currentIndex
 }
 
 export function TaskLLMProfileChain({
+  rotate = false,
+  onRotateChange,
   profiles,
   value,
   onValueChange,
@@ -53,6 +59,15 @@ export function TaskLLMProfileChain({
   inputId,
   portalContainer,
 }: TaskLLMProfileChainProps) {
+  const rotationID = React.useId();
+  const [workerBinding, setWorkerBinding] = React.useState<number | null>(null);
+  const [bindingCheckFailed, setBindingCheckFailed] = React.useState(false);
+  React.useEffect(() => {
+    api
+      .agents()
+      .then((agents) => setWorkerBinding(agents.find((a) => a.key === "worker")?.llm_profile_id ?? null))
+      .catch(() => setBindingCheckFailed(true));
+  }, []);
   const profilesByID = React.useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
   const itemIDs = React.useMemo(() => profiles.map((profile) => profile.id), [profiles]);
   const profilesUnavailable = profiles.length === 0;
@@ -92,6 +107,39 @@ export function TaskLLMProfileChain({
 
   return (
     <div className="flex flex-col gap-3">
+      {onRotateChange && (
+        <div className="flex flex-col gap-2">
+          <label htmlFor={rotationID} className="flex items-center justify-between gap-3 font-medium text-sm">
+            Enable multi-LLM worker rotation
+            <Switch id={rotationID} checked={rotate} onCheckedChange={onRotateChange} disabled={disabled} />
+          </label>
+          <p className="text-muted-foreground text-xs">
+            {rotate
+              ? "New worker intents use the selected profiles in round-robin order. Independent workers can run on different providers simultaneously. Other roles keep the current profile."
+              : "Ordered failover: workers share the current profile and switch after quota exhaustion or repeated provider failures."}
+          </p>
+          {rotate && value.length < 2 && (
+            <p className="text-amber-600 text-xs">Select at least two profiles to distribute work across providers.</p>
+          )}
+          {rotate && workerBinding != null && (
+            <p role="alert" className="text-amber-600 text-xs">
+              Worker has a fixed model binding, which overrides rotation. Set Worker’s model to follow the task in Agent
+              settings to use these profiles.
+            </p>
+          )}
+          {rotate && bindingCheckFailed && (
+            <p className="text-amber-600 text-xs">
+              Worker binding could not be checked. A fixed Worker model overrides rotation; verify Agent settings.
+            </p>
+          )}
+          {rotate && (
+            <p className="text-muted-foreground text-xs">
+              Set concurrent worker count to at least 2 in System settings before starting the task. In-flight calls
+              keep their provider. Exhausted profiles are skipped until the chain is reset.
+            </p>
+          )}
+        </div>
+      )}
       <Combobox
         items={itemIDs}
         itemToStringValue={profileLabel}
@@ -136,7 +184,9 @@ export function TaskLLMProfileChain({
       </Combobox>
 
       {value.length === 0 ? (
-        <p className="text-muted-foreground text-xs">When no profile is set, the task follows the agent or the global active profile.</p>
+        <p className="text-muted-foreground text-xs">
+          When no profile is set, the task follows the agent or the global active profile.
+        </p>
       ) : (
         <div className="flex flex-col divide-y rounded-lg border">
           {value.map((id, index) => {
@@ -153,7 +203,11 @@ export function TaskLLMProfileChain({
                     <p className="truncate text-muted-foreground text-xs">{profile?.model ?? "Profile unavailable"}</p>
                   </div>
                 </div>
-                <ProfileRoleBadge index={index} currentIndex={currentIndex} />
+                {rotate ? (
+                  <Badge variant="secondary">Rotation {index + 1}</Badge>
+                ) : (
+                  <ProfileRoleBadge index={index} currentIndex={currentIndex} />
+                )}
                 <div className="col-span-2 col-start-2 flex shrink-0 items-center gap-1 justify-self-end sm:col-auto sm:justify-self-auto">
                   <Button
                     type="button"
@@ -194,7 +248,7 @@ export function TaskLLMProfileChain({
 
       {onActiveProfileChange && value.length > 0 && (
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <span className="font-medium text-sm">Current profile</span>
+          <span className="font-medium text-sm">{rotate ? "Planner / failover profile" : "Current profile"}</span>
           <Select
             value={activeProfileId && value.includes(activeProfileId) ? activeProfileId : value[0]}
             onValueChange={onActiveProfileChange}

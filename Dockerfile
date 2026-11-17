@@ -145,14 +145,25 @@ RUN set -eux; \
 # preinstalled (--install-all-deps) so scans never need pip at runtime, which
 # would fail under a program's egress allowlist.
 ARG BBOT_VERSION=3.0.2
+# arm64: bbot's Chrome and retirejs's Node are x86-64; use native builds.
 RUN set -eux; \
     python -m venv /opt/bbot; \
     /opt/bbot/bin/pip install --no-cache-dir "bbot==${BBOT_VERSION}"; \
     ln -s /opt/bbot/bin/bbot /usr/local/bin/bbot; \
+    if [ "${TARGETARCH:-amd64}" = "arm64" ]; then \
+      apt-get update; \
+      apt-get install -y --no-install-recommends chromium; \
+      rm -rf /var/lib/apt/lists/*; \
+      bbot_dir="$(/opt/bbot/bin/python -c 'import bbot, os; print(os.path.dirname(bbot.__file__))')"; \
+      sed -i 's/linux-x64/linux-arm64/g' "$bbot_dir/modules/retirejs.py"; \
+    fi; \
     bbot -y --install-all-deps; \
+    if [ "${TARGETARCH:-amd64}" = "arm64" ]; then \
+      printf '\nmodules:\n  gowitness:\n    chrome_path: /usr/bin/chromium\n' >> /root/.config/bbot/bbot.yml; \
+    fi; \
     bbot --version >/dev/null; \
-    bbot --dry-run -t example.com -m wafw00f,paramminer_getparams,lightfuzz,sslcert,gowitness >/dev/null 2>&1 || true; \
-    bbot --dry-run -t example.com -m wafw00f,paramminer_getparams,lightfuzz,sslcert,gowitness --no-color >/tmp/bbot-dry.log 2>&1 || true; \
+    bbot --dry-run -t example.com -m wafw00f,paramminer_getparams,lightfuzz,sslcert,gowitness,retirejs >/dev/null 2>&1 || true; \
+    bbot --dry-run -t example.com -m wafw00f,paramminer_getparams,lightfuzz,sslcert,gowitness,retirejs --no-color >/tmp/bbot-dry.log 2>&1 || true; \
     ! grep -qE "Installing|ERRR|CRITICAL" /tmp/bbot-dry.log || { cat /tmp/bbot-dry.log; exit 1; }
 
 

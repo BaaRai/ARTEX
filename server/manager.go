@@ -24,6 +24,7 @@ import (
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/traffic"
+	"github.com/Autumn-27/artex/traffic/rewrite"
 	actool "github.com/Autumn-27/norma/tool"
 )
 
@@ -161,6 +162,7 @@ func (t *Task) updateLifecycle(update func(*taskLifecycleState)) {
 }
 
 type taskLLMState struct {
+	Rotate         bool
 	ProfileID      *int64
 	ProfileIDs     []int64
 	ActiveID       *int64
@@ -181,6 +183,7 @@ func (t *Task) llmStateSnapshot() taskLLMState {
 	t.llmMu.RLock()
 	defer t.llmMu.RUnlock()
 	return taskLLMState{
+		Rotate:         t.LLMRotate,
 		ProfileID:      cloneInt64Ptr(t.LLMProfileID),
 		ProfileIDs:     append(make([]int64, 0, len(t.LLMProfileIDs)), t.LLMProfileIDs...),
 		ActiveID:       cloneInt64Ptr(t.ActiveLLMProfileID),
@@ -195,10 +198,12 @@ func (t *Task) llmStateSnapshot() taskLLMState {
 // chain. The active head stays authoritative for every non-worker role and for
 // failover ordering; rotation only distributes worker lanes across heads.
 func (t *Task) nextRotatedProfile() (int64, bool) {
+	t.llmMu.RLock()
+	defer t.llmMu.RUnlock()
 	t.rotateMu.Lock()
 	defer t.rotateMu.Unlock()
 	ids := t.LLMProfileIDs
-	if len(ids) == 0 {
+	if !t.LLMRotate || len(ids) == 0 {
 		return 0, false
 	}
 	pick := ids[t.rotateNext%len(ids)]
@@ -206,11 +211,14 @@ func (t *Task) nextRotatedProfile() (int64, bool) {
 	return pick, true
 }
 
-func (t *Task) setLLMState(profileID, activeID *int64, profileIDs []int64, revision int64, state, reason string) bool {
+func (t *Task) setLLMState(profileID, activeID *int64, profileIDs []int64, revision int64, state, reason string, rotate ...bool) bool {
 	t.llmMu.Lock()
 	defer t.llmMu.Unlock()
 	if revision < t.LLMChainRevision {
 		return false
+	}
+	if len(rotate) > 0 {
+		t.LLMRotate = rotate[0]
 	}
 	t.LLMProfileID = cloneInt64Ptr(profileID)
 	t.ActiveLLMProfileID = cloneInt64Ptr(activeID)
@@ -252,6 +260,12 @@ type Manager struct {
 	traffic     *traffic.Traffic       // process-wide recording proxy (may be nil)
 	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
+
+	// Capture-proxy rewrite rules: rewriteMu serializes reloads, rewriteSet is
+	// the snapshot last compiled, rewriteErrors outlives the reloads.
+	rewriteMu     sync.Mutex
+	rewriteSet    atomic.Pointer[rewrite.Set]
+	rewriteErrors rewrite.ErrorLog
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
@@ -442,6 +456,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		}
 		if tr != nil {
 			m.traffic = tr
+			m.reloadRewriteRules() // in place before the proxy accepts a connection
 			go func() {
 				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
 				if err := tr.Start(); err != nil {
@@ -1132,12 +1147,12 @@ func (m *Manager) DeleteCompanyWithAssets(id int64, deleteAssets bool) (int64, e
 // ReplaceTaskLLMProfiles resets a task's ordered provider chain and mirrors the
 // committed state onto the live task handle. Terminal tasks are editable too —
 // their main-agent conversation keeps running on the chain after the task finishes.
-func (m *Manager) ReplaceTaskLLMProfiles(id string, profileIDs []int64, activeProfileID int64) (int64, error) {
+func (m *Manager) ReplaceTaskLLMProfiles(id string, profileIDs []int64, activeProfileID int64, rotate ...*bool) (int64, error) {
 	n, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		return 0, err
 	}
-	if err := m.pg.ReplaceTaskLLMProfiles(n, profileIDs, activeProfileID); err != nil {
+	if err := m.pg.ReplaceTaskLLMProfiles(n, profileIDs, activeProfileID, rotate...); err != nil {
 		return 0, err
 	}
 	pt, err := m.pg.GetTask(n)
@@ -1146,7 +1161,7 @@ func (m *Manager) ReplaceTaskLLMProfiles(id string, profileIDs []int64, activePr
 	}
 	m.mu.Lock()
 	if task := m.tasks[id]; task != nil {
-		task.setLLMState(pt.LLMProfileID, pt.ActiveLLMProfileID, pt.LLMProfileIDs, pt.LLMChainRevision, pt.LLMFailoverState, pt.LLMFailoverReason)
+		task.setLLMState(pt.LLMProfileID, pt.ActiveLLMProfileID, pt.LLMProfileIDs, pt.LLMChainRevision, pt.LLMFailoverState, pt.LLMFailoverReason, pt.LLMRotate)
 	}
 	m.mu.Unlock()
 	// Terminal tasks do not reopen budget-blocked intents: no worker is running for

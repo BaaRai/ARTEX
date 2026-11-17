@@ -184,6 +184,18 @@ func TestApplyTaskArchiveBlocker(t *testing.T) {
 	if !strings.Contains(string(raw), `"archive_blocked_by_task_id":"11"`) {
 		t.Fatalf("archive blocker missing from payload: %s", raw)
 	}
+
+	byID := taskDTO(&Task{ID: "7"}, "paused")
+	applyTaskArchiveBlockerID(&byID, 12)
+	if byID.ArchiveBlockedBy != "12" {
+		t.Fatalf("archive blocker by id=%q, want 12", byID.ArchiveBlockedBy)
+	}
+	none := taskDTO(&Task{ID: "7"}, "paused")
+	applyTaskArchiveBlockerID(&none, 0)
+	if none.ArchiveBlockedBy != "" {
+		t.Fatalf("no blocker set %q", none.ArchiveBlockedBy)
+	}
+	applyTaskArchiveBlockerID(nil, 12) // must not panic
 }
 
 func TestTaskLLMStateSnapshotIsConcurrentAndDetached(t *testing.T) {

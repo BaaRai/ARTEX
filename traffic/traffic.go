@@ -31,6 +31,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/traffic/rewrite"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
@@ -73,6 +74,24 @@ CREATE TABLE IF NOT EXISTS blob_refs (
   PRIMARY KEY (hash, exchange_id)
 );
 CREATE INDEX IF NOT EXISTS idx_blob_refs_ex ON blob_refs(exchange_id);
+
+-- WebSocket messages and SSE events of a stream exchange, in arrival order.
+CREATE TABLE IF NOT EXISTS stream_messages (
+  exchange_id  TEXT NOT NULL,
+  seq          INTEGER NOT NULL,
+  ts           INTEGER NOT NULL,            -- unix seconds, like exchanges.ts
+  direction    TEXT NOT NULL,               -- 'c2s' | 's2c' | 'meta'
+  kind         INTEGER NOT NULL,            -- WebSocket opcode (1 text, 2 binary), 0 for SSE and meta
+  event        TEXT NOT NULL DEFAULT '',
+  event_id     TEXT NOT NULL DEFAULT '',
+  retry        INTEGER NOT NULL DEFAULT 0,
+  size         INTEGER NOT NULL,            -- original payload size
+  payload      BLOB,                        -- inline payload, or a preview when spilled
+  payload_blob TEXT,                        -- sha256 of the spilled payload
+  truncated    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (exchange_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_stream_messages_ex ON stream_messages(exchange_id, seq);
 `
 
 // ftsSchema is applied separately from indexSchema: a driver build without FTS5
@@ -90,6 +109,14 @@ const (
 	// maxInlineBody is the cutoff between a body stored inline (SQLite column) and
 	// one spilled to the content-addressed blob store.
 	maxInlineBody = 256 * 1024
+	// maxStreamPayload is how much of one WebSocket message or SSE event is kept.
+	// A longer payload keeps its prefix, with truncated=1 and its original size.
+	maxStreamPayload = 1024 * 1024
+	// maxStreamMessages and maxStreamBytes bound one stream exchange (bytes as
+	// stored, after truncation). Past either, storing stops and a single 'meta'
+	// row records how many messages and bytes were dropped.
+	maxStreamMessages = 10000
+	maxStreamBytes    = 32 * 1024 * 1024
 	// blobPreview is how much of a spilled body stays inline so readers can tell
 	// what it is (JSON shape, SQL dump header, ZIP magic) without fetching it.
 	blobPreview = 8 * 1024
@@ -170,6 +197,9 @@ type Traffic struct {
 	// transparent-passthrough paths honor it (go-mitmproxy's getUpstreamConn),
 	// so no host escapes it. Hot-swappable at runtime via SetUpstreamProxy.
 	upstream atomic.Pointer[url.URL]
+	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
+	// whole by SetRewriteRules. The proxy does not apply it yet.
+	rewriteRules atomic.Pointer[rewrite.Set]
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -327,6 +357,14 @@ func (t *Traffic) SetUpstreamProxy(raw string) error {
 	return nil
 }
 
+// SetRewriteRules publishes a compiled snapshot of the rewrite rules. The swap
+// is atomic; nil clears the rules. The snapshot is stored only: the proxy does
+// not apply rewrite rules yet, so capture is unchanged whatever it holds.
+func (t *Traffic) SetRewriteRules(s *rewrite.Set) { t.rewriteRules.Store(s) }
+
+// RewriteRules returns the snapshot last published, nil when there is none.
+func (t *Traffic) RewriteRules() *rewrite.Set { return t.rewriteRules.Load() }
+
 // ValidateProxyURL parses and checks a proxy URL (http/https/socks5, optional
 // user:pass), returning the parsed URL. Exposed so callers can validate a global
 // proxy before persisting it even when the traffic proxy itself is disabled.
@@ -387,8 +425,9 @@ func (t *Traffic) DB() *sql.DB { return t.db }
 // the requests of client connections marked for pacing (see pace.go).
 type sink struct {
 	mproxy.BaseAddon
-	t     *Traffic
-	paced sync.Map // ClientConn.Id of a marked connection -> struct{}
+	t       *Traffic
+	paced   sync.Map // ClientConn.Id of a marked connection -> struct{}
+	streams sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
 }
 
 func (s *sink) Response(f *mproxy.Flow) {
@@ -443,9 +482,8 @@ func (t *Traffic) record(f *mproxy.Flow) {
 	host := f.Request.URL.Hostname()
 	method := f.Request.Method
 	tmpl := db.TemplatePath(f.Request.URL.EscapedPath())
-	n := t.seq.Add(1)
 	now := time.Now()
-	id := fmt.Sprintf("%d-%04d", now.Unix(), n%10000)
+	id := t.newExchangeID(now)
 
 	ct := f.Response.Header.Get("Content-Type")
 	url := f.Request.URL.String()
@@ -511,6 +549,12 @@ VALUES(?,?,?,?,?,?,?)`,
 	}
 }
 
+// newExchangeID names a recorded exchange: unix seconds plus a rolling sequence.
+func (t *Traffic) newExchangeID(now time.Time) string {
+	n := t.seq.Add(1)
+	return fmt.Sprintf("%d-%04d", now.Unix(), n%10000)
+}
+
 // storedBody is one body after the inline/spill decision: inline is what goes in
 // the SQLite column (the whole body, or a preview when spilled), hash names the
 // blob when it spilled, and index is the text handed to FTS (empty for binary).
@@ -526,6 +570,12 @@ type storedBody struct {
 // are handed to the full-text index in full (up to maxIndexBody) — indexing is
 // independent of where the bytes end up.
 func (t *Traffic) spill(body []byte, contentType string) storedBody {
+	return t.spillAt(body, contentType, maxInlineBody)
+}
+
+// spillAt is spill with the inline threshold as a parameter: bodies up to
+// maxInline stay inline. Stream messages use a much lower one (maxStreamInline).
+func (t *Traffic) spillAt(body []byte, contentType string, maxInline int) storedBody {
 	if len(body) == 0 {
 		return storedBody{}
 	}
@@ -536,7 +586,7 @@ func (t *Traffic) spill(body []byte, contentType string) storedBody {
 		}
 		return string(clipBytes(body, maxIndexBody))
 	}
-	if len(body) <= maxInlineBody {
+	if len(body) <= maxInline {
 		return storedBody{inline: body, index: indexText()}
 	}
 
@@ -1190,6 +1240,9 @@ func (t *Traffic) deleteWhere(tx *sql.Tx, where string, args ...any) (int64, err
 	}
 	if _, err := tx.Exec(`DELETE FROM exchange_bodies WHERE id IN (SELECT id FROM exchanges WHERE `+where+`)`, args...); err != nil {
 		return 0, fmt.Errorf("delete bodies: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM stream_messages WHERE exchange_id IN (SELECT id FROM exchanges WHERE `+where+`)`, args...); err != nil {
+		return 0, fmt.Errorf("delete stream messages: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM blob_refs WHERE exchange_id IN (SELECT id FROM exchanges WHERE `+where+`)`, args...); err != nil {
 		return 0, fmt.Errorf("delete blob references: %w", err)
@@ -2058,7 +2111,7 @@ func (t *Traffic) Tools() []actool.CoreTool {
 
 	get := actool.Build(actool.Spec{
 		Name:        "traffic_get",
-		Description: "Fetch the raw request/response of one captured traffic record by id (truncated when too large). Use together with traffic_search to avoid re-curling.",
+		Description: "Fetch the raw request/response of one captured traffic record by id (truncated when too large). Use together with traffic_search to avoid re-curling. A WebSocket (status 101) or SSE (text/event-stream) record shows only its handshake here; read its messages with traffic_messages.",
 		Schema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{"id": map[string]any{"type": "string", "description": "the id returned by traffic_search"}},
@@ -2116,7 +2169,70 @@ func (t *Traffic) Tools() []actool.CoreTool {
 		},
 	})
 
-	return []actool.CoreTool{search, get, blob}
+	messages := actool.Build(actool.Spec{
+		Name:        "traffic_messages",
+		Description: "List the messages of one captured WebSocket or SSE (Server-Sent Events) record in order: direction (c2s client→server, s2c server→client), type (text/binary/event, or meta when the recorder dropped messages past its limits), size and a preview of at most 1KB (binary as hex). A payload stored as a blob carries its hash; read the rest with traffic_blob. Returns 20 messages by default, at most 50; use offset to page.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id":     map[string]any{"type": "string", "description": "the record id from traffic_search (a WebSocket status-101 or SSE record)"},
+				"offset": map[string]any{"type": "integer", "description": "number of messages to skip, default 0"},
+				"limit":  map[string]any{"type": "integer", "description": "messages to return, default 20, max 50"},
+			},
+			"required": []any{"id"},
+		},
+		ReadOnly:    ro,
+		Permissions: allow,
+		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+			var a struct {
+				ID     string
+				Offset int
+				Limit  int
+			}
+			_ = json.Unmarshal(in, &a)
+			if strings.TrimSpace(a.ID) == "" {
+				return actool.Errorf("id is a required parameter"), nil
+			}
+			if a.Limit <= 0 {
+				a.Limit = 20
+			}
+			if a.Limit > 50 {
+				a.Limit = 50
+			}
+			if a.Offset < 0 {
+				a.Offset = 0
+			}
+			msgs, total, err := t.StreamMessages(a.ID, a.Offset, a.Limit)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			if total == 0 {
+				return actool.Text("No stream messages recorded for this id (not a WebSocket/SSE record, or no message was exchanged)."), nil
+			}
+			type liteMsg struct {
+				Seq       int64  `json:"seq"`
+				Direction string `json:"direction"`
+				Type      string `json:"type"`
+				Event     string `json:"event,omitempty"`
+				Size      int    `json:"size"`
+				Preview   string `json:"preview"`
+				Blob      string `json:"blob,omitempty"`
+				Truncated bool   `json:"truncated,omitempty"`
+			}
+			lite := make([]liteMsg, 0, len(msgs))
+			for _, m := range msgs {
+				l := liteMsg{Seq: m.Seq, Direction: m.Direction, Type: m.Type, Event: m.Event, Size: m.Size, Preview: streamToolPreview(m), Truncated: m.Truncated}
+				if m.Blob != "" {
+					l.Blob = "@blob sha256:" + m.Blob
+				}
+				lite = append(lite, l)
+			}
+			b, _ := json.Marshal(lite)
+			return actool.Text(fmt.Sprintf("[messages %d-%d of %d]\n", a.Offset+1, a.Offset+len(msgs), total) + string(b)), nil
+		},
+	})
+
+	return []actool.CoreTool{search, get, blob, messages}
 }
 
 // SeedToolMetas returns the traffic tools built on a ZERO receiver, for seeding the

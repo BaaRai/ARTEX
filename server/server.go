@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -823,8 +824,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/traffic/hosts", s.deleteTrafficHosts)
 	mux.HandleFunc("DELETE /api/traffic/all", s.deleteAllTraffic)
 	mux.HandleFunc("GET /api/traffic/exchange", s.getTrafficExchange)
+	mux.HandleFunc("GET /api/traffic/stream", s.getTrafficStream)
 	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
 	mux.HandleFunc("POST /api/traffic/ingest", s.ingestTraffic)
+	mux.HandleFunc("POST /api/traffic/replay", s.replayTraffic)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // aggregate call counts per tool
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
@@ -949,6 +952,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/intercept/rules/{id}", s.interceptUpdateRule)
 	mux.HandleFunc("DELETE /api/intercept/rules/{id}", s.interceptDeleteRule)
 	mux.HandleFunc("POST /api/intercept/rules/{id}/toggle", s.interceptToggleRule)
+
+	// capture-proxy rewrite rule management (stored and compiled; not applied by the proxy yet)
+	mux.HandleFunc("GET /api/traffic/rewrite-rules", s.rewriteListRules)
+	mux.HandleFunc("POST /api/traffic/rewrite-rules", s.rewriteCreateRule)
+	mux.HandleFunc("PUT /api/traffic/rewrite-rules/{id}", s.rewriteUpdateRule)
+	mux.HandleFunc("DELETE /api/traffic/rewrite-rules/{id}", s.rewriteDeleteRule)
+	mux.HandleFunc("POST /api/traffic/rewrite-rules/{id}/toggle", s.rewriteToggleRule)
 
 	// asset interception rule management (global blocklist: domains/IPs/URLs/CIDRs)
 	mux.HandleFunc("GET /api/asset-intercept/rules", s.assetInterceptListRules)
@@ -1614,7 +1624,7 @@ type createTaskReq struct {
 	SourceTaskIDs        []string `json:"source_task_ids,omitempty"` // direct, read-only inherited source tasks
 	CompanyIDs           []int64  `json:"company_ids,omitempty"`     // links the company scope and snapshots its current assets; does not copy assets or force intent generation
 	TimeoutSeconds       int      `json:"timeout_seconds"`
-	LLMRotate            *bool    `json:"llm_rotate"`                  // task-level timeout (seconds); 0/omitted = no limit
+	LLMRotate            *bool    `json:"llm_rotate"`                  // distribute worker intents across the ordered profiles
 	PlanHeartbeatSeconds int      `json:"plan_heartbeat_seconds"`      // planner heartbeat interval (seconds); 0/omitted = default 600 (10min); floor = default = 600, lower values are raised to 600
 	PlanQuietMode        *bool    `json:"plan_quiet_mode,omitempty"`   // planner quiet-mode switch (#86); omitted = default on; false = edge rounds always plan
 	TargetGate           *bool    `json:"target_gate,omitempty"`       // approval gate for asset targets, opt-in; omitted/null = off
@@ -1755,6 +1765,7 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LLMProfileIDs      []int64 `json:"llm_profile_ids"`
 		ActiveLLMProfileID *int64  `json:"active_llm_profile_id"`
+		LLMRotate          *bool   `json:"llm_rotate"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
@@ -1768,7 +1779,7 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	if req.ActiveLLMProfileID != nil {
 		active = *req.ActiveLLMProfileID
 	}
-	reopened, err := s.m.ReplaceTaskLLMProfiles(t.ID, req.LLMProfileIDs, active)
+	reopened, err := s.m.ReplaceTaskLLMProfiles(t.ID, req.LLMProfileIDs, active, req.LLMRotate)
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
@@ -1782,6 +1793,7 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	llmState := t.llmStateSnapshot()
 	result := map[string]any{
 		"id": t.ID, "llm_profile_ids": llmState.ProfileIDs,
+		"llm_rotate":            llmState.Rotate,
 		"active_llm_profile_id": llmState.ActiveID,
 		"llm_failover_state":    llmState.FailoverState, "reopened_intents": reopened,
 	}
@@ -1932,8 +1944,10 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[tasks] detail metrics query failed for %s — metrics zeroed: %v", t.ID, err)
 	}
 	s.applyTaskMetrics(&dto, t, metrics)
-	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
-	applyTaskArchiveBlocker(&dto, archiveBlockers)
+	// Best effort: only this task's blocker, not the whole relation table.
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	blocker, _ := s.m.PG().TaskArchiveBlocker(taskID)
+	applyTaskArchiveBlockerID(&dto, blocker)
 	writeJSON(w, 200, dto)
 }
 
@@ -3449,7 +3463,103 @@ func (s *Server) getTrafficExchange(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"req": req, "resp": resp})
+	// A WebSocket or SSE exchange carries its messages separately
+	// (GET /api/traffic/stream); stream_kind is "" for an ordinary exchange.
+	count, kind, err := tr.StreamInfo(id)
+	if err != nil {
+		log.Printf("[traffic] stream info for %s: %v", id, err)
+	}
+	writeJSON(w, 200, map[string]any{"req": req, "resp": resp, "stream_count": count, "stream_kind": kind})
+}
+
+// getTrafficStream returns one page of a WebSocket/SSE exchange's messages in
+// order (limit 1..200, default 50).
+func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeErr(w, 404, "traffic disabled")
+		return
+	}
+	q := r.URL.Query()
+	id := strings.TrimSpace(q.Get("exchange"))
+	if id == "" {
+		writeErr(w, 400, "missing exchange")
+		return
+	}
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	msgs, total, err := tr.StreamMessages(id, offset, limit)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": msgs, "total": total})
+}
+
+// maxReplayRequestBytes bounds the replay request body (JSON, with the payload
+// possibly base64-encoded); traffic.Replay applies its own body limit after
+// decoding.
+const maxReplayRequestBytes = 16 << 20
+
+// replayTraffic sends an edited request through the recording proxy and returns
+// the response; the proxy records the exchange like any other.
+//
+// Operator-only: this is the equivalent of pointing a browser at the proxy, and
+// no agent tool exposes it. If an agent tool is ever added, it must go through
+// the target gate and the task's scope like every other outbound request.
+func (s *Server) replayTraffic(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeErr(w, 503, "traffic disabled")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxReplayRequestBytes)
+	var body struct {
+		Method     string                 `json:"method"`
+		URL        string                 `json:"url"`
+		Headers    []traffic.ReplayHeader `json:"headers"`
+		Body       string                 `json:"body"`
+		BodyBase64 bool                   `json:"body_base64"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, 413, "replay request too large")
+			return
+		}
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	payload := []byte(body.Body)
+	if body.BodyBase64 {
+		decoded, err := base64.StdEncoding.DecodeString(body.Body)
+		if err != nil {
+			writeErr(w, 400, "body is not valid base64: "+err.Error())
+			return
+		}
+		payload = decoded
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	res, err := tr.Replay(ctx, traffic.ReplayRequest{Method: body.Method, URL: body.URL, Headers: body.Headers, Body: payload})
+	switch {
+	case errors.Is(err, traffic.ErrReplayTooLarge):
+		writeErr(w, 413, err.Error())
+		return
+	case errors.Is(err, traffic.ErrReplayInvalid):
+		writeErr(w, 400, err.Error())
+		return
+	case errors.Is(err, context.DeadlineExceeded):
+		writeErr(w, 504, "replay timed out")
+		return
+	case err != nil:
+		writeErr(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"status": res.Status, "headers": res.Headers, "raw": res.Raw, "duration_ms": res.DurationMS,
+		"truncated": res.Truncated, "recorded": res.Recorded,
+	})
 }
 
 // getTrafficBlob streams one oversized body by its sha256. Bodies past the inline
@@ -4118,14 +4228,35 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
 			counts[ty] = len(ns)
 		}
 	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	var ledger *db.CoverageLedger
 	if t.CoverageEnabled {
-		taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 		ledger, _ = s.m.Assets().CoverageLedger(taskID)
+	}
+	// The exploration node payload carries only name/summary/evidence/severity/
+	// vulnclass. Everything the report says about proof strength (poe level,
+	// verification state and note, counterevidence, confidence rationale, both
+	// evidence versions, the reporter-written body) lives on the standalone findings
+	// row, joined by node_id, and one report-only query fetches all of it. The
+	// findings list keeps its own lean meta query: folding report bodies into it
+	// would fetch multi-KB text for rows that never render it.
+	//
+	// A lookup failure is not an absence. The report is generated on demand and can
+	// be retried, so a failed read fails loudly instead of rendering every finding as
+	// "not assessed" — a database error must never become a claim about the finding.
+	quality := map[int64]db.FindingQuality{} // pg-less deployments have no standalone rows at all
+	if s.m.pg != nil {
+		var err error
+		if quality, err = s.m.pg.FindingQualityByNodeID(taskID); err != nil {
+			log.Printf("[report] task=%s finding quality: %v", t.ID, err)
+			writeErr(w, 500, "report unavailable: the finding quality lookup failed, retry")
+			return
+		}
 	}
 	md := report.Markdown(report.Input{
 		Title: t.Description, Goal: t.Goal, GeneratedAt: time.Now(),
 		AssetCounts: counts, Findings: findings, Coverage: ledger,
+		Quality: quality,
 	})
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.WriteHeader(200)

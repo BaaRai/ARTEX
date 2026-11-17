@@ -79,15 +79,20 @@ type TaskArchive struct {
 	UpdatedAt               time.Time       `json:"updated_at"`
 }
 
+// archiveBlockerScope selects the live direct dependents that block archiving
+// their source task. TaskArchiveBlockers and TaskArchiveBlocker share it so the
+// list and the detail view cannot disagree.
+const archiveBlockerScope = `
+FROM task_relations relation
+JOIN tasks child ON child.id=relation.task_id AND child.deleted_at IS NULL
+LEFT JOIN task_archives pending ON pending.task_id=child.id
+WHERE (pending.id IS NULL OR pending.state NOT IN ('archive_queued','archiving'))`
+
 // TaskArchiveBlockers returns one live direct dependent for every source task
 // that cannot currently be archived. Dependents already queued for archiving do
 // not block their source because the FIFO worker will compact them first.
 func (d *DB) TaskArchiveBlockers() (map[int64]int64, error) {
-	rows, err := d.Query(`SELECT relation.source_task_id, MIN(child.id)
-FROM task_relations relation
-JOIN tasks child ON child.id=relation.task_id AND child.deleted_at IS NULL
-LEFT JOIN task_archives pending ON pending.task_id=child.id
-WHERE pending.id IS NULL OR pending.state NOT IN ('archive_queued','archiving')
+	rows, err := d.Query(`SELECT relation.source_task_id, MIN(child.id)` + archiveBlockerScope + `
 GROUP BY relation.source_task_id`)
 	if err != nil {
 		return nil, err
@@ -102,6 +107,18 @@ GROUP BY relation.source_task_id`)
 		blockers[sourceID] = dependentID
 	}
 	return blockers, rows.Err()
+}
+
+// TaskArchiveBlocker returns the live direct dependent that blocks taskID, or
+// 0 when nothing blocks it. Same rules as TaskArchiveBlockers, scoped to one
+// source task so getTask does not aggregate the whole relation table per poll.
+func (d *DB) TaskArchiveBlocker(taskID int64) (int64, error) {
+	var dependent sql.NullInt64
+	if err := d.QueryRow(`SELECT MIN(child.id)`+archiveBlockerScope+`
+AND relation.source_task_id=$1`, taskID).Scan(&dependent); err != nil {
+		return 0, err
+	}
+	return dependent.Int64, nil
 }
 
 type TaskArchivePage struct {
