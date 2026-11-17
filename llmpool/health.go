@@ -46,7 +46,9 @@ type Registry struct {
 	m  map[int64]*State
 
 	// persist / forget mirror state to the DB so a cooling-off window survives a
-	// restart. Both may be nil (no DB); both are called off the hot path.
+	// restart. Both may be nil (no DB). Both run while r.mu is held, so a later
+	// change to the same profile cannot enqueue ahead of this one. They must not
+	// call back into the registry or wait on database I/O.
 	persist func(id int64, st State)
 	forget  func(id int64)
 
@@ -118,16 +120,14 @@ func (r *Registry) IsOpen(id int64) bool { return r.Get(id).Open() }
 // recovers is fully trusted again (and drops the persisted row).
 func (r *Registry) Pass(id int64) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	st := r.m[id]
 	if st == nil || (st.Fails == 0 && st.Trips == 0 && st.OpenUntil.IsZero()) {
-		r.mu.Unlock()
-		return // already clean — nothing to write
+		return // already clean; nothing to write
 	}
 	delete(r.m, id)
-	forget := r.forget
-	r.mu.Unlock()
-	if forget != nil {
-		forget(id)
+	if r.forget != nil {
+		r.forget(id)
 	}
 }
 
@@ -137,6 +137,7 @@ func (r *Registry) Pass(id int64) {
 // true when this call is what opened the breaker, so the caller can log it once.
 func (r *Registry) Trip(id int64, errMsg string, hard bool) (tripped bool) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	st := r.m[id]
 	if st == nil {
 		st = &State{}
@@ -152,11 +153,8 @@ func (r *Registry) Trip(id int64, errMsg string, hard bool) (tripped bool) {
 		st.Fails = 0 // counted into this trip; start fresh for the half-open probe
 		tripped = true
 	}
-	snap := *st
-	persist := r.persist
-	r.mu.Unlock()
-	if persist != nil {
-		persist(id, snap)
+	if r.persist != nil {
+		r.persist(id, *st)
 	}
 	return tripped
 }
@@ -164,11 +162,10 @@ func (r *Registry) Trip(id int64, errMsg string, hard bool) (tripped bool) {
 // Reset clears one profile's state — the UI's "Recover now" action.
 func (r *Registry) Reset(id int64) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	delete(r.m, id)
-	forget := r.forget
-	r.mu.Unlock()
-	if forget != nil {
-		forget(id)
+	if r.forget != nil {
+		r.forget(id)
 	}
 }
 

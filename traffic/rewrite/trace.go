@@ -30,6 +30,9 @@ const (
 	ErrClassInvalidURL = "invalid_url"     // a rewritten path and query is not a valid request URI
 	ErrClassExpansion  = "expansion_limit" // a replace result exceeds MaxExpansion
 	ErrClassPanic      = "panic"
+	// ErrClassTransport is recorded by the proxy, not the engine: the request a
+	// rule rewrote could not be sent or answered.
+	ErrClassTransport = "transport_error"
 )
 
 // TraceLine is one row of an exchange's rewrite trace, in order. An exchange is

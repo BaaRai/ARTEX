@@ -297,17 +297,22 @@ type Coverage struct {
 }
 
 // CoverageEnabled reports whether a task has the asset-coverage feature turned on
-// (tasks.coverage_enabled). Missing row / error → true (fail open to the default),
-// so unknown/legacy tasks keep the historical behavior. taskID<=0 → true.
-func (s *AssetStore) CoverageEnabled(taskID int64) bool {
+// (tasks.coverage_enabled). A missing row stays enabled, which is the historical
+// default for unknown and legacy tasks. taskID<=0 stays enabled. A query error is
+// returned with enabled=true so a database blip does not turn the feature off.
+func (s *AssetStore) CoverageEnabled(taskID int64) (bool, error) {
 	if taskID <= 0 {
-		return true
+		return true, nil
 	}
 	var enabled bool
-	if err := s.db.QueryRow(`SELECT COALESCE(coverage_enabled,true) FROM tasks WHERE id=$1`, taskID).Scan(&enabled); err != nil {
-		return true
+	err := s.db.QueryRow(`SELECT COALESCE(coverage_enabled,true) FROM tasks WHERE id=$1`, taskID).Scan(&enabled)
+	if err == sql.ErrNoRows {
+		return true, nil
 	}
-	return enabled
+	if err != nil {
+		return true, err
+	}
+	return enabled, nil
 }
 
 // declaredScopeFilter keeps a task_scope row ts in the coverage match only when it is
