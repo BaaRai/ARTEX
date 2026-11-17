@@ -11,6 +11,7 @@ package agent
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -603,7 +604,7 @@ func ValidateUserAgent(raw string) (string, error) {
 func logTestConnection(c Config, capt *llmrec.Capture) {
 	if IsCLIFormat(c.Format) {
 		log.Printf("[llm-test] %s / %s — ran the local CLI; this format sends no HTTP request from ARTEX itself",
-			c.Provider(), c.Model)
+			c.Provider(), cmp.Or(c.Model, "(CLI default model)"))
 		return
 	}
 	attempts := capt.Attempts()
