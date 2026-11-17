@@ -775,12 +775,44 @@ func (d *DB) SetFindingVulnClass(id int64, vulnclass string) (int64, error) {
 
 // FindingMeta is the standalone-row data (id, triage state, anchored assets) the
 // per-task view grafts onto its exploration-node findings.
+//
+// It stays deliberately lean: the task findings list calls FindingMetaByNodeID for
+// up to a few hundred nodes per page and renders none of the proof-strength fields,
+// so the multi-KB report body and the two prose attestations must not ride along on
+// this query. The report path uses FindingQualityByNodeID instead.
 type FindingMeta struct {
 	TrafficCount int
 
 	ID       int64
 	Status   string
 	AssetIDs []int64
+}
+
+// FindingQuality is the report-only view of one standalone row: the triage meta
+// plus the proof-strength fields, the reporter-written body and the two evidence
+// versions that decide whether that body still describes the current evidence.
+//
+// VerificationNote / Counterevidence / ConfidenceRationale are optional; "" means
+// "not given" and stays distinguishable from an empty assertion. Report "" means
+// the reporter never wrote one.
+type FindingQuality struct {
+	FindingMeta
+
+	PoeLevel              int
+	VerificationStatus    string
+	VerificationNote      string
+	Counterevidence       string
+	ConfidenceRationale   string
+	Report                string
+	EvidenceVersion       int64
+	ReportEvidenceVersion int64
+}
+
+// ReportStale reports whether the stored report predates the evidence it
+// describes: it was written against an older evidence version, so it must be read
+// as outdated rather than as the current claim.
+func (q FindingQuality) ReportStale() bool {
+	return q.Report != "" && q.EvidenceVersion != q.ReportEvidenceVersion
 }
 
 // FindingMetaByNodeID maps a task's finding node ids to their standalone-row
@@ -799,7 +831,8 @@ func (d *DB) FindingMetaByNodeID(taskID int64) (map[int64]FindingMeta, error) {
 	if taskID <= 0 {
 		return out, nil
 	}
-	rows, err := d.Query(`SELECT node_id, id, COALESCE(status,'pending'), asset_ids, (SELECT count(*) FROM finding_traffic_bindings b WHERE b.finding_id=findings.id) FROM findings
+	rows, err := d.Query(`SELECT node_id, id, COALESCE(status,'pending'), asset_ids, `+findingTrafficCountCol+`
+		FROM findings
 		WHERE task_id=$1 AND node_id IS NOT NULL`, taskID)
 	if err != nil {
 		return out, err
@@ -814,6 +847,48 @@ func (d *DB) FindingMetaByNodeID(taskID int64) (map[int64]FindingMeta, error) {
 		}
 		_ = json.Unmarshal([]byte(aidsJSON), &m.AssetIDs)
 		out[nid] = m
+	}
+	return out, rows.Err()
+}
+
+// findingTrafficCountCol is the per-row bound-evidence count, spelled once so both
+// node-id lookups count the same way.
+const findingTrafficCountCol = `(SELECT count(*) FROM finding_traffic_bindings b WHERE b.finding_id=findings.id)`
+
+// FindingQualityByNodeID maps a task's finding node ids to everything the report
+// renders about them: triage meta, poe level, verification state and note, the two
+// attestations, the reporter-written body and both evidence versions. One query,
+// because the report shows all of it together and a report render is a single
+// on-demand document.
+//
+// The column order below is load-bearing: it is the FindingMetaByNodeID order
+// followed by the report-only columns, so the Scan target order can be checked
+// column by column against the SELECT instead of being guessed.
+func (d *DB) FindingQualityByNodeID(taskID int64) (map[int64]FindingQuality, error) {
+	out := map[int64]FindingQuality{}
+	if taskID <= 0 {
+		return out, nil
+	}
+	rows, err := d.Query(`SELECT node_id, id, COALESCE(status,'pending'), asset_ids, `+findingTrafficCountCol+`,
+			COALESCE(poe_level,0), COALESCE(verification_status,'unverified'), COALESCE(verification_note,''), COALESCE(counterevidence,''), COALESCE(confidence_rationale,''),
+			evidence_version, report_evidence_version, COALESCE(report,'')
+		FROM findings
+		WHERE task_id=$1 AND node_id IS NOT NULL`, taskID)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var nid int64
+		var q FindingQuality
+		var aidsJSON string
+		if err := rows.Scan(&nid, &q.ID, &q.Status, &aidsJSON, &q.TrafficCount,
+			&q.PoeLevel, &q.VerificationStatus, &q.VerificationNote, &q.Counterevidence, &q.ConfidenceRationale,
+			&q.EvidenceVersion, &q.ReportEvidenceVersion, &q.Report); err != nil {
+			return out, err
+		}
+		_ = json.Unmarshal([]byte(aidsJSON), &q.AssetIDs)
+		out[nid] = q
 	}
 	return out, rows.Err()
 }
