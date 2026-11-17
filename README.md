@@ -87,6 +87,81 @@ does not reset it; the profile order and switch remain persisted.
 The task creation and `PUT /api/tasks/{id}/llm` APIs accept `llm_rotate: true` alongside
 the ordered `llm_profile_ids`. Omitting `llm_rotate` on an update preserves its value.
 
+## Local models (Ollama)
+
+A local Ollama server works as a keyless profile (format **Ollama** in **System → LLM**), but the
+defaults on both sides are wrong for ARTEX. Each item below fails without an error in the UI.
+
+**Networking.** ARTEX runs in a container, so the default base URL `http://127.0.0.1:11434/v1`
+points at the container itself. Use `http://host.docker.internal:11434/v1` on Docker Desktop
+(Windows, macOS) and `http://172.17.0.1:11434/v1` on native Linux Docker. Ollama binds
+`127.0.0.1` by default and Docker bridge traffic arrives on another interface, so start Ollama
+with `OLLAMA_HOST=0.0.0.0`. This exposes the unauthenticated Ollama API on every interface;
+firewall port 11434 on a shared network. Check from inside the container (on Linux, use the
+`172.17.0.1` address):
+
+```bash
+docker compose exec artex wget -qO- http://host.docker.internal:11434/v1/models
+```
+
+**Context window.** This is the most common silent failure. The planner prompt alone is about 54K
+tokens, and two settings must both hold it:
+
+- Ollama: `OLLAMA_CONTEXT_LENGTH=65536`. ARTEX sends no window size, so Ollama uses its own
+  default (as low as 2048 or 4096 tokens, depending on the version) and truncates the prompt.
+- ARTEX: set the profile's **Context window (K)** to `64`. Empty or `0` means 200K, so ARTEX
+  compacts history too late and sends prompts Ollama cannot hold. Values below 32 are raised to
+  32. When a task chain holds several profiles, the smallest window applies.
+
+If either is too small, the planner loops with zero workers and the UI shows only an **Idle**
+engine. The cause appears only in the logs. With **noa context compaction** on (System → Settings →
+Experimental features), ARTEX refuses the request before it reaches Ollama, and
+`docker compose logs artex` shows:
+
+```text
+[planner] task <id> planning error: noa request budget exceeded: estimate <N> exceeds configured budget <M>; ...
+```
+
+With noa off, the request reaches Ollama, and the Ollama server log shows
+`truncating input prompt`.
+
+**Windows.** The Ollama tray app reads environment variables from the user profile; a `$env:`
+assignment in a PowerShell window does not reach it. Set user-level variables, quit the tray app,
+open a new PowerShell window and run `ollama serve`. The `server config` line in the startup log
+must show all four values:
+
+```powershell
+[Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_CONTEXT_LENGTH", "65536", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_FLASH_ATTENTION", "1", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_KV_CACHE_TYPE", "q8_0", "User")
+```
+
+**VRAM.** Flash attention and the `q8_0` KV cache roughly halve the memory a 64K context needs; set
+both on every platform. Without them a 14B model at 64K does not fit an 8 GB card. Rough sizing:
+6-8 GB of VRAM runs an 8B model, and 10-12 GB fits a 14B model fully. Keep the profile window at 64K
+either way, because the planner prompt does not fit a smaller one.
+
+**Model choice.** Capability decides, not parameter count. 4B-class models (for example Qwen 3.5 4B)
+return malformed or empty tool calls: the log repeats `[planner] task <id> planning finished` with
+no `[worker]` lines, and the engine stays Idle. Qwen-family models have also refused authorized
+penetration-testing prompts. Nous Hermes (`hermes3:8b`), Dolphin and Mistral models have followed
+agentic tool calls and authorized security prompts. Run a new model once against a local OWASP
+Juice Shop task before relying on it.
+
+**Running tasks.**
+
+- Run one task at a time. Two tasks on one GPU starve each other's workers.
+- A local 14B planner round takes 1-3 minutes. Set a generous **Task timeout** when creating the
+  task, and check the logs for `[planner]` lines before treating a slow task as stuck.
+- A profile edit reaches an existing task on its next planner round. An idle task waits for its
+  planner heartbeat (10 minutes by default) first, so delete and recreate queued or running tasks
+  to apply the edit at once.
+
+The profile's **Context window** caps what a single planner or worker request may contain.
+`ARTEX_TASK_BUDGET_TOKENS` caps a task's total token spend and is unlimited by default (see
+[Configuration](#configuration)).
+
 ## Screenshots
 
 | Tasks | Findings |
@@ -409,7 +484,8 @@ runtime supports it.
 
 **LLM**: `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`), or configure it in the UI's
 "LLM Configuration" page, which can also add a local Ollama server as a keyless provider (format
-"Ollama", default base URL `http://127.0.0.1:11434/v1`). Optional:
+"Ollama", default base URL `http://127.0.0.1:11434/v1`; from Docker, see
+[Local models (Ollama)](#local-models-ollama)). Optional:
 `ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama`), `ARTEX_LLM_MODEL`,
 `ARTEX_LLM_BASE_URL`, `ARTEX_LLM_PROXY`.
 
