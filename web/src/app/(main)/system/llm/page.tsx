@@ -343,6 +343,7 @@ function ProfileSheet({
   const [models, setModels] = React.useState<string[]>([]);
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [modelsOpen, setModelsOpen] = React.useState(false);
+  const [modelQuery, setModelQuery] = React.useState(""); // filter text for the loaded model list; reset on open/close
 
   // Every time it opens, the form is re-filled from the passed-in profile (reset to defaults when creating). Closing and reopening
   // the drawer is a clean start, leaving no leftovers from the previous profile.
@@ -374,14 +375,24 @@ function ProfileSheet({
     setKeyHint(profile?.api_key_hint ?? "");
     setModels([]);
     setModelsOpen(false);
+    setModelQuery("");
   }, [open, profile]);
 
   const profileId = profile ? Number(profile.id) : undefined;
+
+  // Case-insensitive substring filter, so a provider prefix ("deepseek/") or a
+  // fragment ("flash") is enough to narrow a 400-entry list.
+  const filteredModels = React.useMemo(() => {
+    const q = modelQuery.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter((m) => m.toLowerCase().includes(q));
+  }, [models, modelQuery]);
 
   async function loadModels() {
     if (loadingModels) return;
     setLoadingModels(true);
     setModels([]);
+    setModelQuery("");
     try {
       const r = await api.fetchLLMModels(format, baseUrl, apiKey, proxy, profileId);
       if (r.ok && r.models && r.models.length > 0) {
@@ -541,7 +552,14 @@ function ProfileSheet({
               />
               {/* modal: this Popover's content is portaled to <body>, outside the Sheet's scroll lock,
                   so without modal the list renders but cannot scroll. modal lets it hold the topmost scroll lock itself. */}
-              <Popover open={modelsOpen} onOpenChange={setModelsOpen} modal>
+              <Popover
+                open={modelsOpen}
+                onOpenChange={(o) => {
+                  setModelsOpen(o);
+                  if (!o) setModelQuery("");
+                }}
+                modal
+              >
                 <PopoverTrigger asChild>
                   <Button
                     type="button"
@@ -556,20 +574,39 @@ function ProfileSheet({
                   </Button>
                 </PopoverTrigger>
                 {models.length > 0 && (
-                  <PopoverContent className="max-h-72 w-72 gap-0 overflow-y-auto overscroll-contain p-1" align="end">
-                    {models.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        className="w-full shrink-0 rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-accent hover:text-accent-foreground"
-                        onClick={() => {
-                          setModel(m);
-                          setModelsOpen(false);
-                        }}
-                      >
-                        {m}
-                      </button>
-                    ))}
+                  <PopoverContent className="w-80 gap-0 p-0" align="end">
+                    <div className="border-b p-1">
+                      <Input
+                        autoFocus
+                        className="h-8 border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+                        placeholder={`Search ${models.length} models…`}
+                        value={modelQuery}
+                        onChange={(e) => setModelQuery(e.target.value)}
+                        spellCheck={false}
+                        aria-label="Search models"
+                      />
+                    </div>
+                    <div className="max-h-64 overflow-y-auto overscroll-contain p-1">
+                      {filteredModels.length === 0 ? (
+                        <p className="px-2 py-6 text-center text-muted-foreground text-xs">
+                          No model matches “{modelQuery.trim()}”
+                        </p>
+                      ) : (
+                        filteredModels.map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            className="w-full shrink-0 rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-accent hover:text-accent-foreground"
+                            onClick={() => {
+                              setModel(m);
+                              setModelsOpen(false);
+                            }}
+                          >
+                            {m}
+                          </button>
+                        ))
+                      )}
+                    </div>
                   </PopoverContent>
                 )}
               </Popover>
@@ -643,6 +680,13 @@ function ProfileSheet({
               placeholder={keyPlaceholder}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
+              // A masked field with no autocomplete hint looks like this site's
+              // login password: password managers fill it and Save persists the
+              // wrong secret over the stored key. new-password keeps them out.
+              autoComplete="new-password"
+              spellCheck={false}
+              data-1p-ignore="true"
+              data-lpignore="true"
             />
           </div>
 
