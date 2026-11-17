@@ -147,6 +147,9 @@ func run() int {
 	if drainErr != nil {
 		log.Printf("task drain: %v", drainErr)
 	}
+	// The health writer flushes on ctx.Done(). Wait for it before the deferred
+	// store close, so the last cooling window is not written at a closed database.
+	srv.FlushLLMHealth()
 	if httpErr != nil || drainErr != nil {
 		return 1
 	}
