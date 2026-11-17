@@ -36,7 +36,7 @@ func (s *Server) assetInterceptCreateRule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req assetInterceptRuleReq
-	if err := decode(r, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -63,7 +63,7 @@ func (s *Server) assetInterceptUpdateRule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req assetInterceptRuleReq
-	if err := decode(r, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -109,7 +109,7 @@ func (s *Server) assetInterceptToggleRule(w http.ResponseWriter, r *http.Request
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
-	if err := decode(r, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}

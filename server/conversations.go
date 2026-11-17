@@ -27,7 +27,7 @@ const (
 
 func decodeConversationRequest(w http.ResponseWriter, r *http.Request, value any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxConversationRequestBytes)
-	if err := decode(r, value); err != nil {
+	if err := decode(w, r, value); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			writeErr(w, http.StatusRequestEntityTooLarge, "Request body too large")
@@ -396,7 +396,7 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 		Message     string           `json:"message"`
 		Attachments []chatAttachment `json:"attachments,omitempty"` // files uploaded via method 1 (paths relative to the conversation working dir)
 	}
-	if err := decode(r, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}

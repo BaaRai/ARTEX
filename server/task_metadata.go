@@ -30,7 +30,7 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 		PlanQuietMode *bool   `json:"plan_quiet_mode"`
 		TargetGate    *bool   `json:"target_gate"`
 	}
-	if err := decode(r, &request); err != nil {
+	if err := decode(w, r, &request); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			writeErr(w, http.StatusRequestEntityTooLarge, "request body too large")
