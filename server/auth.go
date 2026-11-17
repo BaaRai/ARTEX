@@ -19,7 +19,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Autumn-27/artex/config"
-	"github.com/Autumn-27/artex/db"
 )
 
 const (
@@ -27,7 +26,7 @@ const (
 	authPassKey       = "auth.password_hash"
 	authPwdVersionKey = "auth.password_version"
 	jwtTTL            = 7 * 24 * time.Hour
-	keyChars        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	keyChars          = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 	// The lower bound matches the setup page's frontend validation — validation that
 	// lives only in the frontend is as good as none: hitting the API directly bypasses
