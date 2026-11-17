@@ -124,7 +124,7 @@ case "$event_name" in
     title=$(jq -r '.issue.title' <<<"$ev")
     body=$(jq -r '.issue.body // ""' <<<"$ev")
     maintainer_opened=false
-    [ "$GITHUB_ACTOR" = "BaaRai" ] && maintainer_opened=true
+    [ "$GITHUB_ACTOR" = "pipsyrs" ] && maintainer_opened=true
     if [ "$maintainer_opened" = false ] && already_triaged "$number"; then log "issue #$number already triaged"; exit 0; fi
     [ "$maintainer_opened" = false ] && eyes "$number"
     answer=$(ask_model \

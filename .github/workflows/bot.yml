@@ -20,7 +20,7 @@ jobs:
     # never react to the maintainer, to bots, or to itself.
     if: >
       github.event_name == 'issues' ||
-      (github.actor != 'BaaRai' &&
+      (github.actor != 'pipsyrs' &&
        github.actor != 'github-actions[bot]' &&
        github.actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
