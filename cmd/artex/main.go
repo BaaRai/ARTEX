@@ -110,10 +110,15 @@ func run() int {
 		log.Printf("[config] trusted proxies: %v", trusted)
 	}
 	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted))
+	// ReadTimeout bounds how long the request headers and body may take to arrive.
+	// It does not limit how long a handler runs, so an event stream stays open.
+	// WriteTimeout is left unset: a write deadline would cut that stream.
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	go func() {

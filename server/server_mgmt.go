@@ -79,7 +79,15 @@ func pathInt(r *http.Request, name string) (int64, bool) {
 	return n, err == nil
 }
 
-func decode(r *http.Request, v any) error { return json.NewDecoder(r.Body).Decode(v) }
+// decodeMaxBytes is the default JSON body cap. Handlers that already wrapped
+// the body with a smaller MaxBytesReader keep that smaller cap. Multipart
+// uploads do not use decode.
+const decodeMaxBytes = 32 << 20
+
+func decode(r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, decodeMaxBytes)
+	return json.NewDecoder(r.Body).Decode(v)
+}
 
 // ---------- tasks (delete) ----------
 
