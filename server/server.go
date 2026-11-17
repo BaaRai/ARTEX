@@ -801,6 +801,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/retests/active", s.listActiveFindingRetests)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/retests", s.startFindingRetest)
 	mux.HandleFunc("PATCH /api/exploration/findings/{id}", s.patchFinding)
+	mux.HandleFunc("POST /api/exploration/findings/bulk-status", s.bulkPatchFindingStatus)
 	mux.HandleFunc("DELETE /api/exploration/findings/{id}", s.deleteFinding)
 	mux.HandleFunc("GET /api/exploration/intents", s.intents)
 	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)
@@ -2563,6 +2564,61 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, findingFromDB(f, s.resolveAssetIDs(f.AssetIDs)))
+}
+
+// maxBulkFindingStatus caps one bulk status request. The UI acts on a page at a
+// time, so this is far above a normal selection and still bounds the work.
+const maxBulkFindingStatus = 500
+
+// bulkPatchFindingStatus sets the same triage status on a batch of findings in
+// one transaction. Ids that do not exist are reported per id, not as a batch
+// failure, and the notification semantics are the single-row ones: one event per
+// finding whose status actually changed. The node payload mirror (#289) runs in
+// the same transaction, so the per-task view stays in sync.
+func (s *Server) bulkPatchFindingStatus(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs    []int64 `json:"ids"`
+		Status string  `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if !db.ValidFindingStatus(body.Status) {
+		writeErr(w, 400, "bad status: "+body.Status)
+		return
+	}
+	seen := make(map[int64]bool, len(body.IDs))
+	ids := make([]int64, 0, len(body.IDs))
+	for _, id := range body.IDs {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		if len(ids) == maxBulkFindingStatus {
+			break
+		}
+	}
+	if len(ids) == 0 {
+		writeErr(w, 400, "no finding ids")
+		return
+	}
+	results, err := s.m.pg.SetFindingStatusesWithNotify(r.Context(), ids, body.Status)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	updated, missing := 0, 0
+	for _, res := range results {
+		if res.Changed {
+			updated++
+		}
+		if !res.Found {
+			missing++
+		}
+	}
+	writeJSON(w, 200, map[string]any{"updated": updated, "missing": missing, "results": results})
 }
 
 // deleteFinding removes a finding (findings row + originating exploration node).
