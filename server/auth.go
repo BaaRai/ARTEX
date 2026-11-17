@@ -23,10 +23,10 @@ import (
 )
 
 const (
-	jwtKeyFilename  = "jwt.key"
-	authPassKey     = "auth.password_hash"
-	authPwdEpochKey = "auth.password_epoch"
-	jwtTTL          = 7 * 24 * time.Hour
+	jwtKeyFilename    = "jwt.key"
+	authPassKey       = "auth.password_hash"
+	authPwdVersionKey = "auth.password_version"
+	jwtTTL            = 7 * 24 * time.Hour
 	keyChars        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 	// The lower bound matches the setup page's frontend validation — validation that
@@ -42,6 +42,14 @@ const (
 // These handlers must never mistake a failed read for "not set": authInit once let an
 // unauthenticated request through on a database error, overwriting the admin password.
 const errDataSourceUnavailable = "Data source temporarily unavailable, please retry later"
+
+// pwdState values. The zero value is unread, which still accepts a valid token
+// at version 0. unreadable means a startup read failed and every token is rejected.
+const (
+	pwdUnread int32 = iota
+	pwdReady
+	pwdUnreadable
+)
 
 // validatePassword returns an empty string when passing, otherwise a reason ready to show the user.
 func validatePassword(pw string) string {
@@ -160,20 +168,36 @@ func samePath(a, b string) bool {
 	return a == b
 }
 
-// signJWT issues a 7-day HS256 token for user ARTEX.
+// sessionClaims carries the password version the token was signed under.
+// Two changes in the same second get different versions, so a cutoff based on
+// the issued-at second cannot leave the older token valid.
+type sessionClaims struct {
+	Pwd int64 `json:"pwd"`
+	jwt.RegisteredClaims
+}
+
+// signJWT issues a 7-day HS256 token for user ARTEX at password version 0.
 func signJWT(key []byte) (string, error) {
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Subject:   "ARTEX",
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(jwtTTL)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	return signJWTVersion(key, 0)
+}
+
+// signJWTVersion issues a 7-day HS256 token bound to a password version.
+func signJWTVersion(key []byte, version int64) (string, error) {
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, sessionClaims{
+		Pwd: version,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "ARTEX",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(jwtTTL)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}).SignedString(key)
 }
 
-// verifyJWT returns true when tokenStr is a valid, non-expired HS256 token
-// issued at or after notBefore. notBefore is Unix seconds; 0 means no cutoff,
-// so a deployment that has never stored a password epoch keeps existing sessions.
-func verifyJWT(tokenStr string, key []byte, notBefore int64) bool {
-	claims := &jwt.RegisteredClaims{}
+// verifyJWT returns true when tokenStr is a valid, non-expired HS256 token.
+// version 0 means no password change is stored yet, and any valid token is
+// accepted. A later version requires the token's pwd claim to equal it.
+func verifyJWT(tokenStr string, key []byte, version int64) bool {
+	claims := &sessionClaims{}
 	t, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
@@ -183,10 +207,39 @@ func verifyJWT(tokenStr string, key []byte, notBefore int64) bool {
 	if err != nil || !t.Valid {
 		return false
 	}
-	if notBefore > 0 && (claims.IssuedAt == nil || claims.IssuedAt.Unix() < notBefore) {
+	if version > 0 && claims.Pwd != version {
 		return false
 	}
 	return true
+}
+
+// sessionOK reports whether token is still a session for the password version
+// this process has loaded. A failed version read rejects every token.
+func (s *Server) sessionOK(token string) bool {
+	if s.pwdState.Load() == pwdUnreadable {
+		return false
+	}
+	return verifyJWT(token, s.jwtKey, s.pwdVersion.Load())
+}
+
+func (s *Server) passwordHashKey() string {
+	if s.authHashKey != "" {
+		return s.authHashKey
+	}
+	return authPassKey
+}
+
+func (s *Server) passwordVersionKey() string {
+	if s.authVersionKey != "" {
+		return s.authVersionKey
+	}
+	return authPwdVersionKey
+}
+
+// applyPasswordVersion records a version that was just committed.
+func (s *Server) applyPasswordVersion(n int64) {
+	s.pwdVersion.Store(n)
+	s.pwdState.Store(pwdReady)
 }
 
 // jwtSubject returns the subject of tokenStr when it is a valid, non-expired
@@ -209,7 +262,7 @@ func jwtSubject(tokenStr string, key []byte) string {
 // request's session token.
 func (s *Server) approver(r *http.Request) string {
 	tok := extractToken(r)
-	if !verifyJWT(tok, s.jwtKey, s.pwdEpoch.Load()) {
+	if !s.sessionOK(tok) {
 		return ""
 	}
 	return jwtSubject(tok, s.jwtKey)
@@ -241,7 +294,7 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 			writeErr(w, 401, "Unauthorized")
 			return
 		}
-		if !verifyJWT(tok, s.jwtKey, s.pwdEpoch.Load()) {
+		if !s.sessionOK(tok) {
 			writeErr(w, 401, "token is invalid or expired")
 			return
 		}
@@ -258,7 +311,7 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	hash, _, err := pg.GetSetting(authPassKey)
+	hash, _, err := pg.GetSetting(s.passwordHashKey())
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -277,7 +330,7 @@ func (s *Server) initSetupToken() {
 	var err error
 	for attempt := 1; attempt <= 3; attempt++ {
 		var ok bool
-		hash, ok, err = s.m.pg.GetSetting(authPassKey)
+		hash, ok, err = s.m.pg.GetSetting(s.passwordHashKey())
 		if err == nil {
 			if ok && hash != "" {
 				return
@@ -304,41 +357,43 @@ func (s *Server) initSetupToken() {
 	log.Printf("[auth] no admin password is set. Setup token for the /setup page: %s", token)
 }
 
-// loadPwdEpoch reads auth.password_epoch. A missing key leaves the cutoff at
-// zero, which accepts every valid token.
-func (s *Server) loadPwdEpoch() {
+// loadPasswordVersion reads auth.password_version. A missing key leaves the
+// version at zero, which accepts every valid token. A read that still fails
+// after three tries rejects every token until a later read succeeds.
+func (s *Server) loadPasswordVersion() {
 	if s.m == nil || s.m.pg == nil {
 		return
 	}
-	raw, ok, err := s.m.pg.GetSetting(authPwdEpochKey)
+	var raw string
+	var ok bool
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		raw, ok, err = s.m.pg.GetSetting(s.passwordVersionKey())
+		if err == nil {
+			break
+		}
+		log.Printf("[auth] password version attempt %d/3: %v", attempt, err)
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+		}
+	}
 	if err != nil {
-		log.Printf("[auth] password epoch: %v", err)
+		log.Printf("[auth] password version unreadable; rejecting sessions until it can be read: %v", err)
+		s.pwdState.Store(pwdUnreadable)
 		return
 	}
 	if !ok || raw == "" {
+		s.pwdVersion.Store(0)
+		s.pwdState.Store(pwdReady)
 		return
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		log.Printf("[auth] password epoch %q: %v", raw, err)
+	if err != nil || n < 0 {
+		log.Printf("[auth] password version %q is not a counter; rejecting sessions", raw)
+		s.pwdState.Store(pwdUnreadable)
 		return
 	}
-	s.pwdEpoch.Store(n)
-}
-
-// bumpPwdEpoch records the current second as the oldest token that is still
-// valid. A token signed in that same second still passes. A failed write leaves
-// the previous cutoff in place and is logged; the password change itself stands.
-func (s *Server) bumpPwdEpoch(pg *db.DB) {
-	if pg == nil {
-		return
-	}
-	epoch := time.Now().Unix()
-	if err := pg.SetSetting(authPwdEpochKey, strconv.FormatInt(epoch, 10)); err != nil {
-		log.Printf("[auth] save password epoch: %v", err)
-		return
-	}
-	s.pwdEpoch.Store(epoch)
+	s.applyPasswordVersion(n)
 }
 
 // checkSetupToken compares got with the active setup token in constant time.
@@ -356,7 +411,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	existing, _, err := pg.GetSetting(authPassKey)
+	existing, _, err := pg.GetSetting(s.passwordHashKey())
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -387,10 +442,10 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "Password encryption failed")
 		return
 	}
-	// INSERT ... ON CONFLICT DO NOTHING instead of an upsert: the GetSetting above is
-	// only a fast-fail path; the real "first-set-only" guarantee rests on the primary
-	// key. bcrypt runs tens of milliseconds, another request may set the password meanwhile, and the read check itself can fail under an outage.
-	inserted, err := pg.InsertSettingIfAbsent(authPassKey, string(hash))
+	// The hash and version commit in one transaction. ON CONFLICT DO NOTHING on the
+	// hash keeps the first password: the GetSetting above is only a fast-fail path.
+	// bcrypt runs tens of milliseconds, another request may set the password meanwhile, and the read check itself can fail under an outage.
+	version, inserted, err := pg.InsertPassword(s.passwordHashKey(), string(hash), s.passwordVersionKey())
 	if err != nil {
 		writeErr(w, 500, "Save failed: "+err.Error())
 		return
@@ -402,8 +457,8 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	s.setupMu.Lock()
 	s.setupToken = ""
 	s.setupMu.Unlock()
-	s.bumpPwdEpoch(pg)
-	tok, err := signJWT(s.jwtKey)
+	s.applyPasswordVersion(version)
+	tok, err := signJWTVersion(s.jwtKey, version)
 	if err != nil {
 		writeErr(w, 500, "token generation failed")
 		return
@@ -419,7 +474,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	if !verifyJWT(extractToken(r), s.jwtKey, s.pwdEpoch.Load()) {
+	if !s.sessionOK(extractToken(r)) {
 		writeErr(w, 401, "Unauthorized")
 		return
 	}
@@ -439,7 +494,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, msg)
 		return
 	}
-	hash, ok, err := pg.GetSetting(authPassKey)
+	hash, ok, err := pg.GetSetting(s.passwordHashKey())
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -457,13 +512,14 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "Password encryption failed")
 		return
 	}
-	if err := pg.SetSetting(authPassKey, string(newHash)); err != nil {
+	// Hash and version commit together. A failed write returns 500 and leaves
+	// the previous session valid. This response has no replacement token.
+	version, err := pg.RotatePassword(s.passwordHashKey(), string(newHash), s.passwordVersionKey())
+	if err != nil {
 		writeErr(w, 500, "Save failed: "+err.Error())
 		return
 	}
-	// Sessions issued before this second stop working. This response does not
-	// include a replacement token; the next request asks for a new login.
-	s.bumpPwdEpoch(pg)
+	s.applyPasswordVersion(version)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -500,7 +556,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		writeErr(w, 401, "Incorrect username or password")
 		return
 	}
-	hash, ok, err := getSetting(authPassKey)
+	hash, ok, err := getSetting(s.passwordHashKey())
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -514,7 +570,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		return
 	}
 	s.loginLimit.reset(ip)
-	tok, err := signJWT(s.jwtKey)
+	if s.pwdState.Load() == pwdUnreadable {
+		writeErr(w, 503, errDataSourceUnavailable)
+		return
+	}
+	tok, err := signJWTVersion(s.jwtKey, s.pwdVersion.Load())
 	if err != nil {
 		writeErr(w, 500, "token generation failed")
 		return

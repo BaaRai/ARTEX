@@ -526,6 +526,11 @@ func (s *Server) cancelSideRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sideEvents(w http.ResponseWriter, r *http.Request) {
+	tok := extractToken(r)
+	if !s.sessionOK(tok) {
+		writeErr(w, 401, "token is invalid or expired")
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, 500, "streaming unavailable")
@@ -550,6 +555,9 @@ func (s *Server) sideEvents(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 	for {
+		if !s.sessionOK(tok) {
+			return
+		}
 		e := first
 		first = nil
 		if e == nil {
