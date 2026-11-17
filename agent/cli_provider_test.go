@@ -348,7 +348,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":
 		t.Errorf("usage = %+v", usage)
 	}
 	args := readArgs(t, argsFile)
-	if args[len(args)-1] != "-" || flagValue(t, args, "-m") != "gpt-5.5" || !slices.Contains(args, `model_reasoning_effort="low"`) || !slices.Contains(args, "features.shell_tool=false") {
+	if args[len(args)-1] != "-" || flagValue(t, args, "-m") != "gpt-5.5" || !slices.Contains(args, `model_reasoning_effort="low"`) || !slices.Contains(args, "features.shell_tool=false") || !slices.Contains(args, "features.code_mode_host=false") {
 		t.Errorf("argv = %q", args)
 	}
 	if slices.Contains(args, "--ignore-user-config") {
@@ -373,6 +373,20 @@ exit 1
 	_, _, _, err := newCLIProvider(Config{Format: FormatCodexCLI}).Complete(context.Background(), transcriptRequest())
 	if err == nil || !IsQuotaExhaustedMessage(err.Error()) {
 		t.Fatalf("err = %v, want a quota-exhausted error so the task fails over", err)
+	}
+}
+
+func TestCLIProviderHidesAPIKeysFromCLI(t *testing.T) {
+	fakeCLI(t, "claude", `cat > /dev/null
+printf '{"type":"result","subtype":"success","is_error":false,"result":"key=[%s] base=[%s]","usage":{}}' "$ANTHROPIC_API_KEY" "$ANTHROPIC_BASE_URL"`)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api-should-not-leak")
+	t.Setenv("ANTHROPIC_BASE_URL", "http://gateway.example")
+	msg, _, _, err := newCLIProvider(Config{Format: FormatClaudeCLI}).Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("ping")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := msg.Text(); got != "key=[] base=[http://gateway.example]" {
+		t.Fatalf("CLI saw %q, want the API key removed and other settings kept", got)
 	}
 }
 

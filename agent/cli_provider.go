@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,11 +75,11 @@ var cliBackends = map[llm.Format]cliBackend{
 		binary:     "codex",
 		foldSystem: true,
 		args: func(c cliCall) []string {
-			// features.shell_tool=false removes Codex's shell; -s read-only
-			// confines anything else it could still touch. --ignore-user-config
-			// must stay off: the user's login route lives in ~/.codex/config.toml.
+			// --ignore-user-config must stay off: the user's login route lives in
+			// ~/.codex/config.toml. -s read-only confines whatever codexToolsOff misses.
 			a := []string{"exec", "--json", "-s", "read-only", "--ephemeral", "--skip-git-repo-check",
-				"--ignore-rules", "-c", "features.shell_tool=false", "-o", c.LastMessageFile}
+				"--ignore-rules", "-o", c.LastMessageFile}
+			a = append(a, codexToolsOff...)
 			if c.SchemaFile != "" {
 				a = append(a, "--output-schema", c.SchemaFile)
 			}
@@ -104,6 +105,33 @@ var cliBackends = map[llm.Format]cliBackend{
 		},
 		parse: parseGrokCLI,
 	},
+}
+
+// codexToolsOff turns off Codex's built-in tools, which a prompt injected
+// through target data could otherwise use on the ARTEX host. shell_tool alone
+// is not enough: code mode's exec still ran code until code_mode_host was off.
+// Codex ignores an unknown key with a warning, so older versions still start.
+var codexToolsOff = func() []string {
+	features := []string{"shell_tool", "unified_exec", "code_mode_host", "multi_agent", "view_image",
+		"image_generation", "browser_use", "browser_use_external", "computer_use", "in_app_browser",
+		"apps", "plugins", "goals", "sleep_tool", "tool_suggest", "skill_search", "hooks"}
+	a := []string{"-c", `web_search="disabled"`, "-c", "mcp_servers={}"}
+	for _, f := range features {
+		a = append(a, "-c", "features."+f+"=false")
+	}
+	return a
+}()
+
+// cliStrippedEnv are ARTEX's own API-key variables. A CLI that finds one bills
+// that API key instead of the subscription login the profile is for.
+var cliStrippedEnv = []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "XAI_API_KEY"}
+
+func cliEnv() []string {
+	env := os.Environ()
+	return slices.DeleteFunc(env, func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		return slices.Contains(cliStrippedEnv, name)
+	})
 }
 
 func appendFlag(args []string, flag, value string) []string {
@@ -485,6 +513,7 @@ func (p *cliProvider) Complete(ctx context.Context, req llm.CompletionRequest) (
 	// An empty scratch dir keeps the CLI from picking up a project's files or
 	// instructions; the inherited env keeps HOME, where its login lives.
 	cmd.Dir = dir
+	cmd.Env = cliEnv()
 	cmd.Stdin = strings.NewReader(prompt)
 	cmd.WaitDelay = cliWaitDelay
 	var stdout, stderr bytes.Buffer
