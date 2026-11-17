@@ -92,6 +92,12 @@ func TestCLIKeylessProfileLifecycle(t *testing.T) {
 	if args, _ := os.ReadFile(argsFile); bytes.Contains(args, []byte("--model")) {
 		t.Fatalf("an emptied model must test the CLI default, not the stored model: %q", args)
 	}
+	if rec := post(s.testLLM, "/api/llm/test", map[string]any{"profile_id": pid}); rec.Code != http.StatusOK {
+		t.Fatalf("connection test by profile id alone: status %d", rec.Code)
+	}
+	if args, _ := os.ReadFile(argsFile); !bytes.Contains(args, []byte("--model\nopus\n")) {
+		t.Fatalf("an omitted model must test the stored model: %q", args)
+	}
 
 	if rec := post(s.pgListModels, "/api/llm/models", map[string]any{"provider": "claude-cli"}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("model listing for a CLI format: status %d, want 400", rec.Code)

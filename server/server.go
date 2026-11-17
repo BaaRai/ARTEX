@@ -1448,17 +1448,17 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 // testLLM makes a real minimal completion to verify the config works.
 func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider         string `json:"provider"`
-		Model            string `json:"model"`
-		BaseURL          string `json:"base_url"`
-		Proxy            string `json:"proxy"`
-		APIKey           string `json:"api_key"`
-		ThinkingType     string `json:"thinking_type"`
-		ReasoningEffort  string `json:"reasoning_effort"`
-		ProfileID        *int64 `json:"profile_id"`         // passed when testing a stored profile: if api_key is empty, its stored key is used
-		Streaming        *bool  `json:"streaming"`          // omitted = streaming, the same defaults as when saving a profile
-		SessionHeaderKey string `json:"session_header_key"` // non-empty = the test also sends this custom session header, with a one-off random session id as the value
-		UserAgent        string `json:"user_agent"`         // non-empty = the test overrides the User-Agent header with this value (mirrors production)
+		Provider         string  `json:"provider"`
+		Model            *string `json:"model"` // nil = omitted: a stored profile keeps its model
+		BaseURL          string  `json:"base_url"`
+		Proxy            string  `json:"proxy"`
+		APIKey           string  `json:"api_key"`
+		ThinkingType     string  `json:"thinking_type"`
+		ReasoningEffort  string  `json:"reasoning_effort"`
+		ProfileID        *int64  `json:"profile_id"`         // passed when testing a stored profile: if api_key is empty, its stored key is used
+		Streaming        *bool   `json:"streaming"`          // omitted = streaming, the same defaults as when saving a profile
+		SessionHeaderKey string  `json:"session_header_key"` // non-empty = the test also sends this custom session header, with a one-off random session id as the value
+		UserAgent        string  `json:"user_agent"`         // non-empty = the test overrides the User-Agent header with this value (mirrors production)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1487,9 +1487,9 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(req.Provider) == "" {
 			req.Provider = stored.Format
 		}
-		// An empty model on a CLI format means the CLI's default, not "keep the stored one".
-		if strings.TrimSpace(req.Model) == "" && !agent.IsCLIFormat(llm.Format(strings.TrimSpace(req.Provider))) {
-			req.Model = stored.Model
+		// An explicitly empty model on a CLI format means the CLI's default.
+		if req.Model == nil || (strings.TrimSpace(*req.Model) == "" && !agent.IsCLIFormat(llm.Format(strings.TrimSpace(req.Provider)))) {
+			req.Model = &stored.Model
 		}
 		if strings.TrimSpace(req.BaseURL) == "" {
 			req.BaseURL = stored.BaseURL
@@ -1508,7 +1508,11 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 			req.ReasoningEffort = stored.ReasoningEffort
 		}
 	}
-	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	var model string
+	if req.Model != nil {
+		model = *req.Model
+	}
+	cfg := agent.ConfigFrom(req.Provider, model, req.BaseURL, req.APIKey, req.Proxy)
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ThinkingType = req.ThinkingType

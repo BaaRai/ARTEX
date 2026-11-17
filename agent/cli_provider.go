@@ -112,7 +112,7 @@ var cliBackends = map[llm.Format]cliBackend{
 // is not enough: code mode's exec still ran code until code_mode_host was off.
 // Codex ignores an unknown key with a warning, so older versions still start.
 var codexToolsOff = func() []string {
-	features := []string{"shell_tool", "unified_exec", "code_mode_host", "multi_agent", "view_image",
+	features := []string{"shell_tool", "unified_exec", "code_mode_host", "multi_agent", "multi_agent_v2", "view_image",
 		"image_generation", "browser_use", "browser_use_external", "computer_use", "in_app_browser",
 		"apps", "plugins", "goals", "sleep_tool", "tool_suggest", "skill_search", "hooks"}
 	a := []string{"-c", `web_search="disabled"`, "-c", "mcp_servers={}"}
