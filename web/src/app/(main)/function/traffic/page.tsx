@@ -47,6 +47,7 @@ import { useStoredSortPreference } from "@/lib/sort-preference";
 import type { TrafficDetail, TrafficExchange, TrafficHost, TrafficResp } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { ReplayPanel } from "./_components/replay-panel";
 import { StreamMessagesPanel } from "./_components/stream-messages";
 
 function fmtTime(ts: string) {
@@ -752,7 +753,7 @@ export default function TrafficPage() {
                 <SheetDescription className="break-all font-mono">{selected.url}</SheetDescription>
               </SheetHeader>
               <Tabs value={detailTab} onValueChange={setDetailTab} className="min-h-0 flex-1 gap-0">
-                <TabsList className={cn("mx-5 mt-4 grid w-auto", hasStream ? "grid-cols-3" : "grid-cols-2")}>
+                <TabsList className={cn("mx-5 mt-4 grid w-auto", hasStream ? "grid-cols-4" : "grid-cols-3")}>
                   <TabsTrigger value="request">Request</TabsTrigger>
                   <TabsTrigger value="response">Response</TabsTrigger>
                   {hasStream && (
@@ -762,6 +763,15 @@ export default function TrafficPage() {
                         <span className="text-muted-foreground text-xs tabular-nums">{detail?.stream_count}</span>
                       )}
                     </TabsTrigger>
+                  )}
+                  {hasStream ? (
+                    <span title="stream replay is not supported" className="flex">
+                      <TabsTrigger value="replay" disabled>
+                        Replay
+                      </TabsTrigger>
+                    </span>
+                  ) : (
+                    <TabsTrigger value="replay">Replay</TabsTrigger>
                   )}
                 </TabsList>
                 <TabsContent value="request" className="min-h-0 overflow-auto">
@@ -787,6 +797,24 @@ export default function TrafficPage() {
                 {streamKind && (
                   <TabsContent value="stream" className="min-h-0 overflow-auto">
                     <StreamMessagesPanel exchangeId={selected.id} kind={streamKind} />
+                  </TabsContent>
+                )}
+                {!hasStream && (
+                  // Kept mounted so edits survive a look at another tab.
+                  <TabsContent value="replay" forceMount className="min-h-0 overflow-auto data-[state=inactive]:hidden">
+                    {detailLoading || !detail ? (
+                      <div className="flex items-center gap-2 p-5 text-muted-foreground text-xs">
+                        <Loader2Icon className="size-3.5 animate-spin" />
+                        Loading…
+                      </div>
+                    ) : (
+                      <ReplayPanel
+                        exchange={selected}
+                        raw={requestWithHost(detail.req, selected)}
+                        methods={METHODS}
+                        onRecorded={() => setReloadTick((n) => n + 1)}
+                      />
+                    )}
                   </TabsContent>
                 )}
               </Tabs>

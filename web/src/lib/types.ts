@@ -942,6 +942,30 @@ export interface TrafficStreamPage {
   total: number;
 }
 
+export interface TrafficReplayHeader {
+  name: string;
+  value: string;
+}
+
+// POST /api/traffic/replay. Host is not sent: the server takes it from url.
+export interface TrafficReplayRequest {
+  method: string;
+  url: string;
+  headers: TrafficReplayHeader[];
+  body: string;
+  body_base64: boolean;
+}
+
+export interface TrafficReplayResult {
+  status: number;
+  headers: TrafficReplayHeader[];
+  raw: string;
+  duration_ms: number;
+  truncated: boolean;
+  // false when the host is in passthrough: the response was not recorded.
+  recorded: boolean;
+}
+
 // One distinct recorded host with its exchange count (target picker).
 export interface TrafficHost {
   host: string;

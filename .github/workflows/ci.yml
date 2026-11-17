@@ -104,6 +104,7 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run test:polling
+      - run: npm run test:replay
       - run: npm run build:static
 
   python:

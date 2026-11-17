@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, copyText } from "@/lib/utils";
 
-function statusTone(status: number) {
+export function statusTone(status: number) {
   if (status >= 500) return "text-red-500";
   if (status >= 400) return "text-amber-500";
   if (status >= 300) return "text-blue-500";
