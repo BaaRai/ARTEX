@@ -47,8 +47,8 @@ func TestRecordFactSourceSchemaUpgrade(t *testing.T) {
 	if err := pg.UpdateTool("record_fact", "operator description", custom, bindings, true); err != nil {
 		t.Fatal(err)
 	}
-	if src := resolvedRecordFactProps(t)["source"]; src != nil {
-		t.Fatalf("precondition: stored schema should not expose source yet: %v", src)
+	if src := resolvedRecordFactProps(t)["source"]; src == nil {
+		t.Fatal("runtime contract repair must expose source even before startup migration")
 	}
 
 	snapshot := func() (string, string, time.Time) {

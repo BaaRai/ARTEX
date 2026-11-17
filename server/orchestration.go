@@ -571,6 +571,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedFindingWorkflowTools()
 	s.seedFindingVerificationSchema() // S1: poe_level / evidence_quotes on update_finding_report, added once per DB
 	s.seedFindingEvidenceSchema()     // optional counterevidence / confidence_rationale on report_finding, added once per DB
+	s.seedFactInputSchema()           // restore record_fact single/batch contracts
 	s.seedFactSourceSchema()          // source enum on record_fact, added once per DB
 	s.seedTaskScopeDescription()      // add_task_scope: "coverage scope, not enforced" replaces the authorization-boundary text
 	// Note: pentest's default tool bindings need no migration — BuiltinToolSeeds already seeds

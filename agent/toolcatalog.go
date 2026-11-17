@@ -162,6 +162,9 @@ func DecorateTool(t actool.CoreTool, desc string, schema map[string]any) actool.
 	if len(schema) == 0 {
 		schema = t.InputSchema()
 	}
+	if t.Name() == "record_fact" {
+		schema = RepairRecordFactSchema(schema)
+	}
 	return &overriddenTool{CoreTool: t, desc: desc, schema: schema}
 }
 
