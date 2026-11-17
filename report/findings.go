@@ -70,6 +70,7 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 			fmt.Fprintf(&b, "- **Class**: %s\n", f.VulnClass)
 		}
 		fmt.Fprintf(&b, "- **Status**: %s\n", nz(f.Status, "pending"))
+		fmt.Fprintf(&b, "- **Report stage**: %s\n", nz(f.ReportState, "none"))
 		if desc := strings.TrimSpace(f.TaskDescription); desc != "" {
 			fmt.Fprintf(&b, "- **Task**: %s\n", desc)
 		}
@@ -99,6 +100,7 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 	}
 	fmt.Fprintf(&b, "- **Severity**: %s\n", nz(f.Severity, "info"))
 	fmt.Fprintf(&b, "- **Status**: %s\n", nz(f.Status, "pending"))
+	fmt.Fprintf(&b, "- **Report stage**: %s\n", nz(f.ReportState, "none"))
 	if desc := strings.TrimSpace(f.TaskDescription); desc != "" {
 		fmt.Fprintf(&b, "- **Task**: %s\n", desc)
 	}
@@ -148,7 +150,7 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("\xEF\xBB\xBF") // UTF-8 BOM
 	w := csv.NewWriter(&buf)
-	_ = w.Write([]string{"ID", "Name", "Class", "Severity", "Status", "Task", "Found At", "Summary", "Traffic Evidence Count", "Traffic Evidence IDs"})
+	_ = w.Write([]string{"ID", "Name", "Class", "Severity", "Status", "Report Stage", "Task", "Found At", "Summary", "Traffic Evidence Count", "Traffic Evidence IDs"})
 	for _, f := range items {
 		_ = w.Write([]string{
 			fmt.Sprintf("%d", f.ID),
@@ -156,6 +158,7 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 			f.VulnClass,
 			nz(f.Severity, "info"),
 			nz(f.Status, "pending"),
+			nz(f.ReportState, "none"),
 			f.TaskDescription,
 			f.CreatedAt.Format("2006-01-02 15:04:05"),
 			strings.TrimSpace(f.Summary),

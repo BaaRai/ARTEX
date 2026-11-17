@@ -471,6 +471,8 @@ function mockFilterFindings(q: URLSearchParams): (typeof mockFindings)[number][]
   const taskID = q.get("task_id");
   if (severity) list = list.filter((finding) => finding.severity === severity);
   if (status) list = list.filter((finding) => finding.status === status);
+  const reportState = q.get("report_state");
+  if (reportState) list = list.filter((finding) => (finding.report_state ?? "none") === reportState);
   if (vulnclass) list = list.filter((finding) => finding.vulnclass === vulnclass);
   if (taskID === "__unassigned__") list = list.filter((finding) => !finding.task_id);
   else if (taskID) list = list.filter((finding) => finding.task_id === taskID);
@@ -1866,6 +1868,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return {
       total: mockFindings.length,
       pending: mockFindings.filter((f) => f.status === "pending").length,
+      submitted: mockFindings.filter((f) => (f.report_state ?? "none") === "submitted").length,
+      accepted: mockFindings.filter((f) => f.report_state === "accepted").length,
       critical: mockFindings.filter((f) => f.severity === "critical").length,
       high: mockFindings.filter((f) => f.severity === "high").length,
       medium: mockFindings.filter((f) => f.severity === "medium").length,
@@ -1873,6 +1877,28 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       vulnclasses,
       tasks,
     };
+  }
+  if (path === "/exploration/findings/bulk-report-state" && m === "POST") {
+    const ids = Array.isArray(b.ids) ? b.ids : [];
+    const state = typeof b.report_state === "string" ? b.report_state : "";
+    let updated = 0;
+    let missing = 0;
+    const results = ids.map((id) => {
+      const key = String(id);
+      const f = mockFindings.find((item) => item.id === key);
+      if (!f) {
+        missing++;
+        return { id, found: false, changed: false };
+      }
+      const from = f.report_state ?? "none";
+      const changed = from !== state;
+      if (changed) {
+        f.report_state = state as typeof f.report_state;
+        updated++;
+      }
+      return { id, found: true, changed, from };
+    });
+    return { updated, missing, results };
   }
   if (path === "/exploration/findings/asset-tree") {
     const list = mockApplyAssetScope(mockFilterFindings(q), null);
@@ -2081,6 +2107,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     if (!f) return {};
     if (m === "PATCH") {
       if (typeof b.status === "string") f.status = b.status as typeof f.status;
+      if (typeof b.report_state === "string") f.report_state = b.report_state as typeof f.report_state;
       if (typeof b.severity === "string") f.severity = b.severity as typeof f.severity;
       if (typeof b.name === "string") f.name = b.name;
       if (typeof b.vulnclass === "string") f.vulnclass = b.vulnclass;

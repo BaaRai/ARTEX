@@ -43,6 +43,7 @@ import type {
   FindingGroupsPage,
   FindingQuery,
   FindingRetest,
+  FindingReportState,
   FindingStats,
   FindingStatus,
   FindingsPage,
@@ -241,6 +242,7 @@ function findingFilterParams(q: Omit<FindingQuery, "page" | "pageSize">): URLSea
   const p = new URLSearchParams();
   if (q.severity && q.severity !== "all") p.set("severity", q.severity);
   if (q.status && q.status !== "all") p.set("status", q.status);
+  if (q.reportState && q.reportState !== "all") p.set("report_state", q.reportState);
   if (q.verificationStatus && q.verificationStatus !== "all") p.set("verification_status", q.verificationStatus);
   if (q.vulnclass && q.vulnclass !== "all") p.set("vulnclass", q.vulnclass);
   if (q.task && q.task !== "all") p.set("task_id", q.task);
@@ -703,6 +705,8 @@ export const api = {
   // Vulnerability lineage: the subgraph (nodes + edges) from the vulnerability node back to the task's initial node.
   findingLineage: (id: string) => get<{ nodes: TaskNode[]; edges: Edge[] }>(`/exploration/findings/${id}/lineage`),
   setFindingStatus: (id: string, status: FindingStatus) => patch<Finding>(`/exploration/findings/${id}`, { status }),
+  setFindingReportState: (id: string, report_state: FindingReportState) =>
+    patch<Finding>(`/exploration/findings/${id}`, { report_state }),
   // Bulk triage: one transaction server-side, with a per-id result. Unknown ids
   // come back as found=false instead of failing the whole batch.
   bulkSetFindingStatus: (ids: string[], status: FindingStatus) =>
@@ -710,11 +714,16 @@ export const api = {
       "/exploration/findings/bulk-status",
       { ids: ids.map(Number), status },
     ),
+  bulkSetFindingReportState: (ids: string[], report_state: FindingReportState) =>
+    post<{ updated: number; missing: number; results: { id: number; found: boolean; changed: boolean }[] }>(
+      "/exploration/findings/bulk-report-state",
+      { ids: ids.map(Number), report_state },
+    ),
   setFindingSeverity: (id: string, severity: Severity) => patch<Finding>(`/exploration/findings/${id}`, { severity }),
   // Save a vulnerability's name/class/severity in one call (inline edit in the findings list); only present fields are sent.
   updateFinding: (
     id: string,
-    fields: { name?: string; vulnclass?: string; severity?: Severity; status?: FindingStatus },
+    fields: { name?: string; vulnclass?: string; severity?: Severity; status?: FindingStatus; report_state?: FindingReportState },
   ) => patch<Finding>(`/exploration/findings/${id}`, fields),
   // Delete a vulnerability: removes the findings record + the source exploration node (gone from the findings list, the task findings tab, and the exploration graph together).
   deleteFinding: (id: string) => del<{ deleted: boolean; id: number }>(`/exploration/findings/${id}`),

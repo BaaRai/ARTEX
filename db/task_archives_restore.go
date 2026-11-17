@@ -361,28 +361,40 @@ func rowExists(tx *sql.Tx, table string, id int64) bool {
 	return exists
 }
 
-func insertArchiveRows(tx *sql.Tx, table string, raw json.RawMessage) error {
-	// json_populate_recordset inserts NULL for absent columns, bypassing SQL
-	// defaults. Preserve compatibility with v3 archives predating side memory.
-	if (table == "side_question_sessions" || table == "side_question_requests") && len(raw) > 0 {
-		var rows []map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &rows); err != nil {
-			return err
-		}
-		field := "memory"
-		if table == "side_question_requests" {
-			field = "context_info"
-		}
-		for _, row := range rows {
+// archiveDefaults are the columns that did not exist when older archives were
+// written. json_populate_recordset inserts NULL for an absent key, bypassing the
+// SQL default, and a NOT NULL column then rejects the whole restore.
+var archiveDefaults = map[string]map[string]string{
+	"side_question_sessions": {"memory": `{}`},
+	"side_question_requests": {"context_info": `{}`},
+	"findings":               {"report_state": `"none"`},
+}
+
+// fillArchiveDefaults restores the default of a column an older archive
+// predates, so a restore keeps working across schema additions.
+func fillArchiveDefaults(table string, raw json.RawMessage) (json.RawMessage, error) {
+	defaults, ok := archiveDefaults[table]
+	if !ok || len(raw) == 0 {
+		return raw, nil
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		for field, def := range defaults {
 			if len(row[field]) == 0 || string(row[field]) == "null" {
-				row[field] = json.RawMessage(`{}`)
+				row[field] = json.RawMessage(def)
 			}
 		}
-		var err error
-		raw, err = json.Marshal(rows)
-		if err != nil {
-			return err
-		}
+	}
+	return json.Marshal(rows)
+}
+
+func insertArchiveRows(tx *sql.Tx, table string, raw json.RawMessage) error {
+	raw, err := fillArchiveDefaults(table, raw)
+	if err != nil {
+		return err
 	}
 	allowed := map[string]bool{
 		"exploration_nodes": true, "exploration_edges": true, "exploration_anchors": true,
@@ -396,7 +408,7 @@ func insertArchiveRows(tx *sql.Tx, table string, raw json.RawMessage) error {
 	if rawRowCount(raw) == 0 {
 		return nil
 	}
-	_, err := tx.Exec(`INSERT INTO `+table+` SELECT * FROM json_populate_recordset(NULL::`+table+`,$1::json)`, string(raw))
+	_, err = tx.Exec(`INSERT INTO `+table+` SELECT * FROM json_populate_recordset(NULL::`+table+`,$1::json)`, string(raw))
 	return err
 }
 

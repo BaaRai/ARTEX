@@ -770,6 +770,8 @@ FROM skill_usage WHERE (task_id=$1 OR exploration_id=$2) AND NOT found GROUP BY 
 		{"findings", `SELECT COALESCE(jsonb_object_agg(name,n),'{}'::jsonb) FROM (SELECT COALESCE(NULLIF(severity,''),'unknown') name,count(*) n FROM findings WHERE task_id=$1 GROUP BY severity) x`, []any{taskID}},
 		{"finding_stats", `SELECT jsonb_build_object(
  'total',count(*),'pending',count(*) FILTER (WHERE status='pending'),
+ 'submitted',count(*) FILTER (WHERE report_state='submitted'),
+ 'accepted',count(*) FILTER (WHERE report_state='accepted'),
  'critical',count(*) FILTER (WHERE severity='critical'),'high',count(*) FILTER (WHERE severity='high'),
  'medium',count(*) FILTER (WHERE severity='medium'),'low',count(*) FILTER (WHERE severity='low'),
  'vulnclasses',COALESCE(jsonb_agg(DISTINCT vulnclass) FILTER (WHERE vulnclass<>''),'[]'::jsonb))
