@@ -57,10 +57,30 @@ const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
   anthropic: "Only selectable for the openai format. Anthropic's field name is fixed as max_tokens.",
   "openai-responses": "Only selectable for the openai format. The Responses API's field name is fixed as max_output_tokens.",
   ollama: "Only selectable for the openai format. Ollama's field name is fixed as max_tokens.",
+  "claude-cli": "Not used: the Claude Code CLI sets its own output cap.",
+  "codex-cli": "Not used: the Codex CLI sets its own output cap.",
+  "grok-cli": "Not used: the Grok CLI sets its own output cap.",
 };
 // LLM profile formats. The default in the create form is "anthropic"; "ollama" is the
 // keyless local-server format (base URL defaults to http://127.0.0.1:11434/v1).
-type ProfileFormat = "anthropic" | "openai" | "openai-responses" | "ollama";
+type ProfileFormat = LLMProfile["format"];
+const PROFILE_FORMATS: { value: ProfileFormat; label: string }[] = [
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI (Chat Completions)" },
+  { value: "openai-responses", label: "OpenAI (Responses API)" },
+  { value: "ollama", label: "Ollama (local, no key needed)" },
+  { value: "claude-cli", label: "Claude Code CLI (subscription)" },
+  { value: "codex-cli", label: "Codex CLI (subscription)" },
+  { value: "grok-cli", label: "Grok CLI (subscription)" },
+];
+// Formats usable without an API key. Mirrors db.IsKeylessFormat on the server.
+const KEYLESS_FORMATS: readonly ProfileFormat[] = ["ollama", "claude-cli", "codex-cli", "grok-cli"];
+// Subscription formats run this CLI on the ARTEX server host, with the CLI's own login.
+const CLI_BINARIES: Partial<Record<ProfileFormat, string>> = {
+  "claude-cli": "claude",
+  "codex-cli": "codex",
+  "grok-cli": "grok",
+};
 const OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1";
 const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: NONE, label: "Not sent (default)" },
@@ -78,11 +98,11 @@ function cooldownText(secs: number) {
 }
 
 // The "healthy or not" badge a profile shows on its card. A profile without a Key cannot send any request at all — say that before the breaker;
-// the exception is Ollama, a keyless local server that IS callable without a key. The other states come from the pool's breaker
-// records (with polling off no new records appear, so "healthy" = no known failure).
+// the exception is the keyless formats (Ollama, the subscription CLIs), which ARE callable without a key. The other states come from
+// the pool's breaker records (with polling off no new records appear, so "healthy" = no known failure).
 type Health = { label: string; cls: string; hint?: string };
 function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
-  if (!p.api_key_hint && p.format !== "ollama") {
+  if (!p.api_key_hint && !KEYLESS_FORMATS.includes(p.format)) {
     return {
       label: "No Key configured",
       cls: "border-muted-foreground/40 text-muted-foreground",
@@ -320,6 +340,7 @@ function ProfileSheet({
   const isNew = !profile;
   const [name, setName] = React.useState("");
   const [format, setFormat] = React.useState<ProfileFormat>("anthropic");
+  const cliBinary = CLI_BINARIES[format];
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [proxy, setProxy] = React.useState("");
@@ -349,11 +370,7 @@ function ProfileSheet({
   React.useEffect(() => {
     if (!open) return;
     setName(profile?.name ?? "");
-    setFormat(
-      profile?.format === "openai" || profile?.format === "openai-responses" || profile?.format === "ollama"
-        ? profile.format
-        : "anthropic",
-    );
+    setFormat(PROFILE_FORMATS.find((f) => f.value === profile?.format)?.value ?? "anthropic");
     setModel(profile?.model ?? "");
     setBaseUrl(profile?.base_url ?? "");
     setProxy(profile?.proxy ?? "");
@@ -431,7 +448,7 @@ function ProfileSheet({
   }
 
   async function save() {
-    if (!name.trim() || !model.trim()) {
+    if (!name.trim() || (!model.trim() && !cliBinary)) {
       toast.error("Please fill in a name and a model");
       return;
     }
@@ -443,8 +460,8 @@ function ProfileSheet({
         name: name.trim(),
         format,
         model: model.trim(),
-        base_url: baseUrl.trim(),
-        proxy: proxy.trim(),
+        base_url: cliBinary ? "" : baseUrl.trim(),
+        proxy: cliBinary ? "" : proxy.trim(),
         api_key: apiKey,
         rate_per_second: Number(rps) || 0,
         rate_per_minute: Number(rpm) || 0,
@@ -478,6 +495,12 @@ function ProfileSheet({
     keyPlaceholder = "optional — a local Ollama server runs keyless";
   } else if (keyHint) {
     keyPlaceholder = `Set (${keyHint}); leave empty to keep it`;
+  }
+  let modelPlaceholder = "claude-opus-4-8";
+  if (cliBinary) {
+    modelPlaceholder = "optional — empty uses the CLI's default model";
+  } else if (format === "ollama") {
+    modelPlaceholder = "llama3.2";
   }
 
   return (
@@ -520,10 +543,11 @@ function ProfileSheet({
                   <SelectValue placeholder="Select a format" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="openai">OpenAI (Chat Completions)</SelectItem>
-                  <SelectItem value="openai-responses">OpenAI (Responses API)</SelectItem>
-                  <SelectItem value="ollama">Ollama (local, no key needed)</SelectItem>
+                  {PROFILE_FORMATS.map((f) => (
+                    <SelectItem key={f.value} value={f.value}>
+                      {f.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -535,7 +559,7 @@ function ProfileSheet({
               <Input
                 id="p-model"
                 className="font-mono"
-                placeholder={format === "ollama" ? "llama3.2" : "claude-opus-4-8"}
+                placeholder={modelPlaceholder}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
@@ -547,7 +571,7 @@ function ProfileSheet({
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="shrink-0"
+                    className={cn("shrink-0", cliBinary && "hidden")}
                     disabled={loadingModels}
                     onClick={loadModels}
                     title="Load available models from the API"
@@ -574,9 +598,16 @@ function ProfileSheet({
                 )}
               </Popover>
             </div>
+            {cliBinary && (
+              <p className="text-muted-foreground text-xs">
+                Runs the <code className="font-mono">{cliBinary}</code> CLI on the host that runs the ARTEX server, with that
+                CLI's own subscription login: install it and log in there first. No API key, base URL or proxy is used, and the
+                CLI's own tools stay off. Each model call starts one CLI process, so it is slower than the API.
+              </p>
+            )}
           </div>
 
-          <div className="grid gap-2">
+          <div className={cn("grid gap-2", cliBinary && "hidden")}>
             <Label htmlFor="p-base-url">Base URL (optional)</Label>
             <Input
               id="p-base-url"
@@ -587,7 +618,7 @@ function ProfileSheet({
             />
           </div>
 
-          <div className="grid gap-2">
+          <div className={cn("grid gap-2", cliBinary && "hidden")}>
             <Label htmlFor="p-proxy">Proxy (optional)</Label>
             <Input
               id="p-proxy"
@@ -602,7 +633,7 @@ function ProfileSheet({
             </p>
           </div>
 
-          <div className="grid gap-2">
+          <div className={cn("grid gap-2", cliBinary && "hidden")}>
             <Label htmlFor="p-session-header">Custom session header (optional)</Label>
             <Input
               id="p-session-header"
@@ -618,7 +649,7 @@ function ProfileSheet({
             </p>
           </div>
 
-          <div className="grid gap-2">
+          <div className={cn("grid gap-2", cliBinary && "hidden")}>
             <Label htmlFor="p-user-agent">Custom User-Agent (optional)</Label>
             <Input
               id="p-user-agent"
@@ -633,7 +664,7 @@ function ProfileSheet({
             </p>
           </div>
 
-          <div className="grid gap-2">
+          <div className={cn("grid gap-2", cliBinary && "hidden")}>
             <Label htmlFor="p-api-key">
               {format === "ollama" ? "API Key (optional for Ollama)" : "API Key"}
             </Label>
