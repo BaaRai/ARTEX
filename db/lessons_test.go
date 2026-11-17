@@ -453,3 +453,459 @@ func insertLessonFinding(t *testing.T, d *DB, taskID int64, status string) int64
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, id) })
 	return id
 }
+
+func TestExtractLessonsRetractsReversedDisposition(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson retract %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+
+	cue := fmt.Sprintf("xss-retract-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := d.ExtractLessonsForTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("first extract=%d, want 1", n)
+	}
+	first, err := d.TaskLessons(t.Context(), task.ID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pos *Lesson
+	for i := range first {
+		if first[i].Kind == "positive" && strings.Contains(first[i].Action, label) {
+			pos = &first[i]
+			break
+		}
+	}
+	if pos == nil {
+		t.Fatalf("no positive lesson: %+v", first)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, pos.ID) })
+	posID := pos.ID
+
+	if _, err := d.SetFindingStatus(fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var posStatus string
+	var posSupport int
+	if err := d.QueryRow(`SELECT status,
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		FROM rsi_lessons WHERE id=$1`, posID).Scan(&posStatus, &posSupport); err != nil {
+		t.Fatal(err)
+	}
+	if posStatus != "retired" || posSupport != 0 {
+		t.Fatalf("positive after FP: status=%s support=%d", posStatus, posSupport)
+	}
+
+	afterFP, err := d.TaskLessons(t.Context(), task.ID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var neg *Lesson
+	for i := range afterFP {
+		if afterFP[i].ID == posID {
+			t.Fatal("retired positive still selected")
+		}
+		if afterFP[i].Kind == "negative" && strings.Contains(afterFP[i].Action, label) {
+			neg = &afterFP[i]
+		}
+	}
+	if neg == nil {
+		t.Fatalf("no negative lesson after FP: %+v", afterFP)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, neg.ID) })
+
+	if _, err := d.SetFindingStatus(fid, FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.QueryRow(`SELECT status,
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		FROM rsi_lessons WHERE id=$1`, posID).Scan(&posStatus, &posSupport); err != nil {
+		t.Fatal(err)
+	}
+	if posStatus != "candidate" || posSupport != 1 {
+		t.Fatalf("positive after re-confirm: status=%s support=%d", posStatus, posSupport)
+	}
+
+	var negStatus string
+	var negSupport int
+	if err := d.QueryRow(`SELECT status,
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		FROM rsi_lessons WHERE id=$1`, neg.ID).Scan(&negStatus, &negSupport); err != nil {
+		t.Fatal(err)
+	}
+	if negStatus != "retired" || negSupport != 0 {
+		t.Fatalf("negative after re-confirm: status=%s support=%d", negStatus, negSupport)
+	}
+}
+
+func TestExtractLessonsRetireOnlyWhenLastEvidence(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson shared retract %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+
+	cue := fmt.Sprintf("xss-shared-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var aID, bID int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&aID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&bID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	lessons, err := d.TaskLessons(t.Context(), task.ID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pos *Lesson
+	for i := range lessons {
+		if lessons[i].Kind == "positive" && strings.Contains(lessons[i].Action, label) {
+			pos = &lessons[i]
+			break
+		}
+	}
+	if pos == nil {
+		t.Fatalf("no shared positive lesson: %+v", lessons)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, pos.ID) })
+	if pos.Support != 2 {
+		t.Fatalf("shared support=%d, want 2", pos.Support)
+	}
+
+	if _, err := d.SetFindingStatus(aID, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var status string
+	var support int
+	if err := d.QueryRow(`SELECT status,
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		FROM rsi_lessons WHERE id=$1`, pos.ID).Scan(&status, &support); err != nil {
+		t.Fatal(err)
+	}
+	if status == "retired" || support != 1 {
+		t.Fatalf("shared positive should stay active with support 1, got status=%s support=%d", status, support)
+	}
+
+	after, err := d.TaskLessons(t.Context(), task.ID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawNeg bool
+	for i := range after {
+		if after[i].ID == pos.ID && after[i].Kind == "positive" {
+			if after[i].Support != 1 {
+				t.Fatalf("selected support=%d, want 1", after[i].Support)
+			}
+		}
+		if after[i].Kind == "negative" && strings.Contains(after[i].Action, label) {
+			sawNeg = true
+			t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, after[i].ID) })
+		}
+	}
+	if !sawNeg {
+		t.Fatalf("expected a negative lesson for the flipped finding: %+v", after)
+	}
+}
+
+func TestExtractLessonsRetractsAllRetests(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson all retests %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+
+	cue := fmt.Sprintf("xss-all-retest-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+
+	r1 := insertLessonRetest(t, d, fid, "reproduced")
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	reproduced := findLessonByAction(t, d, task.ID, "positive", "Reproduced", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, reproduced.ID) })
+	confirmed := findLessonByAction(t, d, task.ID, "positive", "Confirmed", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, confirmed.ID) })
+	if positiveRetestEvidence(t, d, r1) != 1 {
+		t.Fatal("first retest was not extracted")
+	}
+
+	r2 := insertLessonRetest(t, d, fid, "fixed")
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	caution := findLessonByAction(t, d, task.ID, "caution", "Recheck", cue)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, caution.ID) })
+	if positiveRetestEvidence(t, d, r1) != 1 {
+		t.Fatal("older reproduced retest lost its evidence after a later fixed retest")
+	}
+
+	if _, err := d.SetFindingStatus(fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := positiveRetestEvidence(t, d, r1); n != 0 {
+		t.Fatalf("older retest still has %d positive evidence rows after FP", n)
+	}
+	if n := positiveRetestEvidence(t, d, r2); n != 0 {
+		t.Fatalf("latest retest still has %d positive evidence rows after FP", n)
+	}
+	status, support := lessonStatusSupport(t, d, reproduced.ID)
+	if status != "retired" || support != 0 {
+		t.Fatalf("reproduced retest lesson after FP: status=%s support=%d", status, support)
+	}
+	status, support = lessonStatusSupport(t, d, confirmed.ID)
+	if status != "retired" || support != 0 {
+		t.Fatalf("confirmed lesson after FP: status=%s support=%d", status, support)
+	}
+	neg := findLessonByAction(t, d, task.ID, "negative", "Do not re-report", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, neg.ID) })
+}
+
+func TestExtractLessonsDoesNotUnretireWithEvidence(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson keep retired %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+
+	cue := fmt.Sprintf("xss-keep-retired-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	pos := findLessonByAction(t, d, task.ID, "positive", "Confirmed", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, pos.ID) })
+
+	if _, err := d.Exec(`UPDATE rsi_lessons SET status='retired' WHERE id=$1`, pos.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, support := lessonStatusSupport(t, d, pos.ID)
+	if status != "retired" {
+		t.Fatalf("operator-retired lesson with evidence became %s", status)
+	}
+	if support != 1 {
+		t.Fatalf("support=%d, want 1", support)
+	}
+}
+
+func TestExtractLessonsLeavesAdopted(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson keep adopted %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+
+	cue := fmt.Sprintf("xss-keep-adopted-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	pos := findLessonByAction(t, d, task.ID, "positive", "Confirmed", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, pos.ID) })
+
+	if _, err := d.Exec(`UPDATE rsi_lessons SET status='adopted' WHERE id=$1`, pos.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := lessonStatusSupport(t, d, pos.ID)
+	if status != "adopted" {
+		t.Fatalf("adopted lesson became %s", status)
+	}
+}
+
+func TestExtractLessonsReopenRetractsNothing(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson reopen %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+
+	cue := fmt.Sprintf("xss-reopen-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	pos := findLessonByAction(t, d, task.ID, "positive", "Confirmed", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, pos.ID) })
+
+	if _, err := d.SetFindingStatus(fid, FindingPending); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, support := lessonStatusSupport(t, d, pos.ID)
+	if status != "candidate" || support != 1 {
+		t.Fatalf("reopened finding retracted the lesson: status=%s support=%d", status, support)
+	}
+}
+
+func insertLessonRetest(t *testing.T, d *DB, findingID int64, verdict string) int64 {
+	t.Helper()
+	var id int64
+	if err := d.QueryRow(`
+		INSERT INTO finding_retests(finding_id,status,verdict,snapshot)
+		VALUES ($1,'completed',$2,'{}'::jsonb)
+		RETURNING id`, findingID, verdict).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM finding_retests WHERE id=$1`, id) })
+	return id
+}
+
+func findLessonByAction(t *testing.T, d *DB, taskID int64, kind, actionPrefix, label string) *Lesson {
+	t.Helper()
+	lessons, err := d.TaskLessons(t.Context(), taskID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range lessons {
+		if lessons[i].Kind == kind && strings.Contains(lessons[i].Action, actionPrefix) && strings.Contains(lessons[i].Action, label) {
+			return &lessons[i]
+		}
+	}
+	t.Fatalf("no %s lesson with %q and %q: %+v", kind, actionPrefix, label, lessons)
+	return nil
+}
+
+func positiveRetestEvidence(t *testing.T, d *DB, retestID int64) int {
+	t.Helper()
+	var n int
+	if err := d.QueryRow(`
+		SELECT COUNT(*) FROM rsi_lesson_evidence e
+		JOIN rsi_lessons l ON l.id=e.lesson_id
+		WHERE e.source_kind='retest' AND e.source_id=$1 AND l.kind='positive'`, retestID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func lessonStatusSupport(t *testing.T, d *DB, lessonID int64) (status string, support int) {
+	t.Helper()
+	if err := d.QueryRow(`SELECT status,
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		FROM rsi_lessons WHERE id=$1`, lessonID).Scan(&status, &support); err != nil {
+		t.Fatal(err)
+	}
+	return status, support
+}

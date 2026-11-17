@@ -32,9 +32,15 @@ Extraction runs automatically when a task reaches a terminal status
 POST /api/tasks/{id}/lessons/extract
 ```
 
-It is idempotent. `rsi_lesson_evidence` is keyed by `(lesson, source_kind,
-source_id)`, so a second run for the same task adds no evidence and cannot
-inflate support.
+It is idempotent for the same disposition. `rsi_lesson_evidence` is keyed by
+`(lesson, source_kind, source_id)`, so a second run for the same finding adds
+no evidence and cannot inflate support. A later extract after a reversed
+disposition retracts that finding's evidence from the opposite-kind lesson,
+including every retest of the finding, and retires the lesson when its
+support hits zero. Confirming again restores the evidence; a retired lesson
+is un-retired only when it has no remaining evidence. Extraction does not
+run on status PATCH; call the endpoint after triage. Reopening a finding
+(`pending` / `in_progress`) produces nothing and retracts nothing.
 
 Rules:
 
@@ -84,10 +90,13 @@ What this layer deliberately does not do:
 
 - no LLM summarization in this phase: rules only, so every lesson traces to a
   finding or retest id;
-- no adoption: `status` is `candidate`; `adopted` and `retired` are reserved for
-  a later, owner-approved phase;
 - no prompt mutation, no benchmark probing, no lesson editing through the UI;
-- no decay or deletion; the evidence table is the audit trail.
+- `status` starts as `candidate`. Extraction auto-retires a lesson when its last
+  evidence is retracted. It un-retires only a retired lesson with no remaining
+  evidence. Adopted stays adopted; a retired lesson that still has evidence
+  stays retired;
+- no time-based decay; reversed dispositions retract that finding's evidence
+  from the opposite-kind lesson on the next extract.
 
 ## Measuring it
 

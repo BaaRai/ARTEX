@@ -93,10 +93,15 @@ func lessonExtractCompanyID(companyIDs []int64) int64 {
 }
 
 // ExtractLessonsForTask derives candidate lessons from one task's findings and
-// retests. It is idempotent: the evidence primary key means a second run adds
-// no support. A task with more than one company is skipped so a generic
-// (NULL company_id) lesson cannot leak across companies. Returns the number of
-// distinct lessons touched.
+// retests. It is idempotent for the same disposition: the evidence primary key
+// means a second run adds no support. A later run after a reversed disposition
+// retracts that finding's evidence from the opposite-kind lesson, including
+// every retest of the finding, and retires the lesson when nothing else
+// supports it. Confirming again restores the evidence; a retired lesson is
+// un-retired only when it has no remaining evidence. Pending and in_progress
+// produce nothing and retract nothing. A task with more than one company is
+// skipped so a generic (NULL company_id) lesson cannot leak across companies.
+// Returns the number of distinct lessons written.
 func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, error) {
 	categoryID, companyIDs, err := taskLessonScope(ctx, d, taskID)
 	if err != nil {
@@ -175,9 +180,18 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 					return 0, err
 				}
 			}
+			if err := d.retractLessonEvidence(ctx, "finding", findingID, "negative"); err != nil {
+				return 0, err
+			}
 		case "false_positive", "duplicate", "ignored", "risk_accepted":
 			if err := add("negative", "Do not re-report without new mechanics: "+label+" (prior "+status+")",
 				"finding", findingID, sourceDetail); err != nil {
+				return 0, err
+			}
+			if err := d.retractLessonEvidence(ctx, "finding", findingID, "positive"); err != nil {
+				return 0, err
+			}
+			if err := d.retractFindingRetestEvidence(ctx, findingID, "positive"); err != nil {
 				return 0, err
 			}
 		}
@@ -196,9 +210,95 @@ func (d *DB) upsertLesson(ctx context.Context, key, kind, cue, action string, ca
 	err := d.QueryRowContext(ctx, `
 		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,category_id,company_id)
 		VALUES($1,$2,$3,$4,NULLIF($5,0),NULLIF($6,0))
-		ON CONFLICT (dedupe_key) DO UPDATE SET updated_at=now()
+		ON CONFLICT (dedupe_key) DO UPDATE SET
+			updated_at=now(),
+			status=CASE
+				WHEN rsi_lessons.status='retired'
+				 AND NOT EXISTS (
+				     SELECT 1 FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id
+				 )
+				THEN 'candidate'
+				ELSE rsi_lessons.status
+			END
 		RETURNING id`, key, kind, cue, action, categoryID, companyID).Scan(&id)
 	return id, err
+}
+
+// retractLessonEvidence removes this source from lessons of fromKind and
+// retires any of those lessons that now have zero evidence. Shared lessons
+// that still have other evidence stay active.
+func (d *DB) retractLessonEvidence(ctx context.Context, sourceKind string, sourceID int64, fromKind string) error {
+	rows, err := d.QueryContext(ctx, `
+		DELETE FROM rsi_lesson_evidence e
+		USING rsi_lessons l
+		WHERE e.lesson_id=l.id
+		  AND l.kind=$1
+		  AND e.source_kind=$2
+		  AND e.source_id=$3
+		RETURNING e.lesson_id`, fromKind, sourceKind, sourceID)
+	if err != nil {
+		return err
+	}
+	ids, err := collectLessonIDs(rows)
+	if err != nil {
+		return err
+	}
+	return d.retireLessonsIfEmpty(ctx, ids)
+}
+
+// retractFindingRetestEvidence removes every retest of this finding from
+// lessons of fromKind, not only the latest row.
+func (d *DB) retractFindingRetestEvidence(ctx context.Context, findingID int64, fromKind string) error {
+	rows, err := d.QueryContext(ctx, `
+		DELETE FROM rsi_lesson_evidence e
+		USING rsi_lessons l, finding_retests r
+		WHERE e.lesson_id=l.id
+		  AND l.kind=$1
+		  AND e.source_kind='retest'
+		  AND e.source_id=r.id
+		  AND r.finding_id=$2
+		RETURNING e.lesson_id`, fromKind, findingID)
+	if err != nil {
+		return err
+	}
+	ids, err := collectLessonIDs(rows)
+	if err != nil {
+		return err
+	}
+	return d.retireLessonsIfEmpty(ctx, ids)
+}
+
+func collectLessonIDs(rows *sql.Rows) ([]int64, error) {
+	defer rows.Close()
+	seen := map[int64]bool{}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func (d *DB) retireLessonsIfEmpty(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := d.ExecContext(ctx, `
+		UPDATE rsi_lessons l
+		SET status='retired', updated_at=now()
+		WHERE l.id=ANY($1::bigint[])
+		  AND l.status<>'retired'
+		  AND NOT EXISTS (SELECT 1 FROM rsi_lesson_evidence e WHERE e.lesson_id=l.id)`, ids)
+	return err
 }
 
 // TaskLessons selects lessons visible to one task: generic lessons plus those
