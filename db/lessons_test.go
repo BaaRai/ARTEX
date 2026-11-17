@@ -698,7 +698,7 @@ func TestExtractLessonsRetractsAllRetests(t *testing.T) {
 	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
 		t.Fatal(err)
 	}
-	caution := findLessonByAction(t, d, task.ID, "caution", "Recheck", label)
+	caution := findLessonByAction(t, d, task.ID, "caution", "Recheck", cue)
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, caution.ID) })
 	if positiveRetestEvidence(t, d, r1) != 1 {
 		t.Fatal("older reproduced retest lost its evidence after a later fixed retest")
