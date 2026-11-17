@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
@@ -53,6 +54,16 @@ type Server struct {
 
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
+	// pwdVersion is auth.password_version, a counter. Zero means no password
+	// change is stored yet, and any valid token is accepted. pwdState is
+	// pwdUnreadable when that counter could not be read; every session is
+	// rejected until login reads it again.
+	pwdVersion atomic.Int64
+	pwdState   atomic.Int32
+	// authHashKey and authVersionKey override the settings keys. Empty uses
+	// the production keys. Tests set unique keys so a shared database is left alone.
+	authHashKey    string
+	authVersionKey string
 
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	trustedProxies []netip.Prefix // ARTEX_TRUSTED_PROXIES; see clientIP
@@ -173,6 +184,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		o(s)
 	}
 	s.initSetupToken()
+	s.loadPasswordVersion()
 	s.initSideQuestions()
 	// Circuit-breaker thresholds/cooldowns are hot parameters on the failure path; push the global retry policy to the Registry once at startup,
 	// and again on every policy save (saveLLMRetryPolicy).
@@ -1036,7 +1048,7 @@ func (s *Server) Handler() http.Handler {
 // with a valid token gets the service name and version; the web UI's top bar
 // reads the version, and sends its token.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	if !verifyJWT(extractToken(r), s.jwtKey) {
+	if !s.sessionOK(extractToken(r)) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
@@ -3241,6 +3253,11 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "streaming unsupported")
 		return
 	}
+	tok := extractToken(r)
+	if !s.sessionOK(tok) {
+		writeErr(w, 401, "token is invalid or expired")
+		return
+	}
 	since := int64(atoiDefault(r.URL.Query().Get("since"), 0))
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -3256,6 +3273,9 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	lines, cursor := logSink.recent(since, 1000)
 	for _, l := range lines {
+		if !s.sessionOK(tok) {
+			return
+		}
 		send(l)
 	}
 	if cursor > since {
@@ -3271,7 +3291,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case l, ok := <-ch:
-			if !ok {
+			if !ok || !s.sessionOK(tok) {
 				return
 			}
 			if l.Seq <= since {
@@ -3280,6 +3300,9 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 			since = l.Seq
 			send(l)
 		case <-ping.C:
+			if !s.sessionOK(tok) {
+				return
+			}
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		}
@@ -3287,6 +3310,11 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
+	tok := extractToken(r)
+	if !s.sessionOK(tok) {
+		writeErr(w, 401, "token is invalid or expired")
+		return
+	}
 	t := s.m.ResolveTask(r.URL.Query().Get("task"))
 	if t == nil {
 		writeErr(w, 404, "task not found")
@@ -3347,6 +3375,9 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, a := range items {
+			if !s.sessionOK(tok) {
+				return
+			}
 			sendSSE(a)
 		}
 		if cursor > since {
@@ -3366,7 +3397,7 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case a, ok := <-ch:
-			if !ok {
+			if !ok || !s.sessionOK(tok) {
 				return
 			}
 			if a.ID <= since {
@@ -3378,6 +3409,9 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 			since = a.ID
 			sendSSE(a)
 		case <-ping.C:
+			if !s.sessionOK(tok) {
+				return
+			}
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		}

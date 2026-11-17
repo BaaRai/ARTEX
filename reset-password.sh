@@ -3,8 +3,10 @@
 # ARTEX admin password reset script
 #
 # The login username is fixed as ARTEX; the password is stored as a bcrypt hash in
-# the auth.password_hash key of the settings table. This script uses pgcrypto to
-# generate the bcrypt hash in-database — compatible with the backend (x/crypto/bcrypt).
+# the auth.password_hash key of the settings table. The same transaction increments
+# auth.password_version. This script uses pgcrypto to generate the bcrypt hash
+# in-database, compatible with the backend (x/crypto/bcrypt). The running process
+# reads that version only at startup, so ARTEX must be restarted after a reset.
 #
 # Two deployments:
 #   local (default) — host connects to the database directly with psql. Connection
@@ -26,6 +28,7 @@
 set -euo pipefail
 
 PASS_KEY="auth.password_hash"
+VERSION_KEY="auth.password_version"
 BCRYPT_COST=10
 
 MODE=""            # local | docker (empty = auto-detect)
@@ -138,15 +141,23 @@ NEWPASS_CHARS=$(printf '%s' "$NEWPASS" | LC_ALL=C tr -d '\200-\277' | wc -c)
 # Hand the password to psql via environment variable (read with \getenv, never in argv/ps)
 export ARTEX_RESET_NEWPASS="$NEWPASS"
 
-# Generate bcrypt in-database and upsert; the password is auto-escaped with :'newpw'. CREATE EXTENSION is idempotent;
-# if the database role lacks permission to create extensions it errors here (see the hint in the run failure branch below).
+# Generate bcrypt in-database and upsert the hash and the password version in one
+# transaction. The password is auto-escaped with :'newpw'. CREATE EXTENSION is
+# idempotent; if the database role lacks permission to create extensions it errors
+# here (see the hint in the run failure branch below).
 SQL=$(cat <<SQL
 \\set ON_ERROR_STOP on
 \\getenv newpw ARTEX_RESET_NEWPASS
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+BEGIN;
 INSERT INTO settings(key, value)
 VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST)))
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+INSERT INTO settings(key, value)
+VALUES ('$VERSION_KEY', '1')
+ON CONFLICT (key) DO UPDATE
+SET value = (settings.value::bigint + 1)::text, updated_at = now();
+COMMIT;
 SQL
 )
 
@@ -236,4 +247,4 @@ else
 fi
 
 unset ARTEX_RESET_NEWPASS
-echo "✓ ARTEX admin password has been reset. Log in with username ARTEX + the new password (no service restart needed)."
+echo "✓ ARTEX admin password has been reset. Restart ARTEX, then log in with username ARTEX and the new password. Sessions from before the restart stop working."

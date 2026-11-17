@@ -249,7 +249,7 @@ func TestAuthInitRequiresSetupToken(t *testing.T) {
 	}
 	defer m.Close()
 	clearPassword := func() {
-		if _, err := m.pg.Exec(`DELETE FROM settings WHERE key=$1`, authPassKey); err != nil {
+		if _, err := m.pg.Exec(`DELETE FROM settings WHERE key=$1 OR key=$2`, authPassKey, authPwdVersionKey); err != nil {
 			t.Fatal(err)
 		}
 	}
