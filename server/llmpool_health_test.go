@@ -1,51 +1,110 @@
 package server
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmpool"
 )
 
-func TestHealthSyncCoalescesToLatest(t *testing.T) {
-	h := &healthSync{pending: map[int64]healthOp{}}
-	h.enqueue(7, healthOp{st: llmpool.State{Fails: 1}})
-	h.enqueue(7, healthOp{st: llmpool.State{Fails: 4}})
+func TestHealthSyncLoopWritesLatest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	saved := map[int64]db.LLMHealth{}
+	cleared := map[int64]int{}
+	savedCh := make(chan struct{}, 4)
+	clearedCh := make(chan struct{}, 4)
+	h := newHealthSync(ctx,
+		func(row db.LLMHealth) error {
+			mu.Lock()
+			saved[row.ProfileID] = row
+			mu.Unlock()
+			savedCh <- struct{}{}
+			return nil
+		},
+		func(id int64) error {
+			mu.Lock()
+			cleared[id]++
+			delete(saved, id)
+			mu.Unlock()
+			clearedCh <- struct{}{}
+			return nil
+		},
+	)
+	openUntil := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+	h.enqueue(8, healthOp{st: llmpool.State{Fails: 1, LastError: "first"}})
+	h.enqueue(8, healthOp{st: llmpool.State{Fails: 4, Trips: 1, OpenUntil: openUntil, LastError: "down"}})
+	deadline := time.After(2 * time.Second)
+	var latest db.LLMHealth
+	for {
+		mu.Lock()
+		latest = saved[8]
+		mu.Unlock()
+		if latest.Fails == 4 && latest.OpenUntil != nil && latest.OpenUntil.Equal(openUntil) {
+			break
+		}
+		select {
+		case <-savedCh:
+		case <-deadline:
+			t.Fatalf("loop saved=%+v, want the latest trip", latest)
+		}
+	}
 	h.enqueue(7, healthOp{clear: true})
-	h.enqueue(8, healthOp{st: llmpool.State{Fails: 2}})
-	batch := h.take()
-	if len(batch) != 2 || !batch[7].clear || batch[8].st.Fails != 2 {
-		t.Fatalf("batch=%+v", batch)
+	select {
+	case <-clearedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("loop did not clear")
 	}
-	if again := h.take(); again != nil {
-		t.Fatalf("pending was not cleared: %+v", again)
+	mu.Lock()
+	defer mu.Unlock()
+	got := saved[8]
+	if got.Fails != 4 || got.Trips != 1 || got.LastError != "down" || got.OpenUntil == nil || !got.OpenUntil.Equal(openUntil) {
+		t.Fatalf("saved=%+v, want the latest trip including OpenUntil", got)
 	}
-	var saved []db.LLMHealth
-	var cleared []int64
-	worker := &healthSync{
-		save: func(row db.LLMHealth) error {
-			saved = append(saved, row)
-			return nil
-		},
-		clear: func(id int64) error {
-			cleared = append(cleared, id)
-			return nil
-		},
+	if cleared[7] != 1 {
+		t.Fatalf("cleared=%v", cleared)
 	}
-	worker.enqueue(7, healthOp{clear: true})
-	worker.enqueue(8, healthOp{st: llmpool.State{Fails: 3, LastError: "down"}})
-	for id, op := range worker.take() {
-		if op.clear {
-			if err := worker.clear(id); err != nil {
-				t.Fatal(err)
+}
+
+func TestHealthSyncRetriesFailedSave(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	calls := 0
+	done := make(chan struct{})
+	h := newHealthSync(ctx,
+		func(row db.LLMHealth) error {
+			mu.Lock()
+			calls++
+			n := calls
+			mu.Unlock()
+			if n == 1 {
+				return errors.New("database down")
 			}
-			continue
-		}
-		if err := worker.save(db.LLMHealth{ProfileID: id, Fails: op.st.Fails, LastError: op.st.LastError}); err != nil {
-			t.Fatal(err)
-		}
+			if n == 2 {
+				close(done)
+			}
+			return nil
+		},
+		func(int64) error { return nil },
+	)
+	h.retryAfter = 20 * time.Millisecond
+	h.enqueue(3, healthOp{st: llmpool.State{Fails: 2, LastError: "blip"}})
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed save was not retried")
 	}
-	if len(cleared) != 1 || cleared[0] != 7 || len(saved) != 1 || saved[0].ProfileID != 8 || saved[0].Fails != 3 {
-		t.Fatalf("cleared=%v saved=%+v", cleared, saved)
+	mu.Lock()
+	defer mu.Unlock()
+	if calls < 2 {
+		t.Fatalf("save calls=%d, want a retry", calls)
 	}
 }

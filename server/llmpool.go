@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log"
 	"sync"
 	"time"
@@ -18,13 +19,14 @@ import (
 //   - Circuit-breaker state is process-wide (s.llmHealth); rebuilding the pool does not clear it.
 
 // newLLMHealthRegistry builds the process-wide circuit-breaker registry, mirroring
-// state into PG so a cooling-off window survives a restart. Writes are async and
-// best-effort — the in-memory copy is authoritative.
-func newLLMHealthRegistry(pg *db.DB) *llmpool.Registry {
+// state into PG so a cooling-off window survives a restart. Writes are async.
+// The in-memory copy is authoritative. The returned syncer is nil when there is
+// no database; otherwise it flushes when ctx is cancelled.
+func newLLMHealthRegistry(ctx context.Context, pg *db.DB) (*llmpool.Registry, *healthSync) {
 	if pg == nil {
-		return llmpool.NewRegistry(nil, nil)
+		return llmpool.NewRegistry(nil, nil), nil
 	}
-	syncer := newHealthSync(pg.SaveLLMHealth, pg.ClearLLMHealth)
+	syncer := newHealthSync(ctx, pg.SaveLLMHealth, pg.ClearLLMHealth)
 	persist := func(id int64, st llmpool.State) {
 		syncer.enqueue(id, healthOp{st: st})
 	}
@@ -44,11 +46,13 @@ func newLLMHealthRegistry(pg *db.DB) *llmpool.Registry {
 			log.Printf("[llmpool] restored circuit-breaker state: profile #%d cooling until %s", h.ProfileID, st.OpenUntil.Format(time.RFC3339))
 		}
 	}
-	return reg
+	return reg, syncer
 }
 
-// healthOp is the latest circuit-breaker write for one profile. clear drops the row.
+// healthOp is one circuit-breaker write for a profile. clear drops the row.
+// seq orders writes for that profile: a newer op wins over one still in flight.
 type healthOp struct {
+	seq   uint64
 	clear bool
 	st    llmpool.State
 }
@@ -56,35 +60,67 @@ type healthOp struct {
 // healthSync writes circuit-breaker state from one goroutine. A newer update for
 // the same profile replaces one that has not been written yet, so a burst of
 // state changes becomes one database call and the request path does not wait.
+// save and clear must not call enqueue.
 type healthSync struct {
-	save    func(db.LLMHealth) error
-	clear   func(int64) error
-	mu      sync.Mutex
-	pending map[int64]healthOp
-	wake    chan struct{}
+	save       func(db.LLMHealth) error
+	clear      func(int64) error
+	retryAfter time.Duration // tests set a short delay; zero uses one second
+	mu         sync.Mutex
+	pending    map[int64]healthOp
+	applied    map[int64]uint64
+	seq        uint64
+	stopped    bool
+	wake       chan struct{}
+	done       chan struct{}
 }
 
-func newHealthSync(save func(db.LLMHealth) error, clear func(int64) error) *healthSync {
+func newHealthSync(ctx context.Context, save func(db.LLMHealth) error, clear func(int64) error) *healthSync {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	h := &healthSync{
 		save:    save,
 		clear:   clear,
 		pending: map[int64]healthOp{},
+		applied: map[int64]uint64{},
 		wake:    make(chan struct{}, 1),
+		done:    make(chan struct{}),
 	}
-	go h.loop()
+	go h.loop(ctx)
 	return h
+}
+
+// FlushLLMHealth waits until the circuit-breaker writer has flushed the ops
+// queued before shutdown. Call it after the server context is cancelled and
+// before the database closes.
+func (s *Server) FlushLLMHealth() {
+	if s == nil || s.llmHealthSync == nil {
+		return
+	}
+	select {
+	case <-s.llmHealthSync.done:
+	case <-time.After(5 * time.Second):
+		log.Printf("[llmpool] timed out flushing circuit-breaker state")
+	}
 }
 
 func (h *healthSync) enqueue(id int64, op healthOp) {
 	h.mu.Lock()
-	if h.pending == nil {
-		h.pending = map[int64]healthOp{}
+	h.seq++
+	op.seq = h.seq
+	if h.stopped {
+		h.mu.Unlock()
+		if err := h.apply(id, op); err != nil {
+			log.Printf("[llmpool] write circuit-breaker profile #%d: %v", id, err)
+		}
+		return
+	}
+	if prev, ok := h.pending[id]; ok && prev.seq > op.seq {
+		h.mu.Unlock()
+		return
 	}
 	h.pending[id] = op
 	h.mu.Unlock()
-	if h.wake == nil {
-		return
-	}
 	select {
 	case h.wake <- struct{}{}:
 	default:
@@ -102,34 +138,88 @@ func (h *healthSync) take() map[int64]healthOp {
 	return out
 }
 
-func (h *healthSync) loop() {
-	for {
-		batch := h.take()
-		if len(batch) == 0 {
-			<-h.wake
-			continue
+func (h *healthSync) restore(id int64, op healthOp) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stopped || h.applied[id] >= op.seq {
+		return
+	}
+	if cur, ok := h.pending[id]; ok && cur.seq >= op.seq {
+		return
+	}
+	h.pending[id] = op
+}
+
+func (h *healthSync) apply(id int64, op healthOp) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if op.seq > 0 && h.applied[id] >= op.seq {
+		return nil
+	}
+	var err error
+	if op.clear {
+		if h.clear != nil {
+			err = h.clear(id)
 		}
-		for id, op := range batch {
-			if op.clear {
-				if h.clear == nil {
-					continue
-				}
-				if err := h.clear(id); err != nil {
-					log.Printf("[llmpool] clear circuit-breaker profile #%d: %v", id, err)
-				}
-				continue
-			}
-			if h.save == nil {
-				continue
-			}
-			row := db.LLMHealth{ProfileID: id, Fails: op.st.Fails, Trips: op.st.Trips, LastError: op.st.LastError}
-			if !op.st.OpenUntil.IsZero() {
-				openUntil := op.st.OpenUntil
-				row.OpenUntil = &openUntil
-			}
-			if err := h.save(row); err != nil {
-				log.Printf("[llmpool] persist circuit-breaker profile #%d: %v", id, err)
-			}
+	} else if h.save != nil {
+		row := db.LLMHealth{ProfileID: id, Fails: op.st.Fails, Trips: op.st.Trips, LastError: op.st.LastError}
+		if !op.st.OpenUntil.IsZero() {
+			openUntil := op.st.OpenUntil
+			row.OpenUntil = &openUntil
+		}
+		err = h.save(row)
+	}
+	if err != nil {
+		return err
+	}
+	if h.applied[id] < op.seq {
+		h.applied[id] = op.seq
+	}
+	return nil
+}
+
+func (h *healthSync) write(batch map[int64]healthOp) (failed bool) {
+	for id, op := range batch {
+		if err := h.apply(id, op); err != nil {
+			log.Printf("[llmpool] write circuit-breaker profile #%d: %v", id, err)
+			h.restore(id, op)
+			failed = true
+		}
+	}
+	return failed
+}
+
+func (h *healthSync) finish() {
+	h.mu.Lock()
+	h.stopped = true
+	batch := h.pending
+	h.pending = map[int64]healthOp{}
+	h.mu.Unlock()
+	for id, op := range batch {
+		if err := h.apply(id, op); err != nil {
+			log.Printf("[llmpool] write circuit-breaker profile #%d: %v", id, err)
+		}
+	}
+}
+
+func (h *healthSync) loop(ctx context.Context) {
+	defer close(h.done)
+	for {
+		failed := h.write(h.take())
+		delay := h.retryAfter
+		if delay <= 0 {
+			delay = time.Second
+		}
+		var retry <-chan time.Time
+		if failed {
+			retry = time.After(delay)
+		}
+		select {
+		case <-ctx.Done():
+			h.finish()
+			return
+		case <-h.wake:
+		case <-retry:
 		}
 	}
 }

@@ -117,7 +117,9 @@ type Server struct {
 	// It deliberately lives OUTSIDE the provider caches: rebuilding the chain
 	// (saving an unrelated profile, flipping a setting) must not erase what we
 	// learned about which backends are out of credit / rate-limited.
-	llmHealth *llmpool.Registry
+	// llmHealthSync flushes that state when ctx is cancelled, before the database closes.
+	llmHealth     *llmpool.Registry
+	llmHealthSync *healthSync
 
 	// Explicit task chains use one task-scoped dynamic provider shared by goals,
 	// planner, workers, and the main agent. Bundles are stable; their runtime reads
@@ -163,9 +165,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
-		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
+		provByProfile:  map[int64]*provEntry{},
 		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
 		loginLimit: newLoginLimiter(time.Now)}
+	s.llmHealth, s.llmHealthSync = newLLMHealthRegistry(ctx, m.pg)
 	for _, o := range opts {
 		o(s)
 	}
