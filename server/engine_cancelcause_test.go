@@ -9,6 +9,26 @@ import (
 	"github.com/Autumn-27/artex/agent"
 )
 
+func TestWaitCancelsRuntimeWithShutdown(t *testing.T) {
+	e := NewEngine(nil)
+	rt := e.registerTaskRoutines(context.Background(), "t1", 1)
+	if rt == nil {
+		t.Fatal("runtime was not registered")
+	}
+	started := make(chan struct{})
+	runTaskRoutine(rt, func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+	})
+	<-started
+	if err := e.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(context.Cause(rt.ctx), agent.AbortShutdown) {
+		t.Fatalf("cause=%v, want shutdown", context.Cause(rt.ctx))
+	}
+}
+
 func TestPauseCancelsWithNamedCause(t *testing.T) {
 	e := NewEngine(nil)
 	execCtx := e.execContextFor(context.Background(), "t1")

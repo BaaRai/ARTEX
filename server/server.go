@@ -296,8 +296,15 @@ func (s *Server) restoreTaskRuntimes() {
 		lifecycle := t.lifecycleSnapshot()
 		// clear stale 'running' intents from a prior crash/restart (no live worker
 		// owns them) so they re-claim instead of spinning forever in the UI.
-		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
+		if n, err := t.Store.ResetRunningIntents(); err != nil {
+			log.Printf("[engine] task %s reset leftover running intents: %v", t.ID, err)
+		} else if n > 0 {
 			log.Printf("[engine] task %s reset %d leftover running intents to open", t.ID, n)
+		}
+		if n, err := t.Store.FlushActivityOutbox(); err != nil {
+			log.Printf("[activity] task %s outbox: %v", t.ID, err)
+		} else if n > 0 {
+			log.Printf("[activity] task %s stored %d activities recovered from the outbox", t.ID, n)
 		}
 		if lifecycle.Paused {
 			s.engine.Pause(t.ID, agent.AbortPausedOnReload)
@@ -317,6 +324,30 @@ func (s *Server) restoreTaskRuntimes() {
 		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) {
 			s.engine.Run(s.ctx, t)
 		}
+	}
+}
+
+// Wait blocks until the task goroutines snapshotted now, and the archive
+// worker, have finished, or until ctx ends.
+func (s *Server) Wait(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.engine != nil {
+		if err := s.engine.Wait(ctx); err != nil {
+			return err
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		s.archiveWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

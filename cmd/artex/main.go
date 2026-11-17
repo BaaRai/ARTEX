@@ -127,9 +127,21 @@ func run() int {
 	<-ctx.Done()
 
 	log.Println("shutting down...")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	drainErr := srv.Wait(drainCtx)
+	drainCancel()
+	if drainErr != nil {
+		log.Printf("task drain: %v", drainErr)
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = httpSrv.Shutdown(shutdownCtx)
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown: %v", err)
+		return 1
+	}
+	if drainErr != nil {
+		return 1
+	}
 	return 0
 }
 
