@@ -59,13 +59,16 @@ type healthOp struct {
 
 // healthSync writes circuit-breaker state from one goroutine. A newer update for
 // the same profile replaces one that has not been written yet, so a burst of
-// state changes becomes one database call and the request path does not wait.
-// save and clear must not call enqueue.
+// state changes becomes one database call. The database call runs without mu,
+// so enqueue does not wait on a slow write. writeMu keeps those calls in order.
+// Before each call, an op that is already older than the applied or pending
+// sequence is dropped. save and clear must not call enqueue.
 type healthSync struct {
 	save       func(db.LLMHealth) error
 	clear      func(int64) error
 	retryAfter time.Duration // tests set a short delay; zero uses one second
 	mu         sync.Mutex
+	writeMu    sync.Mutex // orders database calls; enqueue does not take it
 	pending    map[int64]healthOp
 	applied    map[int64]uint64
 	seq        uint64
@@ -150,10 +153,22 @@ func (h *healthSync) restore(id int64, op healthOp) {
 	h.pending[id] = op
 }
 
-func (h *healthSync) apply(id int64, op healthOp) error {
+// superseded reports whether a newer op for id is already applied or waiting.
+// The caller holds writeMu, so the decision and the database call stay in order.
+func (h *healthSync) superseded(id int64, seq uint64) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if op.seq > 0 && h.applied[id] >= op.seq {
+	if seq > 0 && h.applied[id] >= seq {
+		return true
+	}
+	cur, ok := h.pending[id]
+	return ok && cur.seq > seq
+}
+
+func (h *healthSync) apply(id int64, op healthOp) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	if h.superseded(id, op.seq) {
 		return nil
 	}
 	var err error
@@ -172,9 +187,11 @@ func (h *healthSync) apply(id int64, op healthOp) error {
 	if err != nil {
 		return err
 	}
+	h.mu.Lock()
 	if h.applied[id] < op.seq {
 		h.applied[id] = op.seq
 	}
+	h.mu.Unlock()
 	return nil
 }
 

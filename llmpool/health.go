@@ -48,7 +48,7 @@ type Registry struct {
 	// persist / forget mirror state to the DB so a cooling-off window survives a
 	// restart. Both may be nil (no DB). Both run while r.mu is held, so a later
 	// change to the same profile cannot enqueue ahead of this one. They must not
-	// call back into the registry.
+	// call back into the registry or wait on database I/O.
 	persist func(id int64, st State)
 	forget  func(id int64)
 
