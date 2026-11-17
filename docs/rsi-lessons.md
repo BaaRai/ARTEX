@@ -32,9 +32,13 @@ Extraction runs automatically when a task reaches a terminal status
 POST /api/tasks/{id}/lessons/extract
 ```
 
-It is idempotent. `rsi_lesson_evidence` is keyed by `(lesson, source_kind,
-source_id)`, so a second run for the same task adds no evidence and cannot
-inflate support.
+It is idempotent for the same disposition. `rsi_lesson_evidence` is keyed by
+`(lesson, source_kind, source_id)`, so a second run for the same finding adds
+no evidence and cannot inflate support. A later extract after a reversed
+disposition retracts that finding's evidence from the opposite-kind lesson
+and retires the lesson when its support hits zero. Confirming again restores
+the evidence and un-retires. Extraction does not run on status PATCH; call
+the endpoint after triage.
 
 Rules:
 
@@ -87,7 +91,8 @@ What this layer deliberately does not do:
 - no adoption: `status` is `candidate`; `adopted` and `retired` are reserved for
   a later, owner-approved phase;
 - no prompt mutation, no benchmark probing, no lesson editing through the UI;
-- no decay or deletion; the evidence table is the audit trail.
+- no time-based decay; reversed dispositions retract that finding's evidence
+  from the opposite-kind lesson on the next extract.
 
 ## Measuring it
 
