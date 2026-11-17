@@ -105,16 +105,34 @@ func (l *loginLimiter) sweep(now time.Time) {
 	}
 }
 
-// evictOldest drops the least recently seen entry to stay under loginMaxEntries.
+// evictOldest drops the least recently seen entry that is not inside a block.
+// A block that is still running stays, so filling the map cannot clear an
+// active lockout. When every entry is blocked, the one whose block ends soonest
+// is the one that goes.
 func (l *loginLimiter) evictOldest() {
+	now := l.now()
 	var oldest string
 	var at time.Time
+	found := false
 	for ip, e := range l.entries {
-		if oldest == "" || e.lastSeen.Before(at) {
-			oldest, at = ip, e.lastSeen
+		if now.Before(e.blockedUntil) {
+			continue
+		}
+		if !found || e.lastSeen.Before(at) {
+			oldest, at, found = ip, e.lastSeen, true
 		}
 	}
-	delete(l.entries, oldest)
+	if !found {
+		var until time.Time
+		for ip, e := range l.entries {
+			if oldest == "" || e.blockedUntil.Before(until) {
+				oldest, until = ip, e.blockedUntil
+			}
+		}
+	}
+	if oldest != "" {
+		delete(l.entries, oldest)
+	}
 }
 
 // peerIP is the host part of the TCP peer address.

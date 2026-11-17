@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
@@ -53,6 +54,10 @@ type Server struct {
 
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
+	// pwdEpoch is auth.password_epoch in Unix seconds. Zero means the setting
+	// is absent and every valid token is accepted. A token issued before the
+	// stored second is rejected.
+	pwdEpoch atomic.Int64
 
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	trustedProxies []netip.Prefix // ARTEX_TRUSTED_PROXIES; see clientIP
@@ -170,6 +175,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		o(s)
 	}
 	s.initSetupToken()
+	s.loadPwdEpoch()
 	s.initSideQuestions()
 	// Circuit-breaker thresholds/cooldowns are hot parameters on the failure path; push the global retry policy to the Registry once at startup,
 	// and again on every policy save (saveLLMRetryPolicy).
@@ -1033,7 +1039,7 @@ func (s *Server) Handler() http.Handler {
 // with a valid token gets the service name and version; the web UI's top bar
 // reads the version, and sends its token.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	if !verifyJWT(extractToken(r), s.jwtKey) {
+	if !verifyJWT(extractToken(r), s.jwtKey, s.pwdEpoch.Load()) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
