@@ -144,3 +144,14 @@ func TestBudgetCountsMatchUsageFixture(t *testing.T) {
 		t.Fatalf("spent %+v remaining %+v estimate %+v, want {%d 5}, remaining, {10400 3}", st.Spent, st.Remaining, st.Estimate, want)
 	}
 }
+
+func TestRestoreSpendCountsTowardCap(t *testing.T) {
+	l := NewBudgetLedger(NewBudget(100, 10), NewBudget(0, 0))
+	l.RestoreSpend(Spend{Tokens: 40, Turns: 4})
+	st := l.State()
+	if st.Spent != (Spend{40, 4}) || st.Remaining != (Budget{60, 6}) {
+		t.Fatalf("spent=%+v remaining=%+v", st.Spent, st.Remaining)
+	}
+	var none *BudgetLedger
+	none.RestoreSpend(Spend{Tokens: 1, Turns: 1})
+}

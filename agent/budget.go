@@ -110,6 +110,19 @@ func NewBudgetLedger(task, intent Budget) *BudgetLedger {
 	return &BudgetLedger{task: task, intent: intent}
 }
 
+// RestoreSpend adds usage that was already recorded before this process started.
+// It is applied once, to a ledger that has not recorded anything yet. A nil
+// ledger (no budget configured) is a no-op.
+func (l *BudgetLedger) RestoreSpend(spent Spend) {
+	if l == nil || (spent.Tokens == 0 && spent.Turns == 0) {
+		return
+	}
+	l.mu.Lock()
+	l.spent.Tokens += spent.Tokens
+	l.spent.Turns += spent.Turns
+	l.mu.Unlock()
+}
+
 // Record meters one task-level call (the planner's own rounds).
 func (l *BudgetLedger) Record(u llm.Usage) {
 	l.mu.Lock()
