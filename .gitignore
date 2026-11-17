@@ -24,9 +24,6 @@ web/next-env.d.ts
 *.swp
 *.swo
 
-# docs
-/docs/
-
 # os
 .DS_Store
 Thumbs.db
