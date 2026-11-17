@@ -1,0 +1,25 @@
+[Unit]
+Description=ARTEX application
+Requires=postgresql@18-main.service
+After=network.target postgresql@18-main.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=parallels
+Group=parallels
+WorkingDirectory=/home/parallels/ARTEX
+ExecStart=/home/parallels/ARTEX/artex -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+KillMode=control-group
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=artex
+
+[Install]
+WantedBy=multi-user.target
