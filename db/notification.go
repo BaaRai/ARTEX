@@ -509,6 +509,38 @@ func (d *DB) SetFindingStatusWithNotify(ctx context.Context, id int64, status st
 	return from, found, notified, err
 }
 
+// FindingStatusBatchResult is one id's outcome in a bulk status update.
+type FindingStatusBatchResult struct {
+	ID       int64  `json:"id"`
+	From     string `json:"from,omitempty"`
+	Found    bool   `json:"found"`
+	Changed  bool   `json:"changed"`
+	Notified bool   `json:"notified"`
+}
+
+// SetFindingStatusesWithNotify updates several findings to the same status in one
+// transaction. It returns a result per id, so an unknown id is reported as
+// found=false instead of hiding the others; a database error rolls the whole
+// batch back. Notification semantics stay identical to the single-row path: one
+// delivery event per finding whose status actually changed, none for a no-op.
+func (d *DB) SetFindingStatusesWithNotify(ctx context.Context, ids []int64, status string) ([]FindingStatusBatchResult, error) {
+	out := make([]FindingStatusBatchResult, 0, len(ids))
+	err := d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
+		for _, id := range ids {
+			from, found, changed, notified, err := SetFindingStatusTx(ctx, tx, id, status)
+			if err != nil {
+				return err
+			}
+			out = append(out, FindingStatusBatchResult{ID: id, From: from, Found: found, Changed: changed, Notified: notified})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SetFindingStatusTx updates a finding's status and registers a status-change delivery
 // event inside the **caller's transaction**.
 //

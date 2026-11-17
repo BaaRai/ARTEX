@@ -260,6 +260,7 @@ export default function FindingsPage() {
 
   // Export selection: tracked by finding_id (the standalone table's id), preserved across pages.
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = React.useState(false);
   // Export dialog state: scope (current filter / all / selected) × format (single md / per-finding md zip / csv / json).
   const [exportOpen, setExportOpen] = React.useState(false);
   const [exportScope, setExportScope] = React.useState<"filtered" | "all" | "selected">("filtered");
@@ -656,6 +657,36 @@ export default function FindingsPage() {
     [refreshAfterMutation, setFindings, status],
   );
 
+  // applyBulkStatus sets the same triage status on every selected finding, then
+  // reloads the current view so rows hidden by the status filter disappear.
+  const applyBulkStatus = React.useCallback(
+    async (next: FindingStatus) => {
+      if (selectedIds.size === 0 || bulkBusy) return;
+      setBulkBusy(true);
+      try {
+        const r = await api.bulkSetFindingStatus([...selectedIds], next);
+        setSelectedIds(new Set());
+        const label = statusMeta("finding", next).label;
+        toast.success(
+          r.updated === 1 ? `Marked 1 finding as "${label}"` : `Marked ${r.updated} findings as "${label}"`,
+        );
+        void loadFlat();
+        if (view === "asset") void loadAssetTree();
+        api
+          .findingStats()
+          .then(setStats)
+          .catch(() => {
+            // The list reload remains valid even if the aggregate refresh fails.
+          });
+      } catch (e) {
+        toast.error(`Bulk update failed: ${(e as Error).message}`);
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view],
+  );
+
   // The inline expanded detailed-report cache is keyed by the globally stable row key. report is long-form
   // Markdown the list query doesn't include, so it is fetched once by finding_id on expand; done with empty text = no report yet.
   const [reports, setReports] = React.useState<Record<string, FindingReport>>({});
@@ -995,7 +1026,27 @@ export default function FindingsPage() {
 
           <div className="ml-auto flex items-center gap-3">
             {selectedIds.size > 0 && (
-              <span className="text-xs text-muted-foreground tabular-nums">{selectedIds.size} selected</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground tabular-nums">{selectedIds.size} selected</span>
+                <Select
+                  value=""
+                  onValueChange={(v) => {
+                    if (v) void applyBulkStatus(v as FindingStatus);
+                  }}
+                  disabled={bulkBusy}
+                >
+                  <SelectTrigger size="sm" className="w-40" aria-label="Set the status of the selected findings">
+                    <SelectValue placeholder={bulkBusy ? "Updating…" : "Set status"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FINDING_STATUSES.map((st) => (
+                      <SelectItem key={st} value={st}>
+                        {statusMeta("finding", st).label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
             <Button size="sm" variant="outline" onClick={openExport}>
               <DownloadIcon /> Export

@@ -698,6 +698,13 @@ export const api = {
   // Vulnerability lineage: the subgraph (nodes + edges) from the vulnerability node back to the task's initial node.
   findingLineage: (id: string) => get<{ nodes: TaskNode[]; edges: Edge[] }>(`/exploration/findings/${id}/lineage`),
   setFindingStatus: (id: string, status: FindingStatus) => patch<Finding>(`/exploration/findings/${id}`, { status }),
+  // Bulk triage: one transaction server-side, with a per-id result. Unknown ids
+  // come back as found=false instead of failing the whole batch.
+  bulkSetFindingStatus: (ids: string[], status: FindingStatus) =>
+    post<{ updated: number; missing: number; results: { id: number; found: boolean; changed: boolean }[] }>(
+      "/exploration/findings/bulk-status",
+      { ids: ids.map(Number), status },
+    ),
   setFindingSeverity: (id: string, severity: Severity) => patch<Finding>(`/exploration/findings/${id}`, { severity }),
   // Save a vulnerability's name/class/severity in one call (inline edit in the findings list); only present fields are sent.
   updateFinding: (
