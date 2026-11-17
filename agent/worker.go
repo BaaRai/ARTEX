@@ -412,7 +412,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
 	tsx.SetTaskID(taskID)
-	coverageEnabled := as == nil || as.CoverageEnabled(taskID)
+	coverageEnabled := coverageOn(as, taskID)
 	tsx.SetCoverageEnabled(coverageEnabled)
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
