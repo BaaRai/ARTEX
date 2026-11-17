@@ -3,10 +3,10 @@
 // §4.3 (planner) and §4.4 (work agent).
 //
 // Provider configuration is read from the environment so the system runs with
-// any Anthropic-, OpenAI- or Ollama-format endpoint (the last being keyless).
-// If no usable configuration is found — a key for the cloud formats, a base
-// URL for keyless Ollama — FromEnv returns ok=false and the exploration engine
-// stays idle (an LLM is required).
+// any Anthropic-, OpenAI- or Ollama-format endpoint, or a subscription CLI
+// (Claude Code, Codex, Grok). Ollama and the CLIs are keyless. If no usable
+// configuration is found — a key for the cloud formats — FromEnv returns
+// ok=false and the exploration engine stays idle (an LLM is required).
 package agent
 
 import (
@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
@@ -31,6 +32,13 @@ import (
 )
 
 // Config describes the LLM backend resolved from the environment.
+//
+// The subscription CLI formats (claude-cli, codex-cli, grok-cli) use only
+// Format, Model and ReasoningEffort: an empty Model lets the CLI pick its own
+// default, and ReasoningEffort maps to the CLI's effort flag (empty = not
+// passed). They ignore BaseURL, APIKey, Proxy, SessionHeaderKey, UserAgent,
+// MaxTokens, MaxTokensField, the rate limits, Retry and ThinkingType, because
+// the CLI owns its endpoint, login and request shape.
 type Config struct {
 	Format  llm.Format
 	BaseURL string
@@ -169,8 +177,9 @@ func normalizeOllamaBaseURL(raw string) string {
 }
 
 // NeedsAPIKey reports whether this provider format requires an API key to be
-// usable. Ollama (local server) is keyless; every cloud format needs one.
-func (c Config) NeedsAPIKey() bool { return c.Format != FormatOllama }
+// usable. Ollama (local server) and the subscription CLIs are keyless; every
+// cloud API format needs one.
+func (c Config) NeedsAPIKey() bool { return !db.IsKeylessFormat(string(c.Format)) }
 
 // CompactionWindow returns the model context window in TOKENS for compaction
 // thresholds, resolved from the user-configured size (ContextWindowK). 0/unset →
@@ -201,11 +210,15 @@ func compactionConfig(windowTokens int) *compaction.Config {
 
 // FromEnv resolves the LLM provider config:
 //
-//	ARTEX_LLM_PROVIDER = anthropic|openai|openai-responses|ollama (default: inferred from keys)
-//	ARTEX_LLM_MODEL    = model id        (default: per provider)
+//	ARTEX_LLM_PROVIDER = anthropic|openai|openai-responses|ollama|claude-cli|codex-cli|grok-cli
+//	                     (default: inferred from keys)
+//	ARTEX_LLM_MODEL    = model id        (default: per provider; empty for a CLI = the CLI's default)
 //	ARTEX_LLM_BASE_URL = endpoint        (optional; ollama defaults to localhost:11434/v1)
 //	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
-//	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials (unused for ollama)
+//	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials (unused for ollama and the CLIs)
+//
+// claude-cli, codex-cli and grok-cli run the Claude Code, Codex or Grok CLI
+// installed and logged in on this host, so they need no key; see Config.
 func FromEnv() (Config, bool) {
 	// Case- and space-insensitive: "Ollama" used to miss every case below and
 	// fall through to anthropic, sending ANTHROPIC_API_KEY to the Ollama base URL.
@@ -231,6 +244,11 @@ func FromEnv() (Config, bool) {
 		// Streaming by default; ARTEX_LLM_STREAM=false/0/off explicitly switches to
 		// non-streaming.
 		Stream: !isFalsy(os.Getenv("ARTEX_LLM_STREAM")),
+	}
+	if f := llm.Format(prov); isCLIFormat(f) {
+		c.Format = f
+		c.BaseURL, c.Proxy = "", ""
+		return c, true
 	}
 	switch prov {
 	case "openai":
@@ -281,6 +299,13 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		Proxy:   strings.TrimSpace(proxy),
 		Stream:  true, // streaming by default; the caller overrides per profile
 	}
+	if f := llm.Format(strings.TrimSpace(provider)); isCLIFormat(f) {
+		// The CLI owns its endpoint and login; an empty model means the CLI's
+		// own default.
+		c.Format = f
+		c.BaseURL, c.APIKey, c.Proxy = "", "", ""
+		return c
+	}
 	switch strings.TrimSpace(provider) {
 	case "openai":
 		c.Format = llm.FormatOpenAI
@@ -327,8 +352,9 @@ func isFalsy(s string) bool {
 	return false
 }
 
-// Provider returns the short provider name
-// ("anthropic"/"openai"/"openai-responses"/"ollama").
+// Provider returns the short provider name, which is also the llm_profiles
+// format string ("anthropic"/"openai"/"openai-responses"/"ollama"/
+// "claude-cli"/"codex-cli"/"grok-cli").
 func (c Config) Provider() string {
 	switch c.Format {
 	case llm.FormatOpenAI:
@@ -338,13 +364,20 @@ func (c Config) Provider() string {
 	case FormatOllama:
 		return "ollama"
 	}
+	if isCLIFormat(c.Format) {
+		return string(c.Format)
+	}
 	return "anthropic"
 }
 
 // NewProvider builds an llm.Provider from the config. When a rate is set, the
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
+// A subscription CLI format gets a CLI provider and no HTTP client.
 func (c Config) NewProvider() (llm.Provider, error) {
+	if isCLIFormat(c.Format) {
+		return newCLIProvider(c), nil
+	}
 	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey, c.UserAgent)
 	if err != nil {
 		return nil, err
@@ -568,6 +601,11 @@ func ValidateUserAgent(raw string) (string, error) {
 // just the collapsed ok/err the UI shows. Bodies are clipped to keep a chatty
 // SSE stream from flooding the log.
 func logTestConnection(c Config, capt *llmrec.Capture) {
+	if isCLIFormat(c.Format) {
+		log.Printf("[llm-test] %s / %s — ran the local CLI; this format sends no HTTP request from ARTEX itself",
+			c.Provider(), c.Model)
+		return
+	}
 	attempts := capt.Attempts()
 	if len(attempts) == 0 {
 		log.Printf("[llm-test] %s / %s @ %s — no HTTP request was ever sent (config resolution or connection setup failed)",
@@ -602,7 +640,12 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 	if err != nil {
 		return 0, "", err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	timeout := 30 * time.Second
+	if isCLIFormat(c.Format) {
+		// A CLI call starts a whole agent process; Grok alone took ~20s for a ping.
+		timeout = 90 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// Capture the raw wire messages: what a connection test most needs to see is
 	// exactly what the gateway returned (status code + response body), which is gone
