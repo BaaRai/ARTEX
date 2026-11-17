@@ -28,6 +28,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed
 
+- **Task budgets survive a restart**: planner, worker, judge, and compactor rows in `llm_usage` are counted back into `ARTEX_TASK_BUDGET_*`. A restored task already inside the wrap-up reserve only has that reserve left, so the run wraps up instead of starting another worker. The per-worker estimate is not restored and starts from the defaults (50,000 tokens and 10 turns) until a worker finishes in this process. Chat, goal decomposition, and side questions stay outside the cap.
 - **Untrusted-output boundary is now on by default**: Norma frames tool results for the worker, planner, chat and main agent unless `ARTEX_UNTRUSTED_BOUNDARY` is set to `0`, `false`, `off` or `no`. It was opt-in via `ARTEX_UNTRUSTED_BOUNDARY=1` in 0.6.0 (#166); the default flips here (#203).
 - **Versioned migrations**: the `db` package applies numbered `db/migrations/NNNN_slug.sql` files once, in order, under the schema advisory lock, and records a SHA-256 checksum in `schema_migrations`; missing, renamed, changed or out-of-order migrations fail closed (#226).
 - **Coverage graph performance**: the coverage graph batches its connector lookups (three queries instead of one per root and per company) and adds the partial index `idx_ts_icp`; on a task of about 3,000 assets the p50 dropped from 126 ms to 27 ms and the queries per call from 221 to 3 (#230).
