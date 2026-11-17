@@ -37,7 +37,8 @@ justify it, and every autonomous action passes through scope rules, approval gat
 - **Autonomy with brakes.** Human-in-the-loop approvals, argv-prefix rules, scope/deny gates,
   token and turn budgets, a target noise governor, and prompt-injection framing on tool output.
 - **Self-hosted and model-agnostic.** One Go binary with the Next.js UI embedded, PostgreSQL,
-  your own Anthropic/OpenAI-compatible endpoint, or a local Ollama.
+  your own Anthropic/OpenAI-compatible endpoint, a local Ollama, or a Claude Code, Codex or Grok
+  subscription.
 
 ---
 
@@ -86,6 +87,36 @@ does not reset it; the profile order and switch remain persisted.
 
 The task creation and `PUT /api/tasks/{id}/llm` APIs accept `llm_rotate: true` alongside
 the ordered `llm_profile_ids`. Omitting `llm_rotate` on an update preserves its value.
+
+## Use a Claude Code, Codex, or Grok subscription
+
+A profile can run on a subscription you already have instead of an API key. ARTEX then
+runs that vendor's CLI for each model call.
+
+1. Install the CLI (`claude`, `codex` or `grok`) on the host that runs the ARTEX server, and
+   log in to it there as the user that runs ARTEX. With Docker Compose, that host is the
+   `artex` container: install the CLI in the image and keep its login directory (for example
+   `~/.claude`, `~/.codex` or `~/.grok`) on a volume.
+2. In **System → LLM**, create a profile and set **Format** to **Claude Code CLI
+   (subscription)**, **Codex CLI (subscription)** or **Grok CLI (subscription)**.
+3. Leave **Model** empty to use the CLI's default model, or type a model name the CLI
+   accepts. Model listing is not available for these formats.
+4. Click **Test connection**.
+
+To use one without the UI, set `ARTEX_LLM_PROVIDER` to `claude-cli`, `codex-cli` or `grok-cli`.
+No API key is needed.
+
+These formats behave differently from the API formats:
+
+- Each model call starts one CLI process, so a call is slower than the API. In our tests a
+  call took a few seconds with Claude and Codex, and up to about 20 s with Grok.
+- ARTEX turns off the CLI's own tools, such as its shell. The model calls only the ARTEX
+  tools, through the CLI's structured output.
+- The CLI's own login, endpoint and limits apply. The profile's API key, base URL, proxy,
+  session header, User-Agent, output cap, thinking switch, rate limits and retry settings are
+  not used. **Reasoning effort** is passed to the CLI's effort flag.
+- When the CLI reports that the subscription's usage limit is reached, the task fails over
+  to the next profile in its chain, the same as an exhausted API quota.
 
 ## Screenshots
 
@@ -286,7 +317,8 @@ worker remains confined to the intent it claimed.
 
 ### Platform
 
-- **LLM profiles with failover**: Anthropic, OpenAI, OpenAI-compatible relays and keyless Ollama;
+- **LLM profiles with failover**: Anthropic, OpenAI, OpenAI-compatible relays, keyless Ollama, and
+  Claude Code, Codex or Grok subscriptions through their CLIs;
   multiple profiles per task with automatic failover.
 - **Token accounting**: per-task and per-session usage, cache reads/writes, and an LLM record view
   for every call.
@@ -410,7 +442,8 @@ runtime supports it.
 **LLM**: `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`), or configure it in the UI's
 "LLM Configuration" page, which can also add a local Ollama server as a keyless provider (format
 "Ollama", default base URL `http://127.0.0.1:11434/v1`). Optional:
-`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama`), `ARTEX_LLM_MODEL`,
+`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama | claude-cli | codex-cli | grok-cli`),
+`ARTEX_LLM_MODEL`,
 `ARTEX_LLM_BASE_URL`, `ARTEX_LLM_PROXY`.
 
 **Base URL gotcha**: for the Anthropic format, enter the host **without** `/v1` (for example
