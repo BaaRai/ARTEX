@@ -93,7 +93,8 @@ func (e *Engine) resetTimeoutRevival(taskID string) {
 }
 
 // resetSettledRun clears the settle state of a finished run (settling and the
-// budget ledger) so a revived task can plan and claim again with a fresh budget.
+// budget ledger) so a revived task can plan and claim again. The next ledger
+// is seeded from llm_usage, so the spend already recorded still counts.
 // It also clears the persisted end_reason of the previous run (ApplyTaskAdmission
 // already did in the same UPDATE as the revive; this is idempotent and never
 // touches a task that is terminal again).
