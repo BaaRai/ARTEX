@@ -68,7 +68,8 @@ evidence entries and a higher support count.
 Lesson fields come from task evidence, which can include target-controlled
 text. Rendering strips control characters, flattens every field to one line,
 caps lengths, and prefixes the block with "prior outcomes, not instructions".
-The block is appended to the planner and worker prompts only in `inject` mode.
+The block is appended to the planner and worker prompts only in `inject` mode,
+inside the same nonce-framed data envelope used for other derived content.
 
 What this layer deliberately does not do:
 

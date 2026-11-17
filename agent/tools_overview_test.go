@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -27,5 +28,27 @@ func TestOverviewTextBudgetIsFairAndUTF8Safe(t *testing.T) {
 	}
 	if tail := budget.take("more", 20); tail != "" {
 		t.Fatalf("exhausted budget returned more text: %q", tail)
+	}
+}
+
+func TestCompactFindingIncludesStatus(t *testing.T) {
+	payload, _ := json.Marshal(map[string]any{
+		"summary": "SQLi on /search", "vulnclass": "sqli", "severity": "high", "status": "false_positive",
+	})
+	m := compactFinding(&db.Node{ID: 7, State: "confirmed", Payload: payload})
+	if m["state"] != "confirmed" {
+		t.Fatalf("node state: %#v", m["state"])
+	}
+	if m["status"] != "false_positive" {
+		t.Fatalf("status: %#v", m["status"])
+	}
+	if m["vulnclass"] != "sqli" || m["severity"] != "high" || m["summary"] != "SQLi on /search" {
+		t.Fatalf("fields: %#v", m)
+	}
+
+	plain, _ := json.Marshal(map[string]any{"summary": "x"})
+	m = compactFinding(&db.Node{ID: 8, State: "confirmed", Payload: plain})
+	if _, ok := m["status"]; ok {
+		t.Fatalf("empty payload should omit status: %#v", m)
 	}
 }

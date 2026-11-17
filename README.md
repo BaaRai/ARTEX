@@ -592,6 +592,10 @@ server {
     # ssl_certificate / ssl_certificate_key ...
 
     location / {
+        # 512 MiB combined file limit plus 1 MiB of multipart metadata.
+        client_max_body_size 513m;
+        proxy_request_buffering off;
+
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;

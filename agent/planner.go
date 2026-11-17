@@ -40,8 +40,9 @@ type Planner struct {
 	noaEnabledFn      func() bool                            // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn       func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
 	compactor         *Compactor                             // cold-node compaction (§7); nil = disabled
-	// lessonsBlock is the code-owned RSI evidence block appended after the
-	// rendered system prompt. Empty = off. Rendered by the server as data.
+	// lessonsBlock is the raw RSI evidence block. Empty = off. Plan() frames it
+	// with a per-run data envelope (field=lessons) and appends it after the
+	// rendered system prompt. The server renders the text from outcome records.
 	lessonsBlock string
 
 	// todos keeps ONE plan-scratchpad per task (keyed by exploration id) so the
@@ -104,9 +105,9 @@ func (p *Planner) SetWebSearch(o WebSearchOpts) { p.webSearch = o }
 // settings toggle takes effect without rebuilding the agent. nil = inject (default).
 func (p *Planner) SetConstraintInject(fn func() bool) { p.injectConstraints = fn }
 
-// SetLessonsBlock sets the code-owned RSI evidence block appended after the
-// rendered system prompt. Empty disables it. The server renders it from
-// outcome records; it is never editable through the prompt UI.
+// SetLessonsBlock sets the raw RSI evidence block. Empty disables it. Plan()
+// frames it as data. The server renders it from outcome records; it is never
+// editable through the prompt UI.
 func (p *Planner) SetLessonsBlock(block string) { p.lessonsBlock = block }
 
 // wantConstraints reports whether constraint injection is enabled (default yes).
@@ -511,7 +512,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// This task's work dir <workDir>/tasks/<taskID>; create it first.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
-	sysBody := plannerSystem(goal, p.workDir, taskDir) + p.lessonsBlock
+	sysBody := plannerSystem(goal, p.workDir, taskDir) + frameLessonsBlock(p.lessonsBlock)
 	constraints := ""
 	if p.wantConstraints() {
 		constraints = constraintBlock(ts)

@@ -65,7 +65,10 @@ func (s *Server) poolMember(p *db.LLMProfile, rank int) *llmpool.Member {
 	return &llmpool.Member{
 		ID: p.ID, Name: p.Name, Model: p.Model, Format: p.Format,
 		Priority: p.Priority, Active: p.IsDefault, Rank: rank,
-		WindowTokens: cfg.CompactionWindow(), Prov: prov,
+		// Actual window, not CompactionWindow(): that helper floors at 32K for
+		// compaction math, which would let an 8K profile accept a 16K request
+		// and then 400 without failover.
+		WindowTokens: cfg.ContextWindowTokens(), Prov: prov,
 	}
 }
 
@@ -103,7 +106,7 @@ func (s *Server) poolChain(headID int64, headProv llm.Provider, headCfg agent.Co
 	members := []*llmpool.Member{{
 		ID: head.ID, Name: head.Name, Model: head.Model, Format: head.Format,
 		Priority: head.Priority, Active: head.IsDefault, Rank: llmpool.RankActive,
-		WindowTokens: headCfg.CompactionWindow(), Prov: headProv,
+		WindowTokens: headCfg.ContextWindowTokens(), Prov: headProv,
 	}}
 	for _, p := range profs {
 		if p.ID == headID {

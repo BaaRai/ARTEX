@@ -75,6 +75,49 @@ jobs:
           ./intercept ./llmpool ./llmrec ./mcphttp ./notify ./server ./sidequestion
           ./traffic ./traffic/rewrite
 
+  # The go job above tests the version go.mod pins. A newer Go can break the
+  # suite without any change to this repository: Go 1.27's compress/flate
+  # started emitting a stored block for a 60-byte input, which made
+  # TestDecodeEvidenceBodyGzipQuoteFound fail on its own "fixture is not
+  # compressed" guard (#276). This job runs the same commands on the latest
+  # release so that drift shows up here rather than in a contributor's lap.
+  #
+  # Advisory on purpose (continue-on-error): a new toolchain release is not a
+  # change to this repository, and it must not block an unrelated merge the
+  # day it lands. Once the pinned floor is raised, drop continue-on-error and
+  # this becomes a required check.
+  go-stable:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: artex
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: artextest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U artex"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ARTEX_PG_DSN: postgres://artex:testpass@localhost:5432/artextest?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: toolchain in use
+        run: go version
+      - run: go build ./...
+      - run: go vet ./...
+      # Same -p 1 reason as the pinned job: packages share the one postgres
+      # service, so parallel package runs delete each other's rows.
+      - run: go test -p 1 ./...
+
   shell:
     runs-on: ubuntu-latest
     steps:
@@ -105,6 +148,7 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run test:polling
       - run: npm run test:replay
+      - run: npm run test:upload
       - run: npm run build:static
 
   python:

@@ -525,12 +525,12 @@ func (d *DB) SetFindingStatusWithNotify(ctx context.Context, id int64, status st
 func SetFindingStatusTx(ctx context.Context, tx *sql.Tx, id int64, status string) (from string, found bool, changed bool, notified bool, err error) {
 	var (
 		vulnclass, name, severity, summary string
-		taskID                             sql.NullInt64
+		taskID, nodeID                     sql.NullInt64
 		assetIDs                           []byte
 	)
-	scanErr := tx.QueryRowContext(ctx, `SELECT vulnclass, name, severity, summary, task_id, asset_ids, status
+	scanErr := tx.QueryRowContext(ctx, `SELECT vulnclass, name, severity, summary, task_id, asset_ids, status, node_id
 FROM findings WHERE id=$1 FOR UPDATE`, id).
-		Scan(&vulnclass, &name, &severity, &summary, &taskID, &assetIDs, &from)
+		Scan(&vulnclass, &name, &severity, &summary, &taskID, &assetIDs, &from, &nodeID)
 	if scanErr == sql.ErrNoRows {
 		return "", false, false, false, nil
 	}
@@ -545,6 +545,13 @@ FROM findings WHERE id=$1 FOR UPDATE`, id).
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE findings SET status=$2 WHERE id=$1`, id, status); err != nil {
 		return from, true, false, false, err
+	}
+	if nodeID.Valid {
+		if _, err := tx.ExecContext(ctx, `UPDATE exploration_nodes
+			SET payload = jsonb_set(payload, '{status}', to_jsonb($1::text))
+			WHERE id = $2`, status, nodeID.Int64); err != nil {
+			return from, true, false, false, err
+		}
 	}
 	var assets []int64
 	_ = json.Unmarshal(assetIDs, &assets)
