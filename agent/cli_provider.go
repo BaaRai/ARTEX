@@ -118,18 +118,31 @@ func IsCLIFormat(f llm.Format) bool {
 	return ok
 }
 
+// anthropicStyleUsage is the usage object Claude Code and Grok both print, in
+// Anthropic semantics (input_tokens excludes the cached part).
+type anthropicStyleUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+}
+
+func (u anthropicStyleUsage) usage() llm.Usage {
+	return llm.Usage{
+		InputTokens:      u.InputTokens,
+		OutputTokens:     u.OutputTokens,
+		CacheReadTokens:  u.CacheReadInputTokens,
+		CacheWriteTokens: u.CacheCreationInputTokens,
+	}
+}
+
 func parseClaudeCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
 	var out struct {
-		IsError          bool            `json:"is_error"`
-		Subtype          string          `json:"subtype"`
-		Result           string          `json:"result"`
-		StructuredOutput json.RawMessage `json:"structured_output"`
-		Usage            struct {
-			InputTokens              int `json:"input_tokens"`
-			OutputTokens             int `json:"output_tokens"`
-			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-		} `json:"usage"`
+		IsError          bool                `json:"is_error"`
+		Subtype          string              `json:"subtype"`
+		Result           string              `json:"result"`
+		StructuredOutput json.RawMessage     `json:"structured_output"`
+		Usage            anthropicStyleUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(stdout, &out); err != nil {
 		return "", llm.Usage{}, fmt.Errorf("unreadable JSON output: %w", err)
@@ -137,16 +150,10 @@ func parseClaudeCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
 	if out.IsError {
 		return "", llm.Usage{}, fmt.Errorf("reported an error (%s): %s", out.Subtype, out.Result)
 	}
-	usage := llm.Usage{
-		InputTokens:      out.Usage.InputTokens,
-		OutputTokens:     out.Usage.OutputTokens,
-		CacheReadTokens:  out.Usage.CacheReadInputTokens,
-		CacheWriteTokens: out.Usage.CacheCreationInputTokens,
-	}
 	if call.Schema != "" && hasJSON(out.StructuredOutput) {
-		return string(out.StructuredOutput), usage, nil
+		return string(out.StructuredOutput), out.Usage.usage(), nil
 	}
-	return out.Result, usage, nil
+	return out.Result, out.Usage.usage(), nil
 }
 
 func parseCodexCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
@@ -192,28 +199,17 @@ func parseCodexCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
 
 func parseGrokCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
 	var out struct {
-		Text             string          `json:"text"`
-		StructuredOutput json.RawMessage `json:"structuredOutput"`
-		Usage            struct {
-			InputTokens              int `json:"input_tokens"`
-			OutputTokens             int `json:"output_tokens"`
-			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-		} `json:"usage"`
+		Text             string              `json:"text"`
+		StructuredOutput json.RawMessage     `json:"structuredOutput"`
+		Usage            anthropicStyleUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(stdout, &out); err != nil {
 		return "", llm.Usage{}, fmt.Errorf("unreadable JSON output: %w", err)
 	}
-	usage := llm.Usage{
-		InputTokens:      out.Usage.InputTokens,
-		OutputTokens:     out.Usage.OutputTokens,
-		CacheReadTokens:  out.Usage.CacheReadInputTokens,
-		CacheWriteTokens: out.Usage.CacheCreationInputTokens,
-	}
 	if call.Schema != "" && hasJSON(out.StructuredOutput) {
-		return string(out.StructuredOutput), usage, nil
+		return string(out.StructuredOutput), out.Usage.usage(), nil
 	}
-	return out.Text, usage, nil
+	return out.Text, out.Usage.usage(), nil
 }
 
 func hasJSON(raw json.RawMessage) bool {
@@ -388,9 +384,8 @@ var cliUsageLimit = regexp.MustCompile(`(?i)usage limit|hit your (?:usage )?limi
 // allowance is reworded so IsQuotaExhaustedMessage recognizes it and the task
 // router fails over to the next profile; output is the CLI's stderr/stdout.
 func cliFailure(format llm.Format, what, output string) error {
-	if line := cliUsageLimit.FindString(output); line != "" {
-		detail := lineAround(output, line)
-		msg := fmt.Sprintf("%s: quota exhausted: the subscription usage limit was reached (%s)", format, detail)
+	if match := cliUsageLimit.FindString(output); match != "" {
+		msg := fmt.Sprintf("%s: quota exhausted: the subscription usage limit was reached (%s)", format, lineAround(output, match))
 		// The CLI's own words may carry a phrase that IsQuotaExhaustedMessage
 		// reads as a transient rate limit; the failover signal must win.
 		if !IsQuotaExhaustedMessage(msg) {
@@ -405,7 +400,11 @@ func cliFailure(format llm.Format, what, output string) error {
 func lineAround(output, match string) string {
 	for line := range strings.SplitSeq(output, "\n") {
 		if strings.Contains(line, match) {
-			return clipString(strings.TrimSpace(line), 300)
+			line = strings.TrimSpace(line)
+			if len(line) > 300 {
+				line = line[:300] + "…"
+			}
+			return line
 		}
 	}
 	return match
@@ -422,13 +421,6 @@ func outputTail(output string) string {
 		return "…" + output[len(output)-max:]
 	}
 	return output
-}
-
-func clipString(s string, max int) string {
-	if len(s) > max {
-		return s[:max] + "…"
-	}
-	return s
 }
 
 // cliWaitDelay bounds how long a cancelled CLI's leftover child processes may

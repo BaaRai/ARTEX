@@ -203,8 +203,10 @@ func TestCLIUsageLimitFailsOver(t *testing.T) {
 	}
 }
 
+// Every registered CLI must be keyless in db.IsKeylessFormat too, or its
+// profiles would be rejected for lacking a key.
 func TestConfigForCLIFormats(t *testing.T) {
-	for _, f := range []llm.Format{FormatClaudeCLI, FormatCodexCLI, FormatGrokCLI} {
+	for f := range cliBackends {
 		c := ConfigFrom(" "+string(f)+" ", "", "https://api.example.com", "sk-stale", "http://proxy:3128")
 		if c.Format != f || c.Model != "" || c.BaseURL != "" || c.APIKey != "" || c.Proxy != "" {
 			t.Errorf("ConfigFrom(%s) = %+v, want the format, the CLI's default model and no endpoint, key or proxy", f, c)
