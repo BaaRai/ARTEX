@@ -354,7 +354,10 @@ WHERE exploration_id=$1 AND kind='intent' AND state='running'
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
 	return n, nil
 }
 
@@ -1379,14 +1382,24 @@ func (s *ExplorationStore) Stats() (map[string]int, error) {
 
 // --- activity (poll by global id cursor) ---
 
+// queryRower is the subset of *sql.DB and *sql.Tx that AppendActivity needs,
+// so a replay can insert the activity and delete the outbox row together.
+type queryRower interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // AppendActivity records one worker step and returns its id.
 func (s *ExplorationStore) AppendActivity(a Activity) (int64, error) {
+	return s.appendActivity(s.db, a)
+}
+
+func (s *ExplorationStore) appendActivity(q queryRower, a Activity) (int64, error) {
 	metadata := a.Metadata
 	if len(metadata) == 0 {
 		metadata = json.RawMessage(`{}`)
 	}
 	var id int64
-	err := s.db.QueryRow(`
+	err := q.QueryRow(`
 INSERT INTO activity(exploration_id, node_id, worker, kind, tool, tool_use_id, is_error, summary, detail, metadata, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, main_seg)
 VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,$14,$15)
 RETURNING id`, s.expID, a.NodeID, utf8Clean(a.Worker), utf8Clean(a.Kind), utf8Clean(a.Tool), utf8Clean(a.ToolUseID), a.IsError, utf8Clean(a.Summary), utf8Clean(a.Detail),

@@ -46,12 +46,18 @@ func (e *Engine) inflightCounter(taskID string) *int64 {
 }
 
 // beginTaskOperation atomically registers a task-owned operation unless deletion
-// has already installed its barrier. The delete handler can therefore wait for
-// inflight==0 without a check-then-start race recreating files after cleanup.
+// has already installed its barrier, or the engine is draining for shutdown.
+// The delete handler and Wait can therefore wait for inflight==0 without a
+// check-then-start race admitting work that outlives the drain.
 func (e *Engine) beginTaskOperation(taskID string) bool {
 	e.deleteMu.RLock()
 	defer e.deleteMu.RUnlock()
 	if e.IsDeleting(taskID) {
+		return false
+	}
+	e.runtimeMu.Lock()
+	defer e.runtimeMu.Unlock()
+	if e.draining {
 		return false
 	}
 	atomic.AddInt64(e.inflightCounter(taskID), 1)
@@ -61,6 +67,17 @@ func (e *Engine) beginTaskOperation(taskID string) bool {
 func (e *Engine) decInflight(taskID string) { atomic.AddInt64(e.inflightCounter(taskID), -1) }
 func (e *Engine) inflightCount(taskID string) int64 {
 	return atomic.LoadInt64(e.inflightCounter(taskID))
+}
+
+// inflightTotal is the sum of every task's admitted operations, including
+// detached chat runs that are not members of a task WaitGroup.
+func (e *Engine) inflightTotal() int64 {
+	var n int64
+	e.inflight.Range(func(_, v any) bool {
+		n += atomic.LoadInt64(v.(*int64))
+		return true
+	})
+	return n
 }
 
 // ---------- deadline ----------
@@ -161,6 +178,10 @@ func (e *Engine) startDeadlineCoordinator(ctx context.Context, t *Task) {
 	}
 	rt := e.registerTaskRoutines(ctx, t.ID, 1)
 	e.deleteMu.RUnlock()
+	if rt == nil {
+		e.coordStarted.Delete(t.ID)
+		return
+	}
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.deadlineCoordinator(loopCtx, t) })
 }
 
