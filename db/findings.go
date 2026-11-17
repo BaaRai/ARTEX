@@ -709,20 +709,18 @@ func (d *DB) DeleteFindingsByTask(taskID int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// SetFindingStatus updates one finding's triage state. Returns rows affected.
+// SetFindingStatus updates one finding's triage state and mirrors it onto the
+// originating exploration node's payload under "status" (same path as
+// setFindingCol). Agents read that node; the findings row alone is not enough.
+// Returns rows affected.
 //
-// Low-level setter: it only changes the status and does not register a push
-// event. Production code changing status should go through
-// SetFindingStatusWithNotify — calling this function directly silently disables
-// the "status change push". It is kept so tests that do not care about
-// notifications (parameter validation, retest flows) can drive the status on
-// their own.
+// Low-level setter: it does not register a push event. Production code changing
+// status should go through SetFindingStatusWithNotify — calling this function
+// directly silently disables the "status change push". It is kept so tests that
+// do not care about notifications (parameter validation, retest flows) can
+// drive the status on their own.
 func (d *DB) SetFindingStatus(id int64, status string) (int64, error) {
-	res, err := d.Exec(`UPDATE findings SET status=$1 WHERE id=$2`, status, id)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+	return d.setFindingCol(id, "status", "status", status)
 }
 
 // SetFindingReportByNodeID sets the Markdown report on the standalone finding row

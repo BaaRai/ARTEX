@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,69 @@ func TestDeleteFinding(t *testing.T) {
 	// deleting a non-existent finding is a no-op (0 rows), not an error
 	if n, err := d.DeleteFinding(fid); err != nil || n != 0 {
 		t.Fatalf("re-delete: want (0,nil), got (%d,%v)", n, err)
+	}
+}
+
+func TestSetFindingStatusMirrorsNodePayload(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer d.Close()
+
+	tk, err := d.CreateTask("finding status node sync", "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(tk.ID)
+
+	es := d.Exploration(tk.ExplorationID)
+	nodeID, err := es.AddNode(KindFinding, map[string]any{"summary": "x", "severity": "high"}, 5, "confirmed", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid, err := d.AddFinding(tk.ID, nodeID, "XSS", "reflected XSS", "high", "summary", "poc", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := d.SetFindingStatus(fid, FindingFalsePositive)
+	if err != nil || n != 1 {
+		t.Fatalf("SetFindingStatus: n=%d err=%v", n, err)
+	}
+
+	var status, state string
+	var payload []byte
+	if err := d.QueryRow(`SELECT f.status, n.payload, n.state
+		FROM findings f JOIN exploration_nodes n ON n.id=f.node_id
+		WHERE f.id=$1`, fid).Scan(&status, &payload, &state); err != nil {
+		t.Fatal(err)
+	}
+	if status != FindingFalsePositive {
+		t.Fatalf("findings.status=%q", status)
+	}
+	if state != "confirmed" {
+		t.Fatalf("node state changed: %q", state)
+	}
+	var p map[string]any
+	if err := json.Unmarshal(payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p["status"] != FindingFalsePositive {
+		t.Fatalf("payload status=%v payload=%s", p["status"], payload)
+	}
+
+	if _, found, _, err := d.SetFindingStatusWithNotify(context.Background(), fid, FindingConfirmed); err != nil || !found {
+		t.Fatalf("SetFindingStatusWithNotify: found=%v err=%v", found, err)
+	}
+	if err := d.QueryRow(`SELECT payload FROM exploration_nodes WHERE id=$1`, nodeID).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p["status"] != FindingConfirmed {
+		t.Fatalf("tx path payload status=%v", p["status"])
 	}
 }
 
