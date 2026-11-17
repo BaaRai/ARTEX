@@ -85,10 +85,6 @@ func pathInt(r *http.Request, name string) (int64, bool) {
 // by a handler still wins, because it sits inside this one.
 const decodeMaxBytes = 32 << 20
 
-// errBodyTooLarge is decode's error for a body past the cap. Callers that answer
-// 400 are turned into 413 by limitRequestBody once the read has hit the cap.
-var errBodyTooLarge = errors.New("Request body too large")
-
 // limitedBody records a MaxBytesError so a later 400 can be answered as 413.
 type limitedBody struct {
 	io.ReadCloser
@@ -159,7 +155,9 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 		if lb, ok := r.Body.(*limitedBody); ok {
 			lb.tooLarge = true
 		}
-		return errBodyTooLarge
+		// Return the original error: a caller that maps 413 itself keeps working,
+		// and the middleware still rewrites a 400 for callers that do not.
+		return tooLarge
 	}
 	return err
 }

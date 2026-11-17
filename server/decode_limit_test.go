@@ -24,7 +24,8 @@ func TestDecodeCapsBody(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/", body)
 	var v map[string]string
 	err := decode(w, r, &v)
-	if !errors.Is(err, errBodyTooLarge) {
+	var tooLarge *http.MaxBytesError
+	if !errors.As(err, &tooLarge) {
 		t.Fatalf("err=%v, want the body cap", err)
 	}
 }
