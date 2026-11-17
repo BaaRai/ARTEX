@@ -40,10 +40,14 @@ func (s *sink) Requestheaders(f *mproxy.Flow) {
 	}
 }
 
-// ClientDisconnected forgets a closed connection's mark.
+// ClientDisconnected forgets a closed connection's mark, and asks for a sweep
+// of the request snapshots its flows may have left (rewrite_flow.go).
 func (s *sink) ClientDisconnected(c *mproxy.ClientConn) {
 	if c != nil {
 		s.paced.Delete(c.Id)
+	}
+	if s.t != nil {
+		s.t.snaps.requestSweep()
 	}
 }
 

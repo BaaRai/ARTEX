@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/traffic/rewrite"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
 )
 
@@ -144,16 +145,34 @@ func (s *sink) startStream(f *mproxy.Flow, kind string) {
 	if f.Request == nil || f.Request.URL == nil || (kind == "sse" && f.Response == nil) {
 		return
 	}
-	id, err := s.t.recordStreamStart(f, kind)
+	rq, rs, lines, res := s.rewriteStream(f, kind)
+	id, err := s.t.recordStreamStart(rq, rs, kind, lines)
+	s.applyStreamResponse(f, res)
 	if err != nil {
+		if rewritten, ruleIDs := appliedRules(lines); rewritten {
+			var re *recordError
+			errors.As(err, &re)
+			log.Printf("[traffic] failed to record a rewritten %s stream of %s (%s; rules %v)", kind, f.Request.URL.Hostname(), re.step, ruleIDs)
+			return
+		}
 		log.Printf("[traffic] failed to record %s stream %s: %v", kind, f.Request.URL, err)
 		return
 	}
 	st.id = id
 	if kind == "sse" {
-		st.reqBytes = int64(len(f.Request.Body))
+		st.reqBytes = int64(len(rq.body))
 	}
 }
+
+// recordError names the step of a recording that failed. Its text is the step
+// and the cause, as recordStreamStart always reported.
+type recordError struct {
+	step string
+	err  error
+}
+
+func (e *recordError) Error() string { return e.step + ": " + e.err.Error() }
+func (e *recordError) Unwrap() error { return e.err }
 
 // libMutex returns the unexported mu sync.Mutex that go-mitmproxy holds while it
 // appends to WebSocketData.Messages / SSEData.Events. The library exposes no
@@ -252,9 +271,9 @@ func sseEventsSince(sse *mproxy.SSEData, st *streamState) []streamRow {
 // streamDisplayURL is the URL shown for a WebSocket exchange: http→ws and
 // https→wss. A plain ws:// connection reaches the WebSocket hooks through its
 // CONNECT tunnel, where only the target authority is known, not the path.
-func streamDisplayURL(f *mproxy.Flow, kind string) (method, display, tmpl string) {
-	u := *f.Request.URL
-	method = f.Request.Method
+func streamDisplayURL(reqMethod string, reqURL *url.URL, kind string) (method, display, tmpl string) {
+	u := *reqURL
+	method = reqMethod
 	if kind == "websocket" && strings.EqualFold(method, "CONNECT") {
 		host := u.Host
 		if host == "" {
@@ -270,63 +289,77 @@ func streamDisplayURL(f *mproxy.Flow, kind string) (method, display, tmpl string
 			u.Scheme = "wss"
 		}
 	}
-	return method, u.String(), db.TemplatePath(f.Request.URL.EscapedPath())
+	return method, u.String(), db.TemplatePath(reqURL.EscapedPath())
 }
 
 // recordStreamStart writes the stream's exchange: metadata, request head and
-// body, the response head (synthetic 101 for WebSocket), and the header text in
-// the full-text index. Messages are never indexed.
-func (t *Traffic) recordStreamStart(f *mproxy.Flow, kind string) (string, error) {
+// body, the response head (synthetic 101 for WebSocket), the rewrite trace,
+// and the header text in the full-text index. Messages are never indexed. rq
+// is the request the client sent and rs (SSE only) the status and headers the
+// target sent, whatever the rules changed.
+func (t *Traffic) recordStreamStart(rq requestView, rs responseView, kind string, lines []rewrite.TraceLine) (string, error) {
 	now := time.Now()
 	id := t.newExchangeID(now)
-	method, display, tmpl := streamDisplayURL(f, kind)
-	host := f.Request.URL.Hostname()
-	target := f.Request.URL.RequestURI()
-	if strings.EqualFold(f.Request.Method, "CONNECT") {
-		target = f.Request.URL.Host // authority-form, as on the wire
+	method, display, tmpl, host, target := rq.method, "", "", "", ""
+	if rq.url != nil {
+		method, display, tmpl = streamDisplayURL(rq.method, rq.url, kind)
+		host = rq.url.Hostname()
+		target = rq.url.RequestURI()
+		if strings.EqualFold(rq.method, "CONNECT") {
+			target = rq.url.Host // authority-form, as on the wire
+		}
 	}
-	reqHead := fmt.Sprintf("%s %s %s\n%s", f.Request.Method, target, f.Request.Proto, requestHeaderLines(f.Request))
+	reqHead := requestHead(rq, target)
 	status, ct, respHead := 101, "websocket", "HTTP/1.1 101 Switching Protocols\n"
 	if kind == "sse" {
-		status = f.Response.StatusCode
-		ct = f.Response.Header.Get("Content-Type")
-		respHead = fmt.Sprintf("HTTP %d\n%s", status, headerLines(f.Response.Header))
+		status = rs.status
+		ct = rs.header.Get("Content-Type")
+		respHead = fmt.Sprintf("HTTP %d\n%s", status, headerLines(rs.header))
 	}
 
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
-	reqB := t.spill(f.Request.Body, f.Request.Header.Get("Content-Type"))
+	reqB := t.spill(rq.body, rq.header.Get("Content-Type"))
+	trace := t.spillTrace(lines)
 	tx, err := t.db.Begin()
 	if err != nil {
-		return "", fmt.Errorf("beginning transaction: %w", err)
+		return "", &recordError{"beginning transaction", err}
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
+	// An id can repeat (seconds plus a rolling counter); the trace of the
+	// exchange it replaces must not stay attached to this one.
+	if _, err := tx.Exec(`DELETE FROM exchange_rewrites WHERE exchange_id=?`, id); err != nil {
+		return "", &recordError{"clearing rewrite trace", err}
+	}
 	res, err := tx.Exec(`INSERT OR REPLACE INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path)
-VALUES(?,?,?,?,?,?,?,?,?,?,'')`, id, now.Unix(), host, method, tmpl, display, status, ct, len(f.Request.Body), 0)
+VALUES(?,?,?,?,?,?,?,?,?,?,'')`, id, now.Unix(), host, method, tmpl, display, status, ct, len(rq.body), 0)
 	if err != nil {
-		return "", fmt.Errorf("writing index: %w", err)
+		return "", &recordError{"writing index", err}
 	}
 	rowid, err := res.LastInsertId()
 	if err != nil {
-		return "", fmt.Errorf("fetching rowid: %w", err)
+		return "", &recordError{"fetching rowid", err}
 	}
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO exchange_bodies(id,req_head,req_body,req_blob,resp_head,resp_body,resp_blob)
 VALUES(?,?,?,?,?,NULL,NULL)`, id, reqHead, reqB.inline, nullIfEmpty(reqB.hash), respHead); err != nil {
-		return "", fmt.Errorf("writing body: %w", err)
+		return "", &recordError{"writing body", err}
 	}
 	if reqB.hash != "" {
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_refs(hash,exchange_id) VALUES(?,?)`, reqB.hash, id); err != nil {
-			return "", fmt.Errorf("registering blob reference: %w", err)
+			return "", &recordError{"registering blob reference", err}
 		}
+	}
+	if err := writeTrace(tx, id, lines, trace); err != nil {
+		return "", err
 	}
 	if t.fts {
 		idx := strings.Join([]string{display, reqHead, reqB.index, respHead}, "\n")
 		if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowid, idx); err != nil {
-			return "", fmt.Errorf("writing full-text index: %w", err)
+			return "", &recordError{"writing full-text index", err}
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("committing: %w", err)
+		return "", &recordError{"committing", err}
 	}
 	return id, nil
 }
