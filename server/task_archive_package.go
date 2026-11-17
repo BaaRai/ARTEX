@@ -428,7 +428,7 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 			errs = append(errs, getErr)
 			continue
 		}
-		if archive != nil && archive.State == pgdb.ArchiveReady {
+		if archive != nil && archive.ArchivePath != "" && archive.SHA256 != "" {
 			if err := os.RemoveAll(root); err != nil {
 				errs = append(errs, err)
 			}
@@ -438,7 +438,7 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 		if err := stage.rollback(); err != nil {
 			errs = append(errs, err)
 		}
-		if archive != nil && archive.ArchivePath != "" {
+		if archive != nil && archive.ArchivePath != "" && !strings.HasPrefix(archive.ArchivePath, "s3://") {
 			_ = os.Remove(archive.ArchivePath)
 		}
 	}

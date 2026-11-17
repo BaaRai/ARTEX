@@ -1494,7 +1494,7 @@ function ArchiveConfirmDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{count === 1 ? "Archive task" : `Archive ${count} tasks`}</AlertDialogTitle>
           <AlertDialogDescription className="[overflow-wrap:anywhere]">
-            Archiving stops task scheduling and compresses the graph, LLM history, files, and exclusive assets and traffic into local cold storage. Once archived, a task can be restored from "Archived".
+            Archiving stops task scheduling and compresses the graph, LLM history, files, and exclusive assets and traffic into the configured archive storage. Once archived, a task can be restored from "Archived". Restoring requires free space on this server.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -1934,6 +1934,7 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                       title={`Before compression: ${formatArchiveBytes(archive.original_size)}`}
                     >
                       {archiveCompressionLabel(archive)}
+                      <div className="text-muted-foreground">{archive.storage === "s3" ? "Object storage" : "Local storage"}</div>
                     </TableCell>
                     <TableCell className="text-xs tabular-nums">{archiveDataTotal(archive).toLocaleString()}</TableCell>
                     <TableCell>
@@ -1952,7 +1953,7 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                           </p>
                         ))}
                         <span className="text-muted-foreground text-xs">
-                          {archive.phase} · {archive.progress}%
+                          {archive.phase === "upload_and_verify" ? "Uploading and verifying" : archive.phase === "download_and_verify" ? "Downloading and verifying" : archive.phase} · {archive.progress}%
                         </span>
                       </div>
                     </TableCell>

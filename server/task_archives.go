@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/archivestore"
 	pgdb "github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/traffic"
 )
@@ -36,6 +37,12 @@ type archiveBatchItem struct {
 func (s *Server) startTaskArchiveWorker() {
 	if s.m == nil || s.m.pg == nil {
 		return
+	}
+	s.archiveStore, s.archiveStoreErr = archivestore.FromEnv()
+	if s.archiveStoreErr != nil {
+		log.Printf("[task-archive] storage configuration: %v", s.archiveStoreErr)
+	} else if s.archiveStore != nil {
+		log.Printf("[task-archive] new archives use S3 object storage with full SHA-256 readback verification")
 	}
 	if err := s.m.pg.RecoverTaskArchiveJobs(); err != nil {
 		log.Printf("[task-archive] recover jobs: %v", err)
@@ -88,6 +95,14 @@ func (s *Server) notifyTaskArchiveWorker() {
 }
 
 func (s *Server) runOneTaskArchiveJob() error {
+	if s.ctx.Err() != nil {
+		return s.ctx.Err()
+	}
+	// Retry deferred remote cleanup before claiming more work. Failed cleanup
+	// keeps its durable journal and does not block unrelated local archives.
+	if err := s.recoverRemoteArchiveJournals(); err != nil {
+		log.Printf("[task-archive] deferred object cleanup: %v", err)
+	}
 	job, err := s.m.pg.ClaimTaskArchiveJob(s.ctx)
 	if err != nil || job == nil {
 		return err
@@ -115,6 +130,9 @@ func (s *Server) runOneTaskArchiveJob() error {
 }
 
 func (s *Server) archiveTask(job *pgdb.TaskArchive) (runErr error) {
+	if s.archiveStoreErr != nil {
+		return s.archiveStoreErr
+	}
 	taskID := strconv.FormatInt(job.TaskID, 10)
 	if !s.beginTaskDelete(taskID) {
 		return errors.New("task is already undergoing another archive or delete operation")
@@ -199,6 +217,21 @@ func (s *Server) archiveTask(job *pgdb.TaskArchive) (runErr error) {
 			_ = os.Remove(archivePath)
 		}
 	}()
+	storedPath := archivePath
+	var remoteJournal string
+	if s.archiveStore != nil {
+		storedPath = s.archiveStore.URI(job.TaskID, job.ID, checksum)
+		remoteJournal, err = s.writeRemoteArchiveJournal(remoteArchiveJournal{
+			ArchiveID: job.ID, URI: storedPath, LocalPath: archivePath, Operation: "upload",
+		})
+		if err != nil {
+			return err
+		}
+		_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "upload_and_verify", 65)
+		if err := s.archiveStore.Upload(s.ctx, storedPath, archivePath, checksum); err != nil {
+			return err
+		}
+	}
 	var trafficStage *traffic.HostDeleteStage
 	if s.m.traffic != nil && len(snapshot.ExclusiveHosts) > 0 {
 		_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "compact_traffic", 68)
@@ -213,11 +246,18 @@ func (s *Server) archiveTask(job *pgdb.TaskArchive) (runErr error) {
 		}()
 	}
 	_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "compact_database", 78)
-	if err := s.m.pg.CompleteTaskArchive(job.ID, snapshot, archivePath, checksum, originalSize, compressedSize); err != nil {
+	if err := s.m.pg.CompleteTaskArchive(job.ID, snapshot, storedPath, checksum, originalSize, compressedSize); err != nil {
 		return err
 	}
 	committed = true
-	removePackage = false
+	removePackage = s.archiveStore != nil
+	if remoteJournal != "" {
+		// The journal also covers a crash after database commit but before local
+		// package removal. Keep it if cleanup fails, so the worker can retry.
+		if err := removeLocalArchivePackage(archivePath); err == nil {
+			_ = os.Remove(remoteJournal)
+		}
+	}
 	if trafficStage != nil {
 		if err := trafficStage.Commit(); err != nil {
 			warning := "archive completed, but cleaning the exclusive traffic hot store failed (the archive package can still restore it): " + err.Error()
@@ -239,7 +279,7 @@ func (s *Server) archiveTask(job *pgdb.TaskArchive) (runErr error) {
 }
 
 func (s *Server) restoreTaskArchive(job *pgdb.TaskArchive) (runErr error) {
-	if err := validateArchivePath(s.m.dir, job.ArchivePath); err != nil {
+	if err := s.validateStoredArchive(job.ArchivePath); err != nil {
 		return err
 	}
 	// A prior attempt may have committed PostgreSQL and files, then failed only
@@ -247,7 +287,7 @@ func (s *Server) restoreTaskArchive(job *pgdb.TaskArchive) (runErr error) {
 	if restored, err := s.m.pg.IsTaskArchiveRestored(job.ID); err != nil {
 		return err
 	} else if restored {
-		if err := os.Remove(job.ArchivePath); err != nil && !os.IsNotExist(err) {
+		if err := s.removeStoredArchive(job.ArchivePath); err != nil {
 			return err
 		}
 		if err := s.m.pg.CompleteTaskArchiveRestore(job.ID); err != nil {
@@ -266,7 +306,15 @@ func (s *Server) restoreTaskArchive(job *pgdb.TaskArchive) (runErr error) {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(extracted) }()
-	if err := extractTaskArchivePackage(job.ArchivePath, job.SHA256, extracted); err != nil {
+	packagePath := job.ArchivePath
+	if strings.HasPrefix(packagePath, "s3://") {
+		_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "download_and_verify", 12)
+		packagePath = filepath.Join(extracted, "download.tar.zst")
+		if err := s.archiveStore.Download(s.ctx, job.ArchivePath, packagePath, job.SHA256, job.CompressedSize); err != nil {
+			return err
+		}
+	}
+	if err := extractTaskArchivePackage(packagePath, job.SHA256, extracted); err != nil {
 		return err
 	}
 	manifestRaw, err := os.ReadFile(filepath.Join(extracted, "manifest.json"))
@@ -356,7 +404,7 @@ func (s *Server) restoreTaskArchivePayload(job *pgdb.TaskArchive, snapshot *pgdb
 		return err
 	}
 	_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "consume_package", 95)
-	if err := os.Remove(job.ArchivePath); err != nil && !os.IsNotExist(err) {
+	if err := s.removeStoredArchive(job.ArchivePath); err != nil {
 		return err
 	}
 	if err := s.m.pg.CompleteTaskArchiveRestore(job.ID); err != nil {
@@ -393,8 +441,11 @@ func (s *Server) loadRestoredTask(taskID int64) {
 }
 
 func (s *Server) deleteTaskArchive(job *pgdb.TaskArchive) error {
-	if err := validateArchivePath(s.m.dir, job.ArchivePath); err != nil {
+	if err := s.validateStoredArchive(job.ArchivePath); err != nil {
 		return err
+	}
+	if strings.HasPrefix(job.ArchivePath, "s3://") {
+		return s.deleteRemoteTaskArchive(job)
 	}
 	_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "stage_package_delete", 35)
 	staged, moved, err := stageTaskArchivePackageDelete(job.ArchivePath, job.ID)
