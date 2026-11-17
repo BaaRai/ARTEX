@@ -3335,6 +3335,7 @@ export const settings: Settings = {
   web_search_backend: "ddgs",
   brave_key_set: false,
   tavily_key_set: true,
+  keenable_key_set: false,
   web_search_proxy: "",
   global_proxy: "",
   python_interpreter: "/usr/bin/python3",

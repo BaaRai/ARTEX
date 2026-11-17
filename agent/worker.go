@@ -40,12 +40,17 @@ import (
 // messages API (the web_search_20250305 server tool), so each search consumes one
 // model call, and the search request is issued by DeepSeek's servers — it does NOT
 // go through the local Proxy, nor into the traffic recording.
+// KeenableSearchTitle is the X-Keenable-Title value ARTEX sends. Fixed in v1:
+// the title identifies the calling application to the provider.
+const KeenableSearchTitle = "ARTEX"
+
 type WebSearchOpts struct {
-	Enabled   bool
-	Backend   string
-	BraveKey  string
-	TavilyKey string
-	Proxy     string
+	Enabled     bool
+	Backend     string
+	BraveKey    string
+	TavilyKey   string
+	KeenableKey string
+	Proxy       string
 	// DeepSeek* comes from the currently active LLM config (only the official
 	// DeepSeek endpoint in anthropic format) — not configured separately; it follows
 	// the LLM config switch.
@@ -505,6 +510,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		WebSearchBackend:      w.webSearch.Backend,
 		BraveSearchAPIKey:     w.webSearch.BraveKey,
 		TavilySearchAPIKey:    w.webSearch.TavilyKey,
+		KeenableSearchAPIKey:  w.webSearch.KeenableKey,
+		KeenableSearchTitle:   KeenableSearchTitle,
 		DeepSeekSearchBaseURL: w.webSearch.DeepSeekBaseURL,
 		DeepSeekSearchAPIKey:  w.webSearch.DeepSeekAPIKey,
 		DeepSeekSearchModel:   w.webSearch.DeepSeekModel,

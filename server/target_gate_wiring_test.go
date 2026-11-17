@@ -156,14 +156,14 @@ func TestTargetGateEndpointsFollowConfig(t *testing.T) {
 		}
 	}
 
-	on, backend, _, _, proxy := g.m.WebSearch()
+	on, backend, _, _, _, proxy := g.m.WebSearch()
 	globalProxy := g.m.GlobalProxy()
 	t.Cleanup(func() {
-		_ = g.m.SetWebSearch(on, backend, nil, nil, &proxy)
+		_ = g.m.SetWebSearch(on, backend, nil, nil, nil, &proxy)
 		_ = g.m.SetGlobalProxy(globalProxy)
 	})
 	searchProxy := "http://search-proxy.example.net:8118"
-	if err := g.m.SetWebSearch(true, "tavily", nil, nil, &searchProxy); err != nil {
+	if err := g.m.SetWebSearch(true, "tavily", nil, nil, nil, &searchProxy); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.m.SetGlobalProxy("socks5://egress.example.net:1080"); err != nil {
@@ -176,7 +176,7 @@ func TestTargetGateEndpointsFollowConfig(t *testing.T) {
 	}
 	// The configuration changes: so do the exemptions.
 	none := ""
-	if err := g.m.SetWebSearch(true, "ddgs", nil, nil, &none); err != nil {
+	if err := g.m.SetWebSearch(true, "ddgs", nil, nil, nil, &none); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.m.SetGlobalProxy(""); err != nil {
@@ -194,7 +194,7 @@ func TestTargetGateEndpointsFollowConfig(t *testing.T) {
 		}
 	}
 	// Search off: its backend is not exempt.
-	if err := g.m.SetWebSearch(false, "ddgs", nil, nil, nil); err != nil {
+	if err := g.m.SetWebSearch(false, "ddgs", nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if has("html.duckduckgo.com:443") {

@@ -3599,7 +3599,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) settingsPayload() map[string]any {
-	on, backend, braveKey, tavilyKey, proxy := s.m.WebSearch()
+	on, backend, braveKey, tavilyKey, keenableKey, proxy := s.m.WebSearch()
 	pyStored, _, _ := s.m.pg.GetSetting(settingPythonInterp)
 	concOn, concLimit := s.m.ConcurrencyLimit()
 	if concLimit == 0 {
@@ -3614,6 +3614,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"web_search_backend":       backend,
 		"brave_key_set":            strings.TrimSpace(braveKey) != "",
 		"tavily_key_set":           strings.TrimSpace(tavilyKey) != "",
+		"keenable_key_set":         strings.TrimSpace(keenableKey) != "",
 		"web_search_proxy":         maskedSecret(proxy), // proxies may carry user:pass: masked when set, "" = direct
 		"web_search_proxy_set":     proxy != "",
 		"global_proxy":             maskedSecret(s.m.GlobalProxy()), // global egress proxy, masked when set, "" = direct
@@ -3687,12 +3688,14 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		TrafficCapture      *bool `json:"traffic_capture"`
 		AgentTrafficBinding *bool `json:"agent_traffic_binding"`
 		LLMRecord           *bool `json:"llm_record"` // LLM recording switch (default off); takes effect immediately, no agent rebuild needed
-		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey
-		// are optional — omit (null) to leave a stored key untouched, send "" to clear.
+		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey/KeenableKey
+		// are optional — omit (null) to leave a stored key untouched, send "" to clear. The Keenable
+		// key is optional even when its backend is selected: empty uses the keyless public endpoint.
 		WebSearchEnabled *bool   `json:"web_search_enabled"`
 		WebSearchBackend *string `json:"web_search_backend"`
 		BraveKey         *string `json:"brave_search_api_key"`
 		TavilyKey        *string `json:"tavily_search_api_key"`
+		KeenableKey      *string `json:"keenable_search_api_key"`
 		WebSearchProxy   *string `json:"web_search_proxy"`   // dedicated egress proxy (http/https/socks5); null = keep, "" = clear
 		GlobalProxy      *string `json:"global_proxy"`       // global egress proxy (http/https/socks5); null = keep, "" = clear (direct)
 		PythonInterp     *string `json:"python_interpreter"` // python interpreter path for the custom script tool
@@ -3739,7 +3742,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		egress.SetProfile(noise)
 	}
 	// A masked placeholder echoed back keeps the stored secret, like null.
-	req.BraveKey, req.TavilyKey = keepIfMasked(req.BraveKey), keepIfMasked(req.TavilyKey)
+	req.BraveKey, req.TavilyKey, req.KeenableKey = keepIfMasked(req.BraveKey), keepIfMasked(req.TavilyKey), keepIfMasked(req.KeenableKey)
 	req.WebSearchProxy, req.GlobalProxy = keepIfMasked(req.WebSearchProxy), keepIfMasked(req.GlobalProxy)
 	if req.ConstraintsInjectPlanner != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectPlanner, *req.ConstraintsInjectPlanner); err != nil {
@@ -3891,16 +3894,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		changed = true // capture-off egress is baked into agents at build time → rebuild
 	}
-	if req.WebSearchEnabled != nil || req.WebSearchBackend != nil || req.BraveKey != nil || req.TavilyKey != nil || req.WebSearchProxy != nil {
+	if req.WebSearchEnabled != nil || req.WebSearchBackend != nil || req.BraveKey != nil || req.TavilyKey != nil || req.KeenableKey != nil || req.WebSearchProxy != nil {
 		// Fill unspecified fields from current state so a partial PUT doesn't reset them.
-		on, backend, _, _, _ := s.m.WebSearch()
+		on, backend, _, _, _, _ := s.m.WebSearch()
 		if req.WebSearchEnabled != nil {
 			on = *req.WebSearchEnabled
 		}
 		if req.WebSearchBackend != nil {
 			backend = *req.WebSearchBackend
 		}
-		if err := s.m.SetWebSearch(on, backend, req.BraveKey, req.TavilyKey, req.WebSearchProxy); err != nil {
+		if err := s.m.SetWebSearch(on, backend, req.BraveKey, req.TavilyKey, req.KeenableKey, req.WebSearchProxy); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -3928,17 +3931,18 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 // not retype them. Always 200 with {ok, error?, count?, backend?}.
 func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Backend   string `json:"web_search_backend"`
-		Proxy     string `json:"web_search_proxy"`
-		BraveKey  string `json:"brave_search_api_key"`
-		TavilyKey string `json:"tavily_search_api_key"`
+		Backend     string `json:"web_search_backend"`
+		Proxy       string `json:"web_search_proxy"`
+		BraveKey    string `json:"brave_search_api_key"`
+		TavilyKey   string `json:"tavily_search_api_key"`
+		KeenableKey string `json:"keenable_search_api_key"`
 	}
 	// Empty body is fine — fall back entirely to the saved config below.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	_, backend, storedBraveKey, storedTavilyKey, storedProxy := s.m.WebSearch()
+	_, backend, storedBraveKey, storedTavilyKey, storedKeenableKey, storedProxy := s.m.WebSearch()
 	if strings.TrimSpace(req.Backend) != "" {
 		backend = req.Backend
 	}
@@ -3958,7 +3962,11 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.TavilyKey) != "" {
 		tavilyKey = req.TavilyKey
 	}
-	cfg := actool.WebSearchConfig{Backend: backend, BraveAPIKey: braveKey, TavilyAPIKey: tavilyKey, Proxy: proxy}
+	keenableKey := storedKeenableKey
+	if strings.TrimSpace(req.KeenableKey) != "" {
+		keenableKey = req.KeenableKey
+	}
+	cfg := actool.WebSearchConfig{Backend: backend, BraveAPIKey: braveKey, TavilyAPIKey: tavilyKey, KeenableAPIKey: keenableKey, KeenableTitle: agent.KeenableSearchTitle, Proxy: proxy}
 	// Hard cap so a slow/blocked proxy can't hang the request.
 	wall := 30 * time.Second
 	// deepseek's credentials are not in the form; they come from the currently active LLM profile. Each search also runs one
