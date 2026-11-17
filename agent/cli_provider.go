@@ -112,8 +112,8 @@ func appendFlag(args []string, flag, value string) []string {
 	return append(args, flag, value)
 }
 
-// isCLIFormat reports whether f runs through a subscription CLI.
-func isCLIFormat(f llm.Format) bool {
+// IsCLIFormat reports whether f runs through a subscription CLI.
+func IsCLIFormat(f llm.Format) bool {
 	_, ok := cliBackends[f]
 	return ok
 }

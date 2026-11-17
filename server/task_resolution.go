@@ -29,8 +29,7 @@ func (s *Server) resolutionFromProfile(p *db.LLMProfile, source string) taskLLMR
 		Model:     p.Model,
 		Source:    source,
 	}
-	// Ollama profiles are keyless by design; the other formats need a key.
-	if p.APIKey == "" && p.Format != "ollama" {
+	if p.APIKey == "" && !db.IsKeylessFormat(p.Format) {
 		result.Reason = "LLM profile has no API Key set"
 		return result
 	}

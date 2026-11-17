@@ -362,7 +362,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	cfg.UserAgent = p.UserAgent
 	s.applyProfileRetry(&cfg, p)
-	// Ollama profiles run keyless (local server); the other formats need a key.
+	// Keyless formats (Ollama, the subscription CLIs) need no key; the others do.
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		return cfg, false
 	}
@@ -374,8 +374,9 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 
 // saveLLMConfig persists the LLM config as the active "default" profile in PG.
 func (s *Server) saveLLMConfig(cfg agent.Config) error {
-	// cfg.Provider() already returns one of the three valid format strings
-	// (anthropic / openai / openai-responses), matching the DB CHECK constraint.
+	// cfg.Provider() returns one of the valid format strings (anthropic / openai /
+	// openai-responses / ollama / claude-cli / codex-cli / grok-cli), matching the
+	// DB CHECK constraint.
 	format := cfg.Provider()
 	var id int64
 	// This legacy endpoint's request body carries no failover/streaming/output-cap params, so the values already stored in the DB are passed back untouched —
@@ -1412,7 +1413,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg.ContextWindowK = k
 	}
-	// Keyless formats (Ollama) need no key; the others keep/require one.
+	// Keyless formats (Ollama, the subscription CLIs) need no key; the others keep/require one.
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
@@ -1539,7 +1540,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg.UserAgent = ua
-	// Keyless formats (Ollama) skip the key resolution entirely.
+	// Keyless formats (Ollama, the subscription CLIs) skip the key resolution entirely.
 	if cfg.NeedsAPIKey() {
 		// API key resolution precedence: form input > the named profile's stored key > the global config's key.
 		// A stored profile's key is never sent back to the browser, so the form is empty when testing a stored profile and the key comes from the DB.

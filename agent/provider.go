@@ -245,7 +245,7 @@ func FromEnv() (Config, bool) {
 		// non-streaming.
 		Stream: !isFalsy(os.Getenv("ARTEX_LLM_STREAM")),
 	}
-	if f := llm.Format(prov); isCLIFormat(f) {
+	if f := llm.Format(prov); IsCLIFormat(f) {
 		c.Format = f
 		c.BaseURL, c.Proxy = "", ""
 		return c, true
@@ -299,7 +299,7 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		Proxy:   strings.TrimSpace(proxy),
 		Stream:  true, // streaming by default; the caller overrides per profile
 	}
-	if f := llm.Format(strings.TrimSpace(provider)); isCLIFormat(f) {
+	if f := llm.Format(strings.TrimSpace(provider)); IsCLIFormat(f) {
 		// The CLI owns its endpoint and login; an empty model means the CLI's
 		// own default.
 		c.Format = f
@@ -364,7 +364,7 @@ func (c Config) Provider() string {
 	case FormatOllama:
 		return "ollama"
 	}
-	if isCLIFormat(c.Format) {
+	if IsCLIFormat(c.Format) {
 		return string(c.Format)
 	}
 	return "anthropic"
@@ -375,7 +375,7 @@ func (c Config) Provider() string {
 // main agent (which share this provider) are bounded by one shared rate limit.
 // A subscription CLI format gets a CLI provider and no HTTP client.
 func (c Config) NewProvider() (llm.Provider, error) {
-	if isCLIFormat(c.Format) {
+	if IsCLIFormat(c.Format) {
 		return newCLIProvider(c), nil
 	}
 	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey, c.UserAgent)
@@ -601,7 +601,7 @@ func ValidateUserAgent(raw string) (string, error) {
 // just the collapsed ok/err the UI shows. Bodies are clipped to keep a chatty
 // SSE stream from flooding the log.
 func logTestConnection(c Config, capt *llmrec.Capture) {
-	if isCLIFormat(c.Format) {
+	if IsCLIFormat(c.Format) {
 		log.Printf("[llm-test] %s / %s — ran the local CLI; this format sends no HTTP request from ARTEX itself",
 			c.Provider(), c.Model)
 		return
@@ -641,7 +641,7 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 		return 0, "", err
 	}
 	timeout := 30 * time.Second
-	if isCLIFormat(c.Format) {
+	if IsCLIFormat(c.Format) {
 		// A CLI call starts a whole agent process; Grok alone took ~20s for a ping.
 		timeout = 90 * time.Second
 	}

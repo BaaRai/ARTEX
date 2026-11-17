@@ -2160,9 +2160,10 @@ func (s *Server) pgLLMPoolReset(w http.ResponseWriter, r *http.Request) {
 // Ollama (keyless OpenAI-compatible GET /v1/models on the local server); for
 // Anthropic-compatible third parties (e.g. DeepSeek) whose model list lives only on
 // the OpenAI path, it falls back to the OpenAI endpoint at the stripped root.
+// The subscription CLI formats have no listing endpoint and get a 400.
 func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider  string `json:"provider"` // "openai" | "anthropic" | "ollama"
+		Provider  string `json:"provider"` // "openai" | "anthropic" | "ollama" | a CLI format
 		BaseURL   string `json:"base_url"`
 		APIKey    string `json:"api_key"`
 		Proxy     string `json:"proxy"`
@@ -2170,6 +2171,10 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
+		return
+	}
+	if f := llm.Format(strings.TrimSpace(req.Provider)); agent.IsCLIFormat(f) {
+		writeErr(w, 400, "model listing is unavailable for the "+string(f)+" format: type a model name the CLI accepts, or leave it empty to use the CLI's default model")
 		return
 	}
 	// Resolve API key: form input > profile stored key. The stored key is only
