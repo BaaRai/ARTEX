@@ -376,6 +376,34 @@ exit 1
 	}
 }
 
+func TestCLIProviderCodexRecoversFromReconnect(t *testing.T) {
+	fakeCLI(t, "codex", `cat > /dev/null
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+echo '{"type":"thread.started","thread_id":"t1"}'
+echo '{"type":"error","message":"Reconnecting... 2/5 (stream disconnected before completion)"}'
+printf '%s' "$FAKE_REPLY" > "$out"
+echo '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":8,"output_tokens":4}}'
+`)
+	t.Setenv("FAKE_REPLY", toolReply)
+	msg, stop, _, err := newCLIProvider(Config{Format: FormatCodexCLI}).Complete(context.Background(), transcriptRequest(addTool))
+	if err != nil {
+		t.Fatalf("a reconnect that later completes must succeed: %v", err)
+	}
+	assertAddCall(t, msg, stop)
+}
+
+func TestCLIProviderCodexNoCompletedTurn(t *testing.T) {
+	fakeCLI(t, "codex", `cat > /dev/null
+echo '{"type":"thread.started","thread_id":"t1"}'
+echo '{"type":"error","message":"Reconnecting... 5/5 (unexpected status 401 Unauthorized)"}'
+`)
+	_, _, _, err := newCLIProvider(Config{Format: FormatCodexCLI}).Complete(context.Background(), transcriptRequest(addTool))
+	if err == nil || !strings.Contains(err.Error(), "401 Unauthorized") {
+		t.Fatalf("err = %v, want the last Codex error when no turn completed", err)
+	}
+}
+
 func TestCLIProviderGrok(t *testing.T) {
 	argsFile, promptFile := fakeCLI(t, "grok", `pf=""; prev=""
 for a in "$@"; do [ "$prev" = "--prompt-file" ] && pf="$a"; prev="$a"; done

@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -158,6 +159,11 @@ func parseClaudeCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
 
 func parseCodexCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
 	var usage llm.Usage
+	// Codex also emits "error" events for transport retries ("Reconnecting...
+	// 2/5") that a later completed turn recovers from, so an error event only
+	// fails the call when no turn completes.
+	var lastErr string
+	completed := false
 	sc := bufio.NewScanner(bytes.NewReader(stdout))
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for sc.Scan() {
@@ -178,10 +184,11 @@ func parseCodexCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
 		}
 		switch ev.Type {
 		case "error":
-			return "", usage, fmt.Errorf("reported an error: %s", ev.Message)
+			lastErr = ev.Message
 		case "turn.failed":
 			return "", usage, fmt.Errorf("turn failed: %s", ev.Error.Message)
 		case "turn.completed":
+			completed = true
 			// Codex reports OpenAI semantics: input_tokens already includes the cached part.
 			usage.Add(llm.Usage{
 				InputTokens:     ev.Usage.InputTokens,
@@ -189,6 +196,9 @@ func parseCodexCLI(stdout []byte, call cliCall) (string, llm.Usage, error) {
 				CacheReadTokens: ev.Usage.CachedInputTokens,
 			})
 		}
+	}
+	if !completed {
+		return "", usage, fmt.Errorf("finished no turn: %s", cmp.Or(lastErr, "no error reported"))
 	}
 	reply, err := os.ReadFile(call.LastMessageFile)
 	if err != nil {
