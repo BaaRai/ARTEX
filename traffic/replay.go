@@ -86,8 +86,7 @@ func (t *Traffic) replayRecorded(scheme, host string) bool {
 	if scheme != "https" {
 		return true
 	}
-	_, tunneled := t.pass.Load(hostOnly(host))
-	return !tunneled
+	return !t.tunneling(hostOnly(host))
 }
 
 func replayInvalid(format string, args ...any) error {
