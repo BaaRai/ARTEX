@@ -6,7 +6,7 @@
 #
 #   frontend (web) -> Go binary with embedded UI (build) -> runtime image
 #
-# The Go binary is produced by build.sh with the same flags the release workflow's
+# The Go binary is produced by `run.sh build` with the same flags the release workflow's
 # binaries job uses, so the image binary and the published release binary come from
 # one source.
 
@@ -29,19 +29,19 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-# Reuse the frontend built above; build.sh skips its own frontend step.
+# Reuse the frontend built above; `run.sh build` skips its own frontend step.
 COPY --from=web /src/web/out ./server/webui/dist
 ARG ARTEX_VERSION=dev
 ARG TARGETOS
 ARG TARGETARCH
 # Same flags as the release binaries job (ARTEX_COMPRESS=0, -trimpath,
-# -X main.version), driven through build.sh so there is one build path.
+# -X main.version), driven through `run.sh build` so there is one build path.
 RUN ARTEX_SKIP_FRONTEND=1 \
     ARTEX_SKIP_NPM_CI=1 \
     ARTEX_COMPRESS=0 \
     ARTEX_OUTPUT=/out/artex \
     ARTEX_BUILD_VERSION="${ARTEX_VERSION}" \
-    bash ./build.sh --target "${TARGETOS:-linux}/${TARGETARCH:-amd64}"
+    bash ./run.sh build --target "${TARGETOS:-linux}/${TARGETARCH:-amd64}"
 
 # ------------------------------------------------------- third-party tools ---
 # Web-recon toolbox (drost-community take 1, #100): pinned release binaries, staged
@@ -107,7 +107,7 @@ FROM python:3.12-slim-bookworm
 ARG TARGETARCH
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
+      ca-certificates tini ripgrep curl wget vim git jq unzip xz-utils \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
     && rm -rf /var/lib/apt/lists/*
 # Node 22 from the official nodejs.org tarball, verified against its SHASUMS256.txt:
@@ -183,14 +183,12 @@ RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "@playwright/cli@
 WORKDIR /app
 # Binary compiled from source in the build stage above.
 COPY --from=build /out/artex /app/artex
-# Daemon startup script: relaunches the process after a crash and forwards SIGTERM
-# to artex — docker stop only signals PID 1; without forwarding, artex never receives it,
-# cannot shut down gracefully, and is hard-killed by SIGKILL after 10 seconds.
-COPY start.sh /app/start.sh
-RUN chmod +x /app/artex /app/start.sh && mkdir -p /app/keys
+RUN chmod +x /app/artex && mkdir -p /app/keys
 COPY skills/ /app/skills/
 # persistence points: data/ (traffic index, task files, transcripts) and keys/ (jwt.key, secret.key, via ARTEX_JWT_KEY_DIR)
 VOLUME ["/app/data", "/app/keys"]
 EXPOSE 8787 8788
-ENTRYPOINT ["/app/start.sh"]
+# tini as PID 1 forwards docker stop's SIGTERM to artex (graceful shutdown) and reaps
+# orphaned tool processes; crash restarts come from the compose restart policy.
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/artex"]
 CMD ["-addr", ":8787", "-proxy", ":8788"]

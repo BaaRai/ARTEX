@@ -186,7 +186,7 @@ func openWithMigrations(dsn string, migrations fs.FS) (*DB, error) {
 	// already`. With a cap, excess queries instead queue waiting for an idle
 	// connection — under the same load they become slower rather than failing,
 	// and callers no longer have to distinguish "cannot read" from "not there".
-	// maxOpenConns must leave headroom for psql / reset-password.sh and any
+	// maxOpenConns must leave headroom for psql / `run.sh reset-password` and any
 	// coexisting instances; if max_connections is lowered, lower this too.
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetMaxIdleConns(maxOpenConns)

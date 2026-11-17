@@ -46,19 +46,19 @@ justify it, and every autonomous action passes through scope rules, approval gat
 ```bash
 git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
-cp .env.example .env            # set POSTGRES_PASSWORD (and optionally an LLM key)
-docker compose up -d --build    # builds from this checkout, starts PostgreSQL
+./run.sh docker                 # installs Docker if needed, writes .env, builds and starts
 ```
 
-Open **http://localhost:8787**. On the first visit `/setup` asks for the one-time setup token
-printed at startup:
+Open **http://localhost:8787** (or the `ARTEX_PORT` set in `.env`). On the first visit `/setup` asks
+for the one-time setup token printed at startup:
 
 ```bash
 docker compose logs artex | grep "Setup token"
 ```
 
 > There is no prebuilt Docker image to pull: the image is always built from your checkout.
-> For all installation paths (script, binaries, source, release archives), see [Installation](#installation).
+> For all installation paths (Docker, dev, binaries, source, release archives) and the Kali Linux
+> and Windows guides, see [Installation](#installation).
 
 ---
 
@@ -299,57 +299,89 @@ worker remains confined to the intent it claimed.
 
 ## Installation
 
-> Requires **PostgreSQL**; exploration requires an **LLM** (`ANTHROPIC_API_KEY` or
-> `OPENAI_API_KEY`, also configurable in the UI).
+> Requires **PostgreSQL** (Docker mode starts one for you); exploration requires an **LLM**
+> (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env`, or configured in the UI).
 
-### Option 1: one-click install script (recommended)
+### `run.sh`: one script for everything
+
+Every operation goes through `./run.sh`. Without arguments it shows a menu; each entry is also a
+command:
+
+| Command | Menu | What it does |
+| --- | --- | --- |
+| `./run.sh docker` | 1 | Installs Docker if missing, writes `.env` on first run, builds the image from this checkout, starts ARTEX + PostgreSQL |
+| `./run.sh dev` | 2 | Writes `config.json` on first run, installs Go/npm dependencies, builds the backend, runs it with the frontend hot-reload server |
+| `./run.sh update` | 3 | `git pull --ff-only`, then rebuilds and restarts the Docker or dev deployment |
+| `./run.sh reset-password` | 4 | Resets the admin password (`-h` for flags) |
+| `./run.sh build` | 5 | Builds the single binary with the embedded frontend; `--release` builds the release zips (`-h` for flags) |
+
+Both modes read `.env`: Docker through compose, dev mode by exporting its `KEY=VALUE` lines
+(variables already set in your shell win). LLM settings, keys and `ARTEX_PORT` therefore live in
+one place.
+
+Supported platforms: **Linux** (Kali, Debian, Ubuntu, …), **macOS** and **Windows through WSL2 or
+Docker Desktop**. Step-by-step guides: [Kali Linux](#kali-linux) and [Windows](#windows).
+
+### Option 1: Docker (recommended)
 
 ```bash
 git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
-./install.sh
+./run.sh docker
 ```
 
-The script detects or installs Docker, then offers **① all-Docker** (writes `.env`, runs
-`docker compose up -d --build`) or **② local build and run** (generates `config.json`, builds the
-embedded binary, starts it).
+On the first run the script asks for a Postgres password (Enter generates one) and an optional
+`ANTHROPIC_API_KEY`, and writes `.env`. Open **http://localhost:8787**; `/setup` asks for the
+one-time setup token printed at startup (`docker compose logs artex | grep "Setup token"`).
 
-Open **http://localhost:8787**; `/setup` asks for the one-time setup token printed at startup
-(`docker compose logs artex | grep "Setup token"`).
+Without the script, the same thing by hand:
+
+```bash
+cp .env.example .env            # set POSTGRES_PASSWORD, optionally an LLM key
+docker compose up -d --build    # → http://localhost:8787
+```
+
+The image includes the scanner toolchain (`nmap`, `nuclei`, `httpx`, `subfinder`, `katana`,
+`ffuf`, `dalfox`, `sqlmap`, `bbot`, Playwright/Chromium, `ripgrep`, `curl`, `npm`, …); `./skills`,
+`./data` and `./keys` are persisted via bind mounts.
 
 The UI listens on `127.0.0.1` by default. To reach it from another machine (or from Windows when
-ARTEX runs inside WSL), set `ARTEX_BIND_ADDR=0.0.0.0` in `.env` (the setup token still protects the
-first-run claim), or keep loopback and use a reverse proxy or SSH tunnel.
-
-### Option 2: Docker Compose (manual)
-
-```bash
-git clone https://github.com/BaaRai/ARTEX.git
-cd ARTEX
-cp .env.example .env            # set POSTGRES_PASSWORD, optionally ANTHROPIC_API_KEY
-docker compose up -d --build
-# → http://localhost:8787
-```
-
-The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
-`sqlmap`, `ripgrep`, `curl`, `npm`, …); `./skills` and `./data` are persisted via bind mounts.
+ARTEX runs inside WSL without Docker Desktop), set `ARTEX_BIND_ADDR=0.0.0.0` in `.env` (the setup
+token still protects the first-run claim), or keep loopback and use a reverse proxy or SSH tunnel.
+Set `ARTEX_PORT` in `.env` when port 8787 is taken.
 
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
 `/message?sessionId=...`; configure the URL as `/sse` and send `Authorization: Bearer <token>`.
 
+### Option 2: dev mode (local, hot reload)
+
+```bash
+./run.sh dev    # → frontend http://localhost:3000, backend :8787 (ARTEX_PORT), proxy :8788
+```
+
+Requires **Go ≥ 1.26**, **Node.js ≥ 22** with npm, and a PostgreSQL: on the first run the script
+asks whether to connect to an existing one or start `postgres:16-alpine` in Docker, and writes
+`config.json` (mode 0600). Ctrl-C stops the backend and the frontend together. Workers use the
+tools installed on the host, so dev mode suits Kali Linux, where the scanners are already present.
+
+> The LLM profile saved in the UI is stored in the database and takes precedence over `.env`. Dev
+> mode and Docker use different databases, so configure the LLM in each, or leave the UI profile
+> empty to use `.env`.
+
 ### Option 3: prebuilt binaries (Releases)
 
 Download the zip for your platform from [Releases](https://github.com/BaaRai/ARTEX/releases). It
-contains `artex`, `start.sh` (`start.bat` on Windows), `skills/` and `config.example.json`:
+contains `artex` (`artex.exe` on Windows), `skills/` and `config.example.json`:
 
 ```bash
 cp config.example.json config.json   # fill in the database connection
-./start.sh                           # → http://localhost:8787
+./artex                              # → http://localhost:8787
 ```
 
-Start with `start.sh` / `start.bat`, not `./artex`: it is a daemon script that restarts the process
-after a backoff. To keep it in the background: `nohup ./start.sh >artex.log 2>&1 &`.
+The binary does not restart itself after a crash. To keep it running, use a service manager, for
+example a systemd unit with `Restart=on-failure`, or `nohup ./artex >artex.log 2>&1 &` for a quick
+background run.
 
 #### Verifying a release
 
@@ -366,30 +398,114 @@ gh attestation verify <zip> --repo BaaRai/ARTEX   # built by this repository's r
 ### Option 4: build the single binary from source
 
 ```bash
-cd web && npm ci && npm run build:static && cd ..
-cp -r web/out server/webui/dist
-CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
-./start.sh
+./run.sh build          # → dist/artex-<os>-<arch>/artex, frontend embedded
 ```
 
-Only `-tags embedui` embeds the frontend into the binary.
+It builds the frontend (`npm ci` + static export), embeds it with `-tags embedui`, and compiles a
+trimmed, CGO-free binary for the current OS/architecture. Run it as in Option 3.
 
 ### Option 5: cross-platform release archives
 
-`build.sh` builds and embeds the frontend, strips debug info, and writes zips for Linux
-amd64/arm64, macOS amd64/arm64 and Windows amd64 by default:
-
 ```bash
-./build.sh --release
-# output: dist/artex-<version>-*.zip
+./run.sh build --release
+# output: dist/artex-<version>-*.zip + dist/SHA256SUMS (Linux/macOS amd64+arm64, Windows amd64)
 
-ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
-./build.sh --target linux/amd64 --upx
+ARTEX_TARGETS=linux/amd64,windows/amd64 ./run.sh build --release
+./run.sh build --target linux/amd64 --upx
 ```
 
 UPX is disabled by default: self-extracting binaries may be incompatible with some kernels,
 virtualization environments or security policies. Pass `--upx` only after confirming the target
-runtime supports it.
+runtime supports it. `./run.sh build -h` lists every option and environment variable.
+
+### Kali Linux
+
+Kali's own repositories provide everything; the Docker convenience script (`get.docker.com`) does
+not support Kali, so `run.sh` installs Docker from apt instead.
+
+**Docker mode (recommended)**
+
+```bash
+sudo apt update
+sudo apt install -y git docker.io docker-compose docker-buildx
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER" && newgrp docker   # use docker without sudo
+
+git clone https://github.com/BaaRai/ARTEX.git
+cd ARTEX
+./run.sh docker
+```
+
+**Dev mode** (uses Kali's preinstalled scanners on the host)
+
+```bash
+sudo apt update
+sudo apt install -y git golang-go nodejs npm postgresql
+sudo systemctl enable --now postgresql
+sudo -u postgres psql -c "CREATE USER artex WITH PASSWORD 'change-me-please';" \
+                      -c "CREATE DATABASE artex OWNER artex;"
+
+git clone https://github.com/BaaRai/ARTEX.git
+cd ARTEX
+./run.sh dev        # choose 1 (existing PostgreSQL): 127.0.0.1 / 5432 / artex / your password / artex
+```
+
+Kali's `golang-go` and `nodejs` meet the minimum versions; if your Go is older than 1.26,
+`GOTOOLCHAIN=auto` downloads the required toolchain on first build.
+
+### Windows
+
+ARTEX's workers run commands through a Bash tool and the Linux scanner toolchain, so on Windows run
+it in Docker or WSL2. Native `artex.exe` builds exist but are not recommended for pentesting.
+
+**Option A: WSL2 + Docker Desktop (recommended)**
+
+1. In an administrator PowerShell, install WSL2 with a Linux distro, then reboot:
+   ```powershell
+   wsl --install -d kali-linux      # or: wsl --install -d Ubuntu
+   ```
+2. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/), then enable
+   *Settings → Resources → WSL integration* for that distro.
+3. In the WSL terminal, clone into the Linux home directory (not `/mnt/c`, which is slow and breaks
+   file permissions) and start:
+   ```bash
+   cd ~
+   git clone https://github.com/BaaRai/ARTEX.git
+   cd ARTEX
+   ./run.sh docker
+   ```
+4. Open **http://localhost:8787** in the Windows browser.
+
+Dev mode works the same inside WSL: follow the Kali dev-mode steps in the WSL terminal, then open
+http://localhost:3000 in the Windows browser.
+
+**Option B: Docker Desktop only (no WSL shell)**
+
+In PowerShell, with Docker Desktop running:
+
+```powershell
+git clone https://github.com/BaaRai/ARTEX.git
+cd ARTEX
+copy .env.example .env      # edit .env: set POSTGRES_PASSWORD, optionally an LLM key
+docker compose up -d --build
+docker compose logs artex | Select-String "Setup token"
+```
+
+Update with `git pull`, then `docker compose build artex` and `docker compose up -d artex`.
+
+### Resetting the admin password
+
+The username is fixed as `ARTEX`; the new password must be at least 12 characters. No restart is
+needed.
+
+```bash
+./run.sh reset-password                 # dev / binary: reads config.json (or ARTEX_PG_DSN), prompts twice
+./run.sh reset-password -m docker       # Docker: runs psql in the postgres container (POSTGRES_* from .env)
+./run.sh reset-password -h              # all flags (--dsn, -H/-P/-U/-W/-d, -c, -y, …)
+```
+
+The new password reaches psql through an environment variable, never the command line. Local mode
+needs `psql` (`sudo apt install postgresql-client`).
 
 ---
 
@@ -457,7 +573,7 @@ judgment, and workers may only write back. The task then ends `done` if its goal
 `timeout`. Practical floor: below 50,000 tokens no worker starts; 50,000-70,000 typically gives one
 worker then wrap-up; pick well above 70,000 for real exploration.
 
-**Common flags**: `./start.sh -addr :8787 -proxy :8788` (`-addr` frontend/API, `-proxy` traffic
+**Common flags**: `./artex -addr :8787 -proxy :8788` (`-addr` frontend/API, `-proxy` traffic
 recording proxy).
 
 ### Reverse proxy deployment (HTTPS / exposing only 443)
@@ -497,7 +613,7 @@ budget and an attacker who fails 10 logins blocks everyone, admin included, for 
 Keep the `X-Forwarded-For` line and set `ARTEX_TRUSTED_PROXIES` (comma-separated CIDRs, empty by
 default) to the address ARTEX sees the proxy connect from:
 
-- **nginx and ARTEX both on the host** (binary, `./start.sh`): the peer is `127.0.0.1`; start ARTEX
+- **nginx and ARTEX both on the host** (binary, `./artex`): the peer is `127.0.0.1`; start ARTEX
   with `ARTEX_TRUSTED_PROXIES=127.0.0.1/32`.
 - **nginx on the host, ARTEX in Docker** (`docker-compose.yml`): the connection reaches the
   container from the Docker bridge gateway (a `172.x` address), not from `127.0.0.1`. Find it with
@@ -567,7 +683,7 @@ Unset, ARTEX makes no update request and shows no banner.
 #### Upgrading from a clone made before 2026-10-23
 
 The repository history was rewritten that day to drop a personal email address from the commit
-metadata. A clone made before then cannot fast-forward, and `./update.sh` now stops instead of
+metadata. A clone made before then cannot fast-forward, and `./run.sh update` now stops instead of
 silently rebuilding stale code. Recover once, then upgrade normally:
 
 ```bash
@@ -579,16 +695,15 @@ git stash pop             # only if you stashed
 
 Your data is unaffected: `./data`, the `pgdata` volume and `./skills` are not part of git history.
 
-#### Option 1: one-click update script
+#### Option 1: `run.sh update`
 
 ```bash
 cd ARTEX
-./update.sh
+./run.sh update
 ```
 
-The script optionally `git pull`s, then offers **① Docker update** (`docker compose build artex` →
-`docker compose up -d artex`) or **② local build update** (rebuild the frontend static assets, then
-recompile `./artex`; restart the process for it to take effect).
+The script optionally `git pull`s (fast-forward only), then offers **① Docker** (`docker compose
+build artex` → `docker compose up -d artex`) or **② dev** (reinstall dependencies, rebuild, run).
 
 #### Option 2: Docker Compose (manual)
 
@@ -603,21 +718,19 @@ docker image prune -f            # optional
 #### Option 3: prebuilt binaries
 
 Download the new zip, stop the old process, overwrite `artex` and `skills/` (keep `config.json` and
-`data/`), then restart:
+`data/`), then start it again:
 
 ```bash
 cp -r <extracted dir>/skills ./ && cp <extracted dir>/artex ./
-./start.sh
+./artex
 ```
 
 #### Option 4: build from source
 
 ```bash
 git pull
-cd web && npm ci && npm run build:static && cd ..
-cp -r web/out server/webui/dist
-CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
-# restart ./start.sh
+./run.sh build
+# stop the old process, then start dist/artex-<os>-<arch>/artex
 ```
 
 ---
@@ -625,10 +738,13 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 ## Development
 
 ```bash
-./dev.sh    # backend(:8787) + traffic proxy(:8788) + frontend next dev(:5173) → http://localhost:5173
+./run.sh dev    # backend(:8787) + traffic proxy(:8788) + frontend next dev(:3000) → http://localhost:3000
 ```
 
-- Backend: `go run ./cmd/artex` (without `-tags embedui`, the frontend is not embedded)
+The backend port is `ARTEX_PORT` in `.env` (default 8787), shared with Docker mode; the frontend
+proxies `/api` to it.
+
+- Backend: `go build -o artex ./cmd/artex` (without `-tags embedui`, the frontend is not embedded)
 - Frontend: `cd web && npm run dev` (`/api` is reverse-proxied to the backend, with hot reload)
 - Tests: `go test ./...`
 - Mock preview (no backend): `cd web && NEXT_PUBLIC_MOCK=1 npm run dev`
