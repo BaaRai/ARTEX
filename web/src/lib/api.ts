@@ -110,6 +110,9 @@ import type {
   WorkspaceListing,
 } from "@/lib/types";
 
+// Combined file data per attachment upload; matches maxChatUpload in server/chatupload.go.
+const MAX_CHAT_UPLOAD_BYTES = 512 * 1024 * 1024;
+
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("artex_token");
@@ -935,6 +938,10 @@ export const api = {
   chatStatus: (taskId: string) => get<{ running: boolean }>(`/tasks/${taskId}/chat/status`),
   // Option 1, file upload: lands in the session/task working directory uploads/, returning a relative path the agent can Read.
   chatUpload: async (scope: "task" | "session" | "staging", id: string, files: File[]) => {
+    const totalSize = files.reduce((total, file) => total + file.size, 0);
+    if (totalSize > MAX_CHAT_UPLOAD_BYTES) {
+      throw new Error("Files exceed the 512 MiB upload limit (combined size).");
+    }
     if (MOCK)
       return {
         attachments: files.map((f) => ({
