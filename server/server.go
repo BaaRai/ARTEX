@@ -57,7 +57,7 @@ type Server struct {
 	// pwdVersion is auth.password_version, a counter. Zero means no password
 	// change is stored yet, and any valid token is accepted. pwdState is
 	// pwdUnreadable when that counter could not be read; every session is
-	// rejected until a later read succeeds.
+	// rejected until login reads it again.
 	pwdVersion atomic.Int64
 	pwdState   atomic.Int32
 	// authHashKey and authVersionKey override the settings keys. Empty uses

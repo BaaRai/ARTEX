@@ -182,6 +182,69 @@ func TestUnreadablePasswordVersionRejectsSessions(t *testing.T) {
 	}
 }
 
+func TestLoginRereadsPasswordVersionWhenUnreadable(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+
+	stamp := time.Now().UnixNano()
+	s := &Server{
+		m:              m,
+		jwtKey:         []byte("0123456789abcdef0123456789abcdef"),
+		loginLimit:     newLoginLimiter(time.Now),
+		authHashKey:    fmt.Sprintf("test.password_hash.%d", stamp),
+		authVersionKey: fmt.Sprintf("test.password_version.%d", stamp),
+	}
+	t.Cleanup(func() {
+		_, _ = m.pg.Exec(`DELETE FROM settings WHERE key=$1 OR key=$2`, s.authHashKey, s.authVersionKey)
+	})
+	s.setupToken = "setup-ok"
+	w := httptest.NewRecorder()
+	s.authInit(w, httptest.NewRequest("POST", "/api/auth/init", strings.NewReader(`{"password":"correct-horse-1","setup_token":"setup-ok"}`)))
+	if w.Code != 200 {
+		t.Fatalf("init status=%d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := m.pg.Exec(`UPDATE settings SET value='not-a-number' WHERE key=$1`, s.authVersionKey); err != nil {
+		t.Fatal(err)
+	}
+	s.pwdVersion.Store(99)
+	s.loadPasswordVersion()
+	if s.pwdState.Load() != pwdUnreadable {
+		t.Fatalf("state=%d want unreadable", s.pwdState.Load())
+	}
+	w = httptest.NewRecorder()
+	s.authLogin(w, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"ARTEX","password":"correct-horse-1"}`)))
+	if w.Code != 503 {
+		t.Fatalf("login while unreadable: status=%d want 503 body=%s", w.Code, w.Body.String())
+	}
+	if s.pwdState.Load() != pwdUnreadable {
+		t.Fatal("a failed reread opened sessions")
+	}
+
+	if _, err := m.pg.Exec(`UPDATE settings SET value='1' WHERE key=$1`, s.authVersionKey); err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	s.authLogin(w, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"ARTEX","password":"correct-horse-1"}`)))
+	if w.Code != 200 {
+		t.Fatalf("login after the version can be read: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if s.pwdState.Load() != pwdReady || s.pwdVersion.Load() != 1 {
+		t.Fatalf("state=%d version=%d, want ready at 1", s.pwdState.Load(), s.pwdVersion.Load())
+	}
+	var logged struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &logged); err != nil || logged.Token == "" {
+		t.Fatalf("login token: %v body=%s", err, w.Body.String())
+	}
+	if !s.sessionOK(logged.Token) {
+		t.Fatal("token from the healed login was rejected")
+	}
+}
+
 func TestAbsentPasswordVersionKeepsSessions(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {

@@ -214,7 +214,8 @@ func verifyJWT(tokenStr string, key []byte, version int64) bool {
 }
 
 // sessionOK reports whether token is still a session for the password version
-// this process has loaded. A failed version read rejects every token.
+// this process has loaded. A failed version read rejects every token until
+// login reads the counter again.
 func (s *Server) sessionOK(token string) bool {
 	if s.pwdState.Load() == pwdUnreadable {
 		return false
@@ -359,7 +360,8 @@ func (s *Server) initSetupToken() {
 
 // loadPasswordVersion reads auth.password_version. A missing key leaves the
 // version at zero, which accepts every valid token. A read that still fails
-// after three tries rejects every token until a later read succeeds.
+// after three tries rejects every token. Login calls this again when the
+// state is unreadable, and stays closed if that read fails too.
 func (s *Server) loadPasswordVersion() {
 	if s.m == nil || s.m.pg == nil {
 		return
@@ -378,7 +380,7 @@ func (s *Server) loadPasswordVersion() {
 		}
 	}
 	if err != nil {
-		log.Printf("[auth] password version unreadable; rejecting sessions until it can be read: %v", err)
+		log.Printf("[auth] password version unreadable; rejecting sessions until login can read it: %v", err)
 		s.pwdState.Store(pwdUnreadable)
 		return
 	}
@@ -389,7 +391,7 @@ func (s *Server) loadPasswordVersion() {
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || n < 0 {
-		log.Printf("[auth] password version %q is not a counter; rejecting sessions", raw)
+		log.Printf("[auth] password version %q is not a counter; rejecting sessions until login can read it", raw)
 		s.pwdState.Store(pwdUnreadable)
 		return
 	}
@@ -570,6 +572,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		return
 	}
 	s.loginLimit.reset(ip)
+	if s.pwdState.Load() == pwdUnreadable {
+		s.loadPasswordVersion()
+	}
 	if s.pwdState.Load() == pwdUnreadable {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
