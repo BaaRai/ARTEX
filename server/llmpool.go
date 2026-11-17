@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"sync"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
@@ -23,20 +24,12 @@ func newLLMHealthRegistry(pg *db.DB) *llmpool.Registry {
 	if pg == nil {
 		return llmpool.NewRegistry(nil, nil)
 	}
+	syncer := newHealthSync(pg.SaveLLMHealth, pg.ClearLLMHealth)
 	persist := func(id int64, st llmpool.State) {
-		h := db.LLMHealth{ProfileID: id, Fails: st.Fails, Trips: st.Trips, LastError: st.LastError}
-		if !st.OpenUntil.IsZero() {
-			t := st.OpenUntil
-			h.OpenUntil = &t
-		}
-		go func() {
-			if err := pg.SaveLLMHealth(h); err != nil {
-				log.Printf("[llmpool] failed to persist circuit-breaker state: %v", err)
-			}
-		}()
+		syncer.enqueue(id, healthOp{st: st})
 	}
 	forget := func(id int64) {
-		go func() { _ = pg.ClearLLMHealth(id) }()
+		syncer.enqueue(id, healthOp{clear: true})
 	}
 	reg := llmpool.NewRegistry(persist, forget)
 	// Restore only windows that haven't expired (LoadLLMHealth filters), so a
@@ -52,6 +45,93 @@ func newLLMHealthRegistry(pg *db.DB) *llmpool.Registry {
 		}
 	}
 	return reg
+}
+
+// healthOp is the latest circuit-breaker write for one profile. clear drops the row.
+type healthOp struct {
+	clear bool
+	st    llmpool.State
+}
+
+// healthSync writes circuit-breaker state from one goroutine. A newer update for
+// the same profile replaces one that has not been written yet, so a burst of
+// state changes becomes one database call and the request path does not wait.
+type healthSync struct {
+	save    func(db.LLMHealth) error
+	clear   func(int64) error
+	mu      sync.Mutex
+	pending map[int64]healthOp
+	wake    chan struct{}
+}
+
+func newHealthSync(save func(db.LLMHealth) error, clear func(int64) error) *healthSync {
+	h := &healthSync{
+		save:    save,
+		clear:   clear,
+		pending: map[int64]healthOp{},
+		wake:    make(chan struct{}, 1),
+	}
+	go h.loop()
+	return h
+}
+
+func (h *healthSync) enqueue(id int64, op healthOp) {
+	h.mu.Lock()
+	if h.pending == nil {
+		h.pending = map[int64]healthOp{}
+	}
+	h.pending[id] = op
+	h.mu.Unlock()
+	if h.wake == nil {
+		return
+	}
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (h *healthSync) take() map[int64]healthOp {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.pending) == 0 {
+		return nil
+	}
+	out := h.pending
+	h.pending = map[int64]healthOp{}
+	return out
+}
+
+func (h *healthSync) loop() {
+	for {
+		batch := h.take()
+		if len(batch) == 0 {
+			<-h.wake
+			continue
+		}
+		for id, op := range batch {
+			if op.clear {
+				if h.clear == nil {
+					continue
+				}
+				if err := h.clear(id); err != nil {
+					log.Printf("[llmpool] clear circuit-breaker profile #%d: %v", id, err)
+				}
+				continue
+			}
+			if h.save == nil {
+				continue
+			}
+			row := db.LLMHealth{ProfileID: id, Fails: op.st.Fails, Trips: op.st.Trips, LastError: op.st.LastError}
+			if !op.st.OpenUntil.IsZero() {
+				openUntil := op.st.OpenUntil
+				row.OpenUntil = &openUntil
+			}
+			if err := h.save(row); err != nil {
+				log.Printf("[llmpool] persist circuit-breaker profile #%d: %v", id, err)
+			}
+		}
+	}
 }
 
 // poolMember builds one chain member from a profile, reusing the per-profile
