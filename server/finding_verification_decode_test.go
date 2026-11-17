@@ -59,7 +59,16 @@ func decodeSnapshot(t *testing.T, respHead string, raw []byte) (*evidence.Store,
 }
 
 func TestDecodeEvidenceBodyGzipQuoteFound(t *testing.T) {
-	raw := gzipBody(t, []byte(decodeHTML))
+	// A body of a few dozen bytes is not worth deflating: some encoders emit a
+	// stored block instead, so the stream carries the plaintext verbatim and the
+	// guard below fails on the encoder's choice rather than on the decode. Give
+	// the fixture enough redundancy that any encoder compresses it. The quote
+	// stays the same and still has to survive the round trip.
+	body := strings.Repeat(decodeHTML, 200)
+	raw := gzipBody(t, []byte(body))
+	if !bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) {
+		t.Fatal("fixture is not gzip")
+	}
 	if strings.Contains(string(raw), "admin") {
 		t.Fatal("fixture is not compressed")
 	}
@@ -67,8 +76,8 @@ func TestDecodeEvidenceBodyGzipQuoteFound(t *testing.T) {
 	if err != nil || truncated {
 		t.Fatalf("decode: truncated=%v err=%v", truncated, err)
 	}
-	if string(out) != decodeHTML {
-		t.Fatalf("decoded %q, want %q", out, decodeHTML)
+	if string(out) != body {
+		t.Fatalf("decoded %d bytes, want %d", len(out), len(body))
 	}
 	if !strings.Contains(normalizeEvidenceText(string(out)), normalizeEvidenceText(decodeQuote)) {
 		t.Fatalf("quote %q not found in decoded body", decodeQuote)
