@@ -44,7 +44,30 @@ ask_model() { # $1 = system prompt, $2 = user payload, $3 = "json" for JSON mode
   jq -r '.choices[0].message.content' <<<"$resp"
 }
 
-repo_context() { git ls-files | head -120; }
+# repo_context prints a bounded, structural view of the tree: the root files,
+# every directory with its file count, and the paths a question is usually
+# about. It is a summary, not a listing, and the prompts say so: an earlier
+# version printed the first 120 paths alphabetically, which stopped at config/
+# and made the bot assert that docs/ and scripts/benchmark/ do not exist.
+repo_context() {
+  local total
+  total=$(git ls-files | wc -l | tr -d ' ')
+  echo "Tracked files: $total. The directory map below is complete, the file list is not: never conclude that a path does not exist because it is absent from this summary."
+  echo
+  echo "Root files:"
+  git ls-files | awk -F/ 'NF == 1 { print "  " $1 }'
+  echo
+  echo "Top-level directories, with every file beneath them:"
+  git ls-files | awk -F/ 'NF >= 2 { n[$1]++ }
+    END { for (k in n) printf "  %s/ %d\n", k, n[k] }' | sort
+  echo
+  echo "Second level, for the larger ones:"
+  git ls-files | awk -F/ 'NF > 2 { n[$1 "/" $2]++ }
+    END { for (k in n) printf "  %s/ %d\n", k, n[k] }' | sort
+  echo
+  echo "Workflows, migrations, docs and scripts:"
+  git ls-files '.github/workflows/*' 'db/migrations/*' 'docs/*' 'scripts/*' | sed 's/^/  /'
+}
 
 post_comment() { # $1 = issue or PR number, $2 = markdown text
   { echo "$2"; echo; echo "$FOOTER"; } > /tmp/bot-comment.md
@@ -105,7 +128,7 @@ case "$event_name" in
     if [ "$maintainer_opened" = false ] && already_triaged "$number"; then log "issue #$number already triaged"; exit 0; fi
     [ "$maintainer_opened" = false ] && eyes "$number"
     answer=$(ask_model \
-      'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Respond ONLY with a single JSON object, no markdown, no prose outside the JSON, exactly of this shape: {"comment": "<your triage comment, max 180 words, same language as the report>", "labels": ["<zero or more of: bug, question, feature, P1, P2, P3>"]}. Classify the report as bug, question, or feature request; if it is a question, answer it concisely using the repository file list as context in the comment; if it is a bug report, the comment says what reproduction steps or version information are missing; if it is a feature request, the comment restates it in one sentence; add a priority label (P1 security impact or data loss, P2 core functionality broken, P3 minor or cosmetic) only for bugs; use an empty labels array if nothing fits.' \
+      'You are the triage bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Respond ONLY with a single JSON object, no markdown, no prose outside the JSON, exactly of this shape: {"comment": "<your triage comment, max 180 words, same language as the report>", "labels": ["<zero or more of: bug, question, feature, P1, P2, P3>"]}. Classify the report as bug, question, or feature request; if it is a question, answer it concisely using the repository file list as context in the comment; if it is a bug report, the comment says what reproduction steps or version information are missing; if it is a feature request, the comment restates it in one sentence; add a priority label (P1 security impact or data loss, P2 core functionality broken, P3 minor or cosmetic) only for bugs; use an empty labels array if nothing fits. The repository summary lists directories with counts and a few key paths, not every file: never state that a file, directory or feature does not exist because it is missing from it, say you are not sure instead.' \
       "Issue title: $title
 
 Issue body:
@@ -139,7 +162,7 @@ $(repo_context)" json)
     echo "$body" | grep -qi '@artex-bot' || { log "no mention; skipping"; exit 0; }
     eyes "$number"
     answer=$(ask_model \
-      'You are the helper bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Someone pinged you with a question about this repository. Answer it concisely and only from what the repository file list suggests; say plainly when you are not sure and suggest opening a proper issue. Maximum 180 words, plain markdown, reply in the language of the question.' \
+      'You are the helper bot of an open-source Go + Next.js repository (an autonomous penetration testing agent system; AGPL-3.0). Someone pinged you with a question about this repository. Answer it concisely from the repository summary, saying plainly when you are not sure and suggesting a proper issue. Never state that a file, directory or feature does not exist because it is missing from that summary: it lists directories, not every file. Maximum 180 words, plain markdown, reply in the language of the question.' \
       "Question:
 $question
 
