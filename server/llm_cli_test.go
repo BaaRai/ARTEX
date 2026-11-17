@@ -13,13 +13,16 @@ import (
 	"github.com/Autumn-27/artex/db"
 )
 
-// A subscription CLI profile has no key, no base URL and may leave the model
-// empty, yet must load, join the failover pool, pass task resolution and pass
-// the connection test, which runs the CLI found on PATH.
+// A subscription CLI profile has no key and no base URL, yet must load, join
+// the failover pool, pass task resolution and pass the connection test, which
+// runs the CLI found on PATH. Clearing the model in the form tests the CLI's
+// default model, not the stored one.
 func TestCLIKeylessProfileLifecycle(t *testing.T) {
 	skipWithoutDSN(t)
 	bin := t.TempDir()
-	script := "#!/bin/sh\ncat > /dev/null\nprintf '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"OK\",\"structured_output\":{\"text\":\"OK\",\"tool_calls\":[]},\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+	argsFile := filepath.Join(bin, "args")
+	t.Setenv("FAKE_CLI_ARGS", argsFile)
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FAKE_CLI_ARGS\"\ncat > /dev/null\nprintf '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"OK\",\"structured_output\":{\"text\":\"OK\",\"tool_calls\":[]},\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
 	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +40,7 @@ func TestCLIKeylessProfileLifecycle(t *testing.T) {
 	cancel()
 	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
 
-	pid, err := m.pg.SaveProfile(&db.LLMProfile{Name: "claude-sub-" + t.Name(), Format: "claude-cli", Model: ""})
+	pid, err := m.pg.SaveProfile(&db.LLMProfile{Name: "claude-sub-" + t.Name(), Format: "claude-cli", Model: "opus"})
 	if err != nil {
 		t.Fatalf("the format CHECK must accept claude-cli: %v", err)
 	}
@@ -85,6 +88,9 @@ func TestCLIKeylessProfileLifecycle(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if !resp.OK || resp.Reply != "OK" {
 		t.Fatalf("connection test on keyless claude-cli: ok=%v reply=%q error=%q", resp.OK, resp.Reply, resp.Error)
+	}
+	if args, _ := os.ReadFile(argsFile); bytes.Contains(args, []byte("--model")) {
+		t.Fatalf("an emptied model must test the CLI default, not the stored model: %q", args)
 	}
 
 	if rec := post(s.pgListModels, "/api/llm/models", map[string]any{"provider": "claude-cli"}); rec.Code != http.StatusBadRequest {

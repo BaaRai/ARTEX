@@ -1487,7 +1487,8 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(req.Provider) == "" {
 			req.Provider = stored.Format
 		}
-		if strings.TrimSpace(req.Model) == "" {
+		// An empty model on a CLI format means the CLI's default, not "keep the stored one".
+		if strings.TrimSpace(req.Model) == "" && !agent.IsCLIFormat(llm.Format(strings.TrimSpace(req.Provider))) {
 			req.Model = stored.Model
 		}
 		if strings.TrimSpace(req.BaseURL) == "" {
