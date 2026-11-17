@@ -18,9 +18,9 @@ func (uploadLimitZeroReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func TestChatUpload500MiBBoundary(t *testing.T) {
-	if maxChatUpload != 500<<20 {
-		t.Fatal("attachment limit must be 500 MiB")
+func TestChatUpload512MiBBoundary(t *testing.T) {
+	if maxChatUpload != 512<<20 {
+		t.Fatal("attachment limit must be 512 MiB")
 	}
 	cases := []struct {
 		name   string
@@ -28,9 +28,11 @@ func TestChatUpload500MiBBoundary(t *testing.T) {
 		status int
 	}{
 		{"above previous limit", []int64{129 << 20}, http.StatusOK},
-		{"exactly 500 MiB", []int64{500 << 20}, http.StatusOK},
-		{"combined files over limit", []int64{250 << 20, (250 << 20) + 1}, http.StatusRequestEntityTooLarge},
-		{"request body over limit", []int64{(501 << 20) + 1}, http.StatusRequestEntityTooLarge},
+		{"exactly 512 MiB", []int64{512 << 20}, http.StatusOK},
+		{"single file over limit", []int64{(512 << 20) + 1}, http.StatusRequestEntityTooLarge},
+		{"combined files exactly at limit", []int64{256 << 20, 256 << 20}, http.StatusOK},
+		{"combined files over limit", []int64{256 << 20, (256 << 20) + 1}, http.StatusRequestEntityTooLarge},
+		{"request body over limit", []int64{(513 << 20) + 1}, http.StatusRequestEntityTooLarge},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,6 +88,15 @@ func TestChatUpload500MiBBoundary(t *testing.T) {
 					}
 				}
 			} else {
+				var reply struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &reply); err != nil {
+					t.Fatal(err)
+				}
+				if reply.Error != "files exceed the 512 MiB upload limit" {
+					t.Fatalf("unexpected size-limit error: %q", reply.Error)
+				}
 				files, err := os.ReadDir(filepath.Join(workDir, "drafts", "boundary-test", "uploads"))
 				if err != nil || len(files) != 0 {
 					t.Fatalf("oversized upload saved files: %v, %v", files, err)
