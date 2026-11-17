@@ -848,6 +848,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/exploration/findings/{id}/retests", s.startFindingRetest)
 	mux.HandleFunc("PATCH /api/exploration/findings/{id}", s.patchFinding)
 	mux.HandleFunc("POST /api/exploration/findings/bulk-status", s.bulkPatchFindingStatus)
+	mux.HandleFunc("POST /api/exploration/findings/bulk-report-state", s.bulkPatchFindingReportState)
 	mux.HandleFunc("DELETE /api/exploration/findings/{id}", s.deleteFinding)
 	mux.HandleFunc("GET /api/exploration/intents", s.intents)
 	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)
@@ -2364,7 +2365,7 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 //	format  = md-single (one combined .md) | md-zip (one .md per vulnerability, zipped)
 //	          | csv | json
 //	ids     = comma-separated finding ids (required when scope=selected)
-//	Filter params severity/status/vulnclass/task_id/q/sort match the list endpoint (used when scope=filtered).
+//	Filter params severity/status/report_state/vulnclass/task_id/q/sort match the list endpoint (used when scope=filtered).
 func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	scope := q.Get("scope")
@@ -2529,17 +2530,18 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Status    *string `json:"status"`
-		Severity  *string `json:"severity"`
-		Name      *string `json:"name"`
-		VulnClass *string `json:"vulnclass"`
+		Status      *string `json:"status"`
+		ReportState *string `json:"report_state"`
+		Severity    *string `json:"severity"`
+		Name        *string `json:"name"`
+		VulnClass   *string `json:"vulnclass"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
 		return
 	}
-	if body.Status == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil {
-		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass")
+	if body.Status == nil && body.ReportState == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil {
+		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass/report_state")
 		return
 	}
 	if body.Status != nil {
@@ -2561,6 +2563,21 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		}
 		if !notified && from != *body.Status {
 			log.Printf("[notify] status-change event not registered finding=%d %s→%s (status was updated)", id, from, *body.Status)
+		}
+	}
+	if body.ReportState != nil {
+		if !db.ValidFindingReportState(*body.ReportState) {
+			writeErr(w, 400, "bad report_state: "+*body.ReportState)
+			return
+		}
+		n, err := s.m.pg.SetFindingReportState(id, *body.ReportState)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if n == 0 {
+			writeErr(w, 404, "finding not found")
+			return
 		}
 	}
 	if body.Severity != nil {
@@ -2634,23 +2651,67 @@ func (s *Server) bulkPatchFindingStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 400, "bad status: "+body.Status)
 		return
 	}
-	seen := make(map[int64]bool, len(body.IDs))
-	ids := make([]int64, 0, len(body.IDs))
-	for _, id := range body.IDs {
-		if id <= 0 || seen[id] {
-			continue
-		}
-		seen[id] = true
-		ids = append(ids, id)
-		if len(ids) == maxBulkFindingStatus {
-			break
-		}
-	}
+	ids := normalizeFindingIDs(body.IDs, maxBulkFindingStatus)
 	if len(ids) == 0 {
 		writeErr(w, 400, "no finding ids")
 		return
 	}
 	results, err := s.m.pg.SetFindingStatusesWithNotify(r.Context(), ids, body.Status)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	updated, missing := 0, 0
+	for _, res := range results {
+		if res.Changed {
+			updated++
+		}
+		if !res.Found {
+			missing++
+		}
+	}
+	writeJSON(w, 200, map[string]any{"updated": updated, "missing": missing, "results": results})
+}
+
+// normalizeFindingIDs drops non-positive and duplicate ids, then caps the list.
+func normalizeFindingIDs(ids []int64, capN int) []int64 {
+	seen := make(map[int64]bool, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+		if capN > 0 && len(out) == capN {
+			break
+		}
+	}
+	return out
+}
+
+// bulkPatchFindingReportState sets the same report stage on a batch of findings
+// in one transaction. Same cap/dedupe/per-id result as bulk status, without
+// status-change notifications: report_state is a workflow stage, not a verdict.
+func (s *Server) bulkPatchFindingReportState(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs         []int64 `json:"ids"`
+		ReportState string  `json:"report_state"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if !db.ValidFindingReportState(body.ReportState) {
+		writeErr(w, 400, "bad report_state: "+body.ReportState)
+		return
+	}
+	ids := normalizeFindingIDs(body.IDs, maxBulkFindingStatus)
+	if len(ids) == 0 {
+		writeErr(w, 400, "no finding ids")
+		return
+	}
+	results, err := s.m.pg.SetFindingReportStates(r.Context(), ids, body.ReportState)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

@@ -486,3 +486,34 @@ func assertArchiveGlobalStats(t *testing.T, d *DB, profileName, skillName, toolN
 		t.Fatalf("archive finding class %q missing", vulnclass)
 	}
 }
+
+// An archive written before report_state existed restores with the column's
+// default instead of failing on the NOT NULL constraint.
+func TestFillArchiveDefaults(t *testing.T) {
+	raw := json.RawMessage(`[{"id":1,"summary":"old"},{"id":2,"report_state":null},{"id":3,"report_state":"submitted"}]`)
+	out, err := fillArchiveDefaults("findings", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(out, &rows); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`"none"`, `"none"`, `"submitted"`}
+	for i, row := range rows {
+		if string(row["report_state"]) != want[i] {
+			t.Fatalf("row %d report_state=%s, want %s", i, row["report_state"], want[i])
+		}
+	}
+
+	// Side memory keeps its own default, and other tables pass through.
+	out, err = fillArchiveDefaults("side_question_sessions", json.RawMessage(`[{"id":1}]`))
+	if err != nil || !strings.Contains(string(out), `"memory":{}`) {
+		t.Fatalf("side memory default missing: %s err=%v", out, err)
+	}
+	in := json.RawMessage(`[{"id":1}]`)
+	out, err = fillArchiveDefaults("activity", in)
+	if err != nil || string(out) != string(in) {
+		t.Fatalf("activity changed: %s err=%v", out, err)
+	}
+}

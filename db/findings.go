@@ -31,6 +31,7 @@ type DBFinding struct {
 	Worker             string
 	AssetIDs           []int64
 	Status             string
+	ReportState        string // none / submitted / accepted / rejected / duplicate; separate from Status
 	PoELevel           int    // proof-of-exploitation level 0-4 (S1); 0 = none declared
 	VerificationStatus string // verified / unverified / blocked / not_assessed / false_positive
 	VerificationNote   string // why the status was reached; empty when verified
@@ -60,6 +61,27 @@ func ValidFindingStatus(s string) bool {
 	switch s {
 	case FindingPending, FindingInProgress, FindingConfirmed, FindingResolved, FindingFixed,
 		FindingFalsePositive, FindingIgnored, FindingDuplicate, FindingRiskAccepted:
+		return true
+	}
+	return false
+}
+
+// Finding report stages (findings.report_state). A workflow stage after triage,
+// not a verdict: a finding can be confirmed and submitted at the same time.
+// RSI lesson extraction still reads findings.status.
+const (
+	FindingReportNone      = "none"
+	FindingReportSubmitted = "submitted"
+	FindingReportAccepted  = "accepted"
+	FindingReportRejected  = "rejected"
+	FindingReportDuplicate = "duplicate"
+)
+
+// ValidFindingReportState reports whether s is a known report stage.
+func ValidFindingReportState(s string) bool {
+	switch s {
+	case FindingReportNone, FindingReportSubmitted, FindingReportAccepted,
+		FindingReportRejected, FindingReportDuplicate:
 		return true
 	}
 	return false
@@ -109,7 +131,7 @@ func (d *DB) AddFinding(taskID, nodeID int64, vulnclass, name, severity, summary
 // findingSelectCols is the column list (with task_description join) every finding
 // list query selects, so scanFinding stays in sync across callers.
 const findingSelectCols = `f.id, f.task_id, f.node_id, f.vulnclass, COALESCE(f.name, ''), f.severity, f.summary,
-	       f.evidence, f.worker, f.asset_ids, COALESCE(f.status, 'pending'), f.created_at,
+	       f.evidence, f.worker, f.asset_ids, COALESCE(f.status, 'pending'), COALESCE(f.report_state, 'none'), f.created_at,
 	       COALESCE(t.description, '') AS task_description, f.evidence_version, f.report_evidence_version,
 	       f.poe_level, COALESCE(f.verification_status, 'unverified'), COALESCE(f.verification_note, ''),
 	       f.counterevidence, f.confidence_rationale,
@@ -126,7 +148,7 @@ func scanFindings(rows interface {
 		f := &DBFinding{}
 		var aidsJSON string
 		if err := rows.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
-			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt, &f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.PoELevel, &f.VerificationStatus, &f.VerificationNote, &f.Counterevidence, &f.ConfidenceRationale, &f.TrafficCount); err != nil {
+			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.ReportState, &f.CreatedAt, &f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.PoELevel, &f.VerificationStatus, &f.VerificationNote, &f.Counterevidence, &f.ConfidenceRationale, &f.TrafficCount); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
@@ -160,6 +182,7 @@ func (d *DB) ListFindings(limit int) ([]*DBFinding, error) {
 type FindingFilter struct {
 	Severity           string // high | medium | low
 	Status             string // pending | false_positive | ignored | resolved
+	ReportState        string // none | submitted | accepted | rejected | duplicate
 	VerificationStatus string // verified | unverified | blocked | not_assessed | false_positive
 	VulnClass          string
 	TaskID             string // task id (in string form; empty/invalid = do not filter by task)
@@ -197,6 +220,7 @@ func (f FindingFilter) where() (string, []any) {
 	}
 	add("severity", f.Severity)
 	add("status", f.Status)
+	add("report_state", f.ReportState)
 	add("verification_status", f.VerificationStatus)
 	add("vulnclass", f.VulnClass)
 	// task_id is a bigint column, compared as an integer (it cannot go through
@@ -528,7 +552,7 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 		f := &DBFinding{}
 		var aidsJSON string
 		if err := rows.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
-			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt,
+			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.ReportState, &f.CreatedAt,
 			&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.PoELevel, &f.VerificationStatus, &f.VerificationNote, &f.Counterevidence, &f.ConfidenceRationale, &f.TrafficCount, &f.Report); err != nil {
 			return nil, err
 		}
@@ -544,6 +568,8 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 type FindingStats struct {
 	Total       int                 `json:"total"`
 	Pending     int                 `json:"pending"`
+	Submitted   int                 `json:"submitted"`
+	Accepted    int                 `json:"accepted"`
 	Critical    int                 `json:"critical"`
 	High        int                 `json:"high"`
 	Medium      int                 `json:"medium"`
@@ -563,18 +589,20 @@ type FindingTaskOption struct {
 	Count       int    `json:"count"`
 }
 
-// FindingStats returns whole-table counts (by severity + pending) and the sorted
-// set of distinct vuln classes.
+// FindingStats returns whole-table counts (by severity, pending, and report
+// stage) and the sorted set of distinct vuln classes.
 func (d *DB) FindingStats() (*FindingStats, error) {
 	st := &FindingStats{VulnClasses: []string{}, Tasks: []FindingTaskOption{}}
 	err := d.QueryRow(`SELECT
 		COUNT(*),
 		COUNT(*) FILTER (WHERE status = 'pending'),
+		COUNT(*) FILTER (WHERE report_state = 'submitted'),
+		COUNT(*) FILTER (WHERE report_state = 'accepted'),
 		COUNT(*) FILTER (WHERE severity = 'critical'),
 		COUNT(*) FILTER (WHERE severity = 'high'),
 		COUNT(*) FILTER (WHERE severity = 'medium'),
 		COUNT(*) FILTER (WHERE severity = 'low')
-		FROM findings`).Scan(&st.Total, &st.Pending, &st.Critical, &st.High, &st.Medium, &st.Low)
+		FROM findings`).Scan(&st.Total, &st.Pending, &st.Submitted, &st.Accepted, &st.Critical, &st.High, &st.Medium, &st.Low)
 	if err != nil {
 		return nil, err
 	}
@@ -629,6 +657,8 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 		cold := aggregate.FindingStats
 		st.Total += cold.Total
 		st.Pending += cold.Pending
+		st.Submitted += cold.Submitted
+		st.Accepted += cold.Accepted
 		st.Critical += cold.Critical
 		st.High += cold.High
 		st.Medium += cold.Medium
@@ -658,7 +688,7 @@ func (d *DB) GetFinding(id int64) (*DBFinding, error) {
 		LEFT JOIN tasks t ON f.task_id = t.id
 		WHERE f.id = $1`, id).Scan(
 		&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
-		&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt,
+		&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.ReportState, &f.CreatedAt,
 		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.PoELevel, &f.VerificationStatus, &f.VerificationNote, &f.Counterevidence, &f.ConfidenceRationale, &f.TrafficCount, &f.Report)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -721,6 +751,71 @@ func (d *DB) DeleteFindingsByTask(taskID int64) (int64, error) {
 // drive the status on their own.
 func (d *DB) SetFindingStatus(id int64, status string) (int64, error) {
 	return d.setFindingCol(id, "status", "status", status)
+}
+
+// SetFindingReportState updates one finding's report stage and mirrors it onto
+// the originating exploration node's payload under "report_state". It does not
+// register a status-change notification: report_state is a workflow stage, not
+// a triage verdict. Returns rows affected.
+func (d *DB) SetFindingReportState(id int64, state string) (int64, error) {
+	return d.setFindingCol(id, "report_state", "report_state", state)
+}
+
+// FindingReportStateBatchResult is one id's outcome in a bulk report-stage update.
+type FindingReportStateBatchResult struct {
+	ID      int64  `json:"id"`
+	From    string `json:"from,omitempty"`
+	Found   bool   `json:"found"`
+	Changed bool   `json:"changed"`
+}
+
+// SetFindingReportStates updates several findings to the same report stage in
+// one transaction. Unknown ids come back as found=false instead of hiding the
+// others; a database error rolls the whole batch back. No notification event
+// is written — status-change pushes stay on findings.status.
+func (d *DB) SetFindingReportStates(ctx context.Context, ids []int64, state string) ([]FindingReportStateBatchResult, error) {
+	out := make([]FindingReportStateBatchResult, 0, len(ids))
+	err := d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
+		for _, id := range ids {
+			from, found, changed, err := setFindingReportStateTx(ctx, tx, id, state)
+			if err != nil {
+				return err
+			}
+			out = append(out, FindingReportStateBatchResult{ID: id, From: from, Found: found, Changed: changed})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func setFindingReportStateTx(ctx context.Context, tx *sql.Tx, id int64, state string) (from string, found bool, changed bool, err error) {
+	var nodeID sql.NullInt64
+	scanErr := tx.QueryRowContext(ctx, `SELECT COALESCE(report_state,'none'), node_id
+FROM findings WHERE id=$1 FOR UPDATE`, id).Scan(&from, &nodeID)
+	if scanErr == sql.ErrNoRows {
+		return "", false, false, nil
+	}
+	if scanErr != nil {
+		return "", false, false, scanErr
+	}
+	found = true
+	if from == state {
+		return from, true, false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE findings SET report_state=$2 WHERE id=$1`, id, state); err != nil {
+		return from, true, false, err
+	}
+	if nodeID.Valid {
+		if _, err := tx.ExecContext(ctx, `UPDATE exploration_nodes
+			SET payload = jsonb_set(payload, '{report_state}', to_jsonb($1::text))
+			WHERE id = $2`, state, nodeID.Int64); err != nil {
+			return from, true, false, err
+		}
+	}
+	return from, true, true, nil
 }
 
 // SetFindingReportByNodeID sets the Markdown report on the standalone finding row

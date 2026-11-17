@@ -486,6 +486,9 @@ export type FindingStatus =
 // human triage status above. "blocked" is produced by no path yet but is displayed when present.
 export type VerificationStatus = "verified" | "unverified" | "blocked" | "not_assessed" | "false_positive";
 
+// Report stage after triage: a finding can be confirmed and submitted at the same time.
+export type FindingReportState = "none" | "submitted" | "accepted" | "rejected" | "duplicate";
+
 // FindingAsset is an asset bound to a vulnerability (label pre-rendered by the backend).
 export interface FindingAsset {
   id: string;
@@ -509,6 +512,7 @@ export interface Finding {
   name?: string; // vulnerability name; display falls back to vulnclass when empty
   severity: Severity;
   status: FindingStatus;
+  report_state?: FindingReportState; // workflow stage after triage; default none
   summary: string;
   evidence: string;
   report?: string; // detailed report (Markdown); returned only by the detail endpoint, empty in lists
@@ -562,6 +566,8 @@ export interface FindingDeepenResponse {
 export interface FindingStats {
   total: number;
   pending: number;
+  submitted: number;
+  accepted: number;
   critical: number;
   high: number;
   medium: number;
@@ -585,6 +591,7 @@ export interface FindingQuery {
   pageSize: number;
   severity?: "all" | Severity;
   status?: "all" | FindingStatus;
+  reportState?: "all" | FindingReportState;
   verificationStatus?: "all" | VerificationStatus;
   vulnclass?: string;
   task?: string; // task id; "all"/empty = no task filter

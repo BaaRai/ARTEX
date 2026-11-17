@@ -8,8 +8,10 @@ import {
   ArrowUpRightIcon,
   BugIcon,
   ChevronRightIcon,
+  CircleCheckIcon,
   ClockIcon,
   DownloadIcon,
+  FileUpIcon,
   InfoIcon,
   SearchIcon,
   ShieldAlertIcon,
@@ -46,6 +48,7 @@ import type {
   Finding,
   FindingAssetNode,
   FindingGroup,
+  FindingReportState,
   FindingStats,
   FindingStatus,
   Severity,
@@ -55,6 +58,7 @@ import { cn } from "@/lib/utils";
 
 import { AssetTree, assetPathOf } from "./_components/asset-tree";
 import {
+  FINDING_REPORT_STATES,
   FINDING_STATUSES,
   type FindingEdit,
   type FindingReport,
@@ -62,6 +66,7 @@ import {
   findingRowKey,
   fmtTime,
   isSameFinding,
+  REPORT_STATE_META,
   SEVERITIES,
   UNASSIGNED_TASK,
   VERIFICATION_META,
@@ -124,6 +129,8 @@ function findingGroupKey(group: FindingGroup) {
 const EMPTY_STATS: FindingStats = {
   total: 0,
   pending: 0,
+  submitted: 0,
+  accepted: 0,
   critical: 0,
   high: 0,
   medium: 0,
@@ -136,6 +143,7 @@ export default function FindingsPage() {
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
+  const [reportState, setReportState] = React.useState<"all" | FindingReportState>("all");
   const [verificationStatus, setVerificationStatus] = React.useState<"all" | VerificationStatus>("all");
   const [vulnclass, setVulnclass] = React.useState<string>("all");
   const [task, setTask] = React.useState<string>("all");
@@ -167,7 +175,16 @@ export default function FindingsPage() {
   const retestRefreshVersion = React.useRef(0);
   const [deepenDescription, setDeepenDescription] = React.useState("");
   const [deepening, setDeepening] = React.useState(false);
-  const filterFingerprint = JSON.stringify([severity, status, verificationStatus, vulnclass, task, sort, query]);
+  const filterFingerprint = JSON.stringify([
+    severity,
+    status,
+    reportState,
+    verificationStatus,
+    vulnclass,
+    task,
+    sort,
+    query,
+  ]);
   const activeFilterFingerprint = React.useRef(filterFingerprint);
   activeFilterFingerprint.current = filterFingerprint;
 
@@ -205,6 +222,7 @@ export default function FindingsPage() {
           view?: unknown;
           severity?: unknown;
           status?: unknown;
+          reportState?: unknown;
           verificationStatus?: unknown;
           vulnclass?: unknown;
           task?: unknown;
@@ -216,6 +234,9 @@ export default function FindingsPage() {
         }
         if (parsed.status === "all" || FINDING_STATUSES.includes(parsed.status as FindingStatus)) {
           setStatus(parsed.status as "all" | FindingStatus);
+        }
+        if (parsed.reportState === "all" || FINDING_REPORT_STATES.includes(parsed.reportState as FindingReportState)) {
+          setReportState(parsed.reportState as "all" | FindingReportState);
         }
         if (
           parsed.verificationStatus === "all" ||
@@ -237,9 +258,9 @@ export default function FindingsPage() {
     if (!preferencesHydrated) return;
     setLocalStorageValue(
       FINDING_LIST_PREFERENCE_KEY,
-      JSON.stringify({ view, severity, status, verificationStatus, vulnclass, task, sort }),
+      JSON.stringify({ view, severity, status, reportState, verificationStatus, vulnclass, task, sort }),
     );
-  }, [preferencesHydrated, severity, sort, status, task, verificationStatus, view, vulnclass]);
+  }, [preferencesHydrated, reportState, severity, sort, status, task, verificationStatus, view, vulnclass]);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => setQuery(search.trim()), 300);
@@ -299,7 +320,7 @@ export default function FindingsPage() {
       await api.exportFindings({
         format: exportFormat,
         scope: exportScope,
-        filters: { severity, status, verificationStatus, vulnclass, task, query, sort },
+        filters: { severity, status, reportState, verificationStatus, vulnclass, task, query, sort },
         ids: [...selectedIds],
       });
       setExportOpen(false);
@@ -339,6 +360,7 @@ export default function FindingsPage() {
         pageSize: flatPageSize,
         severity,
         status,
+        reportState,
         verificationStatus,
         vulnclass,
         task,
@@ -360,6 +382,7 @@ export default function FindingsPage() {
     flatPageSize,
     severity,
     status,
+    reportState,
     verificationStatus,
     vulnclass,
     task,
@@ -375,7 +398,16 @@ export default function FindingsPage() {
     const request = ++assetTreeRequest.current;
     setAssetTree((current) => ({ ...current, loading: true }));
     try {
-      const result = await api.findingAssetTree({ severity, status, verificationStatus, vulnclass, task, query, sort });
+      const result = await api.findingAssetTree({
+        severity,
+        status,
+        reportState,
+        verificationStatus,
+        vulnclass,
+        task,
+        query,
+        sort,
+      });
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree({
         nodes: result.nodes ?? [],
@@ -390,7 +422,7 @@ export default function FindingsPage() {
       setAssetTree((current) => ({ ...current, loading: false }));
       toast.error(`Failed to load the asset tree: ${(e as Error).message}`);
     }
-  }, [filterFingerprint, severity, status, verificationStatus, vulnclass, task, query, sort]);
+  }, [filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, task, query, sort]);
 
   const refreshGroups = React.useCallback(async () => {
     const requestFilter = filterFingerprint;
@@ -402,6 +434,7 @@ export default function FindingsPage() {
         pageSize,
         severity,
         status,
+        reportState,
         verificationStatus,
         vulnclass,
         task,
@@ -415,7 +448,7 @@ export default function FindingsPage() {
     } catch {
       // Polling keeps the last successful snapshot visible.
     }
-  }, [filterFingerprint, page, pageSize, severity, status, verificationStatus, vulnclass, task, query, sort]);
+  }, [filterFingerprint, page, pageSize, reportState, severity, status, verificationStatus, vulnclass, task, query, sort]);
 
   const loadGroup = React.useCallback(
     async (key: string, groupPage: number, groupPageSize: number) => {
@@ -440,6 +473,7 @@ export default function FindingsPage() {
           pageSize: groupPageSize,
           severity,
           status,
+          reportState,
           verificationStatus,
           vulnclass,
           task: key,
@@ -475,7 +509,7 @@ export default function FindingsPage() {
         }));
       }
     },
-    [filterFingerprint, severity, status, verificationStatus, vulnclass, query, sort],
+    [filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, query, sort],
   );
 
   React.useEffect(() => {
@@ -657,6 +691,34 @@ export default function FindingsPage() {
     [refreshAfterMutation, setFindings, status],
   );
 
+  const updateReportState = React.useCallback(
+    async (f: Finding, next: FindingReportState) => {
+      if (!f.finding_id || next === (f.report_state ?? "none")) return;
+      const prev = f.report_state ?? "none";
+      setFindings((cur) => cur.map((x) => (isSameFinding(x, f) ? { ...x, report_state: next } : x)));
+      try {
+        await api.setFindingReportState(f.finding_id, next);
+        toast.success(`Report stage set to "${REPORT_STATE_META[next].label}"`);
+        api
+          .findingStats()
+          .then(setStats)
+          .catch(() => {
+            // The row update remains valid even if the aggregate refresh fails.
+          });
+        if (reportState !== "all" && next !== reportState) {
+          setFindings((cur) => cur.filter((x) => !isSameFinding(x, f)));
+          setTotal((t) => Math.max(0, t - 1));
+          setFlat((cur) => ({ ...cur, total: Math.max(0, cur.total - 1) }));
+        }
+        refreshAfterMutation(f);
+      } catch (e) {
+        setFindings((cur) => cur.map((x) => (isSameFinding(x, f) ? { ...x, report_state: prev } : x)));
+        toast.error(`Update failed: ${(e as Error).message}`);
+      }
+    },
+    [refreshAfterMutation, reportState, setFindings],
+  );
+
   // applyBulkStatus sets the same triage status on every selected finding, then
   // reloads the current view so rows hidden by the status filter disappear.
   const applyBulkStatus = React.useCallback(
@@ -669,6 +731,36 @@ export default function FindingsPage() {
         const label = statusMeta("finding", next).label;
         toast.success(
           r.updated === 1 ? `Marked 1 finding as "${label}"` : `Marked ${r.updated} findings as "${label}"`,
+        );
+        void loadFlat();
+        if (view === "asset") void loadAssetTree();
+        api
+          .findingStats()
+          .then(setStats)
+          .catch(() => {
+            // The list reload remains valid even if the aggregate refresh fails.
+          });
+      } catch (e) {
+        toast.error(`Bulk update failed: ${(e as Error).message}`);
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view],
+  );
+
+  const applyBulkReportState = React.useCallback(
+    async (next: FindingReportState) => {
+      if (selectedIds.size === 0 || bulkBusy) return;
+      setBulkBusy(true);
+      try {
+        const r = await api.bulkSetFindingReportState([...selectedIds], next);
+        setSelectedIds(new Set());
+        const label = REPORT_STATE_META[next].label;
+        toast.success(
+          r.updated === 1
+            ? `Set report stage of 1 finding to "${label}"`
+            : `Set report stage of ${r.updated} findings to "${label}"`,
         );
         void loadFlat();
         if (view === "asset") void loadAssetTree();
@@ -812,6 +904,8 @@ export default function FindingsPage() {
   const statCards = [
     { label: "Total findings", value: stats.total, icon: BugIcon },
     { label: "Pending", value: stats.pending, tone: "text-amber-500", icon: ClockIcon },
+    { label: "Submitted", value: stats.submitted, tone: "text-amber-500", icon: FileUpIcon },
+    { label: "Accepted", value: stats.accepted, tone: "text-emerald-500", icon: CircleCheckIcon },
     { label: "Critical", value: stats.critical, tone: "text-rose-600", icon: ShieldAlertIcon },
     { label: "High", value: stats.high, tone: "text-red-500", icon: TriangleAlertIcon },
     { label: "Medium", value: stats.medium, tone: "text-amber-500", icon: TriangleAlertIcon },
@@ -838,6 +932,7 @@ export default function FindingsPage() {
     saving,
     onSave: saveEdit,
     onStatusChange: updateStatus,
+    onReportStateChange: updateReportState,
     onRetest: setRetestFinding,
     activeRetests,
     onDeepen: openDeepen,
@@ -888,7 +983,7 @@ export default function FindingsPage() {
         </Tabs>
       </div>
       <div className="flex flex-1 flex-col gap-4 md:gap-6">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
           {statCards.map((stat) => {
             const StatIcon = stat.icon;
             return (
@@ -951,6 +1046,20 @@ export default function FindingsPage() {
               {FINDING_STATUSES.map((st) => (
                 <SelectItem key={st} value={st}>
                   {statusMeta("finding", st).label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={reportState} onValueChange={(v) => setReportState(v as "all" | FindingReportState)}>
+            <SelectTrigger size="sm" className="w-40">
+              <SelectValue placeholder="Report stage" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All report stages</SelectItem>
+              {FINDING_REPORT_STATES.map((st) => (
+                <SelectItem key={st} value={st}>
+                  {REPORT_STATE_META[st].label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1042,6 +1151,24 @@ export default function FindingsPage() {
                     {FINDING_STATUSES.map((st) => (
                       <SelectItem key={st} value={st}>
                         {statusMeta("finding", st).label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value=""
+                  onValueChange={(v) => {
+                    if (v) void applyBulkReportState(v as FindingReportState);
+                  }}
+                  disabled={bulkBusy}
+                >
+                  <SelectTrigger size="sm" className="w-44" aria-label="Set the report stage of the selected findings">
+                    <SelectValue placeholder={bulkBusy ? "Updating…" : "Set report stage"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FINDING_REPORT_STATES.map((st) => (
+                      <SelectItem key={st} value={st}>
+                        {REPORT_STATE_META[st].label}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -13,6 +13,25 @@ import (
 
 // TestDeleteFinding verifies that deleting a finding removes both the findings
 // row and its originating exploration node (kind='finding').
+func TestValidFindingReportState(t *testing.T) {
+	for _, s := range []string{
+		FindingReportNone, FindingReportSubmitted, FindingReportAccepted,
+		FindingReportRejected, FindingReportDuplicate,
+	} {
+		if !ValidFindingReportState(s) {
+			t.Fatalf("%q should be valid", s)
+		}
+	}
+	for _, s := range []string{"", "confirmed", "pending", "SUBMITTED", "submitted "} {
+		if ValidFindingReportState(s) {
+			t.Fatalf("%q should be invalid", s)
+		}
+	}
+	if ValidFindingStatus(FindingReportSubmitted) {
+		t.Fatal("submitted must not be a triage status")
+	}
+}
+
 func TestDeleteFinding(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
@@ -122,6 +141,115 @@ func TestSetFindingStatusMirrorsNodePayload(t *testing.T) {
 	}
 }
 
+func TestFindingReportState(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer d.Close()
+
+	tk, err := d.CreateTask("finding report state", "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(tk.ID)
+
+	es := d.Exploration(tk.ExplorationID)
+	nodeID, err := es.AddNode(KindFinding, map[string]any{"summary": "x", "severity": "high"}, 5, "confirmed", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid, err := d.AddFinding(tk.ID, nodeID, "XSS", "reflected XSS", "high", "summary", "poc", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := d.AddFinding(tk.ID, 0, "XSS", "other", "low", "summary", "poc", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Exec(`DELETE FROM notification_events WHERE finding_id IN ($1,$2)`, fid, second) })
+
+	one, err := d.GetFinding(fid)
+	if err != nil || one == nil || one.ReportState != FindingReportNone {
+		t.Fatalf("new finding report_state: %+v err=%v", one, err)
+	}
+
+	n, err := d.SetFindingReportState(fid, FindingReportSubmitted)
+	if err != nil || n != 1 {
+		t.Fatalf("SetFindingReportState: n=%d err=%v", n, err)
+	}
+	one, _ = d.GetFinding(fid)
+	if one.ReportState != FindingReportSubmitted {
+		t.Fatalf("report_state=%q", one.ReportState)
+	}
+	if one.Status != FindingPending {
+		t.Fatalf("triage status changed: %q", one.Status)
+	}
+
+	var payload []byte
+	if err := d.QueryRow(`SELECT payload FROM exploration_nodes WHERE id=$1`, nodeID).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var p map[string]any
+	if err := json.Unmarshal(payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p["report_state"] != FindingReportSubmitted {
+		t.Fatalf("payload report_state=%v", p["report_state"])
+	}
+
+	listed, total, err := d.ListFindingsPage(FindingFilter{TaskID: fmt.Sprintf("%d", tk.ID), ReportState: FindingReportSubmitted}, 1, 20)
+	if err != nil || total != 1 || len(listed) != 1 || listed[0].ID != fid {
+		t.Fatalf("filter submitted: total=%d listed=%d err=%v", total, len(listed), err)
+	}
+
+	st, err := d.FindingStats()
+	if err != nil || st.Submitted < 1 {
+		t.Fatalf("stats submitted undercount: %+v err=%v", st, err)
+	}
+
+	const missingID = int64(999999999)
+	results, err := d.SetFindingReportStates(context.Background(), []int64{fid, second, missingID}, FindingReportAccepted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("want 3 results, got %d", len(results))
+	}
+	if !results[0].Found || !results[0].Changed || results[0].From != FindingReportSubmitted {
+		t.Fatalf("first: %+v", results[0])
+	}
+	if !results[1].Found || !results[1].Changed || results[1].From != FindingReportNone {
+		t.Fatalf("second: %+v", results[1])
+	}
+	if results[2].Found || results[2].Changed {
+		t.Fatalf("missing: %+v", results[2])
+	}
+
+	again, err := d.SetFindingReportStates(context.Background(), []int64{fid}, FindingReportAccepted)
+	if err != nil || len(again) != 1 || again[0].Changed {
+		t.Fatalf("noop batch: %v %v", again, err)
+	}
+
+	var events int
+	if err := d.QueryRow(`SELECT count(*) FROM notification_events WHERE finding_id IN ($1,$2)`, fid, second).Scan(&events); err != nil || events != 0 {
+		t.Fatalf("report_state must not write notification_events: %d (%v)", events, err)
+	}
+
+	one, _ = d.GetFinding(fid)
+	if one.Status != FindingPending {
+		t.Fatalf("bulk report_state mutated triage: %q", one.Status)
+	}
+	if one.ReportState != FindingReportAccepted {
+		t.Fatalf("bulk report_state=%q", one.ReportState)
+	}
+
+	st, err = d.FindingStats()
+	if err != nil || st.Accepted < 2 {
+		t.Fatalf("stats accepted undercount: %+v err=%v", st, err)
+	}
+}
+
 // TestFindingsPageAndStats exercises ListFindingsPage (filter/sort/paging) and
 // FindingStats against the live dev PG. It tags its rows with a unique vulnclass
 // so assertions are isolated from any pre-existing data, and cleans up after.
@@ -225,6 +353,9 @@ func TestFindingsPageAndStats(t *testing.T) {
 	}
 	if one == nil || one.ID != ids[0] || one.Severity != "critical" || one.Name != "Critical Vulnerability Title" {
 		t.Fatalf("GetFinding mismatch: %+v", one)
+	}
+	if one.ReportState != FindingReportNone {
+		t.Fatalf("new finding report_state should be none, got %q", one.ReportState)
 	}
 	if one.Report != "" {
 		t.Fatalf("new finding report should be empty, got %q", one.Report)

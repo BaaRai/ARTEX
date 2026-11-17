@@ -26,6 +26,17 @@ func TestFindingDTOReasoningFields(t *testing.T) {
 	}
 }
 
+func TestFindingDTOReportState(t *testing.T) {
+	raw, _ := json.Marshal(findingFromDB(&db.DBFinding{ID: 1}, nil))
+	if !strings.Contains(string(raw), `"report_state":"none"`) {
+		t.Fatalf("empty report_state should serialize as none: %s", raw)
+	}
+	d := findingFromDB(&db.DBFinding{ID: 2, ReportState: db.FindingReportSubmitted}, nil)
+	if d.ReportState != db.FindingReportSubmitted {
+		t.Fatalf("report_state lost: %q", d.ReportState)
+	}
+}
+
 // PG: the detail endpoint returns the stored fields, and the report_finding
 // schema upgrade adds both properties to an existing (customized) row without
 // overwriting it.
