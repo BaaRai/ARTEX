@@ -190,8 +190,9 @@ type Traffic struct {
 	closeOnce sync.Once
 	// pass is the set of hosts whose MITM interception failed for a proxy/protocol
 	// reason; connections to them are tunneled transparently (fail-open) so the
-	// request still reaches the target — unrecorded — instead of being killed.
-	pass sync.Map // hostname(string) -> struct{}
+	// request still reaches the target, unrecorded, instead of being killed.
+	// The value is the time the mark expires. After that, interception is tried again.
+	pass sync.Map // hostname(string) -> time.Time
 	// upstream is the global egress proxy every captured request is forwarded
 	// through (nil = dial targets directly). Both the intercepted and the
 	// transparent-passthrough paths honor it (go-mitmproxy's getUpstreamConn),
@@ -253,8 +254,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	// can't intercept without breaking (see maybePassthrough). Those are tunneled
 	// transparently so the request still reaches the target instead of being killed.
 	p.SetShouldInterceptRule(func(req *http.Request) bool {
-		_, tunnel := t.pass.Load(hostOnly(req.Host))
-		return !tunnel
+		return !t.tunneling(hostOnly(req.Host))
 	})
 	p.AddAddon(&sink{t: t})
 	t.proxy = p
@@ -439,8 +439,10 @@ func (s *sink) Response(f *mproxy.Flow) {
 
 // RequestError fires when a request through an established MITM tunnel fails. If
 // the failure looks proxy/protocol-caused (h2 quirks, HEAD-with-body, protocol
-// errors) — not a plain target-unreachable error — we flag the host for
-// transparent passthrough so future requests to it succeed instead of dying.
+// errors) and not a plain target-unreachable error, the host is tunneled for
+// passthroughTTL. This request has already failed. Later requests in the window
+// connect straight through; the first request after the window tries
+// interception again.
 func (s *sink) RequestError(f *mproxy.Flow, err error) { s.t.maybePassthrough(f, err) }
 
 // maybePassthrough marks a host to be tunneled transparently on the next
@@ -454,9 +456,34 @@ func (t *Traffic) maybePassthrough(f *mproxy.Flow, err error) {
 	if host == "" {
 		return
 	}
-	if _, loaded := t.pass.LoadOrStore(host, struct{}{}); !loaded {
-		log.Printf("[traffic] MITM with %s failed, falling back to passthrough (this host now connects straight to the target and is no longer recorded, but requests proceed normally): %v", host, err)
+	if t.tunneling(host) {
+		return
 	}
+	until := time.Now().Add(passthroughTTL)
+	if _, loaded := t.pass.LoadOrStore(host, until); !loaded {
+		log.Printf("[traffic] MITM with %s failed, falling back to passthrough for %s (this request failed; the host connects straight to the target and is not recorded until then; the first request after the window fails again if interception still cannot handle it): %v", host, passthroughTTL, err)
+	}
+}
+
+// passthroughTTL is how long a host stays tunneled after a proxy-caused MITM
+// failure. A host whose interception always fails pays one lost request per
+// window: one per host per minute, where a mark that never expired cost one
+// per process. The window is what lets a stale bypass end.
+const passthroughTTL = time.Minute
+
+// tunneling reports whether host is inside an unexpired passthrough mark.
+// An expired mark is removed so the next connection tries interception again.
+func (t *Traffic) tunneling(host string) bool {
+	v, ok := t.pass.Load(host)
+	if !ok {
+		return false
+	}
+	until, ok := v.(time.Time)
+	if !ok || !time.Now().Before(until) {
+		t.pass.CompareAndDelete(host, v)
+		return false
+	}
+	return true
 }
 
 // proxyCausedErr reports whether err indicates the interception layer (not the

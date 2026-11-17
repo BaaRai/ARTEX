@@ -199,7 +199,10 @@ func TestReplayPassthroughHostIsNotIntercepted(t *testing.T) {
 	tr, _, _ := startProxy(t)
 	srv := httptest.NewTLSServer(http.HandlerFunc(echoHandler))
 	t.Cleanup(srv.Close)
-	tr.pass.Store("localhost", struct{}{})
+	tr.pass.Store("localhost", time.Now().Add(passthroughTTL))
+	if !tr.tunneling("localhost") {
+		t.Fatal("passthrough mark was not recognized before the replay")
+	}
 	target := localhostURL(srv.URL) + "/tunneled"
 	_, err := tr.Replay(t.Context(), ReplayRequest{Method: "GET", URL: target})
 	if err == nil || !strings.Contains(err.Error(), "certificate") {
@@ -249,7 +252,11 @@ func TestReplayRejectsInvalidRequests(t *testing.T) {
 // Only an https host in passthrough is reported as not recorded.
 func TestReplayRecordedHelper(t *testing.T) {
 	tr := &Traffic{}
-	tr.pass.Store("localhost", struct{}{})
+	tr.pass.Store("localhost", time.Now().Add(passthroughTTL))
+	if !tr.tunneling("localhost") {
+		t.Fatal("fresh passthrough mark was not tunneling")
+	}
+	tr.pass.Store("expired.example", time.Now().Add(-time.Second))
 	for _, c := range []struct {
 		scheme, host string
 		want         bool
@@ -257,6 +264,7 @@ func TestReplayRecordedHelper(t *testing.T) {
 		{"https", "localhost:443", false},
 		{"https", "example.com:443", true},
 		{"http", "localhost:80", true},
+		{"https", "expired.example:443", true},
 	} {
 		if got := tr.replayRecorded(c.scheme, c.host); got != c.want {
 			t.Errorf("replayRecorded(%s, %s) = %v, want %v", c.scheme, c.host, got, c.want)
