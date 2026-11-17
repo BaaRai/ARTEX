@@ -3,7 +3,13 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 )
+
+// activityOutboxMaxAttempts is how many times a row may fail AppendActivity
+// before it is dropped. One stuck row must not sit at the head of the queue
+// and keep every later row from being replayed.
+const activityOutboxMaxAttempts = 5
 
 // activityOutboxPayload is Activity plus Detail. Activity.Detail is omitted
 // from ordinary JSON (the list payload stays small); the outbox has to keep it
@@ -41,26 +47,29 @@ func (s *ExplorationStore) EnqueueActivity(a Activity, cause string) error {
 }
 
 // FlushActivityOutbox inserts queued activities in order and deletes each row
-// that lands. A row that still cannot be inserted stays, with last_error
-// updated, and the flush stops so later rows keep their order. A payload that
-// cannot be decoded is discarded.
+// that lands. The insert and the delete commit together, so a crash cannot
+// leave the activity stored and the outbox row still queued. A row that still
+// cannot be inserted stays, with its attempt count increased, and the flush
+// continues with the next row. After activityOutboxMaxAttempts the row is
+// dropped and logged. A payload that cannot be decoded is discarded.
 func (s *ExplorationStore) FlushActivityOutbox() (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("activity outbox: no store")
 	}
-	rows, err := s.db.Query(`SELECT id, payload FROM activity_outbox WHERE exploration_id=$1 ORDER BY id`, s.expID)
+	rows, err := s.db.Query(`SELECT id, payload, attempts FROM activity_outbox WHERE exploration_id=$1 ORDER BY id`, s.expID)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
 	type item struct {
-		id      int64
-		payload []byte
+		id       int64
+		payload  []byte
+		attempts int
 	}
 	var items []item
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.id, &it.payload); err != nil {
+		if err := rows.Scan(&it.id, &it.payload, &it.attempts); err != nil {
 			return 0, err
 		}
 		items = append(items, it)
@@ -77,11 +86,30 @@ func (s *ExplorationStore) FlushActivityOutbox() (int, error) {
 			}
 			continue
 		}
-		if _, err := s.AppendActivity(a); err != nil {
-			_, _ = s.db.Exec(`UPDATE activity_outbox SET last_error=$2 WHERE id=$1`, it.id, err.Error())
+		tx, err := s.db.Begin()
+		if err != nil {
 			return stored, err
 		}
-		if _, err := s.db.Exec(`DELETE FROM activity_outbox WHERE id=$1`, it.id); err != nil {
+		if _, err := s.appendActivity(tx, a); err != nil {
+			_ = tx.Rollback()
+			next := it.attempts + 1
+			if next >= activityOutboxMaxAttempts {
+				log.Printf("[activity] outbox %d for exploration %d dropped after %d attempts: %v", it.id, s.expID, next, err)
+				if _, delErr := s.db.Exec(`DELETE FROM activity_outbox WHERE id=$1`, it.id); delErr != nil {
+					return stored, delErr
+				}
+				continue
+			}
+			if _, updErr := s.db.Exec(`UPDATE activity_outbox SET attempts=$2, last_error=$3 WHERE id=$1`, it.id, next, err.Error()); updErr != nil {
+				return stored, updErr
+			}
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM activity_outbox WHERE id=$1`, it.id); err != nil {
+			_ = tx.Rollback()
+			return stored, err
+		}
+		if err := tx.Commit(); err != nil {
 			return stored, err
 		}
 		stored++

@@ -252,11 +252,13 @@ func runTaskRoutine(rt *taskRuntime, fn func(context.Context)) {
 	}()
 }
 
-// Wait blocks until the task goroutines registered at the moment of the call
-// have finished, or until ctx ends. It refuses new registrations first so Add
-// cannot race Wait. Goroutines that were already running are cancelled with
-// AbortShutdown. That cancel does not write a terminal task status, and an
-// in-flight intent claim stays running so the next start can reset it to open.
+// Wait blocks until the task goroutines registered at the moment of the call,
+// and every admitted task operation, have finished, or until ctx ends. It
+// refuses new registrations and new beginTaskOperation calls first. Goroutines
+// that were already running are cancelled with AbortShutdown. That cancel does
+// not write a terminal task status, and an in-flight intent claim stays running
+// so the next start can reset it to open. Detached chat runs are not in a task
+// WaitGroup; they are counted in inflight and Wait stays until they return.
 func (e *Engine) Wait(ctx context.Context) error {
 	if e == nil {
 		return nil
@@ -275,18 +277,34 @@ func (e *Engine) Wait(ctx context.Context) error {
 	}
 	e.runtimeMu.Unlock()
 	for _, wg := range groups {
-		done := make(chan struct{})
-		go func(wg *sync.WaitGroup) {
-			wg.Wait()
-			close(done)
-		}(wg)
+		if err := waitGroup(ctx, wg); err != nil {
+			return err
+		}
+	}
+	for e.inflightTotal() > 0 {
+		timer := time.NewTimer(20 * time.Millisecond)
 		select {
-		case <-done:
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
+		case <-timer.C:
 		}
 	}
 	return nil
+}
+
+func waitGroup(ctx context.Context, wg *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // StopTask permanently stops every long-lived goroutine and removes all Engine
@@ -1393,7 +1411,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 // be started; the intent is left untouched in that case.
 func (e *Engine) runDetachedIntent(ctx context.Context, t *Task, intentID int64, requestID, message, agentMessage string) error {
 	if !e.beginTaskOperation(t.ID) {
-		return fmt.Errorf("task is being deleted")
+		return fmt.Errorf("task is not accepting work")
 	}
 	release := true
 	defer func() {

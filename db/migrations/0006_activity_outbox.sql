@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS activity_outbox (
     exploration_id BIGINT NOT NULL,
     payload JSONB NOT NULL,
     last_error TEXT,
+    attempts INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

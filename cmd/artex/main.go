@@ -127,19 +127,22 @@ func run() int {
 	<-ctx.Done()
 
 	log.Println("shutting down...")
+	// Close the listener before draining. Otherwise a request accepted during
+	// the drain can start a detached run, and mgr.Close runs while that run
+	// is still writing.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	httpErr := httpSrv.Shutdown(shutdownCtx)
+	cancel()
+	if httpErr != nil {
+		log.Printf("http shutdown: %v", httpErr)
+	}
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	drainErr := srv.Wait(drainCtx)
 	drainCancel()
 	if drainErr != nil {
 		log.Printf("task drain: %v", drainErr)
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("http shutdown: %v", err)
-		return 1
-	}
-	if drainErr != nil {
+	if httpErr != nil || drainErr != nil {
 		return 1
 	}
 	return 0
