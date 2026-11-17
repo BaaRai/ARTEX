@@ -56,6 +56,17 @@ func (e dataEnvelope) wrap(field, content string) string {
 		dataClosePrefix + e.nonce + "]]"
 }
 
+// frameLessonsBlock wraps the RSI evidence block as a code-owned data envelope
+// for one system prompt. Empty input stays empty. A fresh nonce is used per
+// call so each Plan/Execute assembly gets its own frame (field=lessons).
+func frameLessonsBlock(block string) string {
+	if block == "" {
+		return ""
+	}
+	env := newDataEnvelope()
+	return env.intro() + "\n\n" + env.wrap("lessons", block)
+}
+
 // overviewDerivedFields are the graph_overview keys whose content is derived
 // from agent or target text; renderOverviewSections frames each of them.
 var overviewDerivedFields = []string{"recent_facts", "finding_list", "cold_digests", "related_tasks"}
