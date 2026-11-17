@@ -55,19 +55,36 @@ func TestCoverageReadFailureKeepsToolsAndWritesAutoScope(t *testing.T) {
 		t.Fatalf("coverage read failure was not logged: %q", logged.String())
 	}
 
-	offTools := NewToolSet(nil, "worker-off")
-	offTools.SetCoverageEnabled(false)
-	for _, name := range []string{"record_coverage", "list_untested_assets"} {
-		if hasTool(offTools, name) {
-			t.Fatalf("%s stayed available with coverage off", name)
+	// record_coverage is the worker's coverage tool; list_untested_assets is the
+	// planner's, so each is checked on the tool set that actually carries it.
+	hasPlannerTool := func(ts *ToolSet, name string) bool {
+		for _, tool := range ts.DropCoverageTools(ts.PlannerTools()) {
+			if tool.Name() == name {
+				return true
+			}
 		}
+		return false
 	}
-	outageTools := NewToolSet(nil, "worker-outage")
-	outageTools.SetCoverageEnabled(coverageOn(broken.Assets(), task.ID))
-	for _, name := range []string{"record_coverage", "list_untested_assets"} {
-		if !hasTool(outageTools, name) {
-			t.Fatalf("%s dropped when the coverage read failed", name)
-		}
+	offWorker := NewToolSet(nil, "worker-off")
+	offWorker.SetCoverageEnabled(false)
+	if hasTool(offWorker, "record_coverage") {
+		t.Fatal("record_coverage stayed available to a worker with coverage off")
+	}
+	offPlanner := NewToolSet(nil, "planner-off")
+	offPlanner.SetCoverageEnabled(false)
+	if hasPlannerTool(offPlanner, "list_untested_assets") {
+		t.Fatal("list_untested_assets stayed available to the planner with coverage off")
+	}
+	outage := coverageOn(broken.Assets(), task.ID)
+	outWorker := NewToolSet(nil, "worker-outage")
+	outWorker.SetCoverageEnabled(outage)
+	if !hasTool(outWorker, "record_coverage") {
+		t.Fatal("record_coverage dropped from the worker when the coverage read failed")
+	}
+	outPlanner := NewToolSet(nil, "planner-outage")
+	outPlanner.SetCoverageEnabled(outage)
+	if !hasPlannerTool(outPlanner, "list_untested_assets") {
+		t.Fatal("list_untested_assets dropped from the planner when the coverage read failed")
 	}
 
 	keptOff := fmt.Sprintf("off-%d.invalid", time.Now().UnixNano())
