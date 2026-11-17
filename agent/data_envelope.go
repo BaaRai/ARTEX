@@ -57,8 +57,10 @@ func (e dataEnvelope) wrap(field, content string) string {
 }
 
 // overviewDerivedFields are the graph_overview keys whose content is derived
-// from agent or target text; renderOverviewSections frames each of them.
-var overviewDerivedFields = []string{"recent_facts", "finding_list", "cold_digests", "related_tasks"}
+// from agent or target text; renderOverviewSections frames each of them. The
+// intent lists belong here with the rest: an intent's summary is written by an
+// agent, and an inherited intent's was written by another task's planner.
+var overviewDerivedFields = []string{"open_intents", "running_intents", "recent_done_intents", "recent_facts", "finding_list", "cold_digests", "related_tasks"}
 
 // operatorHintOrigin is the hint origin written by the operator: the main-agent
 // chat and the no-LLM steering fallback store "human" (see addOneHint).

@@ -265,16 +265,16 @@ func renderTriggers(evs []TriggerEvent, env dataEnvelope, look triggerLookup) st
 		case "goal_edited":
 			b.WriteString(fmt.Sprintf("\n- The human edited a goal, from \"%s\" to \"%s\" — please adjust exploration directions to the new goal (stop dispatching the old directions if they no longer apply).", ev.OldGoal, ev.NewGoal))
 		case "finding":
-			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) reported a finding:\n%s", ev.IntentID, look.intentSummary(ev.IntentID), env.wrap("finding", ev.Detail)))
+			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) reported a finding:\n%s", ev.IntentID, env.wrap("intent_summary", look.intentSummary(ev.IntentID)), env.wrap("finding", ev.Detail)))
 		case "cancelled":
 			// For the intent content prefer the Summary captured at deletion time (after a real delete the node no longer exists, so intentSummary can't find it).
 			sm := ev.Summary
 			if sm == "" {
 				sm = look.intentSummary(ev.IntentID)
 			}
-			b.WriteString(fmt.Sprintf("\n- Intent #%d was deleted by the user; the intent was: %s; the deletion reason: %s. The intent has been deleted (no longer executed); please re-plan accordingly.", ev.IntentID, sm, ev.Detail))
+			b.WriteString(fmt.Sprintf("\n- Intent #%d was deleted by the user; the intent was: %s; the deletion reason: %s. The intent has been deleted (no longer executed); please re-plan accordingly.", ev.IntentID, env.wrap("intent_summary", sm), env.wrap("cancellation_reason", ev.Detail)))
 		default: // "done"
-			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) finished; output conclusion:\n%s", ev.IntentID, look.intentSummary(ev.IntentID), env.wrap("worker_output", look.workerOutput(ev.IntentID))))
+			b.WriteString(fmt.Sprintf("\n- The worker of intent #%d (%s) finished; output conclusion:\n%s", ev.IntentID, env.wrap("intent_summary", look.intentSummary(ev.IntentID)), env.wrap("worker_output", look.workerOutput(ev.IntentID))))
 			if fids := look.factIDs(ev.IntentID); fids != "" {
 				b.WriteString(fmt.Sprintf("; new fact ids produced by this intent: %s ", fids))
 			}

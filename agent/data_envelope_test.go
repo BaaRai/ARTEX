@@ -56,12 +56,14 @@ func envelopeOverview() map[string]any {
 			{"id": 3, "state": "active", "text": envOpHint, "origin": "human"},
 			{"id": 4, "state": "active", "text": envAgentHint, "origin": "worker-1"},
 		},
-		"open_intents":  []map[string]any{{"id": 5, "summary": "probe the login"}},
-		"recent_facts":  []map[string]any{{"id": 6, "summary": envFact}},
-		"finding_list":  []map[string]any{{"id": 7, "summary": envFindingSum}},
-		"cold_digests":  []map[string]any{{"id": 8, "body": envDigest, "member_count": 3}},
-		"related_tasks": []map[string]any{{"source_task_id": 9, "recent_facts": []map[string]any{{"id": 10, "summary": envRelated}}}},
-		"coverage":      map[string]any{"pct": 40},
+		"open_intents":        []map[string]any{{"id": 5, "summary": "probe the login"}},
+		"running_intents":     []map[string]any{{"id": 5, "summary": "run the probe"}},
+		"recent_done_intents": []map[string]any{{"id": 5, "summary": "finished a probe"}},
+		"recent_facts":        []map[string]any{{"id": 6, "summary": envFact}},
+		"finding_list":        []map[string]any{{"id": 7, "summary": envFindingSum}},
+		"cold_digests":        []map[string]any{{"id": 8, "body": envDigest, "member_count": 3}},
+		"related_tasks":       []map[string]any{{"source_task_id": 9, "recent_facts": []map[string]any{{"id": 10, "summary": envRelated}}}},
+		"coverage":            map[string]any{"pct": 40},
 	}
 }
 
@@ -183,12 +185,12 @@ func TestWorkerOverviewEnvelopeSplit(t *testing.T) {
 		}
 	}
 	inside, outside := splitFrames(t, out, env.nonce)
-	for _, derived := range []string{envAgentHint, envFact, envFindingSum, envDigest, envRelated} {
+	for _, derived := range []string{envAgentHint, envFact, envFindingSum, envDigest, envRelated, "probe the login", "run the probe", "finished a probe"} {
 		if !strings.Contains(inside, derived) || strings.Contains(outside, derived) {
 			t.Errorf("derived text %q is not only inside the frames", derived)
 		}
 	}
-	for _, op := range []string{envGoal, envOpHint, "probe the login"} {
+	for _, op := range []string{envGoal, envOpHint} {
 		if !strings.Contains(outside, op) {
 			t.Errorf("%q missing outside the frames", op)
 		}
