@@ -133,6 +133,9 @@ export default function LLMRecordsPage() {
   // Recording on/off toggle (settings.llm_record; default off). When off the
   // backend records nothing.
   const [recEnabled, setRecEnabled] = React.useState(false);
+  // recKnown flips once the settings call resolves, so the empty state does not
+  // claim "recording is off" while the answer is still in flight.
+  const [recKnown, setRecKnown] = React.useState(false);
   const [recBusy, setRecBusy] = React.useState(false);
 
   // Inline detail panel (Burp-style split, not a dialog)
@@ -167,7 +170,11 @@ export default function LLMRecordsPage() {
     let alive = true;
     api
       .settings()
-      .then((s) => { if (alive) setRecEnabled(!!s.llm_record); })
+      .then((s) => {
+        if (!alive) return;
+        setRecEnabled(!!s.llm_record);
+        setRecKnown(true);
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -400,7 +407,9 @@ export default function LLMRecordsPage() {
                 ) : records.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
-                      No LLM call records yet
+                      {!recKnown || recEnabled
+                        ? "No LLM call records yet"
+                        : "LLM call recording is off. Turn on the Recording toggle above to start capturing calls."}
                     </TableCell>
                   </TableRow>
                 ) : (

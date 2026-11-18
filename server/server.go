@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
@@ -53,6 +54,16 @@ type Server struct {
 
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
+	// pwdVersion is auth.password_version, a counter. Zero means no password
+	// change is stored yet, and any valid token is accepted. pwdState is
+	// pwdUnreadable when that counter could not be read; every session is
+	// rejected until login reads it again.
+	pwdVersion atomic.Int64
+	pwdState   atomic.Int32
+	// authHashKey and authVersionKey override the settings keys. Empty uses
+	// the production keys. Tests set unique keys so a shared database is left alone.
+	authHashKey    string
+	authVersionKey string
 
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	trustedProxies []netip.Prefix // ARTEX_TRUSTED_PROXIES; see clientIP
@@ -69,8 +80,12 @@ type Server struct {
 	llmProv   llm.Provider
 	llmDirect llm.Provider // concrete global provider, before any failover pool
 	llmCfg    agent.Config // current LLM config (key not exposed)
-	llmOn     bool
-	llmProf   string // active LLM profile name (for llmrec tagging)
+	// llmHealthProfileID is the llm_profiles row llmProv was built from, or 0
+	// when it came from environment settings. Task selections use it to key
+	// breaker health for the global fallback path.
+	llmHealthProfileID int64
+	llmOn              bool
+	llmProf            string // active LLM profile name (for llmrec tagging)
 
 	// chatBusy guards the per-task main-agent run: the chat handler launches the
 	// agent on the server's background ctx (not the request ctx) and returns
@@ -117,7 +132,9 @@ type Server struct {
 	// It deliberately lives OUTSIDE the provider caches: rebuilding the chain
 	// (saving an unrelated profile, flipping a setting) must not erase what we
 	// learned about which backends are out of credit / rate-limited.
-	llmHealth *llmpool.Registry
+	// llmHealthSync flushes that state when ctx is cancelled, before the database closes.
+	llmHealth     *llmpool.Registry
+	llmHealthSync *healthSync
 
 	// Explicit task chains use one task-scoped dynamic provider shared by goals,
 	// planner, workers, and the main agent. Bundles are stable; their runtime reads
@@ -163,13 +180,15 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
-		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
-		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
+		provByProfile:  map[int64]*provEntry{},
+		taskAgents:     map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
 		loginLimit: newLoginLimiter(time.Now)}
+	s.llmHealth, s.llmHealthSync = newLLMHealthRegistry(ctx, m.pg)
 	for _, o := range opts {
 		o(s)
 	}
 	s.initSetupToken()
+	s.loadPasswordVersion()
 	s.initSideQuestions()
 	// Circuit-breaker thresholds/cooldowns are hot parameters on the failure path; push the global retry policy to the Registry once at startup,
 	// and again on every policy save (saveLLMRetryPolicy).
@@ -296,8 +315,15 @@ func (s *Server) restoreTaskRuntimes() {
 		lifecycle := t.lifecycleSnapshot()
 		// clear stale 'running' intents from a prior crash/restart (no live worker
 		// owns them) so they re-claim instead of spinning forever in the UI.
-		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
+		if n, err := t.Store.ResetRunningIntents(); err != nil {
+			log.Printf("[engine] task %s reset leftover running intents: %v", t.ID, err)
+		} else if n > 0 {
 			log.Printf("[engine] task %s reset %d leftover running intents to open", t.ID, n)
+		}
+		if n, err := t.Store.FlushActivityOutbox(); err != nil {
+			log.Printf("[activity] task %s outbox: %v", t.ID, err)
+		} else if n > 0 {
+			log.Printf("[activity] task %s stored %d activities recovered from the outbox", t.ID, n)
 		}
 		if lifecycle.Paused {
 			s.engine.Pause(t.ID, agent.AbortPausedOnReload)
@@ -317,6 +343,30 @@ func (s *Server) restoreTaskRuntimes() {
 		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) {
 			s.engine.Run(s.ctx, t)
 		}
+	}
+}
+
+// Wait blocks until the task goroutines snapshotted now, and the archive
+// worker, have finished, or until ctx ends.
+func (s *Server) Wait(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.engine != nil {
+		if err := s.engine.Wait(ctx); err != nil {
+			return err
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		s.archiveWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -458,11 +508,13 @@ func maxTokensResolver(cfg agent.Config) func() int {
 // the running engine as the GLOBAL active pair. Safe to call at runtime (UI configures LLM).
 func (s *Server) applyLLM(cfg agent.Config) error {
 	var prov llm.Provider
+	var healthID int64
 	// A persisted active profile must use the same cached provider as task chains
 	// and Agent bindings, otherwise each path owns a separate rate limiter.
 	if active, _ := s.m.pg.ActiveProfile(); active != nil {
 		if activeCfg, ok := s.loadProfileConfig(active.ID); ok && activeCfg == cfg {
 			prov, _, _ = s.providerForProfile(active.ID)
+			healthID = active.ID
 		}
 	}
 	if prov == nil {
@@ -509,6 +561,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.chatAgent.SetNoaEnabled(s.m.NoaCompactionEnabled) // experimental: noa context compaction (read per run)
 	s.llmProv = prov
 	s.llmCfg = cfg
+	s.llmHealthProfileID = healthID
 	s.llmOn = true
 	s.cfgMu.Unlock()
 	s.invalidateTaskAgents()
@@ -801,6 +854,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/retests/active", s.listActiveFindingRetests)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/retests", s.startFindingRetest)
 	mux.HandleFunc("PATCH /api/exploration/findings/{id}", s.patchFinding)
+	mux.HandleFunc("POST /api/exploration/findings/bulk-status", s.bulkPatchFindingStatus)
+	mux.HandleFunc("POST /api/exploration/findings/bulk-report-state", s.bulkPatchFindingReportState)
 	mux.HandleFunc("DELETE /api/exploration/findings/{id}", s.deleteFinding)
 	mux.HandleFunc("GET /api/exploration/intents", s.intents)
 	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)
@@ -992,7 +1047,7 @@ func (s *Server) Handler() http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
-	return root
+	return limitRequestBody(root)
 }
 
 // --- handlers ---
@@ -1001,7 +1056,7 @@ func (s *Server) Handler() http.Handler {
 // with a valid token gets the service name and version; the web UI's top bar
 // reads the version, and sends its token.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	if !verifyJWT(extractToken(r), s.jwtKey) {
+	if !s.sessionOK(extractToken(r)) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
@@ -2317,7 +2372,7 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 //	format  = md-single (one combined .md) | md-zip (one .md per vulnerability, zipped)
 //	          | csv | json
 //	ids     = comma-separated finding ids (required when scope=selected)
-//	Filter params severity/status/vulnclass/task_id/q/sort match the list endpoint (used when scope=filtered).
+//	Filter params severity/status/report_state/vulnclass/task_id/q/sort match the list endpoint (used when scope=filtered).
 func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	scope := q.Get("scope")
@@ -2482,17 +2537,18 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Status    *string `json:"status"`
-		Severity  *string `json:"severity"`
-		Name      *string `json:"name"`
-		VulnClass *string `json:"vulnclass"`
+		Status      *string `json:"status"`
+		ReportState *string `json:"report_state"`
+		Severity    *string `json:"severity"`
+		Name        *string `json:"name"`
+		VulnClass   *string `json:"vulnclass"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
 		return
 	}
-	if body.Status == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil {
-		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass")
+	if body.Status == nil && body.ReportState == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil {
+		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass/report_state")
 		return
 	}
 	if body.Status != nil {
@@ -2514,6 +2570,21 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		}
 		if !notified && from != *body.Status {
 			log.Printf("[notify] status-change event not registered finding=%d %s→%s (status was updated)", id, from, *body.Status)
+		}
+	}
+	if body.ReportState != nil {
+		if !db.ValidFindingReportState(*body.ReportState) {
+			writeErr(w, 400, "bad report_state: "+*body.ReportState)
+			return
+		}
+		n, err := s.m.pg.SetFindingReportState(id, *body.ReportState)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if n == 0 {
+			writeErr(w, 404, "finding not found")
+			return
 		}
 	}
 	if body.Severity != nil {
@@ -2563,6 +2634,105 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, findingFromDB(f, s.resolveAssetIDs(f.AssetIDs)))
+}
+
+// maxBulkFindingStatus caps one bulk status request. The UI acts on a page at a
+// time, so this is far above a normal selection and still bounds the work.
+const maxBulkFindingStatus = 500
+
+// bulkPatchFindingStatus sets the same triage status on a batch of findings in
+// one transaction. Ids that do not exist are reported per id, not as a batch
+// failure, and the notification semantics are the single-row ones: one event per
+// finding whose status actually changed. The node payload mirror (#289) runs in
+// the same transaction, so the per-task view stays in sync.
+func (s *Server) bulkPatchFindingStatus(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs    []int64 `json:"ids"`
+		Status string  `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if !db.ValidFindingStatus(body.Status) {
+		writeErr(w, 400, "bad status: "+body.Status)
+		return
+	}
+	ids := normalizeFindingIDs(body.IDs, maxBulkFindingStatus)
+	if len(ids) == 0 {
+		writeErr(w, 400, "no finding ids")
+		return
+	}
+	results, err := s.m.pg.SetFindingStatusesWithNotify(r.Context(), ids, body.Status)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	updated, missing := 0, 0
+	for _, res := range results {
+		if res.Changed {
+			updated++
+		}
+		if !res.Found {
+			missing++
+		}
+	}
+	writeJSON(w, 200, map[string]any{"updated": updated, "missing": missing, "results": results})
+}
+
+// normalizeFindingIDs drops non-positive and duplicate ids, then caps the list.
+func normalizeFindingIDs(ids []int64, capN int) []int64 {
+	seen := make(map[int64]bool, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+		if capN > 0 && len(out) == capN {
+			break
+		}
+	}
+	return out
+}
+
+// bulkPatchFindingReportState sets the same report stage on a batch of findings
+// in one transaction. Same cap/dedupe/per-id result as bulk status, without
+// status-change notifications: report_state is a workflow stage, not a verdict.
+func (s *Server) bulkPatchFindingReportState(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs         []int64 `json:"ids"`
+		ReportState string  `json:"report_state"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if !db.ValidFindingReportState(body.ReportState) {
+		writeErr(w, 400, "bad report_state: "+body.ReportState)
+		return
+	}
+	ids := normalizeFindingIDs(body.IDs, maxBulkFindingStatus)
+	if len(ids) == 0 {
+		writeErr(w, 400, "no finding ids")
+		return
+	}
+	results, err := s.m.pg.SetFindingReportStates(r.Context(), ids, body.ReportState)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	updated, missing := 0, 0
+	for _, res := range results {
+		if res.Changed {
+			updated++
+		}
+		if !res.Found {
+			missing++
+		}
+	}
+	writeJSON(w, 200, map[string]any{"updated": updated, "missing": missing, "results": results})
 }
 
 // deleteFinding removes a finding (findings row + originating exploration node).
@@ -3151,6 +3321,11 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "streaming unsupported")
 		return
 	}
+	tok := extractToken(r)
+	if !s.sessionOK(tok) {
+		writeErr(w, 401, "token is invalid or expired")
+		return
+	}
 	since := int64(atoiDefault(r.URL.Query().Get("since"), 0))
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -3166,6 +3341,9 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	lines, cursor := logSink.recent(since, 1000)
 	for _, l := range lines {
+		if !s.sessionOK(tok) {
+			return
+		}
 		send(l)
 	}
 	if cursor > since {
@@ -3181,7 +3359,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case l, ok := <-ch:
-			if !ok {
+			if !ok || !s.sessionOK(tok) {
 				return
 			}
 			if l.Seq <= since {
@@ -3190,6 +3368,9 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 			since = l.Seq
 			send(l)
 		case <-ping.C:
+			if !s.sessionOK(tok) {
+				return
+			}
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		}
@@ -3197,6 +3378,11 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
+	tok := extractToken(r)
+	if !s.sessionOK(tok) {
+		writeErr(w, 401, "token is invalid or expired")
+		return
+	}
 	t := s.m.ResolveTask(r.URL.Query().Get("task"))
 	if t == nil {
 		writeErr(w, 404, "task not found")
@@ -3257,6 +3443,9 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, a := range items {
+			if !s.sessionOK(tok) {
+				return
+			}
 			sendSSE(a)
 		}
 		if cursor > since {
@@ -3276,7 +3465,7 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case a, ok := <-ch:
-			if !ok {
+			if !ok || !s.sessionOK(tok) {
 				return
 			}
 			if a.ID <= since {
@@ -3288,6 +3477,9 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 			since = a.ID
 			sendSSE(a)
 		case <-ping.C:
+			if !s.sessionOK(tok) {
+				return
+			}
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		}
@@ -3599,7 +3791,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) settingsPayload() map[string]any {
-	on, backend, braveKey, tavilyKey, proxy := s.m.WebSearch()
+	on, backend, braveKey, tavilyKey, keenableKey, proxy := s.m.WebSearch()
 	pyStored, _, _ := s.m.pg.GetSetting(settingPythonInterp)
 	concOn, concLimit := s.m.ConcurrencyLimit()
 	if concLimit == 0 {
@@ -3614,6 +3806,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"web_search_backend":       backend,
 		"brave_key_set":            strings.TrimSpace(braveKey) != "",
 		"tavily_key_set":           strings.TrimSpace(tavilyKey) != "",
+		"keenable_key_set":         strings.TrimSpace(keenableKey) != "",
 		"web_search_proxy":         maskedSecret(proxy), // proxies may carry user:pass: masked when set, "" = direct
 		"web_search_proxy_set":     proxy != "",
 		"global_proxy":             maskedSecret(s.m.GlobalProxy()), // global egress proxy, masked when set, "" = direct
@@ -3687,12 +3880,14 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		TrafficCapture      *bool `json:"traffic_capture"`
 		AgentTrafficBinding *bool `json:"agent_traffic_binding"`
 		LLMRecord           *bool `json:"llm_record"` // LLM recording switch (default off); takes effect immediately, no agent rebuild needed
-		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey
-		// are optional — omit (null) to leave a stored key untouched, send "" to clear.
+		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey/KeenableKey
+		// are optional — omit (null) to leave a stored key untouched, send "" to clear. The Keenable
+		// key is optional even when its backend is selected: empty uses the keyless public endpoint.
 		WebSearchEnabled *bool   `json:"web_search_enabled"`
 		WebSearchBackend *string `json:"web_search_backend"`
 		BraveKey         *string `json:"brave_search_api_key"`
 		TavilyKey        *string `json:"tavily_search_api_key"`
+		KeenableKey      *string `json:"keenable_search_api_key"`
 		WebSearchProxy   *string `json:"web_search_proxy"`   // dedicated egress proxy (http/https/socks5); null = keep, "" = clear
 		GlobalProxy      *string `json:"global_proxy"`       // global egress proxy (http/https/socks5); null = keep, "" = clear (direct)
 		PythonInterp     *string `json:"python_interpreter"` // python interpreter path for the custom script tool
@@ -3739,7 +3934,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		egress.SetProfile(noise)
 	}
 	// A masked placeholder echoed back keeps the stored secret, like null.
-	req.BraveKey, req.TavilyKey = keepIfMasked(req.BraveKey), keepIfMasked(req.TavilyKey)
+	req.BraveKey, req.TavilyKey, req.KeenableKey = keepIfMasked(req.BraveKey), keepIfMasked(req.TavilyKey), keepIfMasked(req.KeenableKey)
 	req.WebSearchProxy, req.GlobalProxy = keepIfMasked(req.WebSearchProxy), keepIfMasked(req.GlobalProxy)
 	if req.ConstraintsInjectPlanner != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectPlanner, *req.ConstraintsInjectPlanner); err != nil {
@@ -3891,16 +4086,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		changed = true // capture-off egress is baked into agents at build time → rebuild
 	}
-	if req.WebSearchEnabled != nil || req.WebSearchBackend != nil || req.BraveKey != nil || req.TavilyKey != nil || req.WebSearchProxy != nil {
+	if req.WebSearchEnabled != nil || req.WebSearchBackend != nil || req.BraveKey != nil || req.TavilyKey != nil || req.KeenableKey != nil || req.WebSearchProxy != nil {
 		// Fill unspecified fields from current state so a partial PUT doesn't reset them.
-		on, backend, _, _, _ := s.m.WebSearch()
+		on, backend, _, _, _, _ := s.m.WebSearch()
 		if req.WebSearchEnabled != nil {
 			on = *req.WebSearchEnabled
 		}
 		if req.WebSearchBackend != nil {
 			backend = *req.WebSearchBackend
 		}
-		if err := s.m.SetWebSearch(on, backend, req.BraveKey, req.TavilyKey, req.WebSearchProxy); err != nil {
+		if err := s.m.SetWebSearch(on, backend, req.BraveKey, req.TavilyKey, req.KeenableKey, req.WebSearchProxy); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -3928,17 +4123,18 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 // not retype them. Always 200 with {ok, error?, count?, backend?}.
 func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Backend   string `json:"web_search_backend"`
-		Proxy     string `json:"web_search_proxy"`
-		BraveKey  string `json:"brave_search_api_key"`
-		TavilyKey string `json:"tavily_search_api_key"`
+		Backend     string `json:"web_search_backend"`
+		Proxy       string `json:"web_search_proxy"`
+		BraveKey    string `json:"brave_search_api_key"`
+		TavilyKey   string `json:"tavily_search_api_key"`
+		KeenableKey string `json:"keenable_search_api_key"`
 	}
 	// Empty body is fine — fall back entirely to the saved config below.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	_, backend, storedBraveKey, storedTavilyKey, storedProxy := s.m.WebSearch()
+	_, backend, storedBraveKey, storedTavilyKey, storedKeenableKey, storedProxy := s.m.WebSearch()
 	if strings.TrimSpace(req.Backend) != "" {
 		backend = req.Backend
 	}
@@ -3958,7 +4154,11 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.TavilyKey) != "" {
 		tavilyKey = req.TavilyKey
 	}
-	cfg := actool.WebSearchConfig{Backend: backend, BraveAPIKey: braveKey, TavilyAPIKey: tavilyKey, Proxy: proxy}
+	keenableKey := storedKeenableKey
+	if strings.TrimSpace(req.KeenableKey) != "" {
+		keenableKey = req.KeenableKey
+	}
+	cfg := actool.WebSearchConfig{Backend: backend, BraveAPIKey: braveKey, TavilyAPIKey: tavilyKey, KeenableAPIKey: keenableKey, KeenableTitle: agent.KeenableSearchTitle, Proxy: proxy}
 	// Hard cap so a slow/blocked proxy can't hang the request.
 	wall := 30 * time.Second
 	// deepseek's credentials are not in the form; they come from the currently active LLM profile. Each search also runs one

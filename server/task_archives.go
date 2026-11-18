@@ -512,7 +512,7 @@ func (s *Server) queueTaskArchiveDelete(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) queueTaskArchivesBatch(w http.ResponseWriter, r *http.Request) {
 	var request archiveBatchRequest
-	if err := decode(r, &request); err != nil {
+	if err := decode(w, r, &request); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -552,7 +552,7 @@ func (s *Server) queueTaskArchivesBatch(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) queueTaskArchiveActionBatch(w http.ResponseWriter, r *http.Request, action string) {
 	var request archiveBatchRequest
-	if err := decode(r, &request); err != nil {
+	if err := decode(w, r, &request); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}

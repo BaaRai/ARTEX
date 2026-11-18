@@ -2,6 +2,39 @@ package db
 
 import "testing"
 
+func TestCoverageEnabledWithoutTask(t *testing.T) {
+	on, err := (&AssetStore{}).CoverageEnabled(0)
+	if err != nil || !on {
+		t.Fatalf("enabled=%v err=%v", on, err)
+	}
+}
+
+func TestCoverageEnabledMissingRowStaysOn(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer d.Close()
+	on, err := d.Assets().CoverageEnabled(9_000_000_000_001)
+	if err != nil || !on {
+		t.Fatalf("missing task: enabled=%v err=%v, want enabled with no error", on, err)
+	}
+}
+
+func TestCoverageEnabledQueryErrorStaysOn(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	on, err := d.Assets().CoverageEnabled(1)
+	if err == nil || !on {
+		t.Fatalf("failed query: enabled=%v err=%v, want enabled and the error", on, err)
+	}
+}
+
 // TestStripHostPort covers the ip:port / [ipv6]:port stripping used by the
 // ip/cidr scope path so a target like "10.0.188.136:3000" no longer 404s.
 func TestStripHostPort(t *testing.T) {

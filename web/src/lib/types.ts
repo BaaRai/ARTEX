@@ -486,6 +486,9 @@ export type FindingStatus =
 // human triage status above. "blocked" is produced by no path yet but is displayed when present.
 export type VerificationStatus = "verified" | "unverified" | "blocked" | "not_assessed" | "false_positive";
 
+// Report stage after triage: a finding can be confirmed and submitted at the same time.
+export type FindingReportState = "none" | "submitted" | "accepted" | "rejected" | "duplicate";
+
 // FindingAsset is an asset bound to a vulnerability (label pre-rendered by the backend).
 export interface FindingAsset {
   id: string;
@@ -509,6 +512,7 @@ export interface Finding {
   name?: string; // vulnerability name; display falls back to vulnclass when empty
   severity: Severity;
   status: FindingStatus;
+  report_state?: FindingReportState; // workflow stage after triage; default none
   summary: string;
   evidence: string;
   report?: string; // detailed report (Markdown); returned only by the detail endpoint, empty in lists
@@ -562,6 +566,8 @@ export interface FindingDeepenResponse {
 export interface FindingStats {
   total: number;
   pending: number;
+  submitted: number;
+  accepted: number;
   critical: number;
   high: number;
   medium: number;
@@ -585,6 +591,7 @@ export interface FindingQuery {
   pageSize: number;
   severity?: "all" | Severity;
   status?: "all" | FindingStatus;
+  reportState?: "all" | FindingReportState;
   verificationStatus?: "all" | VerificationStatus;
   vulnclass?: string;
   task?: string; // task id; "all"/empty = no task filter
@@ -977,15 +984,17 @@ export interface Settings {
   traffic_capture: boolean;
   agent_traffic_binding: boolean; // agents auto-bind traffic evidence, off by default; does not affect manual binding
   llm_record: boolean; // LLM recording switch (off by default); when off no LLM calls are recorded
-  // Web search. brave_key_set / tavily_key_set reflect whether a key is stored
+  // Web search. brave_key_set / tavily_key_set / keenable_key_set reflect whether a key is stored
   // (the values are never returned). On PUT, send the corresponding field to set/clear.
   web_search_enabled: boolean;
-  web_search_backend: string; // "ddgs" | "brave-free" | "tavily" | "deepseek"
+  web_search_backend: string; // "ddgs" | "brave-free" | "tavily" | "keenable" | "deepseek"
   brave_key_set: boolean;
   tavily_key_set: boolean;
+  keenable_key_set: boolean;
   // write-only: only sent on PUT to store/clear the key.
   brave_search_api_key?: string;
   tavily_search_api_key?: string;
+  keenable_search_api_key?: string;
   // Dedicated egress proxy (http/https/socks5) for reaching search endpoints; unrelated to the MITM proxy that records traffic. Empty = direct.
   web_search_proxy?: string;
   // Global egress proxy (http/https/socks5, may carry user:pass) that all target traffic goes

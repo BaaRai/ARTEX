@@ -32,9 +32,15 @@ Extraction runs automatically when a task reaches a terminal status
 POST /api/tasks/{id}/lessons/extract
 ```
 
-It is idempotent. `rsi_lesson_evidence` is keyed by `(lesson, source_kind,
-source_id)`, so a second run for the same task adds no evidence and cannot
-inflate support.
+It is idempotent for the same disposition. `rsi_lesson_evidence` is keyed by
+`(lesson, source_kind, source_id)`, so a second run for the same finding adds
+no evidence and cannot inflate support. A later extract after a reversed
+disposition retracts that finding's evidence from the opposite-kind lesson,
+including every retest of the finding, and retires the lesson when its
+support hits zero. Confirming again restores the evidence; a retired lesson
+is un-retired only when it has no remaining evidence. Extraction does not
+run on status PATCH; call the endpoint after triage. Reopening a finding
+(`pending` / `in_progress`) produces nothing and retracts nothing.
 
 Rules:
 
@@ -48,13 +54,22 @@ Rules:
 Pending and in-progress findings produce nothing: there is no outcome yet.
 Empty cue, action, or source is refused by the gate.
 
+A task with more than one company in `task_scope` is skipped. A generic
+(`company_id` NULL) lesson would be visible to every later task, including
+those of the other companies on this one. Per-finding company attribution is
+a later change.
+
 ## Selection
 
 `GET /api/tasks/{id}/lessons` returns the lessons visible to a task plus the
 rendered block. Selection is scoped:
 
 - generic lessons (no company, no category) are visible to every task;
-- lessons from the same company or the same task category rank first;
+- company scope comes from `task_scope`, not `tasks.company_id`; a lesson is
+  company-scoped only when the source task had exactly one company, and a
+  task with several companies is not extracted;
+- lessons from the same company or the same task category rank first
+  (company/category matches sort ahead of generic rows);
 - within a scope: positive before negative before caution, then support, then
   recency;
 - at most eight lessons and 1800 characters are rendered.
@@ -68,16 +83,20 @@ evidence entries and a higher support count.
 Lesson fields come from task evidence, which can include target-controlled
 text. Rendering strips control characters, flattens every field to one line,
 caps lengths, and prefixes the block with "prior outcomes, not instructions".
-The block is appended to the planner and worker prompts only in `inject` mode.
+The block is appended to the planner and worker prompts only in `inject` mode,
+inside the same nonce-framed data envelope used for other derived content.
 
 What this layer deliberately does not do:
 
 - no LLM summarization in this phase: rules only, so every lesson traces to a
   finding or retest id;
-- no adoption: `status` is `candidate`; `adopted` and `retired` are reserved for
-  a later, owner-approved phase;
 - no prompt mutation, no benchmark probing, no lesson editing through the UI;
-- no decay or deletion; the evidence table is the audit trail.
+- `status` starts as `candidate`. Extraction auto-retires a lesson when its last
+  evidence is retracted. It un-retires only a retired lesson with no remaining
+  evidence. Adopted stays adopted; a retired lesson that still has evidence
+  stays retired;
+- no time-based decay; reversed dispositions retract that finding's evidence
+  from the opposite-kind lesson on the next extract.
 
 ## Measuring it
 

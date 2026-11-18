@@ -43,6 +43,7 @@ import type {
   FindingGroupsPage,
   FindingQuery,
   FindingRetest,
+  FindingReportState,
   FindingStats,
   FindingStatus,
   FindingsPage,
@@ -109,6 +110,9 @@ import type {
   WorkspaceFile,
   WorkspaceListing,
 } from "@/lib/types";
+
+// Combined file data per attachment upload; matches maxChatUpload in server/chatupload.go.
+const MAX_CHAT_UPLOAD_BYTES = 512 * 1024 * 1024;
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -178,7 +182,9 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // to the Go backend on :8787, whose CORS is open.
 //
 // Override either default with NEXT_PUBLIC_SSE_BASE (set it to "" to force same-origin).
-// Token is appended as ?token= because SSE can't carry cookies cross-origin.
+// A same-origin stream sends the artex_token cookie. The query token is added only
+// when base is non-empty, which is the dev connection to :8787: that origin cannot
+// send the cookie.
 // mockReport returns a canned Markdown report for the demo.
 function mockReport(_task?: string): string {
   return `# ARTEX Penetration Test Report — Acme Corp
@@ -208,6 +214,9 @@ export function sseUrl(path: string): string {
     (process.env.NODE_ENV !== "production" && typeof window !== "undefined"
       ? `${window.location.protocol}//${window.location.hostname}:8787`
       : "");
+  if (!base) {
+    return path;
+  }
   const token = getToken();
   const sep = path.includes("?") ? "&" : "?";
   return token ? `${base}${path}${sep}token=${encodeURIComponent(token)}` : `${base}${path}`;
@@ -233,6 +242,7 @@ function findingFilterParams(q: Omit<FindingQuery, "page" | "pageSize">): URLSea
   const p = new URLSearchParams();
   if (q.severity && q.severity !== "all") p.set("severity", q.severity);
   if (q.status && q.status !== "all") p.set("status", q.status);
+  if (q.reportState && q.reportState !== "all") p.set("report_state", q.reportState);
   if (q.verificationStatus && q.verificationStatus !== "all") p.set("verification_status", q.verificationStatus);
   if (q.vulnclass && q.vulnclass !== "all") p.set("vulnclass", q.vulnclass);
   if (q.task && q.task !== "all") p.set("task_id", q.task);
@@ -695,11 +705,25 @@ export const api = {
   // Vulnerability lineage: the subgraph (nodes + edges) from the vulnerability node back to the task's initial node.
   findingLineage: (id: string) => get<{ nodes: TaskNode[]; edges: Edge[] }>(`/exploration/findings/${id}/lineage`),
   setFindingStatus: (id: string, status: FindingStatus) => patch<Finding>(`/exploration/findings/${id}`, { status }),
+  setFindingReportState: (id: string, report_state: FindingReportState) =>
+    patch<Finding>(`/exploration/findings/${id}`, { report_state }),
+  // Bulk triage: one transaction server-side, with a per-id result. Unknown ids
+  // come back as found=false instead of failing the whole batch.
+  bulkSetFindingStatus: (ids: string[], status: FindingStatus) =>
+    post<{ updated: number; missing: number; results: { id: number; found: boolean; changed: boolean }[] }>(
+      "/exploration/findings/bulk-status",
+      { ids: ids.map(Number), status },
+    ),
+  bulkSetFindingReportState: (ids: string[], report_state: FindingReportState) =>
+    post<{ updated: number; missing: number; results: { id: number; found: boolean; changed: boolean }[] }>(
+      "/exploration/findings/bulk-report-state",
+      { ids: ids.map(Number), report_state },
+    ),
   setFindingSeverity: (id: string, severity: Severity) => patch<Finding>(`/exploration/findings/${id}`, { severity }),
   // Save a vulnerability's name/class/severity in one call (inline edit in the findings list); only present fields are sent.
   updateFinding: (
     id: string,
-    fields: { name?: string; vulnclass?: string; severity?: Severity; status?: FindingStatus },
+    fields: { name?: string; vulnclass?: string; severity?: Severity; status?: FindingStatus; report_state?: FindingReportState },
   ) => patch<Finding>(`/exploration/findings/${id}`, fields),
   // Delete a vulnerability: removes the findings record + the source exploration node (gone from the findings list, the task findings tab, and the exploration graph together).
   deleteFinding: (id: string) => del<{ deleted: boolean; id: number }>(`/exploration/findings/${id}`),
@@ -872,6 +896,7 @@ export const api = {
     web_search_proxy?: string;
     brave_search_api_key?: string;
     tavily_search_api_key?: string;
+    keenable_search_api_key?: string;
   }) => post<{ ok: boolean; error?: string; count?: number; backend?: string }>(`/settings/web-search/test`, patch),
 
   // ---- Vulnerability IM push ----
@@ -935,6 +960,10 @@ export const api = {
   chatStatus: (taskId: string) => get<{ running: boolean }>(`/tasks/${taskId}/chat/status`),
   // Option 1, file upload: lands in the session/task working directory uploads/, returning a relative path the agent can Read.
   chatUpload: async (scope: "task" | "session" | "staging", id: string, files: File[]) => {
+    const totalSize = files.reduce((total, file) => total + file.size, 0);
+    if (totalSize > MAX_CHAT_UPLOAD_BYTES) {
+      throw new Error("Files exceed the 512 MiB upload limit (combined size).");
+    }
     if (MOCK)
       return {
         attachments: files.map((f) => ({

@@ -44,8 +44,9 @@ type Config struct {
 	// using the provider (0 = that window unlimited).
 	RatePerSecond float64
 	RatePerMinute float64
-	// ContextWindowK is the model's context window in K tokens (user-configured),
-	// used to size compaction thresholds. 0 = default; see CompactionWindow.
+	// ContextWindowK is the model's context window in K tokens (user-configured).
+	// CompactionWindow applies a 32K floor for compaction math; ContextWindowTokens
+	// does not, so routing and side-question budgets see the real window. 0 = default.
 	ContextWindowK int
 	// ThinkingType independently controls the thinking "on/off" field (thinking.type):
 	//   "" = don't send (default, compatible with models that don't support the field);
@@ -182,6 +183,22 @@ func (c Config) CompactionWindow() int {
 	}
 	if k < minWindowK {
 		k = minWindowK
+	}
+	if k > maxWindowK {
+		k = maxWindowK
+	}
+	return k * 1000
+}
+
+// ContextWindowTokens returns the model's actual configured context window in
+// tokens (0/unset → 200K, capped at 1M) without the 32K compaction-math floor.
+// llmpool pre-filtering and sidequestion budgets use this so an 8K/16K profile
+// is not treated as 32K — that leak lets an oversize request hit the small
+// model, 400, and never fail over (shouldFailover ignores 400s).
+func (c Config) ContextWindowTokens() int {
+	k := c.ContextWindowK
+	if k <= 0 {
+		k = defaultWindowK
 	}
 	if k > maxWindowK {
 		k = maxWindowK

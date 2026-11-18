@@ -33,6 +33,24 @@ func (d *DB) EnsureLLMUsageTable() error {
 	return d.execEmbeddedMigration(llmUsageMigration)
 }
 
+// TaskLLMSpend is the token and turn total the in-memory task ledger would
+// already have counted. One row is one turn. The ledger sees planner and worker
+// completions, plus judge and compactor calls made on those contexts. Main-agent
+// chat, goal decomposition, and side questions write llm_usage rows for the same
+// task and never enter the ledger, so they are left out: counting them would
+// tighten the turn cap after a restart. Cache read and write are not added:
+// input_tokens already includes them. Every status counts, because a failed call
+// is metered too.
+func (d *DB) TaskLLMSpend(taskID string) (tokens, turns int64, err error) {
+	if d == nil || taskID == "" {
+		return 0, 0, nil
+	}
+	err = d.QueryRow(`SELECT COALESCE(SUM(input_tokens + output_tokens), 0), COUNT(*)
+FROM llm_usage
+WHERE task_id=$1 AND worker IN ('planner', 'worker', 'judge', 'compactor')`, taskID).Scan(&tokens, &turns)
+	return tokens, turns, err
+}
+
 // InsertLLMUsage appends one metering row. Best-effort: callers log and continue on
 // error (a lost metering row must never break the LLM call).
 func (d *DB) InsertLLMUsage(u *LLMUsage) error {

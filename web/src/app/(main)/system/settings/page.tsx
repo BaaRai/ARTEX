@@ -27,6 +27,9 @@ export default function SystemSettingsPage() {
   const [tavilyKeySet, setTavilyKeySet] = React.useState(false);
   const [tavilyKeyInput, setTavilyKeyInput] = React.useState("");
   const [savingTavilyKey, setSavingTavilyKey] = React.useState(false);
+  const [keenableKeySet, setKeenableKeySet] = React.useState(false);
+  const [keenableKeyInput, setKeenableKeyInput] = React.useState("");
+  const [savingKeenableKey, setSavingKeenableKey] = React.useState(false);
   const [proxyInput, setProxyInput] = React.useState("");
   const [savingProxy, setSavingProxy] = React.useState(false);
   const [globalProxyInput, setGlobalProxyInput] = React.useState("");
@@ -53,6 +56,7 @@ export default function SystemSettingsPage() {
     setBackend(s.web_search_backend || "ddgs");
     setBraveKeySet(!!s.brave_key_set);
     setTavilyKeySet(!!s.tavily_key_set);
+    setKeenableKeySet(!!s.keenable_key_set);
     setProxyInput(s.web_search_proxy ?? "");
     setGlobalProxyInput(s.global_proxy ?? "");
     setPyInterp(s.python_interpreter ?? "");
@@ -208,6 +212,19 @@ export default function SystemSettingsPage() {
       .finally(() => setSavingTavilyKey(false));
   };
 
+  const saveKeenableKey = () => {
+    setSavingKeenableKey(true);
+    api
+      .setSettings({ keenable_search_api_key: keenableKeyInput })
+      .then((s) => {
+        apply(s);
+        setKeenableKeyInput("");
+        toast.success("Saved Keenable API Key");
+      })
+      .catch((e) => toast.error("Save failed: " + (e as Error).message))
+      .finally(() => setSavingKeenableKey(false));
+  };
+
   const saveProxy = () => {
     setSavingProxy(true);
     api
@@ -242,6 +259,7 @@ export default function SystemSettingsPage() {
         web_search_proxy: proxyInput.trim(),
         brave_search_api_key: braveKeyInput,
         tavily_search_api_key: tavilyKeyInput,
+        keenable_search_api_key: keenableKeyInput,
       })
       .then((r) => {
         if (r.ok) toast.success(`Search test succeeded · ${r.backend} returned ${r.count} results`);
@@ -483,6 +501,7 @@ export default function SystemSettingsPage() {
                     <SelectItem value="ddgs">DuckDuckGo (ddgs · free, no key)</SelectItem>
                     <SelectItem value="brave-free">Brave (free tier · requires key)</SelectItem>
                     <SelectItem value="tavily">Tavily (requires key)</SelectItem>
+                    <SelectItem value="keenable">Keenable (keyless, optional key)</SelectItem>
                     <SelectItem value="deepseek">DeepSeek (official)</SelectItem>
                   </SelectContent>
                 </Select>
@@ -573,6 +592,39 @@ export default function SystemSettingsPage() {
                   </p>
                 )}
                 <p className="text-muted-foreground text-xs">Register and get an API key at https://tavily.com.</p>
+              </div>
+            )}
+
+            {webSearch && backend === "keenable" && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="keenable-key" className="text-sm font-normal text-muted-foreground">
+                  Keenable Search API Key (optional)
+                  {keenableKeySet && <span className="ml-2 text-xs text-emerald-500">Configured</span>}
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="keenable-key"
+                    type="password"
+                    autoComplete="off"
+                    placeholder={keenableKeySet ? "Configured (leave empty to keep)" : "Optional: leave empty for the keyless endpoint"}
+                    value={keenableKeyInput}
+                    disabled={!loaded || savingKeenableKey}
+                    onChange={(e) => setKeenableKeyInput(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    onClick={saveKeenableKey}
+                    disabled={!loaded || savingKeenableKey || keenableKeyInput.trim() === ""}
+                  >
+                    Save
+                  </Button>
+                </div>
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                  Queries leave this instance and go to api.keenable.ai. The request carries{" "}
+                  <b>X-Keenable-Title: ARTEX</b> so the provider can identify the caller. With no key, the
+                  public endpoint is rate-limited per IP; a key raises the limit, but the backend works
+                  without one.
+                </p>
               </div>
             )}
 

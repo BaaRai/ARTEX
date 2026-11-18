@@ -52,17 +52,13 @@ func (s *Server) wireTaskLessons(t *Task, wk *agent.Worker, pl *agent.Planner) {
 		log.Printf("[rsi] lesson selection failed for task %s: %v", t.ID, err)
 		return
 	}
-	block := db.RenderLessons(lessons, 1800)
+	block, ids := db.RenderLessons(lessons, 1800)
 	if block == "" {
 		return
 	}
 	if mode == "inject" {
 		wk.SetLessonsBlock(block)
 		pl.SetLessonsBlock(block)
-	}
-	ids := make([]int64, 0, len(lessons))
-	for _, l := range lessons {
-		ids = append(ids, l.ID)
 	}
 	if err := s.m.PG().LogLessonUsage(context.Background(), taskID, ids, mode); err != nil {
 		log.Printf("[rsi] lesson usage log failed for task %s: %v", t.ID, err)
@@ -87,10 +83,11 @@ func (s *Server) taskLessons(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "lesson query failed")
 		return
 	}
+	block, _ := db.RenderLessons(lessons, 1800)
 	writeJSON(w, 200, map[string]any{
 		"mode":    rsiLessonsMode(),
 		"lessons": lessons,
-		"block":   db.RenderLessons(lessons, 1800),
+		"block":   block,
 		"count":   len(lessons),
 	})
 }

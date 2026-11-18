@@ -3,9 +3,10 @@
 A rewrite rule matches a request or a response that goes through the capture proxy and describes
 how to change it: the method, the path and query, headers, the body, the status code.
 
-**Status: rules are stored, validated and compiled. The proxy does not apply them yet.** Creating
-or enabling a rule changes nothing in what the proxy forwards or records. Applying the rules, the
-per-exchange trace, the archive format and the web UI come in a later change.
+**Status: the capture proxy applies enabled rules to HTTP traffic (request and response phases),
+and records what it did.** Not yet in this change: archive format, a per-replay rule toggle, the web UI,
+and the proof flag. See [Application in the capture proxy](#application-in-the-capture-proxy) for
+what is covered and what is not.
 
 Rules are a convenience for the operator, not a security control: a rule that fails leaves the
 message unchanged (fail open).
@@ -145,3 +146,66 @@ cannot restore them, and ARTEX refuses to start under a key that cannot open the
 
 The server compiles the enabled rules into an immutable snapshot at startup and after every rule
 change, and hands it to the proxy without a restart.
+
+## Application in the capture proxy
+
+The proxy applies the snapshot to each exchange in two phases. The request phase runs before the
+request is sent to the target; the response phase runs before the response is returned to the
+client. Each rule sees the output of the previous one. Only rules whose phase matches the step
+are run, and a rule that fails leaves the message as it was (fail open).
+
+### What is recorded
+
+For a rewritten exchange, the record keeps the request as the client sent it and the response as
+the target sent it. The rewritten values are not stored as the exchange's original data.
+
+- Each action that ran (applied, skipped or failed) is written in the SQLite table
+  `exchange_rewrites`, in the same transaction as the exchange itself, with the rule id, a copy of
+  the rule as it was applied, the action, the outcome and the reason.
+- The before value is kept as its SHA-256. The after value is kept as the value itself, inline or
+  in the blob store when it is large, with its SHA-256. A sensitive action stores neither value nor
+  plain hash: its after value is not stored, and the hashes it leaves are a keyed HMAC when a key is
+  available (empty otherwise). The same HMAC applies to later actions on a field a sensitive action
+  wrote.
+- `traffic_get` shows a `=== REWRITTEN ===` line naming the rule ids when the exchange was changed.
+  The line says that the shown values are the originals.
+- `traffic_search` searches only the original values. It never finds a value that a rule wrote.
+
+Reasons a rule is not applied are recorded in the trace, for example `not rewritten: binary`,
+`not rewritten: stream`, or `not rewritten: snapshot capacity`.
+
+### Streams: SSE and WebSocket
+
+- **SSE** (`text/event-stream`): status and headers are rewritten at the start of the stream
+  (SSEStart), since they are sent once. Later event frames pass unchanged.
+- **WebSocket**: not rewritten. The capture library calls its start hook after the upgrade is
+  already done, and it short-circuits the upgrade before the request and response hooks run, so
+  the handshake status and headers cannot be changed. Frames pass unchanged. The exchange is
+  traced `not rewritten: stream`.
+
+### Large responses
+
+go-mitmproxy does not call the response hook for a body of 5 MiB or more (its `StreamLargeBodies`
+default). Such a response is forwarded to the client unchanged and is not recorded in full, and no
+response rule runs on it.
+
+### Snapshot limits
+
+Each exchange with a rewrite trace (at least one rule matched and produced a line: applied, skipped or failed) keeps an original copy in memory until it finishes. Limits:
+
+| Limit | Value |
+|---|---|
+| Entries holding an original request | 1024 |
+| Bytes held by those entries | 64 MiB |
+| Tombstones (slots whose data was released) | 4096 |
+| Time after which the slot of a live flow may be turned into a tombstone (see below) | 15 minutes |
+
+When there is no room, the request is not rewritten. The exchange is traced `not rewritten: snapshot capacity` when a tombstone slot is free; when the tombstone table is full, the request is refused with no trace line at all (the refusal is counted and logged, at most once a minute).
+The slot of a finished flow is swept when its connection closes (at most once per second) and at
+least once a minute while slots exist. The 15-minute TTL never deletes a live flow's slot: past it,
+the slot may be converted into a tombstone if a new reservation needs the room.
+
+### Replay
+
+Replay goes through the recording proxy like any other traffic, so the enabled rules apply to a
+replay and the resulting exchange is traced like a captured one. There is no per-replay toggle yet.

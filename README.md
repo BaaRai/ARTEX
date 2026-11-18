@@ -255,7 +255,10 @@ worker remains confined to the intent it claimed.
 - **Budgets**: `ARTEX_TASK_BUDGET_TOKENS` / `ARTEX_TASK_BUDGET_TURNS` cap a whole task (planner and
   workers); `ARTEX_INTENT_BUDGET_TOKENS` / `ARTEX_INTENT_BUDGET_TURNS` cap one worker run. Near the
   limit the task enters a forced wrap-up; a worker is not started when the remaining budget cannot
-  cover it. Budgets are in memory: a restart starts fresh.
+  cover it. Spend already in `llm_usage` is restored after a restart. A task that is already inside
+  the wrap-up reserve only has that reserve left, so the revived run wraps up instead of starting
+  another worker. The per-worker cost estimate starts again from the defaults (50,000 tokens and
+  10 turns) until a worker finishes in this process.
 - **Noise governor**: `ARTEX_NOISE_PROFILE=quiet|balanced|aggressive` paces requests ARTEX sends to
   targets (per-host rate, burst, in-flight limit, jitter, backoff on 429/503, short GET caching).
   With a profile set, agents also receive low-and-slow flags for the installed scanners.
@@ -455,7 +458,13 @@ workers, else 50,000 tokens and 10 turns). Near the wrap-up reserve (the larger 
 tokens, and 2 turns) the task enters a forced wrap-up: the planner writes a summary and final goal
 judgment, and workers may only write back. The task then ends `done` if its goals are met, else
 `timeout`. Practical floor: below 50,000 tokens no worker starts; 50,000-70,000 typically gives one
-worker then wrap-up; pick well above 70,000 for real exploration.
+worker then wrap-up; pick well above 70,000 for real exploration. Planner, worker, judge, and
+compactor rows in `llm_usage` are counted back into the cap when a ledger is created, including
+after a restart and after a revived run drops its ledger. A restored task already inside the
+wrap-up reserve does not get another worker: only that reserve remains, and the run wraps up.
+Chat, goal decomposition, and side questions are stored on the same task and are not counted.
+The per-worker average is not restored (usage rows have no run boundary), so the estimate starts
+from the defaults until a worker finishes in this process.
 
 **Common flags**: `./start.sh -addr :8787 -proxy :8788` (`-addr` frontend/API, `-proxy` traffic
 recording proxy).
@@ -476,6 +485,10 @@ server {
     # ssl_certificate / ssl_certificate_key ...
 
     location / {
+        # 512 MiB combined file limit plus 1 MiB of multipart metadata.
+        client_max_body_size 513m;
+        proxy_request_buffering off;
+
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
