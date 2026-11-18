@@ -251,7 +251,11 @@ func (g *Governor) reserve(h *hostState) time.Duration {
 func (g *Governor) backoff(h http.Header, attempt int) (d time.Duration, ok bool) {
 	v := strings.TrimSpace(h.Get("Retry-After"))
 	if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-		return time.Duration(n) * time.Second, time.Duration(n)*time.Second <= g.p.MaxDelay
+		// Compare in seconds: n * time.Second overflows past about 292 years.
+		if time.Duration(n) > g.p.MaxDelay/time.Second {
+			return g.p.MaxDelay, false
+		}
+		return time.Duration(n) * time.Second, true
 	}
 	if t, err := http.ParseTime(v); err == nil {
 		return max(time.Until(t), 0), time.Until(t) <= g.p.MaxDelay

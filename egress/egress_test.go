@@ -147,6 +147,21 @@ func TestBackoff(t *testing.T) {
 	}
 }
 
+func TestBackoffRetryAfterBeyondDuration(t *testing.T) {
+	g := New(open)
+	s := newServer(t, 0, func(_ int64, w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "10000000000") // past the largest time.Duration
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	if code, _ := do(t, g, context.Background(), "GET", s.URL); code != 429 || s.hits.Load() != 1 {
+		t.Fatalf("status %d, hits %d; want 429 and no retry", code, s.hits.Load())
+	}
+	u, _ := url.Parse(s.URL)
+	if h := g.host(HostKey(u)); !h.notBefore.After(time.Now()) {
+		t.Fatalf("host not paused: notBefore %s", h.notBefore)
+	}
+}
+
 func TestDedupeAndCache(t *testing.T) {
 	p := open
 	p.CacheTTL = 200 * time.Millisecond
