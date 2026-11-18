@@ -152,10 +152,10 @@ func TestProxySecretsAPI(t *testing.T) {
 	s, _, request := trafficEvidenceServer(t)
 	pg := s.m.PG()
 	t.Cleanup(func() {
-		pg.Exec(`DELETE FROM settings WHERE key IN ('brave_search_api_key','tavily_search_api_key','web_search_proxy','global_proxy')`)
+		pg.Exec(`DELETE FROM settings WHERE key IN ('brave_search_api_key','tavily_search_api_key','keenable_search_api_key','web_search_proxy','global_proxy')`)
 		pg.Exec(`DELETE FROM llm_profiles WHERE name='t-proxy'`)
 	})
-	secrets := []string{"brave-api-0007", "tavily-api-0008", "wsp-pass-0009", "gp-pass-0010", "llmp-pass-0011"}
+	secrets := []string{"brave-api-0007", "tavily-api-0008", "keenable-api-0012", "wsp-pass-0009", "gp-pass-0010", "llmp-pass-0011"}
 	put := func(body string) {
 		t.Helper()
 		resp := request("PUT", "/api/settings", body)
@@ -177,7 +177,7 @@ func TestProxySecretsAPI(t *testing.T) {
 		}
 		return v
 	}
-	put(`{"brave_search_api_key":"brave-api-0007","tavily_search_api_key":"tavily-api-0008",
+	put(`{"brave_search_api_key":"brave-api-0007","tavily_search_api_key":"tavily-api-0008","keenable_search_api_key":"keenable-api-0012",
 "web_search_proxy":"socks5://u:wsp-pass-0009@ws.example:1080","global_proxy":"http://u:gp-pass-0010@gp.example:3128"}`)
 	var got map[string]any
 	resp := request("GET", "/api/settings", "")
@@ -191,9 +191,10 @@ func TestProxySecretsAPI(t *testing.T) {
 		t.Fatalf("proxies not masked with a presence flag: %v", got)
 	}
 
-	put(`{"web_search_proxy":"__masked__","global_proxy":"__masked__","brave_search_api_key":"__masked__"}`)
+	put(`{"web_search_proxy":"__masked__","global_proxy":"__masked__","brave_search_api_key":"__masked__","keenable_search_api_key":"__masked__"}`)
 	if setting("web_search_proxy") != "socks5://u:wsp-pass-0009@ws.example:1080" || setting("global_proxy") != "http://u:gp-pass-0010@gp.example:3128" ||
-		setting("brave_search_api_key") != "brave-api-0007" || setting("tavily_search_api_key") != "tavily-api-0008" {
+		setting("brave_search_api_key") != "brave-api-0007" || setting("tavily_search_api_key") != "tavily-api-0008" ||
+		setting("keenable_search_api_key") != "keenable-api-0012" {
 		t.Fatal("a masked placeholder replaced a stored secret")
 	}
 	put(`{"global_proxy":"http://gp2.example:3128","web_search_proxy":""}`)

@@ -43,7 +43,7 @@ type sideQuestionState struct {
 func sideModel(cfg agent.Config, id int64, name string) sidequestion.Model {
 	b, _ := json.Marshal([]any{cfg.Format, cfg.BaseURL, cfg.Model, cfg.ThinkingType, cfg.ReasoningEffort, cfg.Stream, cfg.MaxTokensField, cfg.SessionHeaderKey, cfg.UserAgent})
 	h := sha256.Sum256(b)
-	return sidequestion.Model{ProfileID: id, Name: name, Format: string(cfg.Format), Model: cfg.Model, Identity: hex.EncodeToString(h[:]), Streaming: cfg.Stream, WindowTokens: cfg.CompactionWindow()}
+	return sidequestion.Model{ProfileID: id, Name: name, Format: string(cfg.Format), Model: cfg.Model, Identity: hex.EncodeToString(h[:]), Streaming: cfg.Stream, WindowTokens: cfg.ContextWindowTokens()}
 }
 
 func bindSideProvider(p llm.Provider, cfg agent.Config, id int64, name string) llm.Provider {
@@ -526,6 +526,11 @@ func (s *Server) cancelSideRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sideEvents(w http.ResponseWriter, r *http.Request) {
+	tok := extractToken(r)
+	if !s.sessionOK(tok) {
+		writeErr(w, 401, "token is invalid or expired")
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, 500, "streaming unavailable")
@@ -550,6 +555,9 @@ func (s *Server) sideEvents(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 	for {
+		if !s.sessionOK(tok) {
+			return
+		}
 		e := first
 		first = nil
 		if e == nil {

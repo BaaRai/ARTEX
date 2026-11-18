@@ -3,7 +3,7 @@ module github.com/Autumn-27/artex
 go 1.26.10
 
 require (
-	github.com/Autumn-27/norma v0.4.10
+	github.com/Autumn-27/norma v0.4.11
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.23.19
@@ -74,4 +74,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/Autumn-27/norma => github.com/BaaRai/Norma v0.4.10
+replace github.com/Autumn-27/norma => github.com/BaaRai/Norma v0.4.11

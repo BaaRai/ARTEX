@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -92,6 +93,26 @@ CREATE TABLE IF NOT EXISTS stream_messages (
   PRIMARY KEY (exchange_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_stream_messages_ex ON stream_messages(exchange_id, seq);
+
+-- Rewrite-rule trace of an exchange, in order. The exchange row keeps what the
+-- client sent and what the target answered; these rows say what the rules
+-- changed on the way. An exchange is rewritten when it has an 'applied' row.
+CREATE TABLE IF NOT EXISTS exchange_rewrites (
+  exchange_id   TEXT NOT NULL,
+  seq           INTEGER NOT NULL,
+  phase         TEXT NOT NULL,              -- 'request' | 'response'
+  rule_id       INTEGER,                    -- NULL on a global line
+  rule_snapshot TEXT,                       -- JSON, no sensitive action value
+  action        TEXT,
+  field         TEXT,                       -- 'method' | 'url' | 'header:<Name>' | 'body' | 'status'
+  outcome       TEXT NOT NULL,              -- 'applied' | 'skipped' | 'error'
+  reason        TEXT NOT NULL DEFAULT '',
+  before_hash   TEXT,
+  after_hash    TEXT,
+  after_inline  BLOB,
+  after_blob    TEXT,
+  PRIMARY KEY (exchange_id, seq)
+);
 `
 
 // ftsSchema is applied separately from indexSchema: a driver build without FTS5
@@ -160,6 +181,10 @@ const (
 // and the catalog migration cannot drift apart.
 const TrafficSearchDescription = "Query the target traffic the recording proxy has captured (host is required; accepts a bare host, host:port, or full URL, optionally filtered further by URL substring or body keyword). When a port is specified, only that service's traffic is returned, avoiding cross-talk between different ports on the same IP. body_contains runs a full-text search over the captured request/response headers and bodies, supporting any substring including Chinese (at least 3 characters). Returns only an ultra-light index (id/method/url/status/resp_len) with no response content; once results are non-empty, use traffic_get to verify the request/response of each one, then hand the IDs that actually support the current vulnerability to bind_finding_traffic. Returns 3 by default, at most 10 per page; use page to paginate when there are more results."
 
+// TrafficGetDescription is the traffic_get description, kept here for the same
+// reason as TrafficSearchDescription.
+const TrafficGetDescription = "Fetch the raw request/response of one captured traffic record by id (truncated when too large). Use together with traffic_search to avoid re-curling. A WebSocket (status 101) or SSE (text/event-stream) record shows only its handshake here; read its messages with traffic_messages. When proxy rewrite rules changed the exchange, the result starts with a REWRITTEN line naming the rule ids, and shows the request as the client sent it and the response as the target sent it. traffic_search searches only these original values: it never finds a value a rewrite rule wrote."
+
 // Traffic runs the recording proxy and owns the file tree + index.
 type Traffic struct {
 	dir   string
@@ -190,16 +215,23 @@ type Traffic struct {
 	closeOnce sync.Once
 	// pass is the set of hosts whose MITM interception failed for a proxy/protocol
 	// reason; connections to them are tunneled transparently (fail-open) so the
-	// request still reaches the target — unrecorded — instead of being killed.
-	pass sync.Map // hostname(string) -> struct{}
+	// request still reaches the target, unrecorded, instead of being killed.
+	// The value is the time the mark expires. After that, interception is tried again.
+	pass sync.Map // hostname(string) -> time.Time
 	// upstream is the global egress proxy every captured request is forwarded
 	// through (nil = dial targets directly). Both the intercepted and the
 	// transparent-passthrough paths honor it (go-mitmproxy's getUpstreamConn),
 	// so no host escapes it. Hot-swappable at runtime via SetUpstreamProxy.
 	upstream atomic.Pointer[url.URL]
 	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
-	// whole by SetRewriteRules. The proxy does not apply it yet.
+	// whole by SetRewriteRules and applied by the sink (rewrite_flow.go).
 	rewriteRules atomic.Pointer[rewrite.Set]
+	// snaps keeps the original of each request a rule rewrote until its
+	// exchange is recorded (rewrite_flow.go). Nil on the zero value.
+	snaps *snapTable
+	// sweeping tracks the snapshot sweeper, which runs until Close. It is kept
+	// apart from reaping, which only ever holds work that finishes on its own.
+	sweeping sync.WaitGroup
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -225,7 +257,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	if err != nil {
 		return nil, err
 	}
-	t := &Traffic{dir: dir, addr: addr, db: db, closed: make(chan struct{})}
+	t := &Traffic{dir: dir, addr: addr, db: db, closed: make(chan struct{}), snaps: newSnapTable()}
 	if err := t.initIndex(); err != nil {
 		db.Close()
 		return nil, err
@@ -253,11 +285,11 @@ func Open(dir, addr string) (*Traffic, error) {
 	// can't intercept without breaking (see maybePassthrough). Those are tunneled
 	// transparently so the request still reaches the target instead of being killed.
 	p.SetShouldInterceptRule(func(req *http.Request) bool {
-		_, tunnel := t.pass.Load(hostOnly(req.Host))
-		return !tunnel
+		return !t.tunneling(hostOnly(req.Host))
 	})
 	p.AddAddon(&sink{t: t})
 	t.proxy = p
+	t.sweeping.Go(t.sweepSnapshots) // stops on t.closed; Close waits for it
 	return t, nil
 }
 
@@ -358,8 +390,8 @@ func (t *Traffic) SetUpstreamProxy(raw string) error {
 }
 
 // SetRewriteRules publishes a compiled snapshot of the rewrite rules. The swap
-// is atomic; nil clears the rules. The snapshot is stored only: the proxy does
-// not apply rewrite rules yet, so capture is unchanged whatever it holds.
+// is atomic; nil clears the rules. A flow already rewritten keeps the snapshot
+// its request saw for its response as well.
 func (t *Traffic) SetRewriteRules(s *rewrite.Set) { t.rewriteRules.Store(s) }
 
 // RewriteRules returns the snapshot last published, nil when there is none.
@@ -406,6 +438,7 @@ func (t *Traffic) Close() error {
 		t.closeOnce.Do(func() { close(t.closed) })
 	}
 	t.reaping.Wait()
+	t.sweeping.Wait()
 	return t.db.Close()
 }
 
@@ -430,19 +463,6 @@ type sink struct {
 	streams sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
 }
 
-func (s *sink) Response(f *mproxy.Flow) {
-	if f.Request == nil || f.Response == nil {
-		return
-	}
-	s.t.record(f)
-}
-
-// RequestError fires when a request through an established MITM tunnel fails. If
-// the failure looks proxy/protocol-caused (h2 quirks, HEAD-with-body, protocol
-// errors) — not a plain target-unreachable error — we flag the host for
-// transparent passthrough so future requests to it succeed instead of dying.
-func (s *sink) RequestError(f *mproxy.Flow, err error) { s.t.maybePassthrough(f, err) }
-
 // maybePassthrough marks a host to be tunneled transparently on the next
 // connection, but only for errors the proxy itself caused — a target that is
 // simply down/filtered would fail without us too, and must stay MITM'd+recorded.
@@ -454,9 +474,34 @@ func (t *Traffic) maybePassthrough(f *mproxy.Flow, err error) {
 	if host == "" {
 		return
 	}
-	if _, loaded := t.pass.LoadOrStore(host, struct{}{}); !loaded {
-		log.Printf("[traffic] MITM with %s failed, falling back to passthrough (this host now connects straight to the target and is no longer recorded, but requests proceed normally): %v", host, err)
+	if t.tunneling(host) {
+		return
 	}
+	until := time.Now().Add(passthroughTTL)
+	if _, loaded := t.pass.LoadOrStore(host, until); !loaded {
+		log.Printf("[traffic] MITM with %s failed, falling back to passthrough for %s (this request failed; the host connects straight to the target and is not recorded until then; the first request after the window fails again if interception still cannot handle it): %v", host, passthroughTTL, err)
+	}
+}
+
+// passthroughTTL is how long a host stays tunneled after a proxy-caused MITM
+// failure. A host whose interception always fails pays one lost request per
+// window: one per host per minute, where a mark that never expired cost one
+// per process. The window is what lets a stale bypass end.
+const passthroughTTL = time.Minute
+
+// tunneling reports whether host is inside an unexpired passthrough mark.
+// An expired mark is removed so the next connection tries interception again.
+func (t *Traffic) tunneling(host string) bool {
+	v, ok := t.pass.Load(host)
+	if !ok {
+		return false
+	}
+	until, ok := v.(time.Time)
+	if !ok || !time.Now().Before(until) {
+		t.pass.CompareAndDelete(host, v)
+		return false
+	}
+	return true
 }
 
 // proxyCausedErr reports whether err indicates the interception layer (not the
@@ -475,52 +520,121 @@ func proxyCausedErr(err error) bool {
 // full-text index. Nothing is written to a per-request directory — only bodies
 // above maxInlineBody spill to the content-addressed blob store.
 func (t *Traffic) record(f *mproxy.Flow) {
+	t.recordViews(flowRequestView(f.Request), flowResponseView(f.Response), nil)
+}
+
+// requestView is the request an exchange records: what the client sent, which
+// is not the flow's request once a rule rewrote it.
+type requestView struct {
+	method string
+	url    *url.URL // nil when the original request is unavailable and Raw() is nil
+	proto  string
+	header http.Header
+	// rawHost is the client's Host header (Raw().Host), "" when unknown.
+	rawHost string
+	body    []byte
+	// unavailable marks a request rewritten by a rule whose original was not
+	// kept: only its method, URL and Host are known.
+	unavailable bool
+}
+
+// responseView is the response an exchange records: what the target answered.
+type responseView struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
+func flowRequestView(r *mproxy.Request) requestView {
+	v := requestView{method: r.Method, url: r.URL, proto: r.Proto, header: r.Header, body: r.Body}
+	if raw := r.Raw(); raw != nil {
+		v.rawHost = raw.Host
+	}
+	return v
+}
+
+func flowResponseView(r *mproxy.Response) responseView {
+	return responseView{status: r.StatusCode, header: r.Header, body: r.Body}
+}
+
+// unavailableMarker stands for the headers and body of a request whose
+// original was not kept (see rewrite_flow.go).
+const unavailableMarker = "[original request unavailable]\n"
+
+// recordViews writes one exchange from explicit views, with its rewrite trace,
+// in one transaction: the exchange row, its bodies, blob references, the trace
+// and the full-text index of the views only. A failure rolls everything back,
+// so there is never a rewritten exchange without its trace. Without trace
+// lines this is exactly what record always wrote.
+func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.TraceLine) {
 	// The write lock covers blob + index writes, so DeleteHost (and its blob GC)
 	// can run under the same lock without racing a concurrent record.
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
-	host := f.Request.URL.Hostname()
-	method := f.Request.Method
-	tmpl := db.TemplatePath(f.Request.URL.EscapedPath())
+	var host, tmpl, url, uri string
+	if rq.url != nil {
+		host = rq.url.Hostname()
+		tmpl = db.TemplatePath(rq.url.EscapedPath())
+		url = rq.url.String()
+		uri = rq.url.RequestURI()
+	}
+	method := rq.method
 	now := time.Now()
 	id := t.newExchangeID(now)
 
-	ct := f.Response.Header.Get("Content-Type")
-	url := f.Request.URL.String()
-	reqHead := fmt.Sprintf("%s %s %s\n%s", method, f.Request.URL.RequestURI(), f.Request.Proto, requestHeaderLines(f.Request))
-	respHead := fmt.Sprintf("HTTP %d\n%s", f.Response.StatusCode, headerLines(f.Response.Header))
+	ct := rs.header.Get("Content-Type")
+	reqHead := requestHead(rq, uri)
+	respHead := fmt.Sprintf("HTTP %d\n%s", rs.status, headerLines(rs.header))
 	// Bodies are spilled before the transaction opens: blob writes are filesystem
 	// work and must not sit inside the SQLite write lock.
-	reqB := t.spill(f.Request.Body, f.Request.Header.Get("Content-Type"))
-	respB := t.spill(f.Response.Body, ct)
+	reqB := t.spill(rq.body, rq.header.Get("Content-Type"))
+	respB := t.spill(rs.body, ct)
+	trace := t.spillTrace(lines)
+
+	// A rewritten exchange is logged by host, step and rule ids only: its URL
+	// and the error text may carry a value a rule wrote.
+	rewritten, ruleIDs := appliedRules(lines)
+	fail := func(step string, err error) {
+		if rewritten {
+			log.Printf("[traffic] failed to record a rewritten exchange of %s (%s; rules %v)", host, step, ruleIDs)
+			return
+		}
+		log.Printf("[traffic] failed to record %s (%s): %v", url, step, err)
+	}
 
 	tx, err := t.db.Begin()
 	if err != nil {
-		log.Printf("[traffic] failed to record %s (beginning transaction): %v", url, err)
+		fail("beginning transaction", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
+	// An id can repeat (seconds plus a rolling counter); the trace of the
+	// exchange it replaces must not stay attached to this one.
+	if _, err := tx.Exec(`DELETE FROM exchange_rewrites WHERE exchange_id=?`, id); err != nil {
+		fail("clearing rewrite trace", err)
+		return
+	}
 	// path stays empty for db-resident exchanges; a non-empty path marks a legacy
 	// row whose bodies still live in the old on-disk tree (see Get).
 	res, err := tx.Exec(`INSERT OR REPLACE INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path)
 VALUES(?,?,?,?,?,?,?,?,?,?,'')`,
-		id, now.Unix(), host, method, tmpl, url, f.Response.StatusCode, ct,
-		len(f.Request.Body), len(f.Response.Body))
+		id, now.Unix(), host, method, tmpl, url, rs.status, ct,
+		len(rq.body), len(rs.body))
 	if err != nil {
-		log.Printf("[traffic] failed to record %s (writing index): %v", url, err)
+		fail("writing index", err)
 		return
 	}
 	rowid, err := res.LastInsertId()
 	if err != nil {
-		log.Printf("[traffic] failed to record %s (fetching rowid): %v", url, err)
+		fail("fetching rowid", err)
 		return
 	}
 
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO exchange_bodies(id,req_head,req_body,req_blob,resp_head,resp_body,resp_blob)
 VALUES(?,?,?,?,?,?,?)`,
 		id, reqHead, reqB.inline, nullIfEmpty(reqB.hash), respHead, respB.inline, nullIfEmpty(respB.hash)); err != nil {
-		log.Printf("[traffic] failed to record %s (writing body): %v", url, err)
+		fail("writing body", err)
 		return
 	}
 
@@ -529,24 +643,49 @@ VALUES(?,?,?,?,?,?,?)`,
 			continue
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_refs(hash,exchange_id) VALUES(?,?)`, h, id); err != nil {
-			log.Printf("[traffic] failed to record %s (registering blob reference): %v", url, err)
+			fail("registering blob reference", err)
 			return
 		}
 	}
 
+	if err := writeTrace(tx, id, lines, trace); err != nil {
+		var re *recordError
+		errors.As(err, &re)
+		fail(re.step, re.err)
+		return
+	}
+
 	if t.fts {
 		// The index is fed from memory, so a body that spilled to _blobs is still
-		// fully searchable even though only its preview is stored inline.
+		// fully searchable even though only its preview is stored inline. Only the
+		// recorded views are indexed, never a value a rule wrote.
 		idx := strings.Join([]string{url, reqHead, reqB.index, respHead, respB.index}, "\n")
 		if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowid, idx); err != nil {
-			log.Printf("[traffic] failed to record %s (writing full-text index): %v", url, err)
+			fail("writing full-text index", err)
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		log.Printf("[traffic] failed to record %s (committing): %v", url, err)
+		fail("committing", err)
 	}
+}
+
+// appliedRules reports whether a trace rewrote its exchange, with the ids of
+// the rules that did, in order of first appearance.
+func appliedRules(lines []rewrite.TraceLine) (bool, []int64) {
+	rewritten := false
+	var ids []int64
+	for _, l := range lines {
+		if l.Outcome != rewrite.OutcomeApplied {
+			continue
+		}
+		rewritten = true
+		if l.RuleID != 0 && !slices.Contains(ids, l.RuleID) {
+			ids = append(ids, l.RuleID)
+		}
+	}
+	return rewritten, ids
 }
 
 // newExchangeID names a recorded exchange: unix seconds plus a rolling sequence.
@@ -699,15 +838,35 @@ func headerLines(h map[string][]string) string {
 	return b.String()
 }
 
-// requestHeaderLines restores the HTTP Host header, which net/http stores on
-// Request.Host rather than in Header. Keeping it in request.http makes the raw
-// capture complete and directly replayable.
+// requestHeaderLines is requestHeaderLinesOf for a flow's request.
 func requestHeaderLines(req *mproxy.Request) string {
-	headers := req.Header.Clone()
+	v := flowRequestView(req)
+	return requestHeaderLinesOf(v.header, req.URL.Host, v.rawHost)
+}
+
+// requestHead is the head an exchange records for a request view: request
+// line and headers, or only the Host when the original request is unavailable.
+func requestHead(rq requestView, target string) string {
+	urlHost := ""
+	if rq.url != nil {
+		urlHost = rq.url.Host
+	}
+	if rq.unavailable {
+		return fmt.Sprintf("%s %s %s\n%s%s", rq.method, target, rq.proto, requestHeaderLinesOf(nil, urlHost, rq.rawHost), unavailableMarker)
+	}
+	return fmt.Sprintf("%s %s %s\n%s", rq.method, target, rq.proto, requestHeaderLinesOf(rq.header, urlHost, rq.rawHost))
+}
+
+// requestHeaderLinesOf restores the HTTP Host header, which net/http stores on
+// Request.Host rather than in Header. Keeping it in request.http makes the raw
+// capture complete and directly replayable. rawHost is the client's Host
+// header (Raw().Host); urlHost stands in when it is empty.
+func requestHeaderLinesOf(header http.Header, urlHost, rawHost string) string {
+	headers := header.Clone()
 	headers.Del("Host")
-	host := req.URL.Host
-	if raw := req.Raw(); raw != nil && strings.TrimSpace(raw.Host) != "" {
-		host = raw.Host
+	host := urlHost
+	if strings.TrimSpace(rawHost) != "" {
+		host = rawHost
 	}
 	var b strings.Builder
 	if host = strings.TrimSpace(host); host != "" {
@@ -1243,6 +1402,9 @@ func (t *Traffic) deleteWhere(tx *sql.Tx, where string, args ...any) (int64, err
 	}
 	if _, err := tx.Exec(`DELETE FROM stream_messages WHERE exchange_id IN (SELECT id FROM exchanges WHERE `+where+`)`, args...); err != nil {
 		return 0, fmt.Errorf("delete stream messages: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM exchange_rewrites WHERE exchange_id IN (SELECT id FROM exchanges WHERE `+where+`)`, args...); err != nil {
+		return 0, fmt.Errorf("delete rewrite trace: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM blob_refs WHERE exchange_id IN (SELECT id FROM exchanges WHERE `+where+`)`, args...); err != nil {
 		return 0, fmt.Errorf("delete blob references: %w", err)
@@ -2111,7 +2273,7 @@ func (t *Traffic) Tools() []actool.CoreTool {
 
 	get := actool.Build(actool.Spec{
 		Name:        "traffic_get",
-		Description: "Fetch the raw request/response of one captured traffic record by id (truncated when too large). Use together with traffic_search to avoid re-curling. A WebSocket (status 101) or SSE (text/event-stream) record shows only its handshake here; read its messages with traffic_messages.",
+		Description: TrafficGetDescription,
 		Schema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{"id": map[string]any{"type": "string", "description": "the id returned by traffic_search"}},
@@ -2126,7 +2288,15 @@ func (t *Traffic) Tools() []actool.CoreTool {
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
-			return actool.Text("=== REQUEST ===\n" + clip(req, 2500) + "\n\n=== RESPONSE ===\n" + clip(resp, 4000)), nil
+			rewritten, ruleIDs, err := t.RewriteInfo(a.ID)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			head := ""
+			if rewritten {
+				head = fmt.Sprintf("=== REWRITTEN === rewrite rules %v changed this exchange in the proxy. Shown below: the request as the client sent it and the response as the target sent it, not the rewritten values.\n\n", ruleIDs)
+			}
+			return actool.Text(head + "=== REQUEST ===\n" + clip(req, 2500) + "\n\n=== RESPONSE ===\n" + clip(resp, 4000)), nil
 		},
 	})
 

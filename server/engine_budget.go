@@ -17,8 +17,36 @@ func (e *Engine) budgetFor(taskID string) *agent.BudgetLedger {
 	if v, ok := e.budgets.Load(taskID); ok {
 		return v.(*agent.BudgetLedger)
 	}
-	v, _ := e.budgets.LoadOrStore(taskID, agent.NewBudgetLedger(agent.BudgetsFromEnv()))
-	return v.(*agent.BudgetLedger)
+	created := agent.NewBudgetLedger(agent.BudgetsFromEnv())
+	e.seedBudget(taskID, created)
+	v, loaded := e.budgets.LoadOrStore(taskID, created)
+	if loaded {
+		return v.(*agent.BudgetLedger)
+	}
+	return created
+}
+
+// seedBudget rebuilds spent tokens and turns from llm_usage for every new
+// ledger. budgetFor calls it on first use, and again after resetSettledRun or
+// StopTask deletes the ledger in this same process. The in-memory sink runs
+// before the row is inserted, so a call that happens after this seed is
+// counted once. A nil ledger means no budget is configured and nothing is read.
+// The restore does not rebuild per-worker averages, so the next worker estimate
+// starts from the defaults until a worker finishes against this ledger.
+func (e *Engine) seedBudget(taskID string, ledger *agent.BudgetLedger) {
+	if ledger == nil || e == nil || e.m == nil || e.m.pg == nil || taskID == "" {
+		return
+	}
+	tokens, turns, err := e.m.pg.TaskLLMSpend(taskID)
+	if err != nil {
+		log.Printf("[budget] task %s: cannot restore spend from llm_usage: %v", taskID, err)
+		return
+	}
+	if tokens == 0 && turns == 0 {
+		return
+	}
+	ledger.RestoreSpend(agent.Spend{Tokens: tokens, Turns: turns})
+	log.Printf("[budget] task %s restored %d tokens / %d turns from llm_usage", taskID, tokens, turns)
 }
 
 // budgetStop is the enforcement point of a planner round: it logs the remaining

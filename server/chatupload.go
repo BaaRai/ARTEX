@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,8 +13,13 @@ import (
 	"github.com/Autumn-27/artex/db"
 )
 
-// maxChatUpload caps a single chat-attachment upload request (memory + spill).
-const maxChatUpload = 128 << 20 // 128 MiB
+const (
+	// maxChatUpload caps the combined file data in one attachment upload.
+	maxChatUpload = 512 << 20 // 512 MiB
+	// Allow multipart headers and boundaries in addition to the file data.
+	chatUploadMultipartOverhead = 1 << 20 // 1 MiB
+	chatUploadLimitMessage      = "files exceed the 512 MiB upload limit"
+)
 
 // safeChatID guards the {id} path segment against traversal — task ids are numeric,
 // session ids are alnum/_/- ; anything with "/" or ".." is rejected.
@@ -79,14 +85,28 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "failed to create directory: "+err.Error())
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxChatUpload)
+	r.Body = http.MaxBytesReader(w, r.Body, maxChatUpload+chatUploadMultipartOverhead)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeErr(w, 400, "failed to parse the upload or size limit exceeded: "+err.Error())
+		var sizeErr *http.MaxBytesError
+		if errors.As(err, &sizeErr) {
+			writeErr(w, http.StatusRequestEntityTooLarge, chatUploadLimitMessage)
+			return
+		}
+		writeErr(w, 400, "failed to parse the upload: "+err.Error())
 		return
 	}
+	defer r.MultipartForm.RemoveAll()
 	files := r.MultipartForm.File["file"]
 	if len(files) == 0 {
 		writeErr(w, 400, "missing upload file (form field file)")
+		return
+	}
+	var totalSize int64
+	for _, hdr := range files {
+		totalSize += hdr.Size
+	}
+	if totalSize > maxChatUpload {
+		writeErr(w, http.StatusRequestEntityTooLarge, chatUploadLimitMessage)
 		return
 	}
 	out := make([]chatAttachment, 0, len(files))

@@ -110,10 +110,15 @@ func run() int {
 		log.Printf("[config] trusted proxies: %v", trusted)
 	}
 	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted))
+	// ReadTimeout bounds how long the request headers and body may take to arrive.
+	// It does not limit how long a handler runs, so an event stream stays open.
+	// WriteTimeout is left unset: a write deadline would cut that stream.
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	go func() {
@@ -127,9 +132,27 @@ func run() int {
 	<-ctx.Done()
 
 	log.Println("shutting down...")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = httpSrv.Shutdown(shutdownCtx)
+	// Close the listener before draining. Otherwise a request accepted during
+	// the drain can start a detached run, and mgr.Close runs while that run
+	// is still writing.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	httpErr := httpSrv.Shutdown(shutdownCtx)
+	cancel()
+	if httpErr != nil {
+		log.Printf("http shutdown: %v", httpErr)
+	}
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	drainErr := srv.Wait(drainCtx)
+	drainCancel()
+	if drainErr != nil {
+		log.Printf("task drain: %v", drainErr)
+	}
+	// The health writer flushes on ctx.Done(). Wait for it before the deferred
+	// store close, so the last cooling window is not written at a closed database.
+	srv.FlushLLMHealth()
+	if httpErr != nil || drainErr != nil {
+		return 1
+	}
 	return 0
 }
 

@@ -76,6 +76,11 @@ func (t *Traffic) insertExchange(id string, ts int64, host, method, urlTemplate,
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
+	// An id can repeat (seconds plus a rolling counter); the trace of the
+	// exchange it replaces must not stay attached to this one.
+	if _, err := tx.Exec(`DELETE FROM exchange_rewrites WHERE exchange_id=?`, id); err != nil {
+		return fmt.Errorf("clearing rewrite trace: %w", err)
+	}
 	res, err := tx.Exec(`INSERT OR REPLACE INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path)
 VALUES(?,?,?,?,?,?,?,?,?,?,'')`,
 		id, ts, host, method, urlTemplate, rawURL, status, contentType, reqLen, respLen)

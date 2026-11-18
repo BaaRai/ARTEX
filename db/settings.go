@@ -1,6 +1,9 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+	"strconv"
+)
 
 // Settings is a tiny key-value store for global app config the UI toggles at
 // runtime (e.g. traffic_capture). Missing keys fall back to caller defaults.
@@ -64,6 +67,79 @@ ON CONFLICT (key) DO NOTHING`, key, value)
 		return false, err
 	}
 	return n > 0, nil
+}
+
+// RotatePassword stores hash and increments the monotonic version in one
+// transaction. A failure leaves both rows unchanged. The returned version is
+// the value new sessions must carry.
+func (d *DB) RotatePassword(hashKey, hash, versionKey string) (int64, error) {
+	tx, err := d.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	sealed, err := sealSetting(hashKey, hash)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`
+INSERT INTO settings(key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, hashKey, sealed); err != nil {
+		return 0, err
+	}
+	var raw string
+	if err := tx.QueryRow(`
+INSERT INTO settings(key, value) VALUES ($1, '1')
+ON CONFLICT (key) DO UPDATE
+SET value = (settings.value::bigint + 1)::text, updated_at = now()
+RETURNING value`, versionKey).Scan(&raw); err != nil {
+		return 0, err
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// InsertPassword writes the hash only when that key is absent, and sets the
+// version to 1 in the same transaction. inserted is false when the hash
+// already exists; the version row is then left as it was.
+func (d *DB) InsertPassword(hashKey, hash, versionKey string) (version int64, inserted bool, err error) {
+	tx, err := d.Begin()
+	if err != nil {
+		return 0, false, err
+	}
+	defer tx.Rollback()
+	sealed, err := sealSetting(hashKey, hash)
+	if err != nil {
+		return 0, false, err
+	}
+	res, err := tx.Exec(`
+INSERT INTO settings(key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO NOTHING`, hashKey, sealed)
+	if err != nil {
+		return 0, false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, false, err
+	}
+	if n == 0 {
+		return 0, false, nil
+	}
+	if _, err := tx.Exec(`
+INSERT INTO settings(key, value) VALUES ($1, '1')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, versionKey); err != nil {
+		return 0, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, false, err
+	}
+	return 1, true, nil
 }
 
 // GetBool returns the boolean setting, or def when unset/unparseable.
