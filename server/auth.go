@@ -35,6 +35,8 @@ const (
 	// length, so passwords set under the old 8-character minimum still log in.
 	minPasswordRunes = 12
 	maxPasswordBytes = 72
+
+	pwdLimitTokenPrefix = "tok:"
 )
 
 // errDataSourceUnavailable is the uniform reply when a password-related read fails.
@@ -479,6 +481,12 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "Unauthorized")
 		return
 	}
+	if wait := s.passwordChangeWait(r); wait > 0 {
+		secs := int((wait + time.Second - 1) / time.Second)
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		writeErr(w, 429, fmt.Sprintf("Too many password change attempts, try again in %d seconds", secs))
+		return
+	}
 	var req struct {
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
@@ -520,8 +528,29 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "Save failed: "+err.Error())
 		return
 	}
+	s.passwordChangeReset(r)
 	s.applyPasswordVersion(version)
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// passwordChangeWait records one authenticated change-password attempt against
+// the client IP and the session token. Either bucket can block; rotating the
+// source address with a stolen token still hits the token bucket.
+func (s *Server) passwordChangeWait(r *http.Request) time.Duration {
+	if s.pwdLimit == nil {
+		return 0
+	}
+	ip := clientIP(r, s.trustedProxies)
+	tok := pwdLimitTokenPrefix + extractToken(r)
+	return max(s.pwdLimit.allow(ip), s.pwdLimit.allow(tok))
+}
+
+func (s *Server) passwordChangeReset(r *http.Request) {
+	if s.pwdLimit == nil {
+		return
+	}
+	s.pwdLimit.reset(clientIP(r, s.trustedProxies))
+	s.pwdLimit.reset(pwdLimitTokenPrefix + extractToken(r))
 }
 
 // POST /api/auth/login — validates username/password and returns a JWT.

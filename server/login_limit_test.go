@@ -36,7 +36,7 @@ func loginServer(t *testing.T, clk *fakeClock) (*Server, func(remote, password s
 		}
 		return string(hash), true, nil
 	}
-	s := &Server{jwtKey: []byte("0123456789abcdef0123456789abcdef"), loginLimit: newLoginLimiter(clk.now)}
+	s := &Server{jwtKey: []byte("0123456789abcdef0123456789abcdef"), loginLimit: newLoginLimiter(clk.now), pwdLimit: newLoginLimiter(clk.now)}
 	post := func(remote, password string, hdr map[string]string) *httptest.ResponseRecorder {
 		body := fmt.Sprintf(`{"username":"ARTEX","password":%q}`, password)
 		r := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(body))
