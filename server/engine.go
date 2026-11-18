@@ -672,6 +672,14 @@ func (h steerHooks) Stop(ctx context.Context, messages []llm.Message) (bool, []s
 	if prevent || len(blocking) > 0 || h.nudges == nil || h.limit <= 0 || !isThinkingOnlyTurn(messages) {
 		return prevent, blocking, msg
 	}
+	// A refused turn is empty as well, but there the provider declined the request;
+	// the model did not think and forget to act. A rerun resends the same
+	// conversation and is refused again, so let the run end and be reported as a
+	// refusal (terminalText) instead.
+	if stop := agent.LastStopReason(ctx); agent.IsRefusalStop(stop) {
+		log.Printf("[work %s] provider refused the turn (stop_reason=%s), not injecting an idle-turn rerun", h.label, stop)
+		return prevent, blocking, msg
+	}
 	n := h.nudges.Add(1)
 	if n > int64(h.limit) {
 		log.Printf("[work %s] idle turns (thinking only, no body text, no tools) reached the rerun cap %d, letting it finish", h.label, h.limit)
