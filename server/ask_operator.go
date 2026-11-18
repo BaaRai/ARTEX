@@ -37,7 +37,7 @@ func (s *Server) toolAskOperator() actool.CoreTool {
 				},
 				"image_path": map[string]any{
 					"type":        "string",
-					"description": "Optional path to a screenshot (png/jpg/jpeg/webp/gif, max 10MB), e.g. the browser_take_screenshot output. It is copied into the task uploads and shown to the operator.",
+					"description": "Optional path to a screenshot (png/jpg/jpeg/webp/gif, max 10MB) under this task's working directory, e.g. the browser_take_screenshot output. It is copied into the task uploads and shown to the operator.",
 				},
 			},
 			"required": []any{"question"},
@@ -156,6 +156,38 @@ func askOperatorActivity(text string, att []chatAttachment, derived []string) db
 	return a
 }
 
+// resolveAskOperatorImage maps image_path onto a regular file inside taskDir.
+// Relative paths are resolved from the task working directory (the worker CWD).
+// ".." segments, paths that EvalSymlinks outside taskDir, and non-images are refused.
+func resolveAskOperatorImage(taskDir, src string) (string, error) {
+	src = strings.TrimSpace(src)
+	ext := strings.ToLower(filepath.Ext(src))
+	if !askOperatorImageExt[ext] {
+		return "", fmt.Errorf("image_path must be a png/jpg/jpeg/webp/gif file, got %q", filepath.Base(src))
+	}
+	for _, el := range strings.Split(filepath.ToSlash(src), "/") {
+		if el == ".." {
+			return "", fmt.Errorf("image_path must stay inside the task working directory")
+		}
+	}
+	if !filepath.IsAbs(src) {
+		src = filepath.Join(taskDir, src)
+	}
+	realRoot, err := filepath.EvalSymlinks(taskDir)
+	if err != nil {
+		return "", fmt.Errorf("image not readable")
+	}
+	real, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return "", fmt.Errorf("image not readable")
+	}
+	rel, err := filepath.Rel(realRoot, real)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("image_path must stay inside the task working directory")
+	}
+	return real, nil
+}
+
 // stageAskOperatorImage copies the referenced image into the task's uploads dir
 // (the same place chat uploads land, so the transcript attachment card resolves)
 // and returns the attachment descriptor. Empty src returns no attachment.
@@ -164,25 +196,30 @@ func stageAskOperatorImage(dataDir, taskID, src string) ([]chatAttachment, error
 	if src == "" {
 		return nil, nil
 	}
-	ext := strings.ToLower(filepath.Ext(src))
-	if !askOperatorImageExt[ext] {
-		return nil, fmt.Errorf("image_path must be a png/jpg/jpeg/webp/gif file, got %q", filepath.Base(src))
-	}
-	st, err := os.Stat(src)
+	taskDir := filepath.Join(dataDir, "tasks", taskID)
+	resolved, err := resolveAskOperatorImage(taskDir, src)
 	if err != nil {
-		return nil, fmt.Errorf("image not readable: %v", err)
+		return nil, err
+	}
+	st, err := os.Stat(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("image not readable")
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("image_path must be a regular file")
 	}
 	if st.Size() > askOperatorMaxImage {
 		return nil, fmt.Errorf("image too large (%s, max 10MB)", humanBytes(st.Size()))
 	}
-	dir := filepath.Join(dataDir, "tasks", taskID, "uploads")
+	dir := filepath.Join(taskDir, "uploads")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	ext := strings.ToLower(filepath.Ext(resolved))
 	name := fmt.Sprintf("ask-operator-%d%s", time.Now().Unix(), ext)
-	in, err := os.Open(src)
+	in, err := os.Open(resolved)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("image not readable")
 	}
 	defer in.Close()
 	out, err := os.Create(filepath.Join(dir, name))
