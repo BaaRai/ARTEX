@@ -136,7 +136,7 @@ func FindingFilename(f *db.DBFinding) string {
 	// Defensive: strip one more path layer to rule out zip slip.
 	name = path.Base(name)
 	if len(name) > 120 {
-		name = name[:120]
+		name = strings.ToValidUTF8(name[:120], "")
 	}
 	return name + ".md"
 }
