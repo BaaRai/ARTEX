@@ -35,6 +35,14 @@ ARTEX is an offensive-security tool. Test only against:
 
 Testing, scanning, or exploiting third-party systems without explicit authorization is strictly prohibited. Reports that violate this principle may be closed without action.
 
+## Trusted Inputs and Scope Enforcement
+
+ARTEX trusts `output.json` as produced by its integrated scanner. The `scope_distance` field carried on scope-relevant events is the scanner's own verdict and is ingested as-is: an event the scanner marks in scope (per its own `-s`/`--no-scope` configuration) is treated as in scope without being re-checked against ARTEX's rule set.
+
+The enforced trust boundary is the **task allow-list**. Assets enter the asset graph (`insert_assets`) only through `EvaluateAssetGate`, which enforces the task's allow-list when one is configured; events rejected by the gate are recorded as `in_scope_not_asset` and cannot reach task execution.
+
+Accepted gap: when a task has no allow-list, the gate has nothing to enforce, and any host carried on an in-scope event enters the graph as an asset. Operators who rely on the scanner's scope rules alone should configure an allow-list per task, or review `output.json` before feeding it to ARTEX. Cross-checking ingested events against ARTEX's own rule set would change what existing scanner configurations mean for those operators, so it is treated as a deliberate design question (see #317), not an accepted vulnerability.
+
 ## What to Expect
 
 This is an open-source project maintained on a best-effort basis. We aim to acknowledge a report within about a week and keep you updated, but we cannot guarantee specific response or fix timeframes.
