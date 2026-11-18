@@ -69,6 +69,26 @@ func WithUsageSink(ctx context.Context, sink func(llm.Usage)) context.Context {
 	return context.WithValue(ctx, usageSinkContextKey{}, sink)
 }
 
+type stopSinkContextKey struct{}
+
+// WithStopSink attaches a callback that receives the stop reason of every call
+// made under ctx that completes normally, once per call, after the provider's
+// last event ("" when the provider reported none). The harness keeps the stop
+// reason only long enough to decide whether a turn used tools, so a host that
+// must tell a provider refusal (Anthropic stop_reason "refusal", or
+// finish_reason "content_filter" on OpenAI-compatible endpoints) from an
+// ordinary end of turn observes it here.
+func WithStopSink(ctx context.Context, sink func(stopReason string)) context.Context {
+	return context.WithValue(ctx, stopSinkContextKey{}, sink)
+}
+
+// reportStop hands stopReason to the ctx stop sink, if one is attached.
+func reportStop(ctx context.Context, stopReason string) {
+	if sink, _ := ctx.Value(stopSinkContextKey{}).(func(string)); sink != nil {
+		sink(stopReason)
+	}
+}
+
 // Recorder wraps an llm.Provider and records every completion call.
 type Recorder struct {
 	inner llm.Provider
@@ -223,6 +243,7 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 		}
 
 		// Stream completed normally.
+		reportStop(ctx, stopReason)
 		finish(streamErr)
 	}
 }
@@ -254,6 +275,8 @@ func (r *Recorder) Complete(ctx context.Context, req llm.CompletionRequest) (llm
 	status := "ok"
 	if err != nil {
 		status = "error"
+	} else {
+		reportStop(ctx, stopReason)
 	}
 	r.recordUsage(ctx, taskID, expID, worker, usage, int(time.Since(start).Milliseconds()), status)
 	if recordBodies {

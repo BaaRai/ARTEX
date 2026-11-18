@@ -94,6 +94,48 @@ func TestUsageSinkSeesMeteredCalls(t *testing.T) {
 	}
 }
 
+// The stop sink sees the final stop reason of each call that completes, which the
+// harness otherwise drops: a refusal is an empty, tool-less turn like any other.
+func TestStopSinkSeesFinalStopReason(t *testing.T) {
+	var got []string
+	ctx := WithStopSink(context.Background(), func(stop string) { got = append(got, stop) })
+	recorder := Wrap(refusalStreamProvider{}, nil, "model", "profile", "", "", func() bool { return false })
+	for _, err := range recorder.Stream(ctx, llm.CompletionRequest{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, _, err := recorder.Complete(ctx, llm.CompletionRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "refusal" || got[1] != "stop" {
+		t.Fatalf("sink saw %q, want [refusal stop]", got)
+	}
+	// Without a sink on the context nothing is reported and nothing breaks.
+	for _, err := range recorder.Stream(context.Background(), llm.CompletionRequest{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// refusalStreamProvider streams what Anthropic sends for a refusal before any
+// output: message_start, then message_delta with stop_reason "refusal" and no
+// content blocks at all.
+type refusalStreamProvider struct{ completeProvider }
+
+func (refusalStreamProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+	return func(yield func(llm.StreamEvent, error) bool) {
+		if !yield(llm.StreamEvent{Type: llm.SEMessageStart, Usage: llm.Usage{InputTokens: 41}}, nil) {
+			return
+		}
+		if !yield(llm.StreamEvent{Type: llm.SEMessageDelta, StopReason: "refusal", Usage: llm.Usage{InputTokens: 41}}, nil) {
+			return
+		}
+		yield(llm.StreamEvent{Type: llm.SEMessageStop}, nil)
+	}
+}
+
 type meteredStreamProvider struct{ completeProvider }
 
 func (meteredStreamProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
