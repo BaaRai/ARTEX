@@ -184,7 +184,7 @@ ARG PLAYWRIGHT_VERSION=1.64.1
 RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" "playwright@${PLAYWRIGHT_VERSION}" \
     && playwright-cli --help \
     && playwright install --with-deps chromium \
-    && node /usr/local/lib/node_modules/@playwright/mcp/node_modules/playwright-core/cli.js install chromium \
+    && node "$(node -p 'require.resolve("playwright-core/cli.js",{paths:["/usr/local/lib/node_modules/@playwright/mcp"]})')" install chromium \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # Binary compiled from source in the build stage above.

@@ -20,19 +20,44 @@ const (
 // /opt/google/chrome, which the image does not ship.
 const browserMCPSeedArgs = `["--headless","--browser","chromium"]`
 
-// rewriteStockNpxBrowserMCP converts the original seed
-// `npx @playwright/mcp [--headless ...]` to the image's global playwright-mcp
-// binary. ok is false when the row is not that stock invocation (the operator
-// changed the command or the package), so those rows are left alone.
+// npxMetaFlags are npx switches that do not take a value and that still leave
+// the following argument as the package spec. `-y` is the form the UI mock
+// used; `--` is a common separator. Flags that take a value (`-p`, `--package`)
+// are treated as a custom invocation and left alone.
+var npxMetaFlags = map[string]bool{
+	"-y":      true,
+	"--yes":   true,
+	"--":      true,
+	"-q":      true,
+	"--quiet": true,
+}
+
+func playwrightMCPPackageIndex(args []string) (int, bool) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if npxMetaFlags[a] {
+			continue
+		}
+		if a == "@playwright/mcp" || strings.HasPrefix(a, "@playwright/mcp@") {
+			return i, true
+		}
+		return 0, false
+	}
+	return 0, false
+}
+
+// rewriteStockNpxBrowserMCP converts `npx [@meta...] @playwright/mcp [...]` to
+// the image's global playwright-mcp binary. ok is false when the row is not
+// that invocation (the operator changed the command or the package).
 func rewriteStockNpxBrowserMCP(command string, args []string) (string, []string, bool) {
-	if command != "npx" || len(args) == 0 {
+	if command != "npx" {
 		return command, args, false
 	}
-	pkg := args[0]
-	if pkg != "@playwright/mcp" && !strings.HasPrefix(pkg, "@playwright/mcp@") {
+	idx, ok := playwrightMCPPackageIndex(args)
+	if !ok {
 		return command, args, false
 	}
-	rest := append([]string{}, args[1:]...)
+	rest := append([]string{}, args[idx+1:]...)
 	if !hasCLIFlag(rest, "--headless") {
 		rest = append(rest, "--headless")
 	}
@@ -40,6 +65,22 @@ func rewriteStockNpxBrowserMCP(command string, args []string) (string, []string,
 		rest = append(rest, "--browser", "chromium")
 	}
 	return browserMCPCommand, rest, true
+}
+
+// rewriteBrowserMCPRow is the one-time row rewrite: stock npx @playwright/mcp
+// becomes playwright-mcp, and a playwright-mcp row that still has no --browser
+// (the MCP defaults to a Chrome channel the image does not ship) gets
+// --browser chromium. Any other command or package is left alone.
+func rewriteBrowserMCPRow(command string, args []string) (string, []string, bool) {
+	cmd, out, ok := rewriteStockNpxBrowserMCP(command, args)
+	if !ok {
+		cmd, out = command, append([]string{}, args...)
+	}
+	if cmd == browserMCPCommand && !hasCLIFlag(out, "--browser") {
+		out = append(out, "--browser", "chromium")
+		ok = true
+	}
+	return cmd, out, ok
 }
 
 func hasCLIFlag(args []string, flag string) bool {
@@ -53,9 +94,10 @@ func hasCLIFlag(args []string, flag string) bool {
 }
 
 // migrateStockBrowserMCP rewrites a leftover stock `npx @playwright/mcp` browser
-// MCP row once. Gated by a settings flag so an operator who later puts npx back
-// is not rewritten on the next start. A row whose command or first arg is no
-// longer the stock seed is left as-is.
+// MCP row once, and adds `--browser chromium` to a playwright-mcp row that
+// still has none. Gated by a settings flag so an operator who later puts npx
+// back is not rewritten on the next start. Any other command or package is
+// left as-is.
 func (d *DB) migrateStockBrowserMCP() error {
 	if v, _, _ := d.GetSetting(browserMCPDirectBinSetting); v == "done" {
 		return nil
@@ -75,7 +117,7 @@ func (d *DB) migrateStockBrowserMCP() error {
 			return d.SetSetting(browserMCPDirectBinSetting, "done")
 		}
 	}
-	newCommand, newArgs, ok := rewriteStockNpxBrowserMCP(command, args)
+	newCommand, newArgs, ok := rewriteBrowserMCPRow(command, args)
 	if ok {
 		raw, err := json.Marshal(newArgs)
 		if err != nil {
