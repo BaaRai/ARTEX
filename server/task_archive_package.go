@@ -428,7 +428,7 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 			errs = append(errs, getErr)
 			continue
 		}
-		if archive != nil && archive.State == pgdb.ArchiveReady {
+		if archive != nil && archive.ArchivePath != "" && archive.SHA256 != "" {
 			if err := os.RemoveAll(root); err != nil {
 				errs = append(errs, err)
 			}
@@ -437,9 +437,16 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 		stage := &taskArchiveFileStage{root: root, payload: filepath.Join(root, "payload"), journal: journal}
 		if err := stage.rollback(); err != nil {
 			errs = append(errs, err)
+			continue
 		}
-		if archive != nil && archive.ArchivePath != "" {
-			_ = os.Remove(archive.ArchivePath)
+		// The process can exit after compression but before an upload journal or
+		// database location exists. Remove that temporary package only after the
+		// source-file rollback succeeds, for both local and remote backends.
+		packagePath := taskArchivePath(dataDir, journal.ArchiveID, journal.TaskID)
+		if err := validateArchivePath(dataDir, packagePath); err != nil {
+			errs = append(errs, err)
+		} else if err := removeLocalArchivePackage(packagePath); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
