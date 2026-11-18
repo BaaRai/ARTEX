@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -52,32 +51,20 @@ func TestApplySchemaRetriesOnlyDeadlocks(t *testing.T) {
 	}
 }
 
-func TestValidPostgresDBName(t *testing.T) {
+func TestCreateDatabaseSQLQuotesName(t *testing.T) {
 	tests := []struct {
 		name string
-		ok   bool
+		want string
 	}{
-		{"artex", true},
-		{"artex_db", true},
-		{"artex_agent", true},
-		{"_tmp", true},
-		{"A1", true},
-		{"postgres", true},
-		{"", false},
-		{"1artex", false},
-		{"artex-db", false},
-		{"artex.db", false},
-		{"artex db", false},
-		{"artex$db", false},
-		{`x"; DROP TABLE y; --`, false},
-		{`artex"`, false},
-		{"café", false},
-		{strings.Repeat("a", 63), true},
-		{strings.Repeat("a", 64), false},
+		{"artex", `CREATE DATABASE "artex"`},
+		{"artex-db", `CREATE DATABASE "artex-db"`},
+		{"café", `CREATE DATABASE "café"`},
+		{`artex"`, `CREATE DATABASE "artex"""`},
+		{`x"; DROP TABLE y; --`, `CREATE DATABASE "x""; DROP TABLE y; --"`},
 	}
 	for _, tt := range tests {
-		if got := validPostgresDBName(tt.name); got != tt.ok {
-			t.Errorf("validPostgresDBName(%q)=%v, want %v", tt.name, got, tt.ok)
+		if got := createDatabaseSQL(tt.name); got != tt.want {
+			t.Errorf("createDatabaseSQL(%q)=%q, want %q", tt.name, got, tt.want)
 		}
 	}
 }

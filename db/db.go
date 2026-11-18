@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/config"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx database/sql driver ("pgx")
 )
@@ -142,9 +143,6 @@ func ensureDatabase(dsn string) error {
 	if dbName == "" || dbName == "postgres" {
 		return nil
 	}
-	if !validPostgresDBName(dbName) {
-		return fmt.Errorf("invalid database name %q", dbName)
-	}
 	// connect to the postgres maintenance database instead
 	adminDSN := *u
 	adminDSN.Path = "/postgres"
@@ -159,33 +157,19 @@ func ensureDatabase(dsn string) error {
 	var exists bool
 	_ = admin.QueryRow(`SELECT true FROM pg_database WHERE datname=$1`, dbName).Scan(&exists)
 	if !exists {
-		// dbName is a validated identifier: quoting preserves case and cannot
-		// be closed by the name itself.
-		if _, err := admin.Exec(`CREATE DATABASE "` + dbName + `"`); err != nil {
+		if _, err := admin.Exec(createDatabaseSQL(dbName)); err != nil {
 			return fmt.Errorf("create database %q: %w", dbName, err)
 		}
 	}
 	return nil
 }
 
-// validPostgresDBName reports whether name is safe to embed in a quoted
-// PostgreSQL identifier (ASCII letters, digits, underscore; not starting
-// with a digit; at most 63 bytes). Quotes, spaces, and punctuation are
-// rejected so the name cannot close CREATE DATABASE "...".
-func validPostgresDBName(name string) bool {
-	if name == "" || len(name) > 63 {
-		return false
-	}
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		switch {
-		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c == '_':
-		case i > 0 && c >= '0' && c <= '9':
-		default:
-			return false
-		}
-	}
-	return true
+// createDatabaseSQL builds the CREATE DATABASE statement for a DSN-supplied
+// database name. pgx.Identifier quotes it and doubles any embedded quote, so
+// the name cannot close the identifier, and names PostgreSQL accepts but a
+// restrictive allowlist would reject (hyphens, dots, non-ASCII) keep working.
+func createDatabaseSQL(name string) string {
+	return "CREATE DATABASE " + pgx.Identifier{name}.Sanitize()
 }
 
 // Open connects, applies the schema (idempotent) and the embedded versioned
