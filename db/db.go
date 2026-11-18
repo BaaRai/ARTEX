@@ -317,12 +317,20 @@ ON CONFLICT (agent_id, var_name) DO UPDATE
 	// the recording proxy + CA at runtime (server.Manager.syncBrowserMCPProxy).
 	// Insert only if absent so we never clobber user edits (args/env/enabled/
 	// visibility) on restart.
+	// Launched through the installed playwright-mcp binary, not `npx
+	// @playwright/mcp`: npx asks the npm registry on every start, even with the
+	// package installed globally, so the version that runs is the registry's.
+	// --browser chromium: the default is the "chrome" channel (Google Chrome),
+	// which the image does not have; it ships Playwright's Chromium.
 	if _, err := d.Exec(`
 INSERT INTO mcp_servers(name, transport, command, args, env, enabled)
-VALUES ('browser', 'stdio', 'npx', $1, '{}', false)
+VALUES ('browser', 'stdio', $1, $2, '{}', false)
 ON CONFLICT (name) DO NOTHING`,
-		`["@playwright/mcp","--headless"]`); err != nil {
+		browserMCPCommand, browserMCPSeedArgs); err != nil {
 		return fmt.Errorf("seed browser mcp: %w", err)
+	}
+	if err := d.migrateStockBrowserMCP(); err != nil {
+		return fmt.Errorf("migrate browser mcp: %w", err)
 	}
 	// NOTE: the placeholder ScopeSentry data-source MCP (empty URL + empty X-API-Key,
 	// disabled) is seeded directly in schema.sql §F so a raw `psql < schema.sql` init
