@@ -11,10 +11,10 @@
 Self-hosted multi-agent offensive security. A planner explores, workers run real tools,
 and every finding stays bound to the assets and HTTP traffic that prove it.
 
-[![Release](https://img.shields.io/github/v/release/pipsyrs/ARTEX?label=release&color=6b34db)](https://github.com/pipsyrs/ARTEX/releases)
-[![License](https://img.shields.io/github/license/pipsyrs/ARTEX?color=6b34db)](LICENSE)
-[![CI](https://github.com/pipsyrs/ARTEX/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pipsyrs/ARTEX/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/github/go-mod/go-version/pipsyrs/ARTEX?color=6b34db)](go.mod)
+[![Release](https://img.shields.io/github/v/release/BaaRai/ARTEX?label=release&color=6b34db)](https://github.com/BaaRai/ARTEX/releases)
+[![License](https://img.shields.io/github/license/BaaRai/ARTEX?color=6b34db)](LICENSE)
+[![CI](https://github.com/BaaRai/ARTEX/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BaaRai/ARTEX/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/BaaRai/ARTEX?color=6b34db)](go.mod)
 
 [Quick start](#quick-start) · [Screenshots](#screenshots) · [How it works](#how-it-works) · [Install](#installation) · [Configuration](#configuration) · [Security](SECURITY.md)
 
@@ -44,7 +44,7 @@ justify it, and every autonomous action passes through scope rules, approval gat
 ## Quick start
 
 ```bash
-git clone https://github.com/pipsyrs/ARTEX.git
+git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 ./run.sh docker                 # installs Docker if needed, writes .env, builds and starts
 ```
@@ -325,7 +325,7 @@ Docker Desktop**. Step-by-step guides: [Kali Linux](#kali-linux) and [Windows](#
 ### Option 1: Docker (recommended)
 
 ```bash
-git clone https://github.com/pipsyrs/ARTEX.git
+git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 ./run.sh docker
 ```
@@ -371,7 +371,7 @@ tools installed on the host, so dev mode suits Kali Linux, where the scanners ar
 
 ### Option 3: prebuilt binaries (Releases)
 
-Download the zip for your platform from [Releases](https://github.com/pipsyrs/ARTEX/releases). It
+Download the zip for your platform from [Releases](https://github.com/BaaRai/ARTEX/releases). It
 contains `artex` (`artex.exe` on Windows), `skills/` and `config.example.json`:
 
 ```bash
@@ -392,7 +392,7 @@ neither.
 
 ```bash
 sha256sum -c SHA256SUMS                           # add --ignore-missing if you downloaded only some zips
-gh attestation verify <zip> --repo pipsyrs/ARTEX   # built by this repository's release workflow
+gh attestation verify <zip> --repo BaaRai/ARTEX   # built by this repository's release workflow
 ```
 
 ### Option 4: build the single binary from source
@@ -431,7 +431,7 @@ sudo apt install -y git docker.io docker-compose docker-buildx
 sudo systemctl enable --now docker
 sudo usermod -aG docker "$USER" && newgrp docker   # use docker without sudo
 
-git clone https://github.com/pipsyrs/ARTEX.git
+git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 ./run.sh docker
 ```
@@ -445,7 +445,7 @@ sudo systemctl enable --now postgresql
 sudo -u postgres psql -c "CREATE USER artex WITH PASSWORD 'change-me-please';" \
                       -c "CREATE DATABASE artex OWNER artex;"
 
-git clone https://github.com/pipsyrs/ARTEX.git
+git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 ./run.sh dev        # choose 1 (existing PostgreSQL): 127.0.0.1 / 5432 / artex / your password / artex
 ```
@@ -470,7 +470,7 @@ it in Docker or WSL2. Native `artex.exe` builds exist but are not recommended fo
    file permissions) and start:
    ```bash
    cd ~
-   git clone https://github.com/pipsyrs/ARTEX.git
+   git clone https://github.com/BaaRai/ARTEX.git
    cd ARTEX
    ./run.sh docker
    ```
@@ -484,7 +484,7 @@ http://localhost:3000 in the Windows browser.
 In PowerShell, with Docker Desktop running:
 
 ```powershell
-git clone https://github.com/pipsyrs/ARTEX.git
+git clone https://github.com/BaaRai/ARTEX.git
 cd ARTEX
 copy .env.example .env      # edit .env: set POSTGRES_PASSWORD, optionally an LLM key
 docker compose up -d --build
@@ -844,7 +844,7 @@ Operational security properties:
 
 ## About this fork
 
-This repository is the English translation and continuation of ARTEX, originally by [Autumn-27](https://github.com/Autumn-27). The upstream repository is no longer public, so the link points to the author profile. This repository, [pipsyrs/ARTEX](https://github.com/pipsyrs/ARTEX), is a fork of [BaaRai/ARTEX](https://github.com/BaaRai/ARTEX); releases before it (up to v0.6.0) were published there. Changes in this fork are tracked in [CHANGELOG.md](CHANGELOG.md), under the same AGPL-3.0 license.
+This repository is the English translation and continuation of ARTEX, originally by [Autumn-27](https://github.com/Autumn-27). The upstream repository is no longer public, so the link points to the author profile. Changes in this fork are tracked in [CHANGELOG.md](CHANGELOG.md), under the same AGPL-3.0 license.
 
 ---
 

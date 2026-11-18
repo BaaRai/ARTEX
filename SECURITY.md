@@ -14,7 +14,7 @@ Notes:
 
 **Do not open a public issue for a security vulnerability.**
 
-Report through **GitHub Security Advisories**: **Security** tab → **Report a vulnerability** in the `pipsyrs/ARTEX` repository. This is the only reporting channel.
+Report through **GitHub Security Advisories**: **Security** tab → **Report a vulnerability** in the `BaaRai/ARTEX` repository. This is the only reporting channel.
 
 Please include:
 - A description of the vulnerability and its expected impact.
