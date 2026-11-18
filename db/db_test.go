@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,36 @@ func TestApplySchemaRetriesOnlyDeadlocks(t *testing.T) {
 	})
 	if !errors.Is(err, nonRetryable) || nonRetryableAttempts != 1 {
 		t.Fatalf("non-retryable result: attempts=%d err=%v", nonRetryableAttempts, err)
+	}
+}
+
+func TestValidPostgresDBName(t *testing.T) {
+	tests := []struct {
+		name string
+		ok   bool
+	}{
+		{"artex", true},
+		{"artex_db", true},
+		{"artex_agent", true},
+		{"_tmp", true},
+		{"A1", true},
+		{"postgres", true},
+		{"", false},
+		{"1artex", false},
+		{"artex-db", false},
+		{"artex.db", false},
+		{"artex db", false},
+		{"artex$db", false},
+		{`x"; DROP TABLE y; --`, false},
+		{`artex"`, false},
+		{"café", false},
+		{strings.Repeat("a", 63), true},
+		{strings.Repeat("a", 64), false},
+	}
+	for _, tt := range tests {
+		if got := validPostgresDBName(tt.name); got != tt.ok {
+			t.Errorf("validPostgresDBName(%q)=%v, want %v", tt.name, got, tt.ok)
+		}
 	}
 }
 

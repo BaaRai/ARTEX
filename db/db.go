@@ -142,6 +142,9 @@ func ensureDatabase(dsn string) error {
 	if dbName == "" || dbName == "postgres" {
 		return nil
 	}
+	if !validPostgresDBName(dbName) {
+		return fmt.Errorf("invalid database name %q", dbName)
+	}
 	// connect to the postgres maintenance database instead
 	adminDSN := *u
 	adminDSN.Path = "/postgres"
@@ -156,11 +159,33 @@ func ensureDatabase(dsn string) error {
 	var exists bool
 	_ = admin.QueryRow(`SELECT true FROM pg_database WHERE datname=$1`, dbName).Scan(&exists)
 	if !exists {
+		// dbName is a validated identifier: quoting preserves case and cannot
+		// be closed by the name itself.
 		if _, err := admin.Exec(`CREATE DATABASE "` + dbName + `"`); err != nil {
 			return fmt.Errorf("create database %q: %w", dbName, err)
 		}
 	}
 	return nil
+}
+
+// validPostgresDBName reports whether name is safe to embed in a quoted
+// PostgreSQL identifier (ASCII letters, digits, underscore; not starting
+// with a digit; at most 63 bytes). Quotes, spaces, and punctuation are
+// rejected so the name cannot close CREATE DATABASE "...".
+func validPostgresDBName(name string) bool {
+	if name == "" || len(name) > 63 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c == '_':
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Open connects, applies the schema (idempotent) and the embedded versioned
