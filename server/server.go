@@ -80,8 +80,12 @@ type Server struct {
 	llmProv   llm.Provider
 	llmDirect llm.Provider // concrete global provider, before any failover pool
 	llmCfg    agent.Config // current LLM config (key not exposed)
-	llmOn     bool
-	llmProf   string // active LLM profile name (for llmrec tagging)
+	// llmHealthProfileID is the llm_profiles row llmProv was built from, or 0
+	// when it came from environment settings. Task selections use it to key
+	// breaker health for the global fallback path.
+	llmHealthProfileID int64
+	llmOn              bool
+	llmProf            string // active LLM profile name (for llmrec tagging)
 
 	// chatBusy guards the per-task main-agent run: the chat handler launches the
 	// agent on the server's background ctx (not the request ctx) and returns
@@ -504,11 +508,13 @@ func maxTokensResolver(cfg agent.Config) func() int {
 // the running engine as the GLOBAL active pair. Safe to call at runtime (UI configures LLM).
 func (s *Server) applyLLM(cfg agent.Config) error {
 	var prov llm.Provider
+	var healthID int64
 	// A persisted active profile must use the same cached provider as task chains
 	// and Agent bindings, otherwise each path owns a separate rate limiter.
 	if active, _ := s.m.pg.ActiveProfile(); active != nil {
 		if activeCfg, ok := s.loadProfileConfig(active.ID); ok && activeCfg == cfg {
 			prov, _, _ = s.providerForProfile(active.ID)
+			healthID = active.ID
 		}
 	}
 	if prov == nil {
@@ -555,6 +561,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.chatAgent.SetNoaEnabled(s.m.NoaCompactionEnabled) // experimental: noa context compaction (read per run)
 	s.llmProv = prov
 	s.llmCfg = cfg
+	s.llmHealthProfileID = healthID
 	s.llmOn = true
 	s.cfgMu.Unlock()
 	s.invalidateTaskAgents()

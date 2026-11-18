@@ -10,6 +10,7 @@
 package llmpool
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -157,6 +158,47 @@ func (r *Registry) Trip(id int64, errMsg string, hard bool) (tripped bool) {
 		r.persist(id, *st)
 	}
 	return tripped
+}
+
+// RecordCall applies the failover health policy to one provider call. The Pool
+// calls it for every member attempt, and a caller that runs a provider directly
+// (a task whose selection bypasses the Pool) calls it too, so a profile's state
+// does not depend on which path the request took.
+//
+// stream tells a streaming call from an atomic one; committed says whether any
+// event already reached the caller (streaming only). The rules are the ones the
+// Pool applies:
+//
+//   - a completed call (err == nil) clears the state with Pass;
+//   - a failure that does not trigger failover (context cancellation, a
+//     deterministic 4xx) is ignored on a stream, and clears the state on an
+//     atomic call, matching Complete's non-failover path;
+//   - a failover-eligible stream failure trips only before the first event:
+//     after that the caller already has output and the state is left alone;
+//   - a failover-eligible atomic failure trips.
+//
+// id 0 is a no-op (no profile to key, e.g. an environment-only configuration).
+// It returns whether this call opened the breaker, and the shortened error
+// stored with it.
+func (r *Registry) RecordCall(ctx context.Context, id int64, stream, committed bool, err error) (tripped bool, errMsg string) {
+	if id == 0 {
+		return false, ""
+	}
+	if err == nil {
+		r.Pass(id)
+		return false, ""
+	}
+	if !shouldFailover(ctx, err) {
+		if !stream {
+			r.Pass(id)
+		}
+		return false, ""
+	}
+	if stream && committed {
+		return false, ""
+	}
+	msg := trimErr(err)
+	return r.Trip(id, msg, isHardFailure(err)), msg
 }
 
 // Reset clears one profile's state — the UI's "Recover now" action.
