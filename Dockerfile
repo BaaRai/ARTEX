@@ -181,10 +181,13 @@ RUN set -eux; \
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 ARG PLAYWRIGHT_CLI_VERSION=0.1.22
 ARG PLAYWRIGHT_VERSION=1.64.1
+# playwright-core's exports map hides cli.js from require.resolve, so run the
+# binary npm links for @playwright/mcp instead: it is the copy MCP actually
+# loads, and it installs the Chromium revision that copy expects.
 RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" "playwright@${PLAYWRIGHT_VERSION}" \
     && playwright-cli --help \
     && playwright install --with-deps chromium \
-    && node "$(node -p 'require.resolve("playwright-core/cli.js",{paths:["/usr/local/lib/node_modules/@playwright/mcp"]})')" install chromium \
+    && "$(npm root -g)/@playwright/mcp/node_modules/.bin/playwright-core" install chromium \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # Binary compiled from source in the build stage above.
