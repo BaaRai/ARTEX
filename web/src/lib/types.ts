@@ -101,7 +101,6 @@ export interface TaskArchiveTokenStats {
 }
 
 export interface TaskArchive {
-  storage?: "local" | "s3";
   id: number;
   task_id: number;
   state: TaskArchiveState;
