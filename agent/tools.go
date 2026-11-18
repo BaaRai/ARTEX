@@ -1591,20 +1591,9 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 		"  · **Negative conclusions** (not injectable / port closed / no entry found, etc.) state only \"observation + tentative reading\" — state what you actually saw; whether to abandon the direction is for the planner to decide globally; always provide evidence, mark inferred when the means weren't exhausted or the evidence is weak (including probed only once, looks-like), and mark observed only when truly exhausted and directly seen.",
 		recordFactSchema(),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
-			var a struct {
-				Facts    []factItem `json:"facts"`
-				factItem            // single mode + batch default intent_id
-			}
-			if err := json.Unmarshal(in, &a); err != nil {
+			a, batch, err := decodeRecordFactInput(in)
+			if err != nil {
 				return actool.Errorf("invalid record_fact input: " + err.Error() + "; no facts were written"), nil
-			}
-			var fields map[string]json.RawMessage
-			if err := json.Unmarshal(in, &fields); err != nil || fields == nil {
-				return actool.Errorf("record_fact input must be an object; no facts were written"), nil
-			}
-			_, batch := fields["facts"]
-			if batch && len(a.Facts) == 0 {
-				return actool.Errorf("facts must be a non-empty array of complete facts, each with its own summary; for a single fact omit facts and provide summary. No facts were written"), nil
 			}
 			items := a.Facts
 			if !batch {

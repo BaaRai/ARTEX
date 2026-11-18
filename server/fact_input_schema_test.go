@@ -30,6 +30,7 @@ func TestRecordFactInputSchemaUpgrade(t *testing.T) {
 	t.Cleanup(func() { pg.UpdateTool(old.Key, old.Description, old.Schema, bindings, old.Enabled) })
 	legacy := map[string]any{
 		"type": "object", "required": []string{"summary"},
+		"anyOf": []any{map[string]any{"required": []string{"summary"}}},
 		"properties": map[string]any{
 			"summary":    map[string]any{"type": "string", "description": "operator summary"},
 			"confidence": map[string]any{"type": "string", "default": "inferred"},
@@ -46,6 +47,12 @@ func TestRecordFactInputSchemaUpgrade(t *testing.T) {
 		if _, ok := schema["required"]; ok {
 			t.Fatal("top-level summary still required for batches")
 		}
+		if _, ok := schema["anyOf"]; ok {
+			t.Fatal("root anyOf still present")
+		}
+		if schema["additionalProperties"] != false {
+			t.Fatal("unknown fields allowed")
+		}
 		props := schema["properties"].(map[string]any)
 		items := props["facts"].(map[string]any)["items"].(map[string]any)
 		itemProps := items["properties"].(map[string]any)
@@ -53,7 +60,7 @@ func TestRecordFactInputSchemaUpgrade(t *testing.T) {
 			t.Fatal("repaired schema missing alias or batch summary")
 		}
 		if props["summary"].(map[string]any)["description"] != "operator summary" ||
-			props["confidence"].(map[string]any)["default"] != "inferred" || props["custom"] == nil {
+			props["confidence"].(map[string]any)["default"] != "inferred" || props["custom"] != nil {
 			t.Fatal("operator annotations lost")
 		}
 		if err := actool.ValidateInput(schema, json.RawMessage(`{"facts":[{"summary":"complete batch item"}]}`)); err != nil {
