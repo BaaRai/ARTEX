@@ -49,6 +49,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **BlobRange length no longer wraps int64**: `offset+length > size` overflowed when length was near MaxInt64, so the cap was skipped and `make([]byte, length)` could exhaust memory. The bound is now `length > size-offset`.
 - **PostgreSQL text[] literals escape backslashes**: `marshalStringArray` quoted double quotes but not backslashes, so a value ending in `\"` could close the current array element and inject another. It now doubles backslashes before quotes, matching `marshalJSONBArray`.
 - **Browser MCP env null no longer crashes startup**: a stored MCP `env` of JSON `null` unmarshaled into a nil map, and `syncBrowserMCPProxy` then assigned `NODE_EXTRA_CA_CERTS` when traffic capture was on, panicking the process on every start. `decodeStrMap` now always returns a writable map.
 - **Provider refusals reported as refusals**: a turn the provider's safety system declined (Anthropic `stop_reason: "refusal"`, OpenAI-compatible `finish_reason: "content_filter"`) has no text and no tool calls, so it ended as `completed` with "the model ended this turn normally", and the idle-turn rerun resent the same conversation up to the empty-response retry count, where it is expected to be refused again. The LLM recorder now hands each call's stop reason to the run (`llmrec.WithStopSink`, `agent.WithStopTracker`). After a refusal the idle-turn rerun is skipped, and the run summary says the provider refused the turn and the intent was not completed.
