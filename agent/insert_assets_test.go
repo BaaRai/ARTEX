@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -447,5 +448,51 @@ func TestInsertAssetsRejectsHostnameIPPerItem(t *testing.T) {
 	}
 	if stored != 0 {
 		t.Fatalf("rejected hostname still stored in assets.ip (%d rows)", stored)
+	}
+}
+
+func TestInsertAssetsRuleLoadFailure(t *testing.T) {
+	if out, refused := insertAssetsRuleLoadFailure(nil); refused || out.IsError {
+		t.Fatalf("nil error must not refuse: refused=%v IsError=%v %q", refused, out.IsError, out.Flatten())
+	}
+
+	out, refused := insertAssetsRuleLoadFailure(errors.New("sql: database is closed"))
+	text := out.Flatten()
+	if !refused || !out.IsError || !strings.Contains(text, "asset intercept rules are unavailable") {
+		t.Fatalf("want fail-closed refusal, refused=%v IsError=%v %q", refused, out.IsError, text)
+	}
+	for _, leak := range []string{"sql:", "database is closed"} {
+		if strings.Contains(text, leak) {
+			t.Fatalf("tool result leaked the load error: %q", text)
+		}
+	}
+}
+
+func TestInsertAssetsRefusesWhenInterceptRulesUnavailable(t *testing.T) {
+	d := testDB(t)
+	ts := NewToolSet(nil, "")
+	ts.SetAssetStore(d.Assets(), d.Companies())
+	d.Close()
+
+	raw, err := json.Marshal(map[string]any{
+		"assets": []any{
+			map[string]any{"type": "ip", "ip": "203.0.113.50"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := ts.insertAssets().Call(context.Background(), raw, nil)
+	if err != nil {
+		t.Fatalf("Call error: %v", err)
+	}
+	text := res.Flatten()
+	if !res.IsError || !strings.Contains(text, "asset intercept rules are unavailable") {
+		t.Fatalf("want fail-closed refusal, IsError=%v %q", res.IsError, text)
+	}
+	for _, leak := range []string{"sql:", "database is closed", "pq:", "connection"} {
+		if strings.Contains(strings.ToLower(text), strings.ToLower(leak)) {
+			t.Fatalf("tool result leaked the load error: %q", text)
+		}
 	}
 }
