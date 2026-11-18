@@ -107,7 +107,7 @@ FROM python:3.12-slim-bookworm
 ARG TARGETARCH
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
+      ca-certificates tini ripgrep curl wget vim git jq unzip xz-utils \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
     && rm -rf /var/lib/apt/lists/*
 # Node 22 from the official nodejs.org tarball, verified against its SHASUMS256.txt:
@@ -183,14 +183,14 @@ RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "@playwright/cli@
 WORKDIR /app
 # Binary compiled from source in the build stage above.
 COPY --from=build /out/artex /app/artex
-# Daemon startup script: relaunches the process after a crash and forwards SIGTERM
-# to artex — docker stop only signals PID 1; without forwarding, artex never receives it,
-# cannot shut down gracefully, and is hard-killed by SIGKILL after 10 seconds.
-COPY start.sh /app/start.sh
-RUN chmod +x /app/artex /app/start.sh && mkdir -p /app/keys
+RUN chmod +x /app/artex && mkdir -p /app/keys
 COPY skills/ /app/skills/
 # persistence points: data/ (traffic index, task files, transcripts) and keys/ (jwt.key, secret.key, via ARTEX_JWT_KEY_DIR)
 VOLUME ["/app/data", "/app/keys"]
 EXPOSE 8787 8788
-ENTRYPOINT ["/app/start.sh"]
+# tini as PID 1 forwards docker stop's SIGTERM to artex so it shuts down gracefully
+# (docker stop signals only PID 1; otherwise artex never sees it and is SIGKILLed
+# after 10s) and reaps orphaned tool processes. Crash restarts come from the
+# compose restart policy (restart: unless-stopped).
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/artex"]
 CMD ["-addr", ":8787", "-proxy", ":8788"]
