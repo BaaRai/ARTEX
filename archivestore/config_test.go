@@ -10,6 +10,7 @@ func TestArchiveStorageEnvironment(t *testing.T) {
 		"ARTEX_ARCHIVE_STORAGE", "ARTEX_ARCHIVE_S3_ENDPOINT", "ARTEX_ARCHIVE_S3_REGION",
 		"ARTEX_ARCHIVE_S3_BUCKET", "ARTEX_ARCHIVE_S3_PREFIX", "ARTEX_ARCHIVE_S3_ACCESS_KEY_ID",
 		"ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY", "ARTEX_ARCHIVE_S3_PATH_STYLE",
+		"ARTEX_ARCHIVE_S3_SESSION_TOKEN", "ARTEX_ARCHIVE_S3_SSE", "ARTEX_ARCHIVE_S3_KMS_KEY_ID",
 	} {
 		t.Setenv(key, "")
 	}
@@ -58,5 +59,24 @@ func TestArchiveEndpointValidation(t *testing.T) {
 		} else if strings.Contains(err.Error(), "test-secret") {
 			t.Fatal("configuration error disclosed a secret")
 		}
+	}
+}
+
+func TestArchiveEncryptionConfiguration(t *testing.T) {
+	c := Config{Endpoint: "https://objects.example.test", Bucket: "test", AccessKey: "test", SecretKey: "test"}
+	for _, mode := range []string{"none", "invalid"} {
+		c.SSE = mode
+		if _, err := New(c); err == nil {
+			t.Fatal("unencrypted/invalid mode accepted")
+		}
+	}
+	c.SSE = "AES256"
+	c.KMSKeyID = "alias/archive"
+	if _, err := New(c); err == nil {
+		t.Fatal("KMS key accepted with SSE-S3")
+	}
+	c.SSE = "aws:kms"
+	if _, err := New(c); err != nil {
+		t.Fatal(err)
 	}
 }

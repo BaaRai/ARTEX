@@ -1,21 +1,19 @@
 # Task archive storage
 
 Task archives use local disk by default. The optional S3-compatible backend moves
-cold task packages to object storage after verifying their contents, releasing
-local package space while retaining ARTEX's Archive, Restore and Delete actions.
-
-Active workspaces and the live PostgreSQL database stay local. This feature is
-task-level cold storage; use the existing backup workflow for a full installation
-backup. A complete recovery plan must also preserve the bucket objects and
-access to them.
+cold task packages to object storage while retaining Archive, Restore and Delete.
+Active workspaces and PostgreSQL remain local. This is task cold storage, not a
+full-installation backup; a recovery plan must preserve the database, data
+directory, bucket objects, and the credentials or roles needed to read them.
 
 ## Configuration
 
-Create a private bucket and a dedicated credential scoped to the archive prefix.
-The backend needs object upload, read (including HEAD and byte ranges), delete,
-and multipart upload/abort permissions. Use a separate prefix for each deployment.
+Use a private bucket and a separate prefix for each ARTEX installation. Configure
+the bucket's default encryption to match the selected mode below, and enforce
+that mode/key with a bucket policy. ARTEX does not provision or inspect bucket
+encryption settings.
 
-Set these environment variables for the ARTEX server, then restart it:
+Set the following server environment and restart ARTEX:
 
 ```dotenv
 ARTEX_ARCHIVE_STORAGE=s3
@@ -23,82 +21,140 @@ ARTEX_ARCHIVE_S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
 ARTEX_ARCHIVE_S3_REGION=us-east-1
 ARTEX_ARCHIVE_S3_BUCKET=your-artex-archives
 ARTEX_ARCHIVE_S3_PREFIX=artex/tasks
-ARTEX_ARCHIVE_S3_ACCESS_KEY_ID=REPLACE
-ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY=REPLACE
+ARTEX_ARCHIVE_S3_SSE=AES256
 ```
 
-Store credentials in the service's protected environment file, outside the
-repository and frontend. For systemd, a root-owned environment file with mode
-0600 can be referenced through `EnvironmentFile=`.
+With an EC2 instance role, ECS task role or other SDK-supported credential source,
+no archive-specific access keys are needed.
 
 | Variable | Meaning |
 | --- | --- |
 | `ARTEX_ARCHIVE_STORAGE` | `local` (default) or `s3`. |
-| `ARTEX_ARCHIVE_S3_ENDPOINT` | Required HTTPS origin, without bucket/path/query. Loopback HTTP is allowed for local testing. |
-| `ARTEX_ARCHIVE_S3_REGION` | Signing region; defaults to `us-east-1`. Match the provider's requirements. |
+| `ARTEX_ARCHIVE_S3_ENDPOINT` | Required HTTPS origin, without bucket/path/query. Loopback HTTP is allowed for local tests. |
+| `ARTEX_ARCHIVE_S3_REGION` | Signing region; defaults to `us-east-1`. |
 | `ARTEX_ARCHIVE_S3_BUCKET` | Required bucket name. |
 | `ARTEX_ARCHIVE_S3_PREFIX` | Object prefix; defaults to `artex/tasks`. |
-| `ARTEX_ARCHIVE_S3_ACCESS_KEY_ID` | Dedicated access key. |
-| `ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY` | Dedicated secret key. |
-| `ARTEX_ARCHIVE_S3_PATH_STYLE` | Set to `true` for compatible path-style servers; otherwise virtual-hosted addressing is used. |
+| `ARTEX_ARCHIVE_S3_SSE` | `AES256` (default, SSE-S3) or `aws:kms` (SSE-KMS). There is no unencrypted mode. |
+| `ARTEX_ARCHIVE_S3_KMS_KEY_ID` | Optional KMS key ARN/ID/alias; valid only with `aws:kms`. Omit to use the provider's managed KMS key. |
+| `ARTEX_ARCHIVE_S3_ACCESS_KEY_ID` | Optional dedicated credential override; must be supplied with the secret key. |
+| `ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY` | Secret for the dedicated override. |
+| `ARTEX_ARCHIVE_S3_SESSION_TOKEN` | Optional session token for dedicated temporary credentials. |
+| `ARTEX_ARCHIVE_S3_PATH_STYLE` | `true` for path-style servers; otherwise virtual-hosted addressing is used. |
 
-For DigitalOcean Spaces, use its regional origin, such as
-`https://sfo3.digitaloceanspaces.com`, and the provider's signing region. For a
-local path-style test server, use an endpoint such as `http://127.0.0.1:9000` and
-set `ARTEX_ARCHIVE_S3_PATH_STYLE=true`.
+An invalid mode or partial credential override fails configuration instead of
+silently falling back to local storage or ambient credentials. Preserve the
+bucket, endpoint, prefix and read/delete access while remote archives remain.
+Older local archives remain usable; they are not uploaded automatically.
 
-Invalid S3 configuration fails new archive jobs instead of silently falling back
-to local disk. Preserve the configured bucket, endpoint, prefix and read/delete
-access while remote archives remain. The same installation can still restore or
-delete older local archives.
+## Encryption and permissions
 
-## Lifecycle and integrity
+Every single-object upload and multipart initiation explicitly requests the
+configured server-side encryption. Upload verification also requires HEAD to
+report the requested mode, and a KMS key identifier for SSE-KMS, before accepting
+the object. Size and full SHA-256 readback remain mandatory; encryption metadata
+does not replace content verification.
 
-1. Pause or finish a task and use its existing **Archive** action.
-2. ARTEX builds its `.tar.zst` package locally and uploads it. Large packages use
-   multipart upload, starting with 8 MiB parts and two upload workers (the SDK
-   increases the part size for exceptionally large seekable files).
-3. ARTEX reads the entire object back and checks its size and SHA-256. Multipart
-   ETags and uploaded checksum metadata alone are not treated as proof of content.
-4. Only after verification does PostgreSQL commit the `s3://` location and
-   compact the archived task. ARTEX then removes local source files and the
-   temporary package. The archive list shows **Object storage** or **Local storage**.
-5. **Restore** downloads and verifies the package before restoring task files and
-   database records. The remote package is consumed after restoration commits.
-   Failed remote cleanup can be retried without replaying restored records.
-6. **Delete** removes the archive stub and queues durable cleanup of its remote
-   object. Cleanup is retried after restart and before subsequent archive jobs.
+For SSE-KMS, set both the bucket's default encryption and ARTEX to `aws:kms`;
+set `ARTEX_ARCHIVE_S3_KMS_KEY_ID` to the intended key when using a customer-managed
+key. An explicit `AES256` request takes precedence over a bucket's KMS default,
+so do not leave ARTEX on SSE-S3 when the bucket is intended to use KMS.
 
-Reads use bounded 8 MiB ranges pinned to the object's ETag. Interrupted ranges
-are retried without duplicating output or restarting a multi-gigabyte download.
-An object change, checksum mismatch or invalid range fails verification. Failed
-downloads are removed, and upload/verification failures retain the original task.
+The principal needs object upload, read (HEAD and ranged GET), delete and
+multipart upload/abort permissions. KMS uploads/readback also need the applicable
+key-policy and IAM permissions for `kms:GenerateDataKey` and `kms:Decrypt`.
+Retain old KMS keys and decrypt permissions when changing the key or mode; restore
+does not require an older object to use the current upload policy.
 
-There is no database schema or archive format migration. Existing local archive
-packages remain compatible. Files outside ARTEX's task archive database are not
-automatically imported or uploaded.
+Compatible providers must support the requested SSE mode and its HEAD metadata,
+plus conditional ranged reads. A provider that ignores the encryption request
+or cannot confirm it is rejected; the original task is retained. Local source and
+temporary files keep their existing local-disk protection and restricted modes.
 
-## Disk, transfer and recovery
+See the official [PutObject encryption and permission contract](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html)
+and [HEAD encryption response rules](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html).
 
-Archive creation still needs space for the temporary compressed package.
-Restoration needs space for the downloaded package and extracted files. Full
-upload readback and later restores incur object-storage reads and any applicable
-transfer charges. Configure expiration of abandoned multipart uploads for abrupt
-process termination.
+## Credential sources
 
-Recovery journals under `data/archives/tasks/.remote` contain object locations,
-not credentials. Preserve them with PostgreSQL and the installation's data
-directory. The worker uses these journals to clean up uploads that never
-committed, keep committed objects, and finish deferred deletions. Failed remote
-cleanup does not block unrelated local archive jobs.
+Without the archive-specific override, ARTEX uses the AWS SDK default credential
+chain, including standard AWS environment variables, shared profiles, web
+identity, ECS task credentials and EC2 instance credentials through IMDS. Role
+credentials retain the SDK's automatic refresh behavior. A named shared profile
+can be selected with `AWS_PROFILE`.
+
+For an external S3-compatible provider, dedicated keys can be supplied through
+the archive-specific variables. Both key fields are required; a session token
+is supported for temporary credentials. This explicit override takes precedence
+over ambient AWS credentials. Operator-supplied temporary credentials must be
+rotated by the operator; they are not an IAM role provider.
+
+Keep secrets in a protected service environment file outside the repository and
+frontend. A systemd `EnvironmentFile=` can point to a root-owned mode-0600 file.
+See the [AWS SDK credential-chain documentation](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/configure-gosdk.html).
+
+## Lifecycle
+
+1. Pause or finish a task and use its **Archive** action.
+2. ARTEX stages the source files and builds a local `.tar.zst` package. Large
+   packages use multipart upload, initially 8 MiB parts with two upload workers;
+   the SDK increases the part size for exceptionally large seekable files.
+3. ARTEX confirms encryption metadata and reads the complete object back,
+   checking size and SHA-256. ETags and uploaded checksum metadata alone are
+   insufficient.
+4. **Only after verification and a successful PostgreSQL commit** does ARTEX
+   remove the local package and staged source files. The committed archive
+   location is an `s3://` URI; there is no schema or archive-format migration.
+5. **Restore** downloads and verifies before installing files and database rows.
+   The remote package is consumed only after restoration commits.
+6. **Delete** commits removal of the archive stub, then cleans up the object.
+   A durable journal retains failed cleanup work.
+
+The archive list identifies **Object storage** and **Local storage** and shows
+upload/download verification phases. Reads use bounded 8 MiB ranges pinned to the
+object's ETag, with retries for interrupted ranges rather than the entire object.
+
+## Interruption recovery
+
+Source staging and restore journals live with task archives. Remote cleanup
+journals live under `data/archives/tasks/.remote`; they contain locations, not
+credentials. Keep this directory with PostgreSQL and the installation data.
+
+| Interruption | Recovery |
+| --- | --- |
+| During staging/compression, before an upload journal exists | Roll staged source files back. Remove any temporary package only after rollback succeeds. The task remains in PostgreSQL. |
+| After the upload journal, before successful verification | Roll source files back and clean up any uncommitted object/package. Failed cleanup retains its journal for retry. |
+| After verification, before the database commit | Treat the object as uncommitted: retain the original task and clean up the orphan object. Verification alone never authorizes local deletion. |
+| After the database commit, before package/staging cleanup | Keep the committed object and finish local cleanup. The persisted location and checksum establish commit, even if Restore or Delete has since been queued. |
+| Download/extraction before restored files are installed | Remove temporary extraction data; keep the remote object and archive stub for another attempt. |
+| Restored files installed, before database restoration commits | Roll back installed files using the restore journal. Retain the remote package. |
+| Database restoration committed, before remote cleanup | Recognize the already-restored task and finish cleanup without replaying database rows. |
+| Object consumed, before the restored archive stub is removed | Skip download/replay; repeat idempotent object deletion and remove the stub. |
+| Delete journal written, before database deletion commits | Keep the object while its archive stub exists. The queued Delete operation can retry. |
+| Database deletion committed, before object deletion succeeds | The durable outbox retains the URI and retries object deletion. |
+| An old failed upload survives a retry using local storage | Remove the abandoned remote object, but retain a local package referenced by the committed archive row. |
+
+The staging recovery rule also applies to local archives. Dedicated tests cover
+both storage modes with ready, restore-queued, delete-queued and uncommitted
+states. Additional PostgreSQL/HTTP-S3 tests reconstruct interrupted operations at
+13 persisted boundaries and repeat recovery to check idempotence.
+
+Handled multipart-upload failures are aborted by the SDK. Abrupt process death
+may leave unfinished multipart uploads; configure bucket lifecycle expiration
+for those parts. Existing object versions, if versioning is enabled, are governed
+by the bucket's version-retention policy.
+
+## Disk and transfer requirements
+
+Archive creation still requires temporary local space for the compressed
+package. Restore requires space for the download and extracted files. Full
+upload readback and restores incur storage reads and applicable transfer charges.
+Failed remote cleanup does not prevent unrelated local archive jobs from being
+processed once the failed cleanup request returns.
 
 ## Optional connectivity check
 
-Run `go run ./cmd/artex-archive-check` with the same archive environment as the
-server to upload, verify, download and delete a small uniquely named test object.
-This command performs real bucket operations but does not touch task data. It
-reports leftover test objects if cleanup fails.
+Run `go run ./cmd/artex-archive-check` with the archive environment to upload,
+verify, download and delete a small unique object. It performs real bucket
+operations but does not touch task data, and reports cleanup failures.
 
-Automated tests use an HTTP S3 fixture and isolated PostgreSQL databases. They
-cover multipart transfers, corruption, interrupted range retries, object changes,
-cancellation, upload rollback, corrupted restores and persistent cleanup.
+Automated tests use HTTP fixtures for S3 and metadata credentials, plus isolated
+PostgreSQL. They do not establish compatibility with a live cloud bucket.

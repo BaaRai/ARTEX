@@ -13,99 +13,121 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
 func TestS3RoundTripAndIntegrity(t *testing.T) {
-	for _, size := range []int{1024, 10 << 20} {
-		t.Run(strconv.Itoa(size), func(t *testing.T) {
-			var mu sync.Mutex
-			var object []byte
-			parts := map[int][]byte{}
-			corrupt, multipart := false, false
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				mu.Lock()
-				defer mu.Unlock()
-				q := r.URL.Query()
-				w.Header().Set("ETag", `"test-etag"`)
-				switch {
-				case r.Method == "POST" && q.Has("uploads"):
-					multipart = true
-					fmt.Fprint(w, `<InitiateMultipartUploadResult><UploadId>test-upload</UploadId></InitiateMultipartUploadResult>`)
-				case r.Method == "PUT" && q.Has("partNumber"):
-					n, _ := strconv.Atoi(q.Get("partNumber"))
-					parts[n], _ = io.ReadAll(r.Body)
-				case r.Method == "POST" && q.Has("uploadId"):
-					for i := 1; i <= len(parts); i++ {
-						object = append(object, parts[i]...)
+	for _, sse := range []string{"AES256", "aws:kms"} {
+		kms := ""
+		if sse == "aws:kms" {
+			kms = "arn:aws:kms:us-east-1:123456789012:key/test-key"
+		}
+		for _, size := range []int{1024, 10 << 20} {
+			t.Run(sse+"/"+strconv.Itoa(size), func(t *testing.T) {
+				var mu sync.Mutex
+				var object []byte
+				parts := map[int][]byte{}
+				corrupt, multipart := false, false
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					mu.Lock()
+					defer mu.Unlock()
+					q := r.URL.Query()
+					if (r.Method == "PUT" && !q.Has("partNumber")) || (r.Method == "POST" && q.Has("uploads")) {
+						if r.Header.Get("X-Amz-Server-Side-Encryption") != sse || r.Header.Get("X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id") != kms {
+							t.Error("upload did not explicitly request the configured encryption")
+						}
 					}
-					fmt.Fprint(w, `<CompleteMultipartUploadResult><ETag>test-etag</ETag></CompleteMultipartUploadResult>`)
-				case r.Method == "PUT":
-					object, _ = io.ReadAll(r.Body)
-				case r.Method == "HEAD":
-					w.Header().Set("Content-Length", strconv.Itoa(len(object)))
-				case r.Method == "GET":
-					data := object
-					if corrupt {
-						data = bytes.Clone(object)
-						data[0] ^= 0xff
+					if r.Method == "HEAD" {
+						if r.Header.Get("X-Amz-Server-Side-Encryption") != "" {
+							t.Error("encryption write header leaked into HEAD")
+						}
+						w.Header().Set("X-Amz-Server-Side-Encryption", sse)
+						if kms != "" {
+							w.Header().Set("X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id", kms)
+						}
 					}
-					serveArchiveRange(t, w, r, data)
-				case r.Method == "DELETE":
-					object = nil
-					w.WriteHeader(204)
-				default:
-					t.Errorf("unexpected request %s %s", r.Method, r.URL)
-					w.WriteHeader(400)
+					w.Header().Set("ETag", `"test-etag"`)
+					switch {
+					case r.Method == "POST" && q.Has("uploads"):
+						multipart = true
+						fmt.Fprint(w, `<InitiateMultipartUploadResult><UploadId>test-upload</UploadId></InitiateMultipartUploadResult>`)
+					case r.Method == "PUT" && q.Has("partNumber"):
+						n, _ := strconv.Atoi(q.Get("partNumber"))
+						parts[n], _ = io.ReadAll(r.Body)
+					case r.Method == "POST" && q.Has("uploadId"):
+						for i := 1; i <= len(parts); i++ {
+							object = append(object, parts[i]...)
+						}
+						fmt.Fprint(w, `<CompleteMultipartUploadResult><ETag>test-etag</ETag></CompleteMultipartUploadResult>`)
+					case r.Method == "PUT":
+						object, _ = io.ReadAll(r.Body)
+					case r.Method == "HEAD":
+						w.Header().Set("Content-Length", strconv.Itoa(len(object)))
+					case r.Method == "GET":
+						data := object
+						if corrupt {
+							data = bytes.Clone(object)
+							data[0] ^= 0xff
+						}
+						serveArchiveRange(t, w, r, data)
+					case r.Method == "DELETE":
+						object = nil
+						w.WriteHeader(204)
+					default:
+						t.Errorf("unexpected request %s %s", r.Method, r.URL)
+						w.WriteHeader(400)
+					}
+				}))
+				defer srv.Close()
+				store, err := New(Config{Endpoint: srv.URL, Bucket: "test-bucket", Prefix: "test/tasks", AccessKey: "test", SecretKey: "test", PathStyle: true, SSE: sse, KMSKeyID: kms})
+				if err != nil {
+					t.Fatal(err)
 				}
-			}))
-			defer srv.Close()
-			store, err := New(Config{Endpoint: srv.URL, Bucket: "test-bucket", Prefix: "test/tasks", AccessKey: "test", SecretKey: "test", PathStyle: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			data := bytes.Repeat([]byte{0x42}, size)
-			h := sha256.Sum256(data)
-			checksum := hex.EncodeToString(h[:])
-			root := t.TempDir()
-			source := filepath.Join(root, "source")
-			if err := os.WriteFile(source, data, 0600); err != nil {
-				t.Fatal(err)
-			}
-			uri := store.URI(1, 2, checksum)
-			ctx := context.Background()
-			if err := store.Upload(ctx, uri, source, checksum); err != nil {
-				t.Fatal(err)
-			}
-			if multipart != (size > 8<<20) {
-				t.Fatalf("multipart=%v size=%d", multipart, size)
-			}
-			dest := filepath.Join(root, "download")
-			if err := store.Download(ctx, uri, dest, checksum, int64(size)); err != nil {
-				t.Fatal(err)
-			}
-			got, _ := os.ReadFile(dest)
-			if !bytes.Equal(got, data) {
-				t.Fatal("download differs")
-			}
-			mu.Lock()
-			corrupt = true
-			mu.Unlock()
-			bad := filepath.Join(root, "bad")
-			if err := store.Download(ctx, uri, bad, checksum, int64(size)); err == nil {
-				t.Fatal("accepted corrupt object")
-			}
-			if _, err := os.Stat(bad); !os.IsNotExist(err) {
-				t.Fatal("left corrupt download")
-			}
-			if err := store.Upload(ctx, uri, source, checksum); err == nil {
-				t.Fatal("upload accepted failed readback")
-			}
-			if err := store.Delete(ctx, uri); err != nil {
-				t.Fatal(err)
-			}
-		})
+				data := bytes.Repeat([]byte{0x42}, size)
+				h := sha256.Sum256(data)
+				checksum := hex.EncodeToString(h[:])
+				root := t.TempDir()
+				source := filepath.Join(root, "source")
+				if err := os.WriteFile(source, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				uri := store.URI(1, 2, checksum)
+				ctx := context.Background()
+				if err := store.Upload(ctx, uri, source, checksum); err != nil {
+					t.Fatal(err)
+				}
+				if multipart != (size > 8<<20) {
+					t.Fatalf("multipart=%v size=%d", multipart, size)
+				}
+				dest := filepath.Join(root, "download")
+				if err := store.Download(ctx, uri, dest, checksum, int64(size)); err != nil {
+					t.Fatal(err)
+				}
+				got, _ := os.ReadFile(dest)
+				if !bytes.Equal(got, data) {
+					t.Fatal("download differs")
+				}
+				mu.Lock()
+				corrupt = true
+				mu.Unlock()
+				bad := filepath.Join(root, "bad")
+				if err := store.Download(ctx, uri, bad, checksum, int64(size)); err == nil {
+					t.Fatal("accepted corrupt object")
+				}
+				if _, err := os.Stat(bad); !os.IsNotExist(err) {
+					t.Fatal("left corrupt download")
+				}
+				if err := store.Upload(ctx, uri, source, checksum); err == nil {
+					t.Fatal("upload accepted failed readback")
+				}
+				if err := store.Delete(ctx, uri); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
 }
 
@@ -256,7 +278,7 @@ func TestS3ReadbackPropagatesOutputFailure(t *testing.T) {
 	store := testRangeStore(t, srv.URL)
 	h := sha256.Sum256(data)
 	outputError := errors.New("output disk full")
-	err := store.readVerified(context.Background(), "test/tasks/archive", failedArchiveWriter{outputError}, hex.EncodeToString(h[:]), int64(len(data)))
+	err := store.readVerified(context.Background(), "test/tasks/archive", failedArchiveWriter{outputError}, hex.EncodeToString(h[:]), int64(len(data)), false)
 	if !errors.Is(err, outputError) {
 		t.Fatalf("lost output error: %v", err)
 	}
@@ -307,5 +329,90 @@ func TestS3RejectsForeignLocations(t *testing.T) {
 	var absent *Store
 	if absent.Validate("s3://allowed/archives/tasks/a") == nil {
 		t.Fatal("missing config accepted")
+	}
+}
+
+func TestS3UploadRejectsUnconfirmedEncryption(t *testing.T) {
+	for _, mode := range []string{"missing", "different", "kms-without-key"} {
+		t.Run(mode, func(t *testing.T) {
+			data := []byte("private archive")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case "PUT":
+					_, _ = io.Copy(io.Discard, r.Body)
+				case "HEAD":
+					w.Header().Set("ETag", `"test-etag"`)
+					w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+					if mode != "missing" {
+						w.Header().Set("X-Amz-Server-Side-Encryption", "aws:kms")
+					}
+				default:
+					t.Errorf("content must not be accepted before encryption confirmation: %s", r.Method)
+					w.WriteHeader(400)
+				}
+			}))
+			defer srv.Close()
+			c := Config{Endpoint: srv.URL, Bucket: "test", Prefix: "tasks", AccessKey: "test", SecretKey: "test", PathStyle: true}
+			if mode == "kms-without-key" {
+				c.SSE = "aws:kms"
+			}
+			store, err := New(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			filename := filepath.Join(t.TempDir(), "source")
+			if err := os.WriteFile(filename, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256(data)
+			checksum := hex.EncodeToString(sum[:])
+			if err := store.Upload(context.Background(), store.URI(1, 2, checksum), filename, checksum); err == nil || !strings.Contains(err.Error(), "encryption") {
+				t.Fatalf("unconfirmed encryption accepted: %v", err)
+			}
+			if got, err := os.ReadFile(filename); err != nil || !bytes.Equal(got, data) {
+				t.Fatal("source was not retained", err)
+			}
+		})
+	}
+}
+
+func TestS3MultipartFailureAbortsUpload(t *testing.T) {
+	var aborted atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case r.Method == "POST" && q.Has("uploads"):
+			if r.Header.Get("X-Amz-Server-Side-Encryption") != "AES256" {
+				t.Error("multipart encryption missing")
+			}
+			fmt.Fprint(w, `<InitiateMultipartUploadResult><UploadId>failed-upload</UploadId></InitiateMultipartUploadResult>`)
+		case r.Method == "PUT" && q.Has("partNumber"):
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(403)
+		case r.Method == "DELETE" && q.Get("uploadId") == "failed-upload":
+			aborted.Store(true)
+			w.WriteHeader(204)
+		default:
+			t.Errorf("unexpected failed-upload request: %s", r.Method)
+			w.WriteHeader(400)
+		}
+	}))
+	defer srv.Close()
+	store := testRangeStore(t, srv.URL)
+	data := bytes.Repeat([]byte("x"), 9<<20)
+	checksum := sha256.Sum256(data)
+	sum := hex.EncodeToString(checksum[:])
+	filename := filepath.Join(t.TempDir(), "source")
+	if err := os.WriteFile(filename, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upload(context.Background(), store.URI(1, 2, sum), filename, sum); err == nil {
+		t.Fatal("failed part accepted")
+	}
+	if !aborted.Load() {
+		t.Fatal("failed multipart upload was not aborted")
+	}
+	if info, err := os.Stat(filename); err != nil || info.Size() != int64(len(data)) {
+		t.Fatal("source was not retained", err)
 	}
 }

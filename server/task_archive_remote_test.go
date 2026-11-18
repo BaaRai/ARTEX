@@ -46,6 +46,7 @@ func TestRemoteArchiveLifecycle(t *testing.T) {
 			objects[r.URL.Path], _ = io.ReadAll(r.Body)
 			w.Header().Set("ETag", `"test"`)
 		case "HEAD":
+			w.Header().Set("X-Amz-Server-Side-Encryption", "AES256")
 			w.Header().Set("ETag", `"test"`)
 			w.Header().Set("Content-Length", strconv.Itoa(len(objects[r.URL.Path])))
 		case "GET":
@@ -255,7 +256,7 @@ func TestRemoteArchiveLifecycle(t *testing.T) {
 
 // Once PostgreSQL has committed an archive location and checksum, a subsequent
 // queued operation must not make startup recovery resurrect the old workspace.
-func TestRemoteArchiveStageRecoveryAfterCommit(t *testing.T) {
+func TestTaskArchiveStageRecoveryAfterCommit(t *testing.T) {
 	if os.Getenv("ARTEX_PG_DSN") == "" {
 		t.Skip("requires isolated PostgreSQL")
 	}
@@ -284,41 +285,63 @@ func TestRemoteArchiveStageRecoveryAfterCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, state := range []string{pgdb.ArchiveReady, pgdb.RestoreQueued, pgdb.DeleteQueued, pgdb.ArchiveQueued} {
-		t.Run(state, func(t *testing.T) {
-			committed := state != pgdb.ArchiveQueued
-			checksum := ""
-			if committed {
-				checksum = strings.Repeat("a", 64)
-			}
-			if _, err := m.pg.Exec("UPDATE task_archives SET state=$2,archive_path=$3,sha256=$4 WHERE id=$1", job.ID, state, "s3://test/tasks/package.tar.zst", checksum); err != nil {
-				t.Fatal(err)
-			}
-			file := filepath.Join(m.dir, "tasks", task.ID, "workspace", "remaining.txt")
-			if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(file, []byte("retain until commit"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			stage, err := stageTaskArchiveFiles(m.dir, job.ID, task.ID, pgTask.ExplorationID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := recoverTaskArchiveStages(m.dir, m.pg); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := os.Stat(stage.root); !os.IsNotExist(err) {
-				t.Fatalf("staging cleanup incomplete: %v", err)
-			}
-			if committed {
-				if _, err := os.Stat(file); !os.IsNotExist(err) {
-					t.Fatalf("resurrected committed workspace: %v", err)
+	for _, backend := range []string{"local", "s3"} {
+		for _, state := range []string{pgdb.ArchiveReady, pgdb.RestoreQueued, pgdb.DeleteQueued, pgdb.ArchiveQueued} {
+			t.Run(backend+"/"+state, func(t *testing.T) {
+				committed := state != pgdb.ArchiveQueued
+				checksum := ""
+				if committed {
+					checksum = strings.Repeat("a", 64)
 				}
-			} else if data, err := os.ReadFile(file); err != nil || string(data) != "retain until commit" {
-				t.Fatalf("uncommitted archive lost source: %v", err)
-			}
-		})
+				packagePath := taskArchivePath(m.dir, job.ID, task.ID)
+				if err := os.MkdirAll(filepath.Dir(packagePath), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(packagePath, []byte("verified package"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				location := packagePath
+				if backend == "s3" {
+					location = "s3://test/tasks/package.tar.zst"
+				}
+				if _, err := m.pg.Exec("UPDATE task_archives SET state=$2,archive_path=$3,sha256=$4 WHERE id=$1", job.ID, state, location, checksum); err != nil {
+					t.Fatal(err)
+				}
+				file := filepath.Join(m.dir, "tasks", task.ID, "workspace", "remaining.txt")
+				if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte("retain until commit"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				stage, err := stageTaskArchiveFiles(m.dir, job.ID, task.ID, pgTask.ExplorationID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := recoverTaskArchiveStages(m.dir, m.pg); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Stat(stage.root); !os.IsNotExist(err) {
+					t.Fatalf("staging cleanup incomplete: %v", err)
+				}
+				if backend == "local" && committed {
+					if data, err := os.ReadFile(packagePath); err != nil || string(data) != "verified package" {
+						t.Fatal("committed local package lost", err)
+					}
+				} else if !committed {
+					if _, err := os.Stat(packagePath); !os.IsNotExist(err) {
+						t.Fatal("uncommitted temporary package retained", err)
+					}
+				}
+				if committed {
+					if _, err := os.Stat(file); !os.IsNotExist(err) {
+						t.Fatalf("resurrected committed workspace: %v", err)
+					}
+				} else if data, err := os.ReadFile(file); err != nil || string(data) != "retain until commit" {
+					t.Fatalf("uncommitted archive lost source: %v", err)
+				}
+			})
+		}
 	}
 }
 

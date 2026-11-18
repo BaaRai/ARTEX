@@ -17,19 +17,24 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type Config struct {
 	Endpoint, Region, Bucket, Prefix, AccessKey, SecretKey string
 	PathStyle                                              bool
+	SessionToken, SSE, KMSKeyID                            string
 }
 
 type Store struct {
 	client         *s3.Client
 	bucket, prefix string
+	encryption     types.ServerSideEncryption
+	kmsKeyID       string
 }
 
 // FromEnv returns nil for the default local backend. A configured but invalid
@@ -43,7 +48,9 @@ func FromEnv() (*Store, error) {
 			Endpoint: os.Getenv("ARTEX_ARCHIVE_S3_ENDPOINT"), Region: os.Getenv("ARTEX_ARCHIVE_S3_REGION"),
 			Bucket: os.Getenv("ARTEX_ARCHIVE_S3_BUCKET"), Prefix: os.Getenv("ARTEX_ARCHIVE_S3_PREFIX"),
 			AccessKey: os.Getenv("ARTEX_ARCHIVE_S3_ACCESS_KEY_ID"), SecretKey: os.Getenv("ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY"),
-			PathStyle: os.Getenv("ARTEX_ARCHIVE_S3_PATH_STYLE") == "true",
+			PathStyle:    os.Getenv("ARTEX_ARCHIVE_S3_PATH_STYLE") == "true",
+			SessionToken: os.Getenv("ARTEX_ARCHIVE_S3_SESSION_TOKEN"),
+			SSE:          os.Getenv("ARTEX_ARCHIVE_S3_SSE"), KMSKeyID: os.Getenv("ARTEX_ARCHIVE_S3_KMS_KEY_ID"),
 		})
 	default:
 		return nil, errors.New("ARTEX_ARCHIVE_STORAGE must be local or s3")
@@ -70,22 +77,49 @@ func New(c Config) (*Store, error) {
 	if path.Clean(c.Prefix) != c.Prefix || strings.Contains(c.Prefix, "..") || strings.ContainsAny(c.Prefix, "\\?#") {
 		return nil, errors.New("invalid archive S3 prefix")
 	}
-	if c.Bucket == "" || strings.ContainsAny(c.Bucket, "/\\:@?# ") || c.AccessKey == "" || c.SecretKey == "" {
-		return nil, errors.New("archive S3 bucket and dedicated access credentials are required")
+	if c.Bucket == "" || strings.ContainsAny(c.Bucket, "/\\:@?# ") {
+		return nil, errors.New("a valid archive S3 bucket is required")
+	}
+	explicitCredentials := c.AccessKey != "" || c.SecretKey != "" || c.SessionToken != ""
+	if explicitCredentials && (c.AccessKey == "" || c.SecretKey == "") {
+		return nil, errors.New("archive S3 access key and secret key must both be set when overriding AWS credentials")
+	}
+	if c.SSE == "" {
+		c.SSE = "AES256"
+	}
+	if c.SSE != "AES256" && c.SSE != "aws:kms" {
+		return nil, errors.New("archive S3 SSE must be AES256 or aws:kms; encryption cannot be disabled")
+	}
+	if c.KMSKeyID != "" && c.SSE != "aws:kms" {
+		return nil, errors.New("archive S3 KMS key requires SSE=aws:kms")
 	}
 	if c.Region == "" {
 		c.Region = "us-east-1"
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = 60 * time.Second
-	client := s3.New(s3.Options{
-		Region: c.Region, BaseEndpoint: aws.String(c.Endpoint), UsePathStyle: c.PathStyle,
-		Credentials:                credentials.NewStaticCredentialsProvider(c.AccessKey, c.SecretKey, ""),
-		HTTPClient:                 &http.Client{Transport: transport},
-		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
-		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
+	httpClient := &http.Client{Transport: transport}
+	cfg := aws.Config{Region: c.Region, HTTPClient: httpClient}
+	if explicitCredentials {
+		cfg.Credentials = credentials.NewStaticCredentialsProvider(c.AccessKey, c.SecretKey, c.SessionToken)
+	} else {
+		// Keep the SDK's refreshable default chain: standard AWS environment/shared
+		// profiles, web identity, ECS task roles and EC2 instance roles (IMDSv2).
+		var err error
+		cfg, err = awsconfig.LoadDefaultConfig(context.Background(),
+			awsconfig.WithRegion(c.Region), awsconfig.WithHTTPClient(httpClient))
+		if err != nil {
+			return nil, fmt.Errorf("load archive S3 AWS configuration: %w", err)
+		}
+	}
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(c.Endpoint)
+		o.UsePathStyle = c.PathStyle
+		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 	})
-	return &Store{client: client, bucket: c.Bucket, prefix: c.Prefix + "/"}, nil
+	return &Store{client: client, bucket: c.Bucket, prefix: c.Prefix + "/",
+		encryption: types.ServerSideEncryption(c.SSE), kmsKeyID: c.KMSKeyID}, nil
 }
 
 func (s *Store) URI(taskID, archiveID int64, checksum string) string {
@@ -134,17 +168,22 @@ func (s *Store) Upload(ctx context.Context, uri, filename, checksum string) erro
 		u.Concurrency = 2
 		u.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 	})
-	_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket), Key: aws.String(key), Body: f,
 		ContentType: aws.String("application/zstd"), Metadata: map[string]string{"sha256": checksum},
-	})
+		ServerSideEncryption: s.encryption,
+	}
+	if s.kmsKeyID != "" {
+		input.SSEKMSKeyId = aws.String(s.kmsKeyID)
+	}
+	_, err = uploader.Upload(ctx, input)
 	if err != nil {
 		return fmt.Errorf("upload archive: %w", err)
 	}
-	return s.readVerified(ctx, key, io.Discard, checksum, info.Size())
+	return s.readVerified(ctx, key, io.Discard, checksum, info.Size(), true)
 }
 
-func (s *Store) readVerified(ctx context.Context, key string, out io.Writer, checksum string, expectedSize int64) error {
+func (s *Store) readVerified(ctx context.Context, key string, out io.Writer, checksum string, expectedSize int64, requireEncryption bool) error {
 	if decoded, err := hex.DecodeString(checksum); err != nil || len(decoded) != sha256.Size {
 		return errors.New("invalid archive SHA-256")
 	}
@@ -154,6 +193,10 @@ func (s *Store) readVerified(ctx context.Context, key string, out io.Writer, che
 	object, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
 	if err != nil {
 		return fmt.Errorf("inspect archive: %w", err)
+	}
+	if requireEncryption && (object.ServerSideEncryption != s.encryption ||
+		(s.encryption == types.ServerSideEncryptionAwsKms && aws.ToString(object.SSEKMSKeyId) == "")) {
+		return errors.New("remote archive did not confirm the requested server-side encryption; source data retained")
 	}
 	if object.ContentLength == nil || *object.ContentLength != expectedSize || aws.ToString(object.ETag) == "" {
 		return errors.New("remote archive size mismatch or missing ETag; source data retained")
@@ -264,7 +307,7 @@ func (s *Store) Download(ctx context.Context, uri, filename, checksum string, si
 			_ = os.Remove(filename)
 		}
 	}()
-	if err = s.readVerified(ctx, key, f, checksum, size); err != nil {
+	if err = s.readVerified(ctx, key, f, checksum, size, false); err != nil {
 		return err
 	}
 	return f.Sync()
