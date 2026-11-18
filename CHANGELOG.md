@@ -49,6 +49,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Asset DSL nesting**: `ParseDSL` refuses queries longer than 4 KiB or nested more than 32 parentheses deep, so a crafted `dsl` cannot grow the goroutine stack without bound.
 - **Retry-After overflow**: a 429/503 `Retry-After` of huge seconds no longer wraps `time.Duration` into a tiny delay. Values above `MaxDelay` are not retried.
 - **Conversation message pages**: `GET /api/conversations/{id}/messages` clamps `limit` (200 for history, 1000 for `?since=`), so a huge query cannot load the whole transcript in one response.
 - **Findings CSV formula cells**: `FindingsCSV` prefixes name, class, summary, task, and other text fields that start with `=`, `+`, `-`, `@`, tab, or CR so Excel/LibreOffice do not evaluate them as formulas when the export is opened.
