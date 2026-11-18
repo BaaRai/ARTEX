@@ -49,6 +49,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Findings CSV formula cells**: `FindingsCSV` prefixes name, class, summary, task, and other text fields that start with `=`, `+`, `-`, `@`, tab, or CR so Excel/LibreOffice do not evaluate them as formulas when the export is opened.
 - **ask_operator image_path**: the screenshot path must resolve inside the task working directory (`<data>/tasks/<id>`). Absolute paths, `..` segments, and symlinks that leave that directory are refused, so the tool cannot copy an arbitrary server image into the operator transcript.
 - **insert_assets fail-closed**: when intercept or task allow/block rules cannot be loaded, `insert_assets` refuses the whole call instead of evaluating an empty rule set (which allowed every asset). The tool result does not include the underlying database error.
 - **BlobRange length no longer wraps int64**: `offset+length > size` overflowed when length was near MaxInt64, so the cap was skipped and `make([]byte, length)` could exhaust memory. The bound is now `length > size-offset`.
