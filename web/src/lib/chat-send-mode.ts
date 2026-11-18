@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { t } from "@/i18n";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 
 // Send/newline key bindings for the chat input. Pure client-side preference: localStorage
@@ -13,8 +14,8 @@ export const CHAT_SEND_MODE_KEY = "artex_chat_send_mode";
 export const DEFAULT_CHAT_SEND_MODE: ChatSendMode = "enter";
 
 export const CHAT_SEND_MODE_OPTIONS: { value: ChatSendMode; label: string }[] = [
-  { value: "enter", label: "Enter to send, Shift+Enter for newline" },
-  { value: "ctrl-enter", label: "Ctrl+Enter to send, Enter for newline" },
+  { value: "enter", label: t("Enter to send, Shift+Enter for newline") },
+  { value: "ctrl-enter", label: t("Ctrl+Enter to send, Enter for newline") },
 ];
 
 function parseMode(raw: string | null): ChatSendMode {

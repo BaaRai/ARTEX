@@ -4,6 +4,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import type { Activity, InterceptExecution } from "@/lib/types";
+import { t } from "@/i18n";
 
 // Resolve one exact persisted call, independently of transcript pagination.
 export function useApprovalFocus({ taskId, conversationId }: { taskId?: string; conversationId?: number }) {
@@ -34,12 +35,12 @@ export function useApprovalFocus({ taskId, conversationId }: { taskId?: string; 
             ? source.conversation_id !== conversationId
             : source.task_id !== taskId || source.conversation_id != null
         ) {
-          throw new Error("Approval source does not match the current conversation");
+          throw new Error(t("Approval source does not match the current conversation"));
         }
         setState({ id, source, loading: false });
       })
       .catch((e) => {
-        if (!cancelled) setState({ id, error: (e as Error).message || "Unable to locate the original execution", loading: false });
+        if (!cancelled) setState({ id, error: (e as Error).message || t("Unable to locate the original execution"), loading: false });
       });
     return () => {
       cancelled = true;
@@ -78,13 +79,13 @@ export function useApprovalHistory(
         const page = await loadPage(before);
         if (cancelled) return;
         if (!page.items.length || (before > 0 && page.items[0].seq >= before)) {
-          throw new Error("Matching tool call not found in the conversation; the record may have been deleted");
+          throw new Error(t("Matching tool call not found in the conversation; the record may have been deleted"));
         }
         mergePage(page);
         current = page.items;
         before = current[0].seq;
         if (!page.hasMore && !current.some((a) => a.seq === source.seq)) {
-          throw new Error("Matching tool call not found in the conversation");
+          throw new Error(t("Matching tool call not found in the conversation"));
         }
       }
       if (!cancelled) setResult({ source });
@@ -118,19 +119,19 @@ export function ApprovalExecutionFocus({
     >
       <span className={error ? "text-destructive" : "text-muted-foreground"}>
         {error
-          ? `Unable to locate: ${error}`
+          ? t("Unable to locate: {error}", { error })
           : history.ready
-            ? `Expanded the tool call for approval #${state.id}`
-            : `Loading the conversation position of approval #${state.id}…`}
+            ? t("Expanded the tool call for approval #{id}", { id: state.id })
+            : t("Loading the conversation position of approval #{id}…", { id: state.id })}
       </span>
       <div className="flex gap-2">
         {error ? (
           <Button size="sm" variant="outline" onClick={focus.retry}>
-            Retry locate
+            {t("Retry locate")}
           </Button>
         ) : null}
         <Button size="sm" variant="ghost" onClick={focus.close}>
-          Cancel locate
+          {t("Cancel locate")}
         </Button>
       </div>
     </div>

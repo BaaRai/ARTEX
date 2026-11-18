@@ -8,6 +8,9 @@ import {
   type Locale,
 } from "react-day-picker"
 
+import { tr as dayPickerTr } from "react-day-picker/locale/tr"
+
+import { locale as uiLocale } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon } from "lucide-react"
@@ -18,7 +21,8 @@ function Calendar({
   showOutsideDays = true,
   captionLayout = "label",
   buttonVariant = "ghost",
-  locale,
+  // Follow the UI language for month/weekday captions unless the caller passes its own locale.
+  locale = uiLocale === "tr" ? dayPickerTr : undefined,
   formatters,
   components,
   ...props

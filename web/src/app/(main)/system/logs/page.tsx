@@ -7,6 +7,7 @@ import { sseUrl } from "@/lib/api";
 import { MOCK } from "@/lib/mock/enabled";
 import type { LogLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { t } from "@/i18n";
 
 // Mock demo: no backend SSE, so stuff in a few sample log lines.
 const MOCK_LOGS: LogLine[] = [
@@ -142,13 +143,13 @@ export default function LogsPage() {
   return (
     <div className="flex flex-1 flex-col gap-3">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">System logs</h1>
-        <p className="text-muted-foreground text-sm">Live backend log stream (planner / worker / database / traffic …)</p>
+        <h1 className="text-xl font-semibold tracking-tight">{t("System logs")}</h1>
+        <p className="text-muted-foreground text-sm">{t("Live backend log stream (planner / worker / database / traffic …)")}</p>
       </div>
       <div className="flex flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            placeholder="Filter (text / tag)…"
+            placeholder={t("Filter (text / tag)…")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="h-8 max-w-xs"
@@ -162,7 +163,7 @@ export default function LogsPage() {
                 className="h-8"
                 onClick={() => setLevel(lv)}
               >
-                {lv === "all" ? "All" : lv}
+                {lv === "all" ? t("All") : t(lv)}
               </Button>
             ))}
           </div>
@@ -172,15 +173,15 @@ export default function LogsPage() {
             className="h-8"
             onClick={() => setPaused((p) => !p)}
           >
-            {paused ? "Paused" : "Pause"}
+            {paused ? t("Paused") : t("Pause")}
           </Button>
           <Button size="sm" variant="outline" className="h-8" onClick={() => setLines([])}>
-            Clear
+            {t("Clear")}
           </Button>
           <span className="ml-auto text-xs text-muted-foreground">
-            {counts.total} lines ·{" "}
-            <span className="text-amber-600 dark:text-amber-400">{counts.warn} warnings</span> ·{" "}
-            <span className="text-red-600 dark:text-red-400">{counts.error} errors</span>
+            {t("{count} lines", { count: counts.total })} ·{" "}
+            <span className="text-amber-600 dark:text-amber-400">{t("{count} warnings", { count: counts.warn })}</span> ·{" "}
+            <span className="text-red-600 dark:text-red-400">{t("{count} errors", { count: counts.error })}</span>
           </span>
         </div>
 
@@ -200,12 +201,12 @@ export default function LogsPage() {
                 disabled={loadingHistory}
                 onClick={loadOlderHistory}
               >
-                {loadingHistory ? "Loading…" : "Load older logs"}
+                {loadingHistory ? t("Loading…") : t("Load older logs")}
               </Button>
             </div>
           )}
           {filtered.length === 0 ? (
-            <p className="py-10 text-center text-muted-foreground">No logs yet.</p>
+            <p className="py-10 text-center text-muted-foreground">{t("No logs yet.")}</p>
           ) : (
             filtered.map((l) => {
               const body =

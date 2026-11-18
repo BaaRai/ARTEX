@@ -18,6 +18,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import type { Finding, FindingsPage } from "@/lib/types";
+import { t } from "@/i18n";
 
 export function LinkTrafficDialog({
   trafficIds,
@@ -66,7 +67,9 @@ export function LinkTrafficDialog({
         selected.finding_id,
         trafficIds.map((traffic_id) => ({ traffic_id })),
       );
-      toast.success(`Linked ${trafficIds.length} traffic records to vulnerability #${selected.finding_id}`);
+      toast.success(
+        t("Linked {count} traffic records to vulnerability #{id}", { count: trafficIds.length, id: selected.finding_id }),
+      );
       onBound();
       onClose();
     } catch (e) {
@@ -84,15 +87,19 @@ export function LinkTrafficDialog({
     >
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Link to vulnerability</DialogTitle>
-          <DialogDescription>Save the {trafficIds.length} selected traffic records as evidence of an existing vulnerability.</DialogDescription>
+          <DialogTitle>{t("Link to vulnerability")}</DialogTitle>
+          <DialogDescription>
+            {t("Save the {count} selected traffic records as evidence of an existing vulnerability.", {
+              count: trafficIds.length,
+            })}
+          </DialogDescription>
         </DialogHeader>
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor="link-finding-query">Find vulnerability</FieldLabel>
+            <FieldLabel htmlFor="link-finding-query">{t("Find vulnerability")}</FieldLabel>
             <Input
               id="link-finding-query"
-              placeholder="Name / summary / vulnerability class"
+              placeholder={t("Name / summary / vulnerability class")}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -126,35 +133,35 @@ export function LinkTrafficDialog({
           ))}
           {!data?.items.length ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              {loading ? "Loading…" : "No matching vulnerabilities; register one first"}
+              {loading ? t("Loading…") : t("No matching vulnerabilities; register one first")}
             </p>
           ) : null}
         </div>
         <div className="flex items-center justify-between gap-2">
           <Button variant="outline" size="sm" disabled={loading || page <= 1} onClick={() => setPage((p) => p - 1)}>
-            Previous
+            {t("Previous")}
           </Button>
-          <span className="text-xs">
-            Page {page} · {data?.total ?? 0} total
-          </span>
+          <span className="text-xs">{t("Page {page} · {total} total", { page, total: data?.total ?? 0 })}</span>
           <Button
             variant="outline"
             size="sm"
             disabled={loading || page * 20 >= (data?.total ?? 0)}
             onClick={() => setPage((p) => p + 1)}
           >
-            Next
+            {t("Next")}
           </Button>
         </div>
         <p className="text-sm">
-          {selected ? `Selected: #${selected.finding_id} ${selected.name || selected.vulnclass}` : "Select a vulnerability"}
+          {selected
+            ? t("Selected: #{id} {name}", { id: selected.finding_id ?? "", name: selected.name || selected.vulnclass })
+            : t("Select a vulnerability")}
         </p>
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button disabled={busy || !selected} onClick={() => void save()}>
-            {busy ? "Saving…" : "Link"}
+            {busy ? t("Saving…") : t("Link")}
           </Button>
         </DialogFooter>
       </DialogContent>

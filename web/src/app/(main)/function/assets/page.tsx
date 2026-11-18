@@ -62,6 +62,7 @@ import { api } from "@/lib/api";
 import { parseCompanyScopeText } from "@/lib/company-scope";
 import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { t } from "@/i18n";
 
 const METHOD_COLOR: Record<string, string> = {
   GET: "bg-emerald-100 text-emerald-700",
@@ -98,13 +99,13 @@ function statusTone(code: number) {
 const PAGE_SIZES = [25, 50, 100, 200];
 
 const TABS: { key: string; label: string; icon: LucideIcon }[] = [
-  { key: "company", label: "Companies", icon: BuildingIcon },
-  { key: "root_domain", label: "Root domains", icon: GlobeIcon },
+  { key: "company", label: t("Companies"), icon: BuildingIcon },
+  { key: "root_domain", label: t("Root domains"), icon: GlobeIcon },
   { key: "ip", label: "IP", icon: NetworkIcon },
-  { key: "subdomain", label: "Subdomains", icon: GlobeIcon },
-  { key: "app", label: "Apps", icon: SmartphoneIcon },
-  { key: "service", label: "Services", icon: LayoutTemplateIcon },
-  { key: "endpoint", label: "Endpoints", icon: LinkIcon },
+  { key: "subdomain", label: t("Subdomains"), icon: GlobeIcon },
+  { key: "app", label: t("Apps"), icon: SmartphoneIcon },
+  { key: "service", label: t("Services"), icon: LayoutTemplateIcon },
+  { key: "endpoint", label: t("Endpoints"), icon: LinkIcon },
 ];
 
 export default function AssetsPage() {
@@ -192,11 +193,11 @@ export default function AssetsPage() {
     setDeleting(true);
     try {
       const res = await api.deleteAssets(deleteIds);
-      toast.success(`Deleted ${res.deleted} assets`);
+      toast.success(t("Deleted {count} assets", { count: res.deleted }));
       setSelected(new Set());
       refresh();
     } catch (e) {
-      toast.error("Delete failed: " + String((e as Error)?.message ?? e));
+      toast.error(t("Delete failed: {error}", { error: String((e as Error)?.message ?? e) }));
     } finally {
       setDeleting(false);
       setDeleteOpen(false);
@@ -210,12 +211,12 @@ export default function AssetsPage() {
       const res = await api.deleteCompany(companyDeleteTarget.id, companyDeleteAssets);
       const msg =
         companyDeleteAssets && res.assets_deleted > 0
-          ? `Company deleted, along with ${res.assets_deleted} assets`
-          : "Company deleted";
+          ? t("Company deleted, along with {count} assets", { count: res.assets_deleted })
+          : t("Company deleted");
       toast.success(msg);
       refresh();
     } catch (e) {
-      toast.error("Delete failed: " + String((e as Error)?.message ?? e));
+      toast.error(t("Delete failed: {error}", { error: String((e as Error)?.message ?? e) }));
     } finally {
       setCompanyDeleting(false);
       setCompanyDeleteTarget(null);
@@ -316,19 +317,19 @@ export default function AssetsPage() {
     <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Assets</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{t("Assets")}</h1>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">
-            <span className="tabular-nums">{totalAssets}</span> assets in total
+          <span className="text-sm text-muted-foreground tabular-nums">
+            {t("{count} assets in total", { count: totalAssets })}
           </span>
           {selected.size > 0 && (
             <Button variant="destructive" size="sm" onClick={() => openDelete(Array.from(selected) as number[])}>
-              <Trash2Icon className="size-3.5" /> Delete selected ({selected.size})
+              <Trash2Icon className="size-3.5" /> {t("Delete selected ({count})", { count: selected.size })}
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-            <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> Refresh
+            <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> {t("Refresh")}
           </Button>
           <CompanyDialog onSaved={refresh} />
         </div>
@@ -354,10 +355,10 @@ export default function AssetsPage() {
               <Table>
                 <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow>
-                    <TableHead>Company</TableHead>
-                    <TableHead className="w-24 text-right">Assets</TableHead>
-                    <TableHead>Asset scope</TableHead>
-                    <TableHead className="w-36 text-right">Actions</TableHead>
+                    <TableHead>{t("Company")}</TableHead>
+                    <TableHead className="w-24 text-right">{t("Assets")}</TableHead>
+                    <TableHead>{t("Asset scope")}</TableHead>
+                    <TableHead className="w-36 text-right">{t("Actions")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -380,7 +381,7 @@ export default function AssetsPage() {
                             ))}
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground">No scope set</span>
+                          <span className="text-xs text-muted-foreground">{t("No scope set")}</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -395,7 +396,7 @@ export default function AssetsPage() {
                               setCompanyDeleteTarget(c);
                               setCompanyDeleteAssets(false);
                             }}
-                            aria-label={`Delete company ${c.name}`}
+                            aria-label={t("Delete company {name}", { name: c.name })}
                           >
                             <Trash2Icon className="size-3.5" />
                           </Button>
@@ -406,7 +407,9 @@ export default function AssetsPage() {
                   {companies.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">
-                        No companies yet. Click "Add company" in the top-right corner and fill in the asset scope; the system will automatically claim matching assets.
+                        {t(
+                          'No companies yet. Click "Add company" in the top-right corner and fill in the asset scope; the system will automatically claim matching assets.',
+                        )}
                       </TableCell>
                     </TableRow>
                   )}
@@ -439,7 +442,7 @@ export default function AssetsPage() {
                 <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
                 <TableCell className="text-xs">{a.icp || "—"}</TableCell>
                 <TableCell className="text-xs">
-                  {companyName(a.company_id) || <span className="text-muted-foreground">Unassigned</span>}
+                  {companyName(a.company_id) || <span className="text-muted-foreground">{t("Unassigned")}</span>}
                 </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
@@ -447,7 +450,7 @@ export default function AssetsPage() {
                     size="icon"
                     className="size-7 text-muted-foreground hover:text-destructive"
                     onClick={() => openDelete([a.id])}
-                    aria-label={`Delete asset ${a.domain || a.id}`}
+                    aria-label={t("Delete asset {name}", { name: a.domain || a.id })}
                   >
                     <Trash2Icon className="size-3.5" />
                   </Button>
@@ -494,7 +497,7 @@ export default function AssetsPage() {
                     size="icon"
                     className="size-7 text-muted-foreground hover:text-destructive"
                     onClick={() => openDelete([a.id])}
-                    aria-label={`Delete asset ${a.ip || a.id}`}
+                    aria-label={t("Delete asset {name}", { name: a.ip || a.id })}
                   >
                     <Trash2Icon className="size-3.5" />
                   </Button>
@@ -536,7 +539,7 @@ export default function AssetsPage() {
                     size="icon"
                     className="size-7 text-muted-foreground hover:text-destructive"
                     onClick={() => openDelete([a.id])}
-                    aria-label={`Delete asset ${a.domain || a.id}`}
+                    aria-label={t("Delete asset {name}", { name: a.domain || a.id })}
                   >
                     <Trash2Icon className="size-3.5" />
                   </Button>
@@ -576,7 +579,7 @@ export default function AssetsPage() {
                     size="icon"
                     className="size-7 text-muted-foreground hover:text-destructive"
                     onClick={() => openDelete([a.id])}
-                    aria-label={`Delete asset ${a.app_name || a.id}`}
+                    aria-label={t("Delete asset {name}", { name: a.app_name || a.id })}
                   >
                     <Trash2Icon className="size-3.5" />
                   </Button>
@@ -655,7 +658,7 @@ export default function AssetsPage() {
                     ) : (
                       (a.auth ?? []).map((authItem, i) => {
                         const item = authItem as Record<string, string>;
-                        const label = item.type || item.username || "Auth";
+                        const label = item.type || item.username || t("Auth");
                         return (
                           <span key={i} className="inline-flex items-center gap-1 text-[11px]">
                             <KeyRoundIcon className="size-3 text-muted-foreground" />
@@ -671,7 +674,7 @@ export default function AssetsPage() {
                       size="icon"
                       className="size-7 text-muted-foreground hover:text-destructive"
                       onClick={() => openDelete([a.id])}
-                      aria-label={`Delete asset ${a.url || a.id}`}
+                      aria-label={t("Delete asset {name}", { name: a.url || a.id })}
                     >
                       <Trash2Icon className="size-3.5" />
                     </Button>
@@ -723,7 +726,7 @@ export default function AssetsPage() {
                     size="icon"
                     className="size-7 text-muted-foreground hover:text-destructive"
                     onClick={() => openDelete([a.id])}
-                    aria-label={`Delete asset ${a.url || a.id}`}
+                    aria-label={t("Delete asset {name}", { name: a.url || a.id })}
                   >
                     <Trash2Icon className="size-3.5" />
                   </Button>
@@ -737,14 +740,15 @@ export default function AssetsPage() {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm delete</AlertDialogTitle>
+            <AlertDialogTitle>{t("Confirm delete")}</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete <span className="font-semibold tabular-nums">{deleteIds.length}</span>{" "}
-               asset records. This action cannot be undone.
+              {t("This will permanently delete {count} asset records. This action cannot be undone.", {
+                count: deleteIds.length,
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
@@ -753,7 +757,7 @@ export default function AssetsPage() {
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting ? "Deleting…" : "Confirm delete"}
+              {deleting ? t("Deleting…") : t("Confirm delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -770,10 +774,14 @@ export default function AssetsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete company · {companyDeleteTarget?.name}</AlertDialogTitle>
+            <AlertDialogTitle>{t("Delete company · {name}", { name: companyDeleteTarget?.name ?? "" })}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
-                <p>This will permanently delete the company and its asset scope configuration. This action cannot be undone.</p>
+                <p>
+                  {t(
+                    "This will permanently delete the company and its asset scope configuration. This action cannot be undone.",
+                  )}
+                </p>
                 <label
                   htmlFor="delete-assets-opt"
                   className="flex cursor-pointer items-center gap-2.5 rounded-md border p-3 hover:bg-muted/50"
@@ -784,15 +792,17 @@ export default function AssetsPage() {
                     onCheckedChange={(v) => setCompanyDeleteAssets(!!v)}
                   />
                   <span className="text-sm leading-snug">
-                    Also delete all assets under this company
-                    <span className="block text-xs text-muted-foreground">Leave unchecked to keep the assets and only remove the ownership</span>
+                    {t("Also delete all assets under this company")}
+                    <span className="block text-xs text-muted-foreground">
+                      {t("Leave unchecked to keep the assets and only remove the ownership")}
+                    </span>
                   </span>
                 </label>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={companyDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={companyDeleting}>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
@@ -801,7 +811,7 @@ export default function AssetsPage() {
               disabled={companyDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {companyDeleting ? "Deleting…" : "Confirm delete"}
+              {companyDeleting ? t("Deleting…") : t("Confirm delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -859,7 +869,7 @@ function AssetCard({
                     />
                   </TableHead>
                 ) : (
-                  <TableHead key={c + i}>{c}</TableHead>
+                  <TableHead key={c + i}>{c && t(c)}</TableHead>
                 ),
               )}
             </TableRow>
@@ -870,7 +880,7 @@ function AssetCard({
             ) : (
               <TableRow>
                 <TableCell colSpan={cols.length} className="py-12 text-center text-sm text-muted-foreground">
-                  {loaded ? "No data." : "Loading…"}
+                  {loaded ? t("No data.") : t("Loading…")}
                 </TableCell>
               </TableRow>
             )}
@@ -887,7 +897,7 @@ function AssetCard({
               <SelectGroup>
                 {PAGE_SIZES.map((n) => (
                   <SelectItem key={n} value={String(n)}>
-                    {n} / page
+                    {t("{count} / page", { count: n })}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -987,11 +997,11 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
 
   const submit = async () => {
     if (!name.trim()) {
-      toast.error("Please enter a company name");
+      toast.error(t("Please enter a company name"));
       return;
     }
     if (parsedScope.errors.length > 0) {
-      toast.error("Please fix the invalid asset scope");
+      toast.error(t("Please fix the invalid asset scope"));
       return;
     }
     setBusy(true);
@@ -999,14 +1009,15 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
       const res = await api.createCompany(name.trim(), parsedScope.rules);
       const added = res.scope_added ?? 0;
       const invalid = res.scope_invalid ?? 0;
-      if (invalid > 0) toast.warning(`Company created, ${added} scopes added; ${invalid} invalid lines`);
-      else toast.success(`Company created, ${added} scopes added`);
+      if (invalid > 0)
+        toast.warning(t("Company created, {added} scopes added; {invalid} invalid lines", { added, invalid }));
+      else toast.success(t("Company created, {added} scopes added", { added }));
       setOpen(false);
       onSaved();
     } catch (e) {
       const msg = String((e as Error)?.message ?? e);
-      if (/:\s*409$/.test(msg)) toast.error("Company already exists; try a different name");
-      else toast.error(`Save failed: ${msg}`);
+      if (/:\s*409$/.test(msg)) toast.error(t("Company already exists; try a different name"));
+      else toast.error(t("Save failed: {error}", { error: msg }));
     } finally {
       setBusy(false);
     }
@@ -1016,21 +1027,25 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <Button size="sm">
-          <BuildingIcon data-icon="inline-start" /> Add company
+          <BuildingIcon data-icon="inline-start" /> {t("Add company")}
         </Button>
       </SheetTrigger>
       <SheetContent className="w-full! max-w-none! gap-0 p-0 sm:w-[520px]! sm:max-w-[520px]!">
         <SheetHeader className="border-b p-6">
-          <SheetTitle>Add company</SheetTitle>
-          <SheetDescription>Configure the company and its asset scope. Keywords only serve as agent hints and do not automatically assign assets.</SheetDescription>
+          <SheetTitle>{t("Add company")}</SheetTitle>
+          <SheetDescription>
+            {t(
+              "Configure the company and its asset scope. Keywords only serve as agent hints and do not automatically assign assets.",
+            )}
+          </SheetDescription>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto p-6">
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="cn-name">Company name</FieldLabel>
+              <FieldLabel htmlFor="cn-name">{t("Company name")}</FieldLabel>
               <Input
                 id="cn-name"
-                placeholder="e.g. Acme Corp (name must be unique)"
+                placeholder={t("e.g. Acme Corp (name must be unique)")}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -1040,10 +1055,10 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
         </div>
         <SheetFooter className="flex-row justify-end gap-2 border-t p-4">
           <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button onClick={submit} disabled={busy || !name.trim() || parsedScope.errors.length > 0}>
-            {busy ? "Saving…" : "Save"}
+            {busy ? t("Saving…") : t("Save")}
           </Button>
         </SheetFooter>
       </SheetContent>
@@ -1071,20 +1086,20 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
 
   const submit = async () => {
     if (parsedScope.errors.length > 0) {
-      toast.error("Please fix the invalid asset scope");
+      toast.error(t("Please fix the invalid asset scope"));
       return;
     }
     setBusy(true);
     try {
       const res = await api.updateCompanyScope(company.id, parsedScope.rules, reason);
       const errCount = res.invalid ?? 0;
-      if (errCount > 0) toast.warning(`Saved; ${errCount} invalid lines`);
-      else toast.success(`Scope updated, ${res.added} entries in total`);
+      if (errCount > 0) toast.warning(t("Saved; {count} invalid lines", { count: errCount }));
+      else toast.success(t("Scope updated, {count} entries in total", { count: res.added }));
       showScopeWarnings(res.warnings);
       setOpen(false);
       onSaved();
     } catch (e) {
-      toast.error(`Save failed: ${String((e as Error)?.message ?? e)}`);
+      toast.error(t("Save failed: {error}", { error: String((e as Error)?.message ?? e) }));
     } finally {
       setBusy(false);
     }
@@ -1094,14 +1109,16 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="h-7">
-          Edit
+          {t("Edit")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit asset scope · {company.name}</DialogTitle>
+          <DialogTitle>{t("Edit asset scope · {name}", { name: company.name })}</DialogTitle>
           <DialogDescription>
-            Saving replaces all existing scopes. ICP matches assets exactly; company keywords only serve as agent hints.
+            {t(
+              "Saving replaces all existing scopes. ICP matches assets exactly; company keywords only serve as agent hints.",
+            )}
           </DialogDescription>
         </DialogHeader>
         <FieldGroup className="py-2">
@@ -1112,10 +1129,10 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
             parsed={parsedScope}
           />
           <Field>
-            <FieldLabel htmlFor="es-reason">Attribution basis (optional)</FieldLabel>
+            <FieldLabel htmlFor="es-reason">{t("Attribution basis (optional)")}</FieldLabel>
             <Input
               id="es-reason"
-              placeholder="e.g. certificate / whois / ASN evidence"
+              placeholder={t("e.g. certificate / whois / ASN evidence")}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
@@ -1123,10 +1140,10 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
         </FieldGroup>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button onClick={submit} disabled={busy || parsedScope.errors.length > 0}>
-            {busy ? "Saving…" : "Overwrite save"}
+            {busy ? t("Saving…") : t("Overwrite save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1150,24 +1167,24 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
 
   const submit = async () => {
     if (parsedScope.rules.length === 0) {
-      toast.error("Please enter the scopes to append");
+      toast.error(t("Please enter the scopes to append"));
       return;
     }
     if (parsedScope.errors.length > 0) {
-      toast.error("Please fix the invalid asset scope");
+      toast.error(t("Please fix the invalid asset scope"));
       return;
     }
     setBusy(true);
     try {
       const res = await api.addCompanyScope(company.id, parsedScope.rules, reason);
       const errCount = res.invalid ?? 0;
-      if (errCount > 0) toast.warning(`Saved; ${errCount} invalid lines`);
-      else toast.success(`Appended ${res.added} scopes`);
+      if (errCount > 0) toast.warning(t("Saved; {count} invalid lines", { count: errCount }));
+      else toast.success(t("Appended {count} scopes", { count: res.added }));
       showScopeWarnings(res.warnings);
       setOpen(false);
       onSaved();
     } catch (e) {
-      toast.error(`Save failed: ${String((e as Error)?.message ?? e)}`);
+      toast.error(t("Save failed: {error}", { error: String((e as Error)?.message ?? e) }));
     } finally {
       setBusy(false);
     }
@@ -1177,13 +1194,17 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="h-7">
-          Append
+          {t("Append")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Append asset scope · {company.name}</DialogTitle>
-          <DialogDescription>New scopes are appended to the existing ones. ICP matches assets exactly; company keywords only serve as agent hints.</DialogDescription>
+          <DialogTitle>{t("Append asset scope · {name}", { name: company.name })}</DialogTitle>
+          <DialogDescription>
+            {t(
+              "New scopes are appended to the existing ones. ICP matches assets exactly; company keywords only serve as agent hints.",
+            )}
+          </DialogDescription>
         </DialogHeader>
         <FieldGroup className="py-2">
           <ScopeTextEditor
@@ -1193,10 +1214,10 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
             parsed={parsedScope}
           />
           <Field>
-            <FieldLabel htmlFor="as-reason">Attribution basis (optional)</FieldLabel>
+            <FieldLabel htmlFor="as-reason">{t("Attribution basis (optional)")}</FieldLabel>
             <Input
               id="as-reason"
-              placeholder="e.g. certificate / whois / ASN evidence"
+              placeholder={t("e.g. certificate / whois / ASN evidence")}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
@@ -1204,10 +1225,10 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
         </FieldGroup>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button onClick={submit} disabled={busy || parsedScope.rules.length === 0 || parsedScope.errors.length > 0}>
-            {busy ? "Saving…" : "Append"}
+            {busy ? t("Saving…") : t("Append")}
           </Button>
         </DialogFooter>
       </DialogContent>
