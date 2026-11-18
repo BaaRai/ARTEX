@@ -31,6 +31,7 @@ All notable changes to this project are documented in this file. The format is b
 - **Opt-in Keenable web search backend** (#295): the search tool gains Keenable alongside Brave and Tavily; the key is stored encrypted and can be cleared independently.
 - **Durable activity outbox** (#300): activity rows that cannot be stored are written to the new `activity_outbox` table (migration `0006_activity_outbox.sql`) and replayed once on the next start. The server stops admitting new work before the drain, and a shutdown cancel leaves an in-flight intent claim running so the next start can reset it to open instead of recording it as done or blocked.
 - **LLM model search** (#284): the System → LLM model picker can search the model list, and the API-key field opts out of password-manager autofill.
+- **Finding report state** (#308): findings carry a `report_state` (`none`, `submitted`, `accepted`, `rejected`, `duplicate`) for what was sent to a bug bounty program, separate from the triage status; the bulk update accepts both fields, and restoring an older archive fills `none` (migration `0007_finding_report_state.sql`).
 
 ### Changed
 
@@ -49,6 +50,7 @@ All notable changes to this project are documented in this file. The format is b
 ### Fixed
 
 - **LLM health badge on every task path**: `/system/llm/` read a breaker state that only the failover Pool wrote, so a profile used by an explicit task chain, by a bound agent with failover off, or as the global provider stayed "Healthy" through a real outage. Every task LLM attempt now records its outcome through the same policy the Pool uses, keyed by the profile that served it. The LLM recording page also explains an empty list when the `llm_record` toggle is off instead of looking broken.
+- **LLM health persistence** (#304): persisted breaker rows are applied in sequence at startup and written before the database closes, and a slow write no longer holds the registry lock while it runs.
 - **Skill visibility survives restarts**: turning a skill off now writes an explicit disabled row instead of deleting it, so the startup seed, which only inserts missing rows, can no longer bring the skill back. Skills that were turned off before this version have no row to keep, so they come back once after the upgrade and must be turned off again.
 - **Browser extension traffic capture**: CDP delivers `Network.responseReceived` response headers as an object, not an array of `{name, value}` records, so the extension threw on every response and never queued an exchange. It now accepts both shapes and lower-cases names before the body-capture gate, so captures work again and `content-type` correctly controls body capture.
 - **bbot on arm64**: the image now builds on arm64 hosts such as Apple Silicon. bbot's `gowitness` downloaded an x86-64 Chrome and `retirejs` an x86-64 Node, which can't run there, so the build failed. On arm64 the image uses Debian's `chromium` for gowitness and an arm64 Node for retirejs, and the build check now covers `retirejs` too. amd64 builds are unchanged.
@@ -59,6 +61,7 @@ All notable changes to this project are documented in this file. The format is b
 - **RSI lesson correctness** (#287, #290): lessons are scoped from `task_scope`, UTF-8 is no longer split mid-character, caution lessons are looked up by cue, lesson evidence and every retest are retracted when a finding's disposition reverses, and extraction is skipped on a task with more than one company.
 - **Finding disposition mirror** (#289): finding triage is mirrored onto its exploration node, so the graph and the findings table agree.
 - **RSI lessons in the data envelope** (#288): lesson text reaches the planner and worker inside the same nonce-framed envelope as other target-derived content.
+- **Intent summaries framed** (#311): the intent summary on the worker-finished and finding lines, and the summaries in `graph_overview`, now reach the planner inside the nonce frame; the structured intent fields stay in the plain JSON, and the operator-typed deletion reason stays outside.
 - **LLM pool context window** (#286): the pool and side-question paths use the model's real context window instead of a default when computing compression thresholds.
 - **Sensitive rewrite values** (#273 follow-ups): a kept sensitive value is matched on action type, header name and regex, and a host change is refused while a stored sensitive value is kept.
 - **Triage bot context** (#274): the PR triage bot receives a directory map instead of a truncated file list.
