@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toast } from "sonner";
 
+import { t } from "@/i18n";
 import { sseUrl } from "@/lib/api";
 import { isBtwCommand, type SideExchange, type SideHistory, sideAPI } from "@/lib/side-questions";
 import { setVisibleInterval } from "@/lib/polling";
@@ -139,7 +140,7 @@ export function useSideQuestions(parent: string | null) {
         restoreFailedDraft([item]);
         if (item.status !== "running") stream.close();
       } catch {
-        setError("Failed to parse side-question data; please reopen the panel");
+        setError(t("Failed to parse side-question data; please reopen the panel"));
       }
     });
     stream.addEventListener("cleared", () => {

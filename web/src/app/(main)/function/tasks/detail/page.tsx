@@ -36,6 +36,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { LLMProfile, Task } from "@/lib/types";
 
@@ -53,17 +54,17 @@ import { SessionsTab } from "./_tabs/sessions-tab";
 import { setVisibleInterval } from "@/lib/polling";
 
 const TABS = [
-  { value: "sessions", label: "Sessions" },
-  { value: "overview", label: "Overview" },
-  { value: "graph", label: "Exploration graph" },
-  { value: "broadcast", label: "Broadcast" },
-  { value: "findings", label: "Findings" },
-  { value: "retests", label: "Retests" },
-  { value: "assets", label: "Test assets" },
-  { value: "credentials", label: "Credentials" },
-  { value: "coverage", label: "Asset coverage" },
-  { value: "intercept", label: "Interception approval" },
-  { value: "report", label: "Report" },
+  { value: "sessions", label: t("Sessions") },
+  { value: "overview", label: t("Overview") },
+  { value: "graph", label: t("Exploration graph") },
+  { value: "broadcast", label: t("Broadcast") },
+  { value: "findings", label: t("Findings") },
+  { value: "retests", label: t("Retests") },
+  { value: "assets", label: t("Test assets") },
+  { value: "credentials", label: t("Credentials") },
+  { value: "coverage", label: t("Asset coverage") },
+  { value: "intercept", label: t("Interception approval") },
+  { value: "report", label: t("Report") },
 ];
 
 function taskProfileIDs(task: Task): string[] {
@@ -96,20 +97,22 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
   if (task.active_llm_profile_id) activeID = String(task.active_llm_profile_id);
   const activeProfile = profiles.find((profile) => profile.id === activeID);
   const currentLabel = exhausted
-    ? "Configuration chain exhausted"
+    ? t("Configuration chain exhausted")
     : task.llm_rotate
-      ? `Worker rotation (${chain.length})`
-      : (activeProfile?.name ?? (activeID ? `Config #${activeID}` : "Follow default config"));
+      ? t("Worker rotation ({count})", { count: chain.length })
+      : (activeProfile?.name ?? (activeID ? t("Config #{id}", { id: activeID }) : t("Follow default config")));
   const activeIndex = chain.indexOf(activeID);
   const backupCount = activeIndex >= 0 ? Math.max(0, chain.length - activeIndex - 1) : 0;
-  const currentTitle = [currentLabel, activeProfile?.model, backupCount > 0 ? `${backupCount} backups` : ""]
+  const currentTitle = [currentLabel, activeProfile?.model, backupCount > 0 ? t("{count} backups", { count: backupCount }) : ""]
     .filter(Boolean)
     .join(" · ");
-  let editorDescription = "Rotation changes apply to new worker intents. Profile changes apply to subsequent LLM calls; in-flight calls keep their provider. Saving resets exhausted profiles.";
-  if (terminal) editorDescription = "The task has ended; changes only affect subsequent main agent conversations.";
-  let saveLabel = "Save";
-  if (exhausted) saveLabel = "Save and reset";
-  if (saving) saveLabel = "Saving";
+  let editorDescription = t(
+    "Rotation changes apply to new worker intents. Profile changes apply to subsequent LLM calls; in-flight calls keep their provider. Saving resets exhausted profiles.",
+  );
+  if (terminal) editorDescription = t("The task has ended; changes only affect subsequent main agent conversations.");
+  let saveLabel = t("Save");
+  if (exhausted) saveLabel = t("Save and reset");
+  if (saving) saveLabel = t("Saving");
 
   const syncDraft = React.useCallback(() => {
     const next = taskProfileIDs(task);
@@ -142,14 +145,14 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
       } else {
         toast.success(
           result.reopened_intents > 0
-            ? `LLM configs updated and ${result.reopened_intents} quota-blocked intents reopened`
-            : "LLM configs updated",
+            ? t("LLM configs updated and {count} quota-blocked intents reopened", { count: result.reopened_intents })
+            : t("LLM configs updated"),
         );
       }
       setOpen(false);
       onUpdated();
     } catch (error) {
-      toast.error("Update failed: " + (error as Error).message);
+      toast.error(t("Update failed: {error}", { error: (error as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -161,7 +164,7 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
         <Button
           size="sm"
           variant={exhausted ? "destructive" : "outline"}
-          aria-label="View or switch the task LLM config"
+          aria-label={t("View or switch the task LLM config")}
           title={currentTitle}
         >
           <BrainIcon data-icon="inline-start" />
@@ -171,16 +174,19 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
       </PopoverTrigger>
       <PopoverContent ref={popoverContentRef} align="start" className="w-[min(28rem,calc(100vw-2rem))] gap-4 p-4">
         <PopoverHeader>
-          <PopoverTitle>Task LLM config chain{task.llm_rotate ? " · Worker rotation on" : ""}</PopoverTitle>
+          <PopoverTitle>
+            {task.llm_rotate ? t("Task LLM config chain · Worker rotation on") : t("Task LLM config chain")}
+          </PopoverTitle>
           <PopoverDescription>{editorDescription}</PopoverDescription>
         </PopoverHeader>
 
         {exhausted && (
           <Alert variant="destructive">
             <CircleAlertIcon />
-            <AlertTitle>Configuration chain quota exhausted</AlertTitle>
+            <AlertTitle>{t("Configuration chain quota exhausted")}</AlertTitle>
             <AlertDescription>
-              {task.llm_failover_reason ?? "All selected configs were judged to be out of quota. Saving the chain resets the failure state."}
+              {task.llm_failover_reason ??
+                t("All selected configs were judged to be out of quota. Saving the chain resets the failure state.")}
             </AlertDescription>
           </Alert>
         )}
@@ -200,7 +206,7 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
 
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>
-            Close
+            {t("Close")}
           </Button>
           <Button type="button" size="sm" onClick={save} disabled={saving}>
             {saving && <Spinner data-icon="inline-start" />}
@@ -291,9 +297,9 @@ function TaskDetailInner() {
     try {
       await api.controlTask(id, next ? "pause" : "resume");
       setPaused(next);
-      toast.success(next ? "Exploration paused" : "Exploration resumed");
+      toast.success(next ? t("Exploration paused") : t("Exploration resumed"));
     } catch (e) {
-      toast.error("Operation failed: " + (e as Error).message);
+      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
     }
   }
 
@@ -302,10 +308,10 @@ function TaskDetailInner() {
     setArchiving(true);
     try {
       await api.archiveTask(task.id);
-      toast.success("Task queued for archiving");
+      toast.success(t("Task queued for archiving"));
       router.push("/function/tasks");
     } catch (error) {
-      toast.error(`Archive failed: ${(error as Error).message}`);
+      toast.error(t("Archive failed: {error}", { error: (error as Error).message }));
       setArchiving(false);
     }
   }
@@ -313,11 +319,11 @@ function TaskDetailInner() {
   if (!task) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-        <p className="text-muted-foreground">{loaded ? `Task ${id} was deleted, archived, or does not exist` : "Loading…"}</p>
+        <p className="text-muted-foreground">{loaded ? t("Task {id} was deleted, archived, or does not exist", { id }) : t("Loading…")}</p>
         {loaded && (
           <Button asChild variant="outline">
             <Link href="/function/tasks">
-              <ArrowLeftIcon /> Back to task list
+              <ArrowLeftIcon /> {t("Back to task list")}
             </Link>
           </Button>
         )}
@@ -329,29 +335,32 @@ function TaskDetailInner() {
   const terminal = ["done", "failed", "timeout"].includes(task.status);
   const archiveLifecycleEligible = terminal || paused || task.status === "paused";
   const canArchive = archiveLifecycleEligible && !task.archive_blocked_by_task_id;
-  let archiveDisabledReason = task.queued ? "Queued tasks must be paused first" : "Running tasks must be paused first";
+  let archiveDisabledReason = task.queued ? t("Queued tasks must be paused first") : t("Running tasks must be paused first");
   if (archiveLifecycleEligible && task.archive_blocked_by_task_id) {
-    archiveDisabledReason = `The task is directly inherited by unarchived task #${task.archive_blocked_by_task_id}; archive the dependent task first`;
+    archiveDisabledReason = t(
+      "The task is directly inherited by unarchived task #{id}; archive the dependent task first",
+      { id: task.archive_blocked_by_task_id },
+    );
   }
   const engineMode = paused ? "paused" : (task.engine_mode ?? "idle");
   let controlVariant: "default" | "secondary" | "outline" = "outline";
   let controlIcon = <PauseIcon data-icon="inline-start" />;
-  let controlLabel = "Pause";
+  let controlLabel = t("Pause");
   if (terminal) {
     controlVariant = "secondary";
     controlIcon = <CheckIcon data-icon="inline-start" />;
-    controlLabel = completed ? "Completed" : "Ended";
+    controlLabel = completed ? t("Completed") : t("Ended");
   } else if (paused) {
     controlVariant = "default";
     controlIcon = <PlayIcon data-icon="inline-start" />;
-    controlLabel = "Resume";
+    controlLabel = t("Resume");
   }
   const archiveTrigger = (
     <Button
       size="icon-sm"
       variant="ghost"
       disabled={!canArchive || archiving}
-      aria-label={canArchive ? "Archive task" : archiveDisabledReason}
+      aria-label={canArchive ? t("Archive task") : archiveDisabledReason}
     >
       {archiving ? <Spinner /> : <ArchiveIcon />}
     </Button>
@@ -382,15 +391,16 @@ function TaskDetailInner() {
               <AlertDialogTrigger asChild>{archiveTrigger}</AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Archive task #{task.id}?</AlertDialogTitle>
+                  <AlertDialogTitle>{t("Archive task #{id}?", { id: task.id })}</AlertDialogTitle>
                   <AlertDialogDescription>
-                    The task graph, related records, exclusive assets and traffic, working files, and LLM
-                    history will be compressed into cold storage. Once archiving completes, restore it from the "Archived" tab of the task list.
+                    {t(
+                      "The task graph, related records, exclusive assets and traffic, working files, and LLM history will be compressed into cold storage. Once archiving completes, restore it from the \"Archived\" tab of the task list.",
+                    )}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => void archiveTask()}>Confirm archive</AlertDialogAction>
+                  <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void archiveTask()}>{t("Confirm archive")}</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
@@ -411,10 +421,10 @@ function TaskDetailInner() {
         {/* Tabs */}
         <div className="no-scrollbar min-w-0 overflow-x-auto">
           <TabsList variant="default" className="min-w-max">
-            {TABS.map((t) => (
-              <TabsTrigger key={t.value} value={t.value}>
-                {t.label}
-                {t.value === "intercept" && interceptPendingCount > 0 && (
+            {TABS.map((tabItem) => (
+              <TabsTrigger key={tabItem.value} value={tabItem.value}>
+                {tabItem.label}
+                {tabItem.value === "intercept" && interceptPendingCount > 0 && (
                   <span className="ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white">
                     {interceptPendingCount > 99 ? "99+" : interceptPendingCount}
                   </span>

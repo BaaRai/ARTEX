@@ -18,6 +18,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { t } from "@/i18n";
 
 export function NavDocuments({
   items,
@@ -32,7 +33,7 @@ export function NavDocuments({
 
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>Documents</SidebarGroupLabel>
+      <SidebarGroupLabel>{t("Documents")}</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => (
           <SidebarMenuItem key={item.name}>
@@ -46,7 +47,7 @@ export function NavDocuments({
               <DropdownMenuTrigger asChild>
                 <SidebarMenuAction showOnHover className="rounded-sm data-[state=open]:bg-accent">
                   <Ellipsis />
-                  <span className="sr-only">More</span>
+                  <span className="sr-only">{t("More")}</span>
                 </SidebarMenuAction>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -56,16 +57,16 @@ export function NavDocuments({
               >
                 <DropdownMenuItem>
                   <Folder />
-                  <span>Open</span>
+                  <span>{t("Open")}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem>
                   <Forward />
-                  <span>Share</span>
+                  <span>{t("Share")}</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive">
                   <Trash2 />
-                  <span>Delete</span>
+                  <span>{t("Delete")}</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -74,7 +75,7 @@ export function NavDocuments({
         <SidebarMenuItem>
           <SidebarMenuButton className="text-sidebar-foreground/70">
             <Ellipsis className="text-sidebar-foreground/70" />
-            <span>More</span>
+            <span>{t("More")}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

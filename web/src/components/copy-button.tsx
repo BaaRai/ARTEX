@@ -6,6 +6,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { t } from "@/i18n";
 import { cn, copyText } from "@/lib/utils";
 
 type CopyButtonProps = {
@@ -23,8 +24,8 @@ type CopyButtonProps = {
 // contexts it degrades automatically (see copyText).
 export function CopyButton({
   text,
-  successMessage = "Copied",
-  label = "Copy",
+  successMessage = t("Copied"),
+  label = t("Copy"),
   size = "sm",
   variant = "outline",
   className,
@@ -47,7 +48,7 @@ export function CopyButton({
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 1500);
     } else {
-      toast.error("Copy failed; select the text manually to copy");
+      toast.error(t("Copy failed; select the text manually to copy"));
     }
   }
 

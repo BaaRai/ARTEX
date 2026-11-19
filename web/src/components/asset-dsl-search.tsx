@@ -5,6 +5,7 @@ import * as React from "react";
 import { SearchIcon } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 // ── DSL autocomplete ──────────────────────────────────────────────────────────
@@ -14,167 +15,167 @@ import { cn } from "@/lib/utils";
 const DSL_FIELDS: { name: string; desc: string; ops: { op: string; desc: string }[] }[] = [
   {
     name: "domain",
-    desc: "Domain (root domain/subdomain/service domain)",
+    desc: t("Domain (root domain/subdomain/service domain)"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "ip",
-    desc: "IPv4/IPv6 address",
+    desc: t("IPv4/IPv6 address"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "url",
-    desc: "Full URL (service/endpoint)",
+    desc: t("Full URL (service/endpoint)"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "root_domain",
-    desc: "Root domain",
+    desc: t("Root domain"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "page_title",
-    desc: "Page title (HTTP service)",
+    desc: t("Page title (HTTP service)"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "icp",
-    desc: "ICP filing number",
+    desc: t("ICP filing number"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "service_name",
-    desc: "Service name (non-HTTP service)",
+    desc: t("Service name (non-HTTP service)"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "app_name",
-    desc: "App name",
+    desc: t("App name"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "bundle_id",
-    desc: "App Bundle ID",
+    desc: t("App Bundle ID"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "category",
-    desc: "App category",
+    desc: t("App category"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "app_icp",
-    desc: "App ICP filing",
+    desc: t("App ICP filing"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "method",
-    desc: "HTTP method GET/POST/PUT/…",
+    desc: t("HTTP method GET/POST/PUT/…"),
     ops: [
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "service_type",
-    desc: "Service type: http | other",
+    desc: t("Service type: http | other"),
     ops: [
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "record_type",
-    desc: "DNS record type A/CNAME/MX/…",
+    desc: t("DNS record type A/CNAME/MX/…"),
     ops: [
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "technology",
-    desc: "Technology fingerprint (array field)",
+    desc: t("Technology fingerprint (array field)"),
     ops: [
-      { op: "=", desc: "fuzzy match" },
-      { op: "==", desc: "exact match" },
-      { op: "!=", desc: "exclude" },
+      { op: "=", desc: t("fuzzy match") },
+      { op: "==", desc: t("exact match") },
+      { op: "!=", desc: t("exclude") },
     ],
   },
   {
     name: "port",
-    desc: "Port number (integer)",
+    desc: t("Port number (integer)"),
     ops: [
-      { op: "==", desc: "equals" },
-      { op: "!=", desc: "not equals" },
-      { op: ">", desc: "greater than" },
-      { op: ">=", desc: "greater than or equal" },
-      { op: "<", desc: "less than" },
-      { op: "<=", desc: "less than or equal" },
+      { op: "==", desc: t("equals") },
+      { op: "!=", desc: t("not equals") },
+      { op: ">", desc: t("greater than") },
+      { op: ">=", desc: t("greater than or equal") },
+      { op: "<", desc: t("less than") },
+      { op: "<=", desc: t("less than or equal") },
     ],
   },
   {
     name: "status_code",
-    desc: "HTTP status code (integer)",
+    desc: t("HTTP status code (integer)"),
     ops: [
-      { op: "==", desc: "equals" },
-      { op: "!=", desc: "not equals" },
-      { op: ">", desc: "greater than" },
-      { op: ">=", desc: "greater than or equal" },
-      { op: "<", desc: "less than" },
-      { op: "<=", desc: "less than or equal" },
+      { op: "==", desc: t("equals") },
+      { op: "!=", desc: t("not equals") },
+      { op: ">", desc: t("greater than") },
+      { op: ">=", desc: t("greater than or equal") },
+      { op: "<", desc: t("less than") },
+      { op: "<=", desc: t("less than or equal") },
     ],
   },
-  { name: "company_id", desc: "Owning company ID (integer)", ops: [{ op: "==", desc: "equals" }] },
-  { name: "task_id", desc: "Source task ID (integer)", ops: [{ op: "==", desc: "equals" }] },
+  { name: "company_id", desc: t("Owning company ID (integer)"), ops: [{ op: "==", desc: t("equals") }] },
+  { name: "task_id", desc: t("Source task ID (integer)"), ops: [{ op: "==", desc: t("equals") }] },
 ];
 
 const LOGIC_OPS = [
-  { label: "AND", desc: "AND (both conditions must match)" },
-  { label: "OR", desc: "OR (either one matches)" },
+  { label: "AND", desc: t("AND (both conditions must match)") },
+  { label: "OR", desc: t("OR (either one matches)") },
 ];
 
 interface DslSuggestion {
@@ -341,7 +342,7 @@ export function AssetDslSearch({
         <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={inputRef}
-          placeholder="DSL search: domain=example AND status_code>=400"
+          placeholder={t("DSL search: {example}", { example: "domain=example AND status_code>=400" })}
           value={query}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
@@ -375,7 +376,13 @@ export function AssetDslSearch({
       </div>
       {query.trim() && !open && (
         <p className="pl-1 text-[11px] text-muted-foreground">
-          {loading ? "Searching…" : error ? <span className="text-destructive">{error}</span> : `Found ${count ?? 0}`}
+          {loading ? (
+            t("Searching…")
+          ) : error ? (
+            <span className="text-destructive">{error}</span>
+          ) : (
+            t("Found {count}", { count: count ?? 0 })
+          )}
         </p>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
+import { t } from "@/i18n";
 
 export function StatTile({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
   return (
@@ -15,7 +16,7 @@ export function StatTile({ label, value, hint, tone }: { label: string; value: s
 // formatBacklog renders backlog milliseconds as a human-readable magnitude.
 export function formatBacklog(ms: number): string {
   if (!ms) return "—";
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}min`;
-  return `${(ms / 3_600_000).toFixed(1)}h`;
+  if (ms < 60_000) return t("{n}s", { n: Math.round(ms / 1000) });
+  if (ms < 3_600_000) return t("{n}min", { n: Math.round(ms / 60_000) });
+  return t("{n}h", { n: (ms / 3_600_000).toFixed(1) });
 }

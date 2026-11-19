@@ -7,6 +7,7 @@ import { PlusIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { t } from "@/i18n";
 import type { AssetInterceptKind, AssetInterceptRuleInput } from "@/lib/types";
 
 // Uses NativeSelect (a native <select>) instead of shadcn Select: this editor is used inside a Sheet drawer,
@@ -16,13 +17,13 @@ export const ASSET_INTERCEPT_KIND_OPTIONS: {
   label: string;
   placeholder: string;
 }[] = [
-  { value: "exact_domain", label: "Domain (exact)", placeholder: "example.gov.cn" },
-  { value: "exact_ip", label: "IP (exact)", placeholder: "203.0.113.10" },
-  { value: "exact_url", label: "URL (exact)", placeholder: "https://example.com/login" },
-  { value: "fuzzy_domain", label: "Domain (fuzzy)", placeholder: ".gov.cn" },
-  { value: "fuzzy_ip", label: "IP (fuzzy)", placeholder: "203.0.113." },
-  { value: "fuzzy_url", label: "URL (fuzzy)", placeholder: "/admin" },
-  { value: "cidr", label: "CIDR range", placeholder: "192.168.0.0/16" },
+  { value: "exact_domain", label: t("Domain (exact)"), placeholder: "example.gov.cn" },
+  { value: "exact_ip", label: t("IP (exact)"), placeholder: "203.0.113.10" },
+  { value: "exact_url", label: t("URL (exact)"), placeholder: "https://example.com/login" },
+  { value: "fuzzy_domain", label: t("Domain (fuzzy)"), placeholder: ".gov.cn" },
+  { value: "fuzzy_ip", label: t("IP (fuzzy)"), placeholder: "203.0.113." },
+  { value: "fuzzy_url", label: t("URL (fuzzy)"), placeholder: "/admin" },
+  { value: "cidr", label: t("CIDR range"), placeholder: "192.168.0.0/16" },
 ];
 
 // AssetInterceptRulesEditor is a controlled multi-row editor for block/allow rules (block/allow +
@@ -56,8 +57,8 @@ export function AssetInterceptRulesEditor({
               value={r.action}
               onChange={(e) => update(i, { action: e.target.value as "block" | "allow" })}
             >
-              <NativeSelectOption value="block">Block</NativeSelectOption>
-              <NativeSelectOption value="allow">Allow</NativeSelectOption>
+              <NativeSelectOption value="block">{t("Block")}</NativeSelectOption>
+              <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
             </NativeSelect>
             <NativeSelect
               size="sm"
@@ -79,7 +80,7 @@ export function AssetInterceptRulesEditor({
             />
             <Input
               className="w-[120px] shrink-0"
-              placeholder="Note (optional)"
+              placeholder={t("Note (optional)")}
               value={r.note}
               onChange={(e) => update(i, { note: e.target.value })}
             />
@@ -96,7 +97,7 @@ export function AssetInterceptRulesEditor({
         );
       })}
       <Button type="button" size="sm" variant="outline" className="w-fit" onClick={add}>
-        <PlusIcon className="size-4" /> Add row
+        <PlusIcon className="size-4" /> {t("Add row")}
       </Button>
     </div>
   );

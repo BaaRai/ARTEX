@@ -17,15 +17,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/lib/api";
 import type { FindingRetest } from "@/lib/types";
+import { intlLocale, t } from "@/i18n";
 
 const statusLabels = {
-  pending: "Waiting to start",
-  running: "Retesting",
-  completed: "Completed",
-  failed: "Retest failed",
-  stopped: "Stopped",
+  pending: t("Waiting to start"),
+  running: t("Retesting"),
+  completed: t("Completed"),
+  failed: t("Retest failed"),
+  stopped: t("Stopped"),
 };
-const verdictLabels = { reproduced: "Still reproducible", fixed: "Fixed", inconclusive: "Inconclusive" };
+const verdictLabels = { reproduced: t("Still reproducible"), fixed: t("Fixed"), inconclusive: t("Inconclusive") };
 
 function active(r: FindingRetest) {
   return r.status === "pending" || r.status === "running";
@@ -84,21 +85,21 @@ export function FindingRetestPanel({
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1.5">
-          <CardTitle>Vulnerability retest</CardTitle>
-          <CardDescription>Verifies the current state in a separate session, keeping each retest's verdict and evidence.</CardDescription>
+          <CardTitle>{t("Vulnerability retest")}</CardTitle>
+          <CardDescription>{t("Verifies the current state in a separate session, keeping each retest's verdict and evidence.")}</CardDescription>
         </div>
         {running?.conversation_id != null ? (
           <Button asChild variant="outline" size="sm">
-            <Link href={`/chat?c=${running.conversation_id}`} title="View the running retest session">
+            <Link href={`/chat?c=${running.conversation_id}`} title={t("View the running retest session")}>
               <Spinner data-icon="inline-start" aria-hidden="true" />
-              Retesting
+              {t("Retesting")}
             </Link>
           </Button>
         ) : null}
         {!running && !readOnly ? (
           <Button size="sm" onClick={() => setOpen(true)} disabled={items === null || !!error}>
             <RotateCcwIcon data-icon="inline-start" />
-            Start retest
+            {t("Start retest")}
           </Button>
         ) : null}
       </CardHeader>
@@ -106,9 +107,9 @@ export function FindingRetestPanel({
         {error ? (
           <Alert variant="destructive">
             <AlertDescription>
-              Failed to load retest records: {error}
+              {t("Failed to load retest records: {error}", { error })}
               <Button variant="outline" size="sm" onClick={() => void load()}>
-                Retry
+                {t("Retry")}
               </Button>
             </AlertDescription>
           </Alert>
@@ -117,8 +118,8 @@ export function FindingRetestPanel({
         {!error && items?.length === 0 ? (
           <Empty>
             <EmptyHeader>
-              <EmptyTitle>No retest records</EmptyTitle>
-              <EmptyDescription>Once the fix is deployed, start a retest to compare new and old evidence.</EmptyDescription>
+              <EmptyTitle>{t("No retest records")}</EmptyTitle>
+              <EmptyDescription>{t("Once the fix is deployed, start a retest to compare new and old evidence.")}</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}
@@ -134,14 +135,14 @@ export function FindingRetestPanel({
                       : statusLabels[item.status]}
                   </Badge>
                   <span className="text-muted-foreground text-xs">
-                    #{item.id} · {new Date(item.created_at).toLocaleString("zh-CN")}
+                    #{item.id} · {new Date(item.created_at).toLocaleString(intlLocale)}
                   </span>
                   {item.conversation_id != null ? (
                     <Button asChild variant="ghost" size="sm" className="ml-auto">
-                      <Link href={`/chat?c=${item.conversation_id}`}>View session</Link>
+                      <Link href={`/chat?c=${item.conversation_id}`}>{t("View session")}</Link>
                     </Button>
                   ) : (
-                    <span className="text-muted-foreground text-xs">Conversation deleted</span>
+                    <span className="text-muted-foreground text-xs">{t("Conversation deleted")}</span>
                   )}
                 </div>
                 {item.status === "completed" && item.summary ? (
@@ -152,12 +153,12 @@ export function FindingRetestPanel({
                 ) : null}
                 {item.notes ? (
                   <p className="whitespace-pre-wrap break-words text-muted-foreground text-xs">
-                    Notes: {item.notes}
+                    {t("Notes: {notes}", { notes: item.notes })}
                   </p>
                 ) : null}
                 {item.status === "completed" && item.evidence ? (
                   <details className="min-w-0">
-                    <summary className="cursor-pointer text-sm">Retest evidence</summary>
+                    <summary className="cursor-pointer text-sm">{t("Retest evidence")}</summary>
                     <div className="mt-3 overflow-x-auto">
                       <Markdown text={item.evidence} />
                     </div>
