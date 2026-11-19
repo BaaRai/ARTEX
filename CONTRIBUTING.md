@@ -12,4 +12,4 @@
 
 ## Security
 
-- Do not open a public issue for a vulnerability in ARTEX itself. Use the private advisory form in the repository's Security tab.
+- Do not open a public issue for a vulnerability in ARTEX itself. Follow the [private reporting instructions](SECURITY.md#reporting-a-vulnerability).
