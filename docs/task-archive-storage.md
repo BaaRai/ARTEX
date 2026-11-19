@@ -35,7 +35,7 @@ no archive-specific access keys are needed.
 | `ARTEX_ARCHIVE_S3_BUCKET` | Required bucket name. |
 | `ARTEX_ARCHIVE_S3_PREFIX` | Object prefix; defaults to `artex/tasks`. |
 | `ARTEX_ARCHIVE_S3_SSE` | `AES256` (default, SSE-S3) or `aws:kms` (SSE-KMS). There is no unencrypted mode. |
-| `ARTEX_ARCHIVE_S3_KMS_KEY_ID` | Optional KMS key ARN/ID/alias; valid only with `aws:kms`. Omit to use the provider's managed KMS key. |
+| `ARTEX_ARCHIVE_S3_KMS_KEY_ID` | Optional full KMS key ARN (not an alias or bare key ID); valid only with `aws:kms`. Omit to use the provider's managed KMS key. |
 | `ARTEX_ARCHIVE_S3_ACCESS_KEY_ID` | Optional dedicated credential override; must be supplied with the secret key. |
 | `ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY` | Secret for the dedicated override. |
 | `ARTEX_ARCHIVE_S3_SESSION_TOKEN` | Optional session token for dedicated temporary credentials. |
@@ -50,7 +50,8 @@ Older local archives remain usable; they are not uploaded automatically.
 
 Every single-object upload and multipart initiation explicitly requests the
 configured server-side encryption. Upload verification also requires HEAD to
-report the requested mode, and a KMS key identifier for SSE-KMS, before accepting
+report the requested mode and a nonempty KMS key identifier for SSE-KMS. When a
+key ARN is configured, HEAD must return that exact ARN before ARTEX accepts
 the object. Size and full SHA-256 readback remain mandatory; encryption metadata
 does not replace content verification.
 
@@ -60,7 +61,9 @@ key. An explicit `AES256` request takes precedence over a bucket's KMS default,
 so do not leave ARTEX on SSE-S3 when the bucket is intended to use KMS.
 
 The principal needs object upload, read (HEAD and ranged GET), delete and
-multipart upload/abort permissions. KMS uploads/readback also need the applicable
+multipart upload/abort permissions. For versioned buckets, grant
+`s3:DeleteObjectVersion` as well: failed verification deletes the version just
+uploaded, rather than creating a delete marker. KMS uploads/readback also need the applicable
 key-policy and IAM permissions for `kms:GenerateDataKey` and `kms:Decrypt`.
 Retain old KMS keys and decrypt permissions when changing the key or mode; restore
 does not require an older object to use the current upload policy.
@@ -87,6 +90,10 @@ is supported for temporary credentials. This explicit override takes precedence
 over ambient AWS credentials. Operator-supplied temporary credentials must be
 rotated by the operator; they are not an IAM role provider.
 
+Both credential modes load shared AWS configuration, including `AWS_CA_BUNDLE`
+for private certificate authorities. HTTP redirects are rejected for all archive
+requests, including 307/308; configure the final endpoint directly.
+
 Keep secrets in a protected service environment file outside the repository and
 frontend. A systemd `EnvironmentFile=` can point to a root-owned mode-0600 file.
 See the [AWS SDK credential-chain documentation](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/configure-gosdk.html).
@@ -108,9 +115,13 @@ See the [AWS SDK credential-chain documentation](https://docs.aws.amazon.com/sdk
 6. **Delete** commits removal of the archive stub, then cleans up the object.
    A durable journal retains failed cleanup work.
 
-The archive list identifies **Object storage** and **Local storage** and shows
-upload/download verification phases. Reads use bounded 8 MiB ranges pinned to the
-object's ETag, with retries for interrupted ranges rather than the entire object.
+The archive list identifies **Object storage** or **Local storage** only once a
+stored location exists; queued/uploading archives do not default to a local
+label. Upload/download verification phases remain visible. Reads use bounded
+8 MiB ranges pinned to the object's ETag. Each range has at most five HTTP
+attempts total, including transient service errors and interrupted bodies;
+SDK retries are disabled inside that loop. Each attempt has a two-minute limit
+and cancellation interrupts both requests and retry delays.
 
 ## Interruption recovery
 
@@ -120,7 +131,7 @@ credentials. Keep this directory with PostgreSQL and the installation data.
 
 | Interruption | Recovery |
 | --- | --- |
-| During staging/compression, before an upload journal exists | Roll staged source files back. Remove any temporary package only after rollback succeeds. The task remains in PostgreSQL. |
+| During staging/compression, before an upload journal exists | Roll staged source files back. Remove any temporary package, including a partially written `.partial` file, only after rollback succeeds. Keep the staging journal if cleanup fails so recovery can retry. The task remains in PostgreSQL. |
 | After the upload journal, before successful verification | Roll source files back and clean up any uncommitted object/package. Failed cleanup retains its journal for retry. |
 | After verification, before the database commit | Treat the object as uncommitted: retain the original task and clean up the orphan object. Verification alone never authorizes local deletion. |
 | After the database commit, before package/staging cleanup | Keep the committed object and finish local cleanup. The persisted location and checksum establish commit, even if Restore or Delete has since been queued. |
@@ -135,12 +146,17 @@ credentials. Keep this directory with PostgreSQL and the installation data.
 The staging recovery rule also applies to local archives. Dedicated tests cover
 both storage modes with ready, restore-queued, delete-queued and uncommitted
 states. Additional PostgreSQL/HTTP-S3 tests reconstruct interrupted operations at
-13 persisted boundaries and repeat recovery to check idempotence.
+14 persisted boundaries and repeat recovery to check idempotence.
 
-Handled multipart-upload failures are aborted by the SDK. Abrupt process death
-may leave unfinished multipart uploads; configure bucket lifecycle expiration
-for those parts. Existing object versions, if versioning is enabled, are governed
-by the bucket's version-retention policy.
+Handled multipart-upload failures, including cancellation, trigger an abort with
+a separate 30-second cleanup context. A failed encryption/content verification
+similarly deletes the newly uploaded object (its exact version when available)
+while retaining the source. Cleanup failures are returned together with the
+original error. Abrupt process death may still leave unfinished multipart uploads
+or object versions; configure bucket lifecycle expiration for incomplete uploads
+and a version-retention policy. The URI-based recovery journal does not retain
+version IDs, so lifecycle policy remains necessary after a crash or failed
+version cleanup.
 
 ## Disk and transfer requirements
 

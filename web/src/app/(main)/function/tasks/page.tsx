@@ -1934,7 +1934,9 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                       title={`Before compression: ${formatArchiveBytes(archive.original_size)}`}
                     >
                       {archiveCompressionLabel(archive)}
-                      <div className="text-muted-foreground">{archive.storage === "s3" ? "Object storage" : "Local storage"}</div>
+                      {(archive.storage === "s3" || archive.storage === "local") && (
+                        <div className="text-muted-foreground">{archive.storage === "s3" ? "Object storage" : "Local storage"}</div>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs tabular-nums">{archiveDataTotal(archive).toLocaleString()}</TableCell>
                     <TableCell>
