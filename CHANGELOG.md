@@ -49,6 +49,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Workspace and skill symlink confinement**: workspace file operations, the skill file APIs and the skill loader resolve symlinks in every path component and refuse a target outside their root, so a link planted in the workspace or a skill directory cannot expose another file.
 - **Target gate behind proxies**: a target approval is name-only whenever a proxy is in the path, including the recording proxy, the global egress proxy and a custom tool's own proxy, so the gate never claims an IP binding the proxy does not enforce.
 - **Remote MCP response bound**: Streamable HTTP JSON-RPC bodies and SSE data payloads are refused above 8 MiB, so a remote MCP server cannot force an unbounded decode.
 - **LLM response capture bound**: each recorded provider attempt keeps at most 1 MiB, and a call keeps at most 8 attempts, so a large or retrying stream cannot grow the recorder without bound. The live stream is unchanged.
