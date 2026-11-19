@@ -38,6 +38,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { llmTransitionToast } from "@/lib/llm-transition";
 import { setVisibleInterval } from "@/lib/polling";
 import type { LLMProfile, Task } from "@/lib/types";
 
@@ -76,6 +77,7 @@ function taskProfileIDs(task: Task): string[] {
 
 function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: LLMProfile[]; onUpdated: () => void }) {
   const t = useTranslations("tasksDetail");
+  const tLlm = useTranslations("llm");
   const [open, setOpen] = React.useState(false);
   const [profileIDs, setProfileIDs] = React.useState<string[]>(() => taskProfileIDs(task));
   const [llmRotate, setLLMRotate] = React.useState(task.llm_rotate ?? false);
@@ -144,7 +146,11 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
         llmRotate,
       );
       if (result.switch_event) {
-        toast.info(result.switch_event.summary, { id: `task-${task.id}-llm-${result.switch_event.seq}` });
+        const transition = result.switch_event.metadata?.llm_transition;
+        const desc = transition ? llmTransitionToast(transition) : null;
+        toast.info(desc ? tLlm(desc.key, desc.values) : result.switch_event.summary, {
+          id: `task-${task.id}-llm-${result.switch_event.seq}`,
+        });
       } else {
         toast.success(
           result.reopened_intents > 0

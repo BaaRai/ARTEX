@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { sseUrl } from "@/lib/api";
@@ -24,6 +25,7 @@ function merge(old: SideExchange[], incoming: SideExchange[]) {
 }
 
 export function useSideQuestions(parent: string | null) {
+  const t = useTranslations("sideQuestionWorkspace");
   const [stateParent, setStateParent] = useState(parent);
   const current = stateParent === parent;
   const [open, setOpen] = useState(false);
@@ -207,7 +209,7 @@ export function useSideQuestions(parent: string | null) {
       retry.current = null;
       accepted.current = null;
     } catch (err) {
-      if (version === epoch.current) toast.error((err as Error).message);
+      if (version === epoch.current) toast.error(t("requestFailed", { message: (err as Error).message }));
     } finally {
       if (version === epoch.current) {
         submitting.current = false;
@@ -223,7 +225,7 @@ export function useSideQuestions(parent: string | null) {
       try {
         await sideAPI.cancel(running.id);
       } catch (err) {
-        toast.error((err as Error).message);
+        toast.error(t("requestFailed", { message: (err as Error).message }));
       }
     }
   };

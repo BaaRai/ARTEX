@@ -250,7 +250,7 @@ function InterceptCard({ step, getDetail }: { step: Activity; getDetail: (seq: n
       setDecided(decision);
       toast.success(decision === "allowed" ? t("intercept.toastAllowed") : t("intercept.toastDenied"));
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("intercept.requestFailed", { message: (e as Error).message }));
     } finally {
       setDeciding(false);
     }

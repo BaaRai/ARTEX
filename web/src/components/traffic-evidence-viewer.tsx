@@ -58,7 +58,7 @@ export function TrafficEvidenceViewer({
           : current,
       );
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("requestFailed", { message: (e as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -101,7 +101,7 @@ export function TrafficEvidenceViewer({
                     onClick={() =>
                       void api
                         .downloadFindingTrafficBody(findingId, detail.binding.id, side, contextTask)
-                        .catch((e: Error) => toast.error(e.message))
+                        .catch((e: Error) => toast.error(t("requestFailed", { message: e.message })))
                     }
                   >
                     {side === "request" ? t("download.request") : t("download.response")}

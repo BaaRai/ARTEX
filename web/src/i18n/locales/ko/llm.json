@@ -1,4 +1,9 @@
 {
+  "transition": {
+    "automatic": "LLM이 자동으로 전환되었습니다: {from} → {to}",
+    "manual": "LLM이 전환되었습니다: {from} → {to}",
+    "exhausted": "사용 가능한 LLM을 모두 소진했습니다 (마지막: {from})"
+  },
   "page": {
     "subtitle": "모든 에이전트가 공유하는 형식 / 모델 / 속도 제한 설정입니다. 카드를 클릭하여 편집하세요. 별표가 있는 카드가 활성 프로파일입니다.",
     "poolSettings": "풀 설정",

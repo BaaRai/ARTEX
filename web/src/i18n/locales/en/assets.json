@@ -98,6 +98,7 @@
     "description": "New scopes are appended to the existing ones. ICP matches assets exactly; company keywords only serve as agent hints."
   },
   "toasts": {
+    "scopeWarning": "Scope warning: {message}",
     "deleted": "Deleted {count} assets",
     "deleteFailed": "Delete failed: {error}",
     "companyDeleted": "Company deleted",

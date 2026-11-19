@@ -82,7 +82,7 @@ export function FindingTrafficPanel({
       onChanged();
       toast.success(t("toasts.updated"));
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("toasts.requestFailed", { message: (e as Error).message }));
       setReload((n) => n + 1);
     } finally {
       setBusy(false);

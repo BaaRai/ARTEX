@@ -579,7 +579,7 @@ export default function InterceptPage() {
       setOpen(false);
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("page.toasts.requestFailed", { message: (e as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -591,7 +591,7 @@ export default function InterceptPage() {
       toast.success(t("page.toasts.ruleDeleted"));
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("page.toasts.requestFailed", { message: (e as Error).message }));
     }
   }
 
@@ -600,7 +600,7 @@ export default function InterceptPage() {
       await api.toggleInterceptRule(rule.id, !rule.enabled);
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("page.toasts.requestFailed", { message: (e as Error).message }));
     }
   }
 

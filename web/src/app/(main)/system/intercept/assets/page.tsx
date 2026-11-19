@@ -146,7 +146,7 @@ export default function AssetInterceptPage() {
       setOpen(false);
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("assets.toasts.requestFailed", { message: (e as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -159,7 +159,7 @@ export default function AssetInterceptPage() {
       toast.success(t("assets.toasts.ruleDeleted"));
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("assets.toasts.requestFailed", { message: (e as Error).message }));
     }
   }
 
@@ -168,7 +168,7 @@ export default function AssetInterceptPage() {
       await api.toggleAssetInterceptRule(rule.id, !rule.enabled);
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("assets.toasts.requestFailed", { message: (e as Error).message }));
     }
   }
 

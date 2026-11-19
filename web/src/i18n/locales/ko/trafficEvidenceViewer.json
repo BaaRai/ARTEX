@@ -1,4 +1,5 @@
 {
+  "requestFailed": "요청 실패: {message}",
   "evidence": {
     "title": "트래픽 증거 #{id}",
     "descriptionFallback": "바인딩 시점에 저장된 요청과 응답을 봅니다"

@@ -102,7 +102,7 @@ function ApprovalOrigin({ row, detail = false }: { row: InterceptApprovalRow; de
           await api.interceptExecution(row.id, row.conversation_id ?? undefined);
           window.location.assign(href);
         } catch (error) {
-          toast.error((error as Error).message || t("origin.locateError"));
+          toast.error(t("toasts.requestFailed", { message: (error as Error).message || t("origin.locateError") }));
           setLocating(false);
         }
       }}
@@ -386,7 +386,7 @@ function AlwaysAllowAction({ id, prefix }: { id: number; prefix?: string }) {
       const res = await api.interceptAlwaysAllow(id);
       toast.success(res.created ? t("alwaysAllow.created") : t("alwaysAllow.exists"));
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("toasts.requestFailed", { message: (e as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -974,7 +974,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       // Re-fetch counts and rows: a decided item may no longer match the filter.
       await latestLoad.current(true);
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(t("toasts.requestFailed", { message: (e as Error).message }));
       await latestLoad.current(true);
     } finally {
       decisionLock.current = false;

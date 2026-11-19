@@ -1,4 +1,5 @@
 {
+  "requestFailed": "요청 실패: {message}",
   "button": {
     "label": "사이드 질문",
     "title": "/btw 사이드 질문"

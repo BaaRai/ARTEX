@@ -19,7 +19,8 @@
     "loadingDetails": "승인 세부 정보 불러오는 중…",
     "loadFailed": "승인 세부 정보를 불러오지 못했습니다",
     "toastAllowed": "실행이 허용되었습니다",
-    "toastDenied": "실행이 거부되었습니다"
+    "toastDenied": "실행이 거부되었습니다",
+    "requestFailed": "요청 실패: {message}"
   },
   "tool": {
     "running": "실행 중…",

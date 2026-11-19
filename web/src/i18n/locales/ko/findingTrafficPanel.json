@@ -33,6 +33,7 @@
     "noteLabel": "증거 메모"
   },
   "toasts": {
-    "updated": "트래픽 증거가 업데이트되었습니다"
+    "updated": "트래픽 증거가 업데이트되었습니다",
+    "requestFailed": "요청 실패: {message}"
   }
 }

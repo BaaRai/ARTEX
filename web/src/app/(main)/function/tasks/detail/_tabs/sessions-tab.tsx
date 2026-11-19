@@ -53,6 +53,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useSideQuestions } from "@/hooks/use-side-questions";
 import { api, sseUrl } from "@/lib/api";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
+import { llmTransitionToast } from "@/lib/llm-transition";
 import { MOCK } from "@/lib/mock/enabled";
 import { setVisibleInterval } from "@/lib/polling";
 import { isBtwCommand } from "@/lib/side-questions";
@@ -500,6 +501,7 @@ function WorkerAssetBadge({ assets }: { assets: IntentAsset[] }) {
 
 export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; taskPaused?: boolean }) {
   const t = useTranslations("tasksSessions");
+  const tLlm = useTranslations("llm");
   const approvalFocus = useApprovalFocus({ taskId });
   const [selectedSessionId, setActiveId] = React.useState(MAIN_ID);
   const focusSession = React.useMemo<Session | undefined>(() => {
@@ -1006,12 +1008,14 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
           if ((a.kind === "llm_switch" || a.kind === "llm_failover") && !llmToastSeqRef.current.has(a.seq)) {
             llmToastSeqRef.current.add(a.seq);
             const transition = a.metadata?.llm_transition;
+            const desc = transition ? llmTransitionToast(transition) : null;
+            const message = desc ? tLlm(desc.key, desc.values) : a.summary;
             if (transition?.mode === "exhausted" || a.is_error) {
-              toast.error(a.summary, { id: `task-${taskId}-llm-${a.seq}` });
+              toast.error(message, { id: `task-${taskId}-llm-${a.seq}` });
             } else if (transition?.mode === "automatic") {
-              toast.success(a.summary, { id: `task-${taskId}-llm-${a.seq}` });
+              toast.success(message, { id: `task-${taskId}-llm-${a.seq}` });
             } else {
-              toast.info(a.summary, { id: `task-${taskId}-llm-${a.seq}` });
+              toast.info(message, { id: `task-${taskId}-llm-${a.seq}` });
             }
             void api
               .taskLLMResolution(taskId)

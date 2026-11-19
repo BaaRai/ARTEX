@@ -1,4 +1,5 @@
 {
+  "requestFailed": "Request failed: {message}",
   "button": {
     "label": "Side question",
     "title": "/btw side question"

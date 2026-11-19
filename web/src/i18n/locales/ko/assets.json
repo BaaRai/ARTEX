@@ -98,6 +98,7 @@
     "description": "새 범위가 기존 범위에 추가됩니다. ICP는 자산과 정확히 일치하며, 회사 키워드는 에이전트 힌트로만 사용됩니다."
   },
   "toasts": {
+    "scopeWarning": "범위 경고: {message}",
     "deleted": "자산 {count}개를 삭제했습니다",
     "deleteFailed": "삭제 실패: {error}",
     "companyDeleted": "회사를 삭제했습니다",

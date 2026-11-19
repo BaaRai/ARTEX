@@ -215,6 +215,7 @@
     "requestFailed": "request failed"
   },
   "toasts": {
+    "requestFailed": "Request failed: {message}",
     "allowed": "Execution allowed",
     "denied": "Execution denied"
   },

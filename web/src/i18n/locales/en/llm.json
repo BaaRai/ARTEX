@@ -1,4 +1,9 @@
 {
+  "transition": {
+    "automatic": "LLM switched automatically: {from} → {to}",
+    "manual": "LLM switched: {from} → {to}",
+    "exhausted": "All available LLMs exhausted (last: {from})"
+  },
   "page": {
     "subtitle": "Format / model / rate-limit settings shared by all agents. Click a card to edit it; the starred card is the active profile.",
     "poolSettings": "Pool settings",

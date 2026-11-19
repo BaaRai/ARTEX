@@ -94,7 +94,8 @@
       "ruleDeleted": "규칙을 삭제했습니다",
       "loadFailed": "불러오기에 실패했습니다: {message}",
       "scopeSaved": "가로채기 범위를 저장했습니다",
-      "saveFailed": "저장에 실패했습니다: {message}"
+      "saveFailed": "저장에 실패했습니다: {message}",
+      "requestFailed": "요청 실패: {message}"
     },
     "judge": {
       "title": "모델 폴백 승인",
@@ -187,6 +188,7 @@
     },
     "toasts": {
       "loadFailed": "자산 가로채기 규칙을 불러오지 못했습니다",
+      "requestFailed": "요청 실패: {message}",
       "ruleUpdated": "규칙을 수정했습니다",
       "ruleCreated": "규칙을 생성했습니다",
       "ruleDeleted": "규칙을 삭제했습니다"

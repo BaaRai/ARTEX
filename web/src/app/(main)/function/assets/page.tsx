@@ -961,9 +961,9 @@ function CompanyAvatar({ name, logo }: { name: string; logo?: string }) {
 
 // Warnings from the backend describe pre-existing data problems (not errors in the submitted lines); the save itself
 // already succeeded. Show them longer because the user must fix specific assets — a glance at the title is not enough.
-function showScopeWarnings(warnings?: string[]) {
+function showScopeWarnings(warnings: string[] | undefined, frame: (message: string) => string) {
   for (const warning of warnings ?? []) {
-    toast.warning(warning, { duration: 15000 });
+    toast.warning(frame(warning), { duration: 15000 });
   }
 }
 
@@ -1090,7 +1090,7 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
       const errCount = res.invalid ?? 0;
       if (errCount > 0) toast.warning(t("toasts.savedWithInvalid", { count: errCount }));
       else toast.success(t("toasts.scopeUpdated", { count: res.added }));
-      showScopeWarnings(res.warnings);
+      showScopeWarnings(res.warnings, (message) => t("toasts.scopeWarning", { message }));
       setOpen(false);
       onSaved();
     } catch (e) {
@@ -1174,7 +1174,7 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
       const errCount = res.invalid ?? 0;
       if (errCount > 0) toast.warning(t("toasts.savedWithInvalid", { count: errCount }));
       else toast.success(t("toasts.scopeAppended", { count: res.added }));
-      showScopeWarnings(res.warnings);
+      showScopeWarnings(res.warnings, (message) => t("toasts.scopeWarning", { message }));
       setOpen(false);
       onSaved();
     } catch (e) {

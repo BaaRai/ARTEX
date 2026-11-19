@@ -19,7 +19,8 @@
     "loadingDetails": "Loading approval details…",
     "loadFailed": "Failed to load approval details",
     "toastAllowed": "Execution allowed",
-    "toastDenied": "Execution denied"
+    "toastDenied": "Execution denied",
+    "requestFailed": "Request failed: {message}"
   },
   "tool": {
     "running": "Running…",

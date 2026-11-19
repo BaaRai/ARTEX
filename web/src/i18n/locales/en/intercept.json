@@ -94,7 +94,8 @@
       "ruleDeleted": "Rule deleted",
       "loadFailed": "Load failed: {message}",
       "scopeSaved": "Interception scope saved",
-      "saveFailed": "Save failed: {message}"
+      "saveFailed": "Save failed: {message}",
+      "requestFailed": "Request failed: {message}"
     },
     "judge": {
       "title": "Model fallback approval",
@@ -187,6 +188,7 @@
     },
     "toasts": {
       "loadFailed": "Failed to load asset interception rules",
+      "requestFailed": "Request failed: {message}",
       "ruleUpdated": "Rule updated",
       "ruleCreated": "Rule created",
       "ruleDeleted": "Rule deleted"

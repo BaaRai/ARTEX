@@ -215,6 +215,7 @@
     "requestFailed": "요청 실패"
   },
   "toasts": {
+    "requestFailed": "요청 실패: {message}",
     "allowed": "실행이 허용되었습니다",
     "denied": "실행이 거부되었습니다"
   },

@@ -1,4 +1,5 @@
 {
+  "requestFailed": "Request failed: {message}",
   "evidence": {
     "title": "Traffic evidence #{id}",
     "descriptionFallback": "View the request and response saved at binding time"

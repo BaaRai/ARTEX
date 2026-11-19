@@ -33,6 +33,7 @@
     "noteLabel": "Evidence note"
   },
   "toasts": {
-    "updated": "Traffic evidence updated"
+    "updated": "Traffic evidence updated",
+    "requestFailed": "Request failed: {message}"
   }
 }
