@@ -17,6 +17,9 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
@@ -93,24 +96,37 @@ func New(c Config) (*Store, error) {
 	if c.KMSKeyID != "" && c.SSE != "aws:kms" {
 		return nil, errors.New("archive S3 KMS key requires SSE=aws:kms")
 	}
+	if c.KMSKeyID != "" {
+		key, err := arn.Parse(c.KMSKeyID)
+		if err != nil || key.Service != "kms" || key.Region == "" || key.AccountID == "" ||
+			!strings.HasPrefix(key.Resource, "key/") || len(key.Resource) <= len("key/") {
+			return nil, errors.New("archive S3 KMS key must be a full key ARN, not an alias or bare key ID")
+		}
+	}
 	if c.Region == "" {
 		c.Region = "us-east-1"
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 60 * time.Second
-	httpClient := &http.Client{Transport: transport}
-	cfg := aws.Config{Region: c.Region, HTTPClient: httpClient}
+	// Load shared AWS settings (including custom CAs) for both credential modes.
+	httpClient := awshttp.NewBuildableClient().WithTransportOptions(func(t *http.Transport) {
+		t.ResponseHeaderTimeout = 60 * time.Second
+	})
+	options := []func(*awsconfig.LoadOptions) error{
+		awsconfig.WithRegion(c.Region), awsconfig.WithHTTPClient(httpClient),
+	}
 	if explicitCredentials {
-		cfg.Credentials = credentials.NewStaticCredentialsProvider(c.AccessKey, c.SecretKey, c.SessionToken)
-	} else {
-		// Keep the SDK's refreshable default chain: standard AWS environment/shared
-		// profiles, web identity, ECS task roles and EC2 instance roles (IMDSv2).
-		var err error
-		cfg, err = awsconfig.LoadDefaultConfig(context.Background(),
-			awsconfig.WithRegion(c.Region), awsconfig.WithHTTPClient(httpClient))
-		if err != nil {
-			return nil, fmt.Errorf("load archive S3 AWS configuration: %w", err)
-		}
+		options = append(options, awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(c.AccessKey, c.SecretKey, c.SessionToken)))
+	}
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(), options...)
+	if err != nil {
+		return nil, fmt.Errorf("load archive S3 AWS configuration: %w", err)
+	}
+	// The SDK's default client still follows 307/308. Use its CA-configured
+	// transport, but never redirect a signed archive request to another origin.
+	configuredClient := cfg.HTTPClient.(*awshttp.BuildableClient)
+	cfg.HTTPClient = &http.Client{
+		Transport: configuredClient.GetTransport(), Timeout: configuredClient.GetTimeout(),
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(c.Endpoint)
@@ -166,6 +182,7 @@ func (s *Store) Upload(ctx context.Context, uri, filename, checksum string) erro
 	uploader := manager.NewUploader(s.client, func(u *manager.Uploader) {
 		u.PartSize = 8 << 20
 		u.Concurrency = 2
+		u.LeavePartsOnError = true // Abort below with a fresh, bounded cleanup context.
 		u.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 	})
 	input := &s3.PutObjectInput{
@@ -176,11 +193,36 @@ func (s *Store) Upload(ctx context.Context, uri, filename, checksum string) erro
 	if s.kmsKeyID != "" {
 		input.SSEKMSKeyId = aws.String(s.kmsKeyID)
 	}
-	_, err = uploader.Upload(ctx, input)
+	result, err := uploader.Upload(ctx, input)
 	if err != nil {
-		return fmt.Errorf("upload archive: %w", err)
+		uploadErr := fmt.Errorf("upload archive: %w", err)
+		var multipart manager.MultiUploadFailure
+		if errors.As(err, &multipart) {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			_, cleanupErr := s.client.AbortMultipartUpload(cleanupCtx, &s3.AbortMultipartUploadInput{
+				Bucket: aws.String(s.bucket), Key: aws.String(key), UploadId: aws.String(multipart.UploadID()),
+			})
+			if cleanupErr != nil {
+				return errors.Join(uploadErr, fmt.Errorf("abort archive multipart upload: %w", cleanupErr))
+			}
+		}
+		return uploadErr
 	}
-	return s.readVerified(ctx, key, io.Discard, checksum, info.Size(), true)
+	if err := s.readVerified(ctx, key, io.Discard, checksum, info.Size(), true); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		// Versioned buckets require deleting the version just uploaded; an
+		// unversioned DELETE would only hide it behind a delete marker.
+		_, cleanupErr := s.client.DeleteObject(cleanupCtx, &s3.DeleteObjectInput{
+			Bucket: aws.String(s.bucket), Key: aws.String(key), VersionId: result.VersionID,
+		})
+		if cleanupErr != nil {
+			return errors.Join(err, fmt.Errorf("delete unverified archive: %w", cleanupErr))
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) readVerified(ctx context.Context, key string, out io.Writer, checksum string, expectedSize int64, requireEncryption bool) error {
@@ -195,7 +237,8 @@ func (s *Store) readVerified(ctx context.Context, key string, out io.Writer, che
 		return fmt.Errorf("inspect archive: %w", err)
 	}
 	if requireEncryption && (object.ServerSideEncryption != s.encryption ||
-		(s.encryption == types.ServerSideEncryptionAwsKms && aws.ToString(object.SSEKMSKeyId) == "")) {
+		(s.encryption == types.ServerSideEncryptionAwsKms && (aws.ToString(object.SSEKMSKeyId) == "" ||
+			(s.kmsKeyID != "" && aws.ToString(object.SSEKMSKeyId) != s.kmsKeyID)))) {
 		return errors.New("remote archive did not confirm the requested server-side encryption; source data retained")
 	}
 	if object.ContentLength == nil || *object.ContentLength != expectedSize || aws.ToString(object.ETag) == "" {
@@ -265,11 +308,17 @@ func (s *Store) readArchiveChunkOnce(ctx context.Context, key, etag string, star
 	object, err := s.client.GetObject(requestCtx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket), Key: aws.String(key), IfMatch: aws.String(etag),
 		Range: aws.String(fmt.Sprintf("bytes=%d-%d", start, end)),
+	}, func(o *s3.Options) {
+		// This loop owns both HTTP and interrupted-body retries: at most five
+		// wire requests per chunk, rather than five times the SDK's attempts.
+		o.RetryMaxAttempts = 1
 	})
 	if err != nil {
 		var networkError net.Error
-		retry := errors.As(err, &networkError) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.DeadlineExceeded)
-		return nil, retry, fmt.Errorf("read archive range: %w", err)
+		var responseError *awshttp.ResponseError
+		throttled := errors.As(err, &responseError) && responseError.HTTPStatusCode() == http.StatusTooManyRequests
+		shouldRetry := throttled || retry.NewStandard().IsErrorRetryable(err) || errors.As(err, &networkError) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.DeadlineExceeded)
+		return nil, shouldRetry, fmt.Errorf("read archive range: %w", err)
 	}
 	defer object.Body.Close()
 	want := end - start + 1

@@ -76,6 +76,13 @@ func TestArchiveEncryptionConfiguration(t *testing.T) {
 		t.Fatal("KMS key accepted with SSE-S3")
 	}
 	c.SSE = "aws:kms"
+	for _, key := range []string{"alias/archive", "bare-key-id", "arn:aws:kms:us-east-1:123456789012:alias/archive"} {
+		c.KMSKeyID = key
+		if _, err := New(c); err == nil {
+			t.Fatalf("accepted noncanonical KMS key %q", key)
+		}
+	}
+	c.KMSKeyID = "arn:aws:kms:us-east-1:123456789012:key/test-key"
 	if _, err := New(c); err != nil {
 		t.Fatal(err)
 	}

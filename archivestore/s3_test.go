@@ -340,6 +340,8 @@ func TestS3UploadRejectsUnconfirmedEncryption(t *testing.T) {
 				switch r.Method {
 				case "PUT":
 					_, _ = io.Copy(io.Discard, r.Body)
+				case "DELETE":
+					w.WriteHeader(204)
 				case "HEAD":
 					w.Header().Set("ETag", `"test-etag"`)
 					w.Header().Set("Content-Length", strconv.Itoa(len(data)))
