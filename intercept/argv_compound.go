@@ -439,10 +439,10 @@ func evalPayload(args []callWord) (string, bool) {
 
 // envMatchesArgv handles env's options (including -S/--split-string, whose
 // value is re-parsed as a Bash line at depth+1), NAME=VALUE assignments, and
-// any trailing wrapped command.
+// any trailing wrapped command. Unknown options are over-approximated (tried
+// as 0-arg and, when applicable, 1-arg) up to argvMaxWrapperCandidates.
 func envMatchesArgv(rule []string, args []callWord, depth int) bool {
 	spec := wrapperSpecs["env"]
-	i := 0
 	checkSplitString := func(val string) bool {
 		if depth >= argvMaxNestedPayloads || strings.TrimSpace(val) == "" {
 			return false
@@ -458,115 +458,141 @@ func envMatchesArgv(rule []string, args []callWord, depth int) bool {
 		return false
 	}
 
-	for i < len(args) {
-		if !args[i].Literal {
-			if args[i].AssignLike {
-				break
-			}
+	candidates := 0
+	seenIdx := map[int]bool{}
+	var walk func(i int) bool
+	walk = func(i int) bool {
+		if candidates >= argvMaxWrapperCandidates {
 			return false
 		}
-		tok := args[i].Value
-		if tok == "--" {
-			i++
-			break
-		}
-		if tok == "-" {
-			i++
-			continue
-		}
-		if !strings.HasPrefix(tok, "-") {
-			break
-		}
-		if strings.HasPrefix(tok, "--") {
-			name := tok[2:]
-			if eq := strings.IndexByte(name, '='); eq >= 0 {
-				flagName, val := name[:eq], name[eq+1:]
-				if flagName == "split-string" {
-					if checkSplitString(val) {
-						return true
-					}
-					i++
-					continue
-				}
-				if spec.longArg[flagName] || spec.longOptVal[flagName] {
-					i++
-					continue
+		for i < len(args) {
+			if !args[i].Literal {
+				if args[i].AssignLike {
+					break
 				}
 				return false
 			}
-			if name == "split-string" {
-				if i+1 >= len(args) {
-					return false
-				}
-				if args[i+1].Literal && checkSplitString(args[i+1].Value) {
-					return true
-				}
-				i += 2
-				continue
+			tok := args[i].Value
+			if tok == "--" {
+				i++
+				break
 			}
-			if spec.longNoArg[name] || spec.longOptVal[name] {
+			if tok == "-" {
 				i++
 				continue
 			}
-			if spec.longArg[name] {
-				if i+1 >= len(args) {
-					return false
-				}
-				i += 2
-				continue
+			if !strings.HasPrefix(tok, "-") {
+				break
 			}
-			return false
-		}
-
-		flags := tok[1:]
-		consumedNext := false
-		for j := 0; j < len(flags); j++ {
-			ch := flags[j]
-			switch {
-			case ch == 'S':
-				if j+1 < len(flags) {
-					if checkSplitString(flags[j+1:]) {
+			if strings.HasPrefix(tok, "--") {
+				name := tok[2:]
+				if eq := strings.IndexByte(name, '='); eq >= 0 {
+					flagName, val := name[:eq], name[eq+1:]
+					if flagName == "split-string" && checkSplitString(val) {
 						return true
 					}
-					j = len(flags)
-				} else {
+					// Known or unknown --flag=val skips one token.
+					i++
+					continue
+				}
+				if name == "help" || name == "version" {
+					return false
+				}
+				if name == "split-string" {
 					if i+1 >= len(args) {
 						return false
 					}
 					if args[i+1].Literal && checkSplitString(args[i+1].Value) {
 						return true
 					}
-					consumedNext = true
+					i += 2
+					continue
 				}
-			case strings.IndexByte(spec.shortNoArg, ch) >= 0:
-				continue
-			case strings.IndexByte(spec.shortArg, ch) >= 0:
-				if j+1 < len(flags) {
-					j = len(flags)
-				} else {
+				if spec.longNoArg[name] || spec.longOptVal[name] {
+					i++
+					continue
+				}
+				if spec.longArg[name] {
 					if i+1 >= len(args) {
 						return false
 					}
-					consumedNext = true
+					i += 2
+					continue
 				}
-			default:
+				// Unknown long option without "=": try 0-arg and 1-arg.
+				if walk(i + 1) {
+					return true
+				}
+				if i+1 < len(args) && walk(i+2) {
+					return true
+				}
 				return false
 			}
+
+			flags := tok[1:]
+			consumedNext := false
+			unknownOpt := false
+			for j := 0; j < len(flags); j++ {
+				ch := flags[j]
+				switch {
+				case ch == 'S':
+					if j+1 < len(flags) {
+						if checkSplitString(flags[j+1:]) {
+							return true
+						}
+						j = len(flags)
+					} else {
+						if i+1 >= len(args) {
+							return false
+						}
+						if args[i+1].Literal && checkSplitString(args[i+1].Value) {
+							return true
+						}
+						consumedNext = true
+					}
+				case strings.IndexByte(spec.shortNoArg, ch) >= 0:
+					continue
+				case strings.IndexByte(spec.shortArg, ch) >= 0:
+					if j+1 < len(flags) {
+						j = len(flags)
+					} else {
+						if i+1 >= len(args) {
+							return false
+						}
+						consumedNext = true
+					}
+				default:
+					unknownOpt = true
+					j = len(flags)
+				}
+			}
+			if unknownOpt {
+				if walk(i + 1) {
+					return true
+				}
+				if i+1 < len(args) && walk(i+2) {
+					return true
+				}
+				return false
+			}
+			if consumedNext {
+				i += 2
+			} else {
+				i++
+			}
 		}
-		if consumedNext {
-			i += 2
-		} else {
+
+		for i < len(args) && args[i].AssignLike {
 			i++
 		}
+		if i >= len(args) || seenIdx[i] {
+			return false
+		}
+		seenIdx[i] = true
+		candidates++
+		return callMatchesArgv(rule, args[i:], depth)
 	}
-
-	for i < len(args) && args[i].AssignLike {
-		i++
-	}
-	if i >= len(args) {
-		return false
-	}
-	return callMatchesArgv(rule, args[i:], depth)
+	return walk(0)
 }
 
 // findExecMatches walks every -exec, -execdir, -ok, and -okdir clause inside a
@@ -785,18 +811,21 @@ func parallelMatchesArgv(rule []string, args []callWord, depth int) bool {
 	return false
 }
 
-// wrapperSpec describes the handled leading-option layout for a wrapper
-// program. Any flag not listed here causes stripping to skip the call rather
-// than guess, except for optional-argument flags in shortOptAmb / longOptAmb
-// where both 0-arg and 1-arg interpretations are considered.
+// wrapperSpec describes the leading-option layout for a known wrapper program.
+// Explicit non-executing modes (stopShort / stopLong, plus --help / --version)
+// skip unwrapping. Unknown options on a known wrapper are over-approximated
+// (trying both 0-arg and 1-arg interpretations, capped by
+// argvMaxWrapperCandidates) rather than returning no match.
 type wrapperSpec struct {
 	shortNoArg   string          // short flags that take no argument
 	shortArg     string          // short flags that take one argument (attached or next token)
 	shortOptAtt  string          // short flags that accept only an optional attached argument (never next token)
 	shortOptAmb  string          // short flags with optional attached OR separate next-token value (try both)
+	stopShort    string          // short flags indicating a non-executing mode (skip unwrapping)
 	longNoArg    map[string]bool // --flag (no value)
 	longArg      map[string]bool // --flag VAL or --flag=VAL
 	longOptVal   map[string]bool // --flag or --flag=VAL (never consumes next token)
+	stopLong     map[string]bool // --flag indicating a non-executing mode (skip unwrapping)
 	allowBareMin bool            // treat bare "-" as a no-arg option
 	allowNumFlag bool            // treat -<digits> as a no-arg option (nice -10)
 	skipAssigns  bool            // skip NAME=VALUE tokens after options (env, sudo)
@@ -823,6 +852,7 @@ var wrapperSpecs = map[string]wrapperSpec{
 	},
 	"command": {
 		shortNoArg: "p",
+		stopShort:  "vV",
 	},
 	"builtin": {},
 	"exec": {
@@ -846,8 +876,10 @@ var wrapperSpecs = map[string]wrapperSpec{
 	"ionice": {
 		shortNoArg: "t",
 		shortArg:   "cn",
+		stopShort:  "pPu",
 		longNoArg:  strSet("ignore"),
 		longArg:    strSet("class", "classdata"),
+		stopLong:   strSet("pid", "pgid", "uid"),
 	},
 	"timeout": {
 		shortNoArg:   "fpv",
@@ -858,27 +890,34 @@ var wrapperSpecs = map[string]wrapperSpec{
 	},
 	"taskset": {
 		shortNoArg:   "ca",
+		stopShort:    "p",
 		longNoArg:    strSet("cpu-list", "all-tasks"),
+		stopLong:     strSet("pid"),
 		posBeforeCmd: 1, // MASK / CPU-LIST
 	},
 	"chrt": {
 		shortNoArg:   "abdforiRv",
 		shortArg:     "TPD",
+		stopShort:    "pm",
 		longNoArg:    strSet("all-tasks", "batch", "deadline", "fifo", "idle", "other", "rr", "reset-on-fork", "verbose"),
 		longArg:      strSet("sched-runtime", "sched-period", "sched-deadline"),
+		stopLong:     strSet("pid", "max"),
 		posBeforeCmd: 1, // PRIORITY
 	},
 	"sudo": {
 		shortNoArg:  "AbBEHikKnPsSv",
 		shortArg:    "CDghprRtTuU",
+		stopShort:   "elV",
 		longNoArg:   strSet("askpass", "background", "bell", "set-home", "login", "reset-timestamp", "remove-timestamp", "non-interactive", "preserve-groups", "shell", "stdin", "validate"),
 		longArg:     strSet("close-from", "chdir", "group", "host", "prompt", "role", "chroot", "type", "command-timeout", "user", "other-user"),
 		longOptVal:  strSet("preserve-env"),
+		stopLong:    strSet("edit", "list"),
 		skipAssigns: true,
 	},
 	"doas": {
 		shortNoArg: "Lns",
 		shortArg:   "au",
+		stopShort:  "C",
 	},
 	"watch": {
 		shortNoArg:  "bcCegprtwx",
@@ -915,7 +954,9 @@ var wrapperSpecs = map[string]wrapperSpec{
 		longNoArg:   strSet("null", "open-tty", "interactive", "no-run-if-empty", "verbose", "exit", "show-limits"),
 		longArg:     strSet("arg-file", "delimiter", "eof", "replace", "max-lines", "max-args", "max-procs", "max-chars", "process-slot-var"),
 	},
-	"busybox": {},
+	"busybox": {
+		stopLong: strSet("list", "list-full", "list-modules", "install"),
+	},
 	"chroot": {
 		longNoArg:    strSet("skip-chdir"),
 		longArg:      strSet("userspec", "groups"),
@@ -924,16 +965,17 @@ var wrapperSpecs = map[string]wrapperSpec{
 	"parallel": {
 		shortNoArg: "0kmquvXi",
 		shortArg:   "jnNPILSadEC",
-		longNoArg:  strSet("null", "keep-order", "quote", "ungroup", "verbose", "bar", "eta", "progress", "no-notice", "will-cite", "plain", "pipe", "pipepart", "line-buffer", "group", "dry-run", "shuf"),
-		longArg:    strSet("jobs", "max-args", "max-procs", "max-lines", "sshlogin", "arg-file", "delimiter", "colsep", "tagstring", "timeout", "delay", "retries", "results", "joblog", "workdir", "wd", "env", "halt", "memfree", "load"),
+		longNoArg:  strSet("null", "keep-order", "quote", "ungroup", "verbose", "bar", "eta", "progress", "no-notice", "will-cite", "plain", "pipe", "pipepart", "line-buffer", "group", "dry-run", "shuf", "link", "xargs"),
+		longArg:    strSet("jobs", "max-args", "max-procs", "max-lines", "sshlogin", "sshloginfile", "basefile", "transferfile", "total-jobs", "block", "recstart", "recend", "compress-program", "use-compress-program", "nice", "sshdelay", "arg-file", "delimiter", "colsep", "tagstring", "timeout", "delay", "retries", "results", "joblog", "workdir", "wd", "env", "halt", "memfree", "load"),
 		longOptVal: strSet("tag"),
 	},
 }
 
 // stripOneWrapperCandidates returns the possible wrapped-command slices after
 // stripping prog's options, assignments, and required positional arguments.
-// For unambiguous options it returns at most one slice; for optional-argument
-// flags (such as xargs -l) it returns both the 0-arg and 1-arg interpretations.
+// For unambiguous known options it returns one slice; for optional-argument
+// flags (such as xargs -l) or unknown options on a known wrapper it tries both
+// 0-arg and 1-arg interpretations up to argvMaxWrapperCandidates.
 func stripOneWrapperCandidates(prog string, args []callWord) [][]callWord {
 	spec, ok := wrapperSpecs[prog]
 	if !ok {
@@ -972,10 +1014,14 @@ func stripOneWrapperCandidates(prog string, args []callWord) [][]callWord {
 				name := tok[2:]
 				if eq := strings.IndexByte(name, '='); eq >= 0 {
 					flagName := name[:eq]
-					if spec.longArg[flagName] || spec.longOptVal[flagName] {
-						i++
-						continue
+					if spec.stopLong[flagName] {
+						return
 					}
+					// Known or unknown --flag=val consumes one token.
+					i++
+					continue
+				}
+				if name == "help" || name == "version" || spec.stopLong[name] {
 					return
 				}
 				if spec.longNoArg[name] || spec.longOptVal[name] {
@@ -989,6 +1035,11 @@ func stripOneWrapperCandidates(prog string, args []callWord) [][]callWord {
 					i += 2
 					continue
 				}
+				// Unknown long option without "=": try both 0-arg and 1-arg.
+				walk(i + 1)
+				if i+1 < len(args) {
+					walk(i + 2)
+				}
 				return
 			}
 
@@ -999,9 +1050,12 @@ func stripOneWrapperCandidates(prog string, args []callWord) [][]callWord {
 			}
 			consumedNext := false
 			ambiguousNext := false
+			unknownNext := false
 			for j := 0; j < len(flags); j++ {
 				ch := flags[j]
 				switch {
+				case strings.IndexByte(spec.stopShort, ch) >= 0:
+					return
 				case strings.IndexByte(spec.shortNoArg, ch) >= 0:
 					continue
 				case strings.IndexByte(spec.shortOptAtt, ch) >= 0:
@@ -1025,8 +1079,17 @@ func stripOneWrapperCandidates(prog string, args []callWord) [][]callWord {
 						consumedNext = true
 					}
 				default:
-					return
+					// Unknown short flag on a known wrapper: try both 0-arg and 1-arg.
+					unknownNext = true
+					j = len(flags)
 				}
+			}
+			if unknownNext {
+				walk(i + 1)
+				if i+1 < len(args) {
+					walk(i + 2)
+				}
+				return
 			}
 			if ambiguousNext && !consumedNext {
 				// Interpretation 1: no-arg.
