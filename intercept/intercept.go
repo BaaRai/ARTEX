@@ -765,12 +765,20 @@ func (i *Interceptor) SetRulesForTest(rules []db.InterceptRule) {
 func ruleMatches(r compiledRule, toolName string, input []byte) bool {
 	if r.MatchType == "argv" {
 		// Bash only, on the parsed command; match_target is always tool_input.
-		// The denylist neutralises allow rules only: an argv deny or ask rule
-		// for a denylisted program still matches.
-		if r.Action == "allow" && CheckArgvAllow(r.argv) != nil {
-			return false
+		// Allow rules stay strictly limited to a single simple command with
+		// exact derived prefix and denylist enforcement. Deny and ask rules
+		// walk every call in a compound Bash command, stripping known wrappers
+		// and recursing into eval / shell -c payloads.
+		if r.Action == "allow" {
+			if CheckArgvAllow(r.argv) != nil {
+				return false
+			}
+			return r.MatchTarget == "tool_input" && argvRuleMatches(r.argv, toolName, input)
 		}
-		return r.MatchTarget == "tool_input" && argvRuleMatches(r.argv, toolName, input)
+		if r.Action == "deny" || r.Action == "ask" {
+			return r.MatchTarget == "tool_input" && argvCompoundMatches(r.argv, toolName, input)
+		}
+		return false
 	}
 	var subject string
 	switch r.MatchTarget {
