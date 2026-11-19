@@ -8,9 +8,14 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// argvMaxNestedPayloads bounds how deeply nested shell/eval payloads
+// argvMaxNestedPayloads bounds how deeply nested shell/eval/env -S payloads
 // (for example, bash -c "bash -c ...") are re-parsed and walked.
 const argvMaxNestedPayloads = 3
+
+// argvMaxWrapperCandidates bounds option-disambiguation branching (for example
+// repeated ambiguous optional-value flags like xargs -l) so pathological input
+// cannot cause exponential work.
+const argvMaxWrapperCandidates = 8
 
 // callWord is one argument word of a *syntax.CallExpr for deny/ask matching.
 // Literal is true when the word contains no runtime expansion; Value holds the
@@ -26,7 +31,8 @@ type callWord struct {
 // argvCompoundMatches reports whether any command executed within a Bash tool
 // call matches the deny/ask prefix rule tokens. It parses the entire Bash line,
 // walks every *syntax.CallExpr in the AST, strips known wrapper programs, and
-// recurses into eval and shell -c payloads up to argvMaxNestedPayloads deep.
+// recurses into eval, shell -c, env -S, flock -c, and parallel command-string
+// payloads up to argvMaxNestedPayloads deep.
 //
 // Parse errors never panic and always return false (no match).
 func argvCompoundMatches(tokens []string, toolName string, input []byte) bool {
@@ -73,47 +79,61 @@ func bashCommandMatchesArgv(rule []string, command string, depth int) bool {
 }
 
 // callMatchesArgv checks a single call's argv against rule, stripping known
-// wrappers repeatedly and recursing into eval / shell -c payloads up to
+// wrappers repeatedly and recursing into nested Bash payloads up to
 // argvMaxNestedPayloads deep.
 func callMatchesArgv(rule []string, argv []callWord, depth int) bool {
-	cur := argv
-	for len(cur) > 0 {
-		if argvMatchesRulePrefix(rule, cur) {
-			return true
-		}
-		if !cur[0].Literal || cur[0].Value == "" {
+	if len(argv) == 0 {
+		return false
+	}
+	if argvMatchesRulePrefix(rule, argv) {
+		return true
+	}
+	if !argv[0].Literal || argv[0].Value == "" {
+		return false
+	}
+	prog := path.Base(argv[0].Value)
+	rest := argv[1:]
+
+	switch {
+	case prog == "eval":
+		if depth >= argvMaxNestedPayloads {
 			return false
 		}
-		prog := path.Base(cur[0].Value)
-
-		// Nested Bash payload wrappers: eval and shells with -c.
-		if prog == "eval" {
-			if depth >= argvMaxNestedPayloads {
-				return false
-			}
-			payload, ok := evalPayload(cur[1:])
-			if !ok {
-				return false
-			}
-			return bashCommandMatchesArgv(rule, payload, depth+1)
-		}
-		if isShellWrapper(prog) {
-			if depth >= argvMaxNestedPayloads {
-				return false
-			}
-			payload, ok := shellDashCPayload(cur[1:])
-			if !ok {
-				return false
-			}
-			return bashCommandMatchesArgv(rule, payload, depth+1)
-		}
-
-		// Direct command-wrapping programs.
-		next, ok := stripOneWrapper(prog, cur[1:])
-		if !ok || len(next) == 0 || len(next) >= len(cur) {
+		payload, ok := evalPayload(rest)
+		if !ok {
 			return false
 		}
-		cur = next
+		return bashCommandMatchesArgv(rule, payload, depth+1)
+
+	case isShellWrapper(prog):
+		if depth >= argvMaxNestedPayloads {
+			return false
+		}
+		payload, ok := shellDashCPayload(rest)
+		if !ok {
+			return false
+		}
+		return bashCommandMatchesArgv(rule, payload, depth+1)
+
+	case prog == "env":
+		return envMatchesArgv(rule, rest, depth)
+
+	case prog == "find":
+		return findExecMatches(rule, rest, depth)
+
+	case prog == "flock":
+		return flockMatchesArgv(rule, rest, depth)
+
+	case prog == "parallel":
+		return parallelMatchesArgv(rule, rest, depth)
+	}
+
+	for _, next := range stripOneWrapperCandidates(prog, rest) {
+		if len(next) > 0 && len(next) < len(argv) {
+			if callMatchesArgv(rule, next, depth) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -146,9 +166,9 @@ func argvMatchesRulePrefix(rule []string, argv []callWord) bool {
 }
 
 // callWordOf converts a Bash AST word into a callWord. Words containing any
-// expansion (parameter, command/process substitution, arithmetic, glob, brace,
-// tilde, ANSI-C/locale quoting) become opaque (Literal: false) rather than
-// failing the whole call.
+// expansion (parameter, command/process substitution, arithmetic, glob, brace
+// expansion, tilde, ANSI-C/locale quoting) become opaque (Literal: false)
+// rather than failing the whole call.
 func callWordOf(w *syntax.Word) callWord {
 	if w == nil || len(w.Parts) == 0 {
 		return callWord{}
@@ -283,19 +303,110 @@ func isShellWrapper(prog string) bool {
 	return false
 }
 
-// shellDashCPayload extracts the literal command string following a leading
-// "-c" option. Other shell options are intentionally not interpreted.
+// Known leading options of POSIX/Bash/Zsh/Dash/Ksh/Fish shells.
+// Short flags may appear with '-' or '+' (only '-c' enables command mode);
+// -o/+o and -O/+O take a single option-name value.
+const shellShortNoArg = "abBCdefhHiklmnpPrstuvxETLN"
+
+var (
+	shellLongNoArg = strSet(
+		"debugger", "dump-po-strings", "dump-strings", "interactive", "login",
+		"no-config", "noediting", "noprofile", "norc", "posix", "pretty-print",
+		"private", "restricted", "verbose",
+	)
+	shellLongArg = strSet("init-file", "rcfile")
+)
+
+// shellDashCPayload parses a shell's leading options (combined short clusters
+// containing c, -o/+o and -O/+O with a value, known long options, and --) and
+// returns the literal command string if -c (or --command) was given.
+// No -c (script/stdin mode), unknown options, or opaque options before -c
+// return ("", false).
 func shellDashCPayload(args []callWord) (string, bool) {
-	if len(args) < 2 {
+	hasC := false
+	i := 0
+	for i < len(args) {
+		if !args[i].Literal {
+			return "", false
+		}
+		tok := args[i].Value
+		if tok == "--" || tok == "-" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(tok, "-") && !strings.HasPrefix(tok, "+") {
+			break
+		}
+		if strings.HasPrefix(tok, "--") {
+			name := tok[2:]
+			if eq := strings.IndexByte(name, '='); eq >= 0 {
+				flagName, val := name[:eq], name[eq+1:]
+				if flagName == "command" {
+					return val, true
+				}
+				if shellLongArg[flagName] {
+					i++
+					continue
+				}
+				return "", false
+			}
+			if name == "command" {
+				if i+1 >= len(args) || !args[i+1].Literal {
+					return "", false
+				}
+				return args[i+1].Value, true
+			}
+			if shellLongNoArg[name] {
+				i++
+				continue
+			}
+			if shellLongArg[name] {
+				if i+1 >= len(args) {
+					return "", false
+				}
+				i += 2
+				continue
+			}
+			return "", false
+		}
+
+		// Short option or combined short-option cluster starting with '-' or '+'.
+		sign := tok[0]
+		flags := tok[1:]
+		if flags == "" {
+			break
+		}
+		consumedNext := false
+		for j := 0; j < len(flags); j++ {
+			ch := flags[j]
+			switch {
+			case ch == 'c' && sign == '-':
+				hasC = true
+			case ch == 'o' || ch == 'O':
+				if j+1 < len(flags) {
+					j = len(flags)
+				} else {
+					if i+1 >= len(args) {
+						return "", false
+					}
+					consumedNext = true
+				}
+			case strings.IndexByte(shellShortNoArg, ch) >= 0:
+				continue
+			default:
+				return "", false
+			}
+		}
+		if consumedNext {
+			i += 2
+		} else {
+			i++
+		}
+	}
+	if !hasC || i >= len(args) || !args[i].Literal {
 		return "", false
 	}
-	if !args[0].Literal || args[0].Value != "-c" {
-		return "", false
-	}
-	if !args[1].Literal {
-		return "", false
-	}
-	return args[1].Value, true
+	return args[i].Value, true
 }
 
 // evalPayload joins eval's arguments with spaces for re-parsing as Bash.
@@ -326,17 +437,344 @@ func evalPayload(args []callWord) (string, bool) {
 	return strings.Join(parts, " "), true
 }
 
+// envMatchesArgv handles env's options (including -S/--split-string, whose
+// value is re-parsed as a Bash line at depth+1), NAME=VALUE assignments, and
+// any trailing wrapped command.
+func envMatchesArgv(rule []string, args []callWord, depth int) bool {
+	spec := wrapperSpecs["env"]
+	i := 0
+	checkSplitString := func(val string) bool {
+		if depth >= argvMaxNestedPayloads || strings.TrimSpace(val) == "" {
+			return false
+		}
+		if bashCommandMatchesArgv(rule, val, depth+1) {
+			return true
+		}
+		// If the split-string payload starts with env options (e.g. -i or -u),
+		// also evaluate it as an env invocation.
+		if strings.HasPrefix(strings.TrimSpace(val), "-") {
+			return bashCommandMatchesArgv(rule, "env "+val, depth+1)
+		}
+		return false
+	}
+
+	for i < len(args) {
+		if !args[i].Literal {
+			if args[i].AssignLike {
+				break
+			}
+			return false
+		}
+		tok := args[i].Value
+		if tok == "--" {
+			i++
+			break
+		}
+		if tok == "-" {
+			i++
+			continue
+		}
+		if !strings.HasPrefix(tok, "-") {
+			break
+		}
+		if strings.HasPrefix(tok, "--") {
+			name := tok[2:]
+			if eq := strings.IndexByte(name, '='); eq >= 0 {
+				flagName, val := name[:eq], name[eq+1:]
+				if flagName == "split-string" {
+					if checkSplitString(val) {
+						return true
+					}
+					i++
+					continue
+				}
+				if spec.longArg[flagName] || spec.longOptVal[flagName] {
+					i++
+					continue
+				}
+				return false
+			}
+			if name == "split-string" {
+				if i+1 >= len(args) {
+					return false
+				}
+				if args[i+1].Literal && checkSplitString(args[i+1].Value) {
+					return true
+				}
+				i += 2
+				continue
+			}
+			if spec.longNoArg[name] || spec.longOptVal[name] {
+				i++
+				continue
+			}
+			if spec.longArg[name] {
+				if i+1 >= len(args) {
+					return false
+				}
+				i += 2
+				continue
+			}
+			return false
+		}
+
+		flags := tok[1:]
+		consumedNext := false
+		for j := 0; j < len(flags); j++ {
+			ch := flags[j]
+			switch {
+			case ch == 'S':
+				if j+1 < len(flags) {
+					if checkSplitString(flags[j+1:]) {
+						return true
+					}
+					j = len(flags)
+				} else {
+					if i+1 >= len(args) {
+						return false
+					}
+					if args[i+1].Literal && checkSplitString(args[i+1].Value) {
+						return true
+					}
+					consumedNext = true
+				}
+			case strings.IndexByte(spec.shortNoArg, ch) >= 0:
+				continue
+			case strings.IndexByte(spec.shortArg, ch) >= 0:
+				if j+1 < len(flags) {
+					j = len(flags)
+				} else {
+					if i+1 >= len(args) {
+						return false
+					}
+					consumedNext = true
+				}
+			default:
+				return false
+			}
+		}
+		if consumedNext {
+			i += 2
+		} else {
+			i++
+		}
+	}
+
+	for i < len(args) && args[i].AssignLike {
+		i++
+	}
+	if i >= len(args) {
+		return false
+	}
+	return callMatchesArgv(rule, args[i:], depth)
+}
+
+// findExecMatches walks every -exec, -execdir, -ok, and -okdir clause inside a
+// find invocation (terminated by literal ";" or "+") and runs callMatchesArgv
+// on each wrapped command.
+func findExecMatches(rule []string, args []callWord, depth int) bool {
+	for i := 0; i < len(args); i++ {
+		if !args[i].Literal {
+			continue
+		}
+		switch args[i].Value {
+		case "-exec", "-execdir", "-ok", "-okdir":
+			start := i + 1
+			end := start
+			terminated := false
+			for end < len(args) {
+				if args[end].Literal && (args[end].Value == ";" || args[end].Value == "+") {
+					terminated = true
+					break
+				}
+				end++
+			}
+			if terminated && end > start {
+				if callMatchesArgv(rule, args[start:end], depth) {
+					return true
+				}
+				i = end
+			}
+		}
+	}
+	return false
+}
+
+// flockMatchesArgv handles both "flock [opts] <file> <cmd...>" and
+// "flock [opts] <file> -c <cmd-string>" / "flock [opts] -c <cmd-string> <file>".
+func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
+	spec := wrapperSpecs["flock"]
+	i := 0
+	for i < len(args) {
+		if !args[i].Literal {
+			return false
+		}
+		tok := args[i].Value
+		if tok == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(tok, "-") || tok == "-" {
+			break
+		}
+		if strings.HasPrefix(tok, "--") {
+			name := tok[2:]
+			if eq := strings.IndexByte(name, '='); eq >= 0 {
+				flagName, val := name[:eq], name[eq+1:]
+				if flagName == "command" {
+					if depth < argvMaxNestedPayloads && bashCommandMatchesArgv(rule, val, depth+1) {
+						return true
+					}
+					i++
+					continue
+				}
+				if spec.longArg[flagName] {
+					i++
+					continue
+				}
+				return false
+			}
+			if name == "command" {
+				if i+1 >= len(args) {
+					return false
+				}
+				if depth < argvMaxNestedPayloads && args[i+1].Literal && bashCommandMatchesArgv(rule, args[i+1].Value, depth+1) {
+					return true
+				}
+				i += 2
+				continue
+			}
+			if spec.longNoArg[name] {
+				i++
+				continue
+			}
+			if spec.longArg[name] {
+				if i+1 >= len(args) {
+					return false
+				}
+				i += 2
+				continue
+			}
+			return false
+		}
+
+		flags := tok[1:]
+		consumedNext := false
+		for j := 0; j < len(flags); j++ {
+			ch := flags[j]
+			switch {
+			case ch == 'c':
+				if j+1 < len(flags) {
+					if depth < argvMaxNestedPayloads && bashCommandMatchesArgv(rule, flags[j+1:], depth+1) {
+						return true
+					}
+					j = len(flags)
+				} else {
+					if i+1 >= len(args) {
+						return false
+					}
+					if depth < argvMaxNestedPayloads && args[i+1].Literal && bashCommandMatchesArgv(rule, args[i+1].Value, depth+1) {
+						return true
+					}
+					consumedNext = true
+				}
+			case strings.IndexByte(spec.shortNoArg, ch) >= 0:
+				continue
+			case strings.IndexByte(spec.shortArg, ch) >= 0:
+				if j+1 < len(flags) {
+					j = len(flags)
+				} else {
+					if i+1 >= len(args) {
+						return false
+					}
+					consumedNext = true
+				}
+			default:
+				return false
+			}
+		}
+		if consumedNext {
+			i += 2
+		} else {
+			i++
+		}
+	}
+
+	// Skip positional <lockfile>.
+	if i >= len(args) {
+		return false
+	}
+	i++
+	if i >= len(args) {
+		return false
+	}
+	// Handle "flock <file> -c <cmd-string>" / "flock <file> --command <cmd-string>".
+	if args[i].Literal {
+		tok := args[i].Value
+		if tok == "-c" || tok == "--command" {
+			if i+1 < len(args) && args[i+1].Literal && depth < argvMaxNestedPayloads {
+				return bashCommandMatchesArgv(rule, args[i+1].Value, depth+1)
+			}
+			return false
+		}
+		if strings.HasPrefix(tok, "--command=") {
+			if depth < argvMaxNestedPayloads {
+				return bashCommandMatchesArgv(rule, strings.TrimPrefix(tok, "--command="), depth+1)
+			}
+			return false
+		}
+		if strings.HasPrefix(tok, "-c") && len(tok) > 2 {
+			if depth < argvMaxNestedPayloads {
+				return bashCommandMatchesArgv(rule, tok[2:], depth+1)
+			}
+			return false
+		}
+	}
+	return callMatchesArgv(rule, args[i:], depth)
+}
+
+// parallelMatchesArgv strips parallel's leading options, stops before GNU
+// parallel's input separators (:::, :::+, ::::, ::::+), and matches the
+// wrapped command (including single-string shell commands like
+// "parallel 'nmap -p 80 {}' ::: target").
+func parallelMatchesArgv(rule []string, args []callWord, depth int) bool {
+	for _, cand := range stripOneWrapperCandidates("parallel", args) {
+		end := len(cand)
+		for idx, w := range cand {
+			if w.Literal && (w.Value == ":::" || w.Value == ":::+" || w.Value == "::::" || w.Value == "::::+") {
+				end = idx
+				break
+			}
+		}
+		cmd := cand[:end]
+		if len(cmd) == 0 {
+			continue
+		}
+		if callMatchesArgv(rule, cmd, depth) {
+			return true
+		}
+		if len(cmd) == 1 && cmd[0].Literal && depth < argvMaxNestedPayloads {
+			if bashCommandMatchesArgv(rule, cmd[0].Value, depth+1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // wrapperSpec describes the handled leading-option layout for a wrapper
-// program. Any flag not listed in shortNoArg, shortArg, longNoArg, longArg,
-// or longOptVal causes stripping to skip the call rather than guess.
+// program. Any flag not listed here causes stripping to skip the call rather
+// than guess, except for optional-argument flags in shortOptAmb / longOptAmb
+// where both 0-arg and 1-arg interpretations are considered.
 type wrapperSpec struct {
 	shortNoArg   string          // short flags that take no argument
 	shortArg     string          // short flags that take one argument (attached or next token)
 	shortOptAtt  string          // short flags that accept only an optional attached argument (never next token)
+	shortOptAmb  string          // short flags with optional attached OR separate next-token value (try both)
 	longNoArg    map[string]bool // --flag (no value)
 	longArg      map[string]bool // --flag VAL or --flag=VAL
 	longOptVal   map[string]bool // --flag or --flag=VAL (never consumes next token)
-	allowBareMin bool            // treat bare "-" as a no-arg option (env -)
+	allowBareMin bool            // treat bare "-" as a no-arg option
 	allowNumFlag bool            // treat -<digits> as a no-arg option (nice -10)
 	skipAssigns  bool            // skip NAME=VALUE tokens after options (env, sudo)
 	posBeforeCmd int             // required positional arguments before the wrapped command
@@ -353,9 +791,9 @@ func strSet(names ...string) map[string]bool {
 var wrapperSpecs = map[string]wrapperSpec{
 	"env": {
 		shortNoArg:   "i0v",
-		shortArg:     "uCSa",
+		shortArg:     "uCa",
 		longNoArg:    strSet("ignore-environment", "null", "debug"),
-		longArg:      strSet("unset", "chdir", "split-string", "argv0"),
+		longArg:      strSet("unset", "chdir", "argv0"),
 		longOptVal:   strSet("block-signal", "default-signal", "ignore-signal"),
 		allowBareMin: true,
 		skipAssigns:  true,
@@ -409,7 +847,7 @@ var wrapperSpecs = map[string]wrapperSpec{
 	},
 	"sudo": {
 		shortNoArg:  "AbBEHikKnPsSv",
-		shortArg:    "CDgprRtTuU",
+		shortArg:    "CDghprRtTuU",
 		longNoArg:   strSet("askpass", "background", "bell", "set-home", "login", "reset-timestamp", "remove-timestamp", "non-interactive", "preserve-groups", "shell", "stdin", "validate"),
 		longArg:     strSet("close-from", "chdir", "group", "host", "prompt", "role", "chroot", "type", "command-timeout", "user", "other-user"),
 		longOptVal:  strSet("preserve-env"),
@@ -420,11 +858,12 @@ var wrapperSpecs = map[string]wrapperSpec{
 		shortArg:   "au",
 	},
 	"watch": {
-		shortNoArg: "bcCdegprtwx",
-		shortArg:   "nq",
-		longNoArg:  strSet("beep", "color", "no-color", "errexit", "chgexit", "precise", "no-rerun", "no-title", "no-wrap", "exec"),
-		longArg:    strSet("interval", "equexit"),
-		longOptVal: strSet("differences"),
+		shortNoArg:  "bcCegprtwx",
+		shortArg:    "nq",
+		shortOptAmb: "d",
+		longNoArg:   strSet("beep", "color", "no-color", "errexit", "chgexit", "precise", "no-rerun", "no-title", "no-wrap", "exec"),
+		longArg:     strSet("interval", "equexit"),
+		longOptVal:  strSet("differences"),
 	},
 	"flock": {
 		shortNoArg:   "sxeunFo",
@@ -449,118 +888,173 @@ var wrapperSpecs = map[string]wrapperSpec{
 		shortNoArg:  "0oprtx",
 		shortArg:    "adEILnPsR",
 		shortOptAtt: "ei",
+		shortOptAmb: "l",
 		longNoArg:   strSet("null", "open-tty", "interactive", "no-run-if-empty", "verbose", "exit", "show-limits"),
 		longArg:     strSet("arg-file", "delimiter", "eof", "replace", "max-lines", "max-args", "max-procs", "max-chars", "process-slot-var"),
 	},
+	"busybox": {},
+	"chroot": {
+		longNoArg:    strSet("skip-chdir"),
+		longArg:      strSet("userspec", "groups"),
+		posBeforeCmd: 1, // NEWROOT
+	},
+	"parallel": {
+		shortNoArg: "0kmquvXi",
+		shortArg:   "jnNPILSadEC",
+		longNoArg:  strSet("null", "keep-order", "quote", "ungroup", "verbose", "bar", "eta", "progress", "no-notice", "will-cite", "plain", "pipe", "pipepart", "line-buffer", "group", "dry-run", "shuf"),
+		longArg:    strSet("jobs", "max-args", "max-procs", "max-lines", "sshlogin", "arg-file", "delimiter", "colsep", "tagstring", "timeout", "delay", "retries", "results", "joblog", "workdir", "wd", "env", "halt", "memfree", "load"),
+		longOptVal: strSet("tag"),
+	},
 }
 
-func stripOneWrapper(prog string, args []callWord) ([]callWord, bool) {
+// stripOneWrapperCandidates returns the possible wrapped-command slices after
+// stripping prog's options, assignments, and required positional arguments.
+// For unambiguous options it returns at most one slice; for optional-argument
+// flags (such as xargs -l) it returns both the 0-arg and 1-arg interpretations.
+func stripOneWrapperCandidates(prog string, args []callWord) [][]callWord {
 	spec, ok := wrapperSpecs[prog]
 	if !ok {
-		return nil, false
+		return nil
 	}
-	i := 0
-	for i < len(args) {
-		if !args[i].Literal {
-			if spec.skipAssigns && args[i].AssignLike {
+	var out [][]callWord
+	seenIdx := map[int]bool{}
+	var walk func(i int)
+	walk = func(i int) {
+		if len(out) >= argvMaxWrapperCandidates {
+			return
+		}
+		for i < len(args) {
+			if !args[i].Literal {
+				if spec.skipAssigns && args[i].AssignLike {
+					break
+				}
+				return
+			}
+			tok := args[i].Value
+			if tok == "--" {
+				i++
 				break
 			}
-			// Do not guess past an opaque token in option position.
-			return nil, false
-		}
-		tok := args[i].Value
-		if tok == "--" {
-			i++
-			break
-		}
-		if tok == "-" {
-			if spec.allowBareMin {
-				i++
-				continue
-			}
-			break
-		}
-		if !strings.HasPrefix(tok, "-") {
-			break
-		}
-		if strings.HasPrefix(tok, "--") {
-			name := tok[2:]
-			if eq := strings.IndexByte(name, '='); eq >= 0 {
-				flagName := name[:eq]
-				if spec.longArg[flagName] || spec.longOptVal[flagName] {
+			if tok == "-" {
+				if spec.allowBareMin {
 					i++
 					continue
 				}
-				return nil, false
+				break
 			}
-			if spec.longNoArg[name] || spec.longOptVal[name] {
+			if !strings.HasPrefix(tok, "-") {
+				break
+			}
+			if strings.HasPrefix(tok, "--") {
+				name := tok[2:]
+				if eq := strings.IndexByte(name, '='); eq >= 0 {
+					flagName := name[:eq]
+					if spec.longArg[flagName] || spec.longOptVal[flagName] {
+						i++
+						continue
+					}
+					return
+				}
+				if spec.longNoArg[name] || spec.longOptVal[name] {
+					i++
+					continue
+				}
+				if spec.longArg[name] {
+					if i+1 >= len(args) {
+						return
+					}
+					i += 2
+					continue
+				}
+				return
+			}
+
+			flags := tok[1:]
+			if spec.allowNumFlag && isAllDigits(flags) {
 				i++
 				continue
 			}
-			if spec.longArg[name] {
-				if i+1 >= len(args) {
-					return nil, false
-				}
-				i += 2
-				continue
-			}
-			return nil, false
-		}
-
-		// Short flag or combined short-flag cluster (e.g. -nu root, -uFOO).
-		flags := tok[1:]
-		if spec.allowNumFlag && isAllDigits(flags) {
-			i++
-			continue
-		}
-		consumedNext := false
-		for j := 0; j < len(flags); j++ {
-			ch := flags[j]
-			switch {
-			case strings.IndexByte(spec.shortNoArg, ch) >= 0:
-				continue
-			case strings.IndexByte(spec.shortOptAtt, ch) >= 0:
-				// Optional value only when attached in the same token; never consumes next token.
-				j = len(flags)
-			case strings.IndexByte(spec.shortArg, ch) >= 0:
-				if j+1 < len(flags) {
-					// Attached value consumes the rest of this token.
+			consumedNext := false
+			ambiguousNext := false
+			for j := 0; j < len(flags); j++ {
+				ch := flags[j]
+				switch {
+				case strings.IndexByte(spec.shortNoArg, ch) >= 0:
+					continue
+				case strings.IndexByte(spec.shortOptAtt, ch) >= 0:
 					j = len(flags)
-				} else {
-					if i+1 >= len(args) {
-						return nil, false
+				case strings.IndexByte(spec.shortOptAmb, ch) >= 0:
+					if j+1 < len(flags) {
+						// Attached value (e.g. -l5) consumes the rest of this token.
+						j = len(flags)
+					} else {
+						// Bare flag: try treating as no-arg AND (if a next token
+						// could be its optional argument) consuming the next token.
+						ambiguousNext = true
 					}
-					consumedNext = true
+				case strings.IndexByte(spec.shortArg, ch) >= 0:
+					if j+1 < len(flags) {
+						j = len(flags)
+					} else {
+						if i+1 >= len(args) {
+							return
+						}
+						consumedNext = true
+					}
+				default:
+					return
 				}
-			default:
-				// Unhandled flag: skip this call rather than guessing whether it takes a value.
-				return nil, false
+			}
+			if ambiguousNext && !consumedNext {
+				// Interpretation 1: no-arg.
+				walk(i + 1)
+				// Interpretation 2: consumes next token as optional value
+				// (e.g. xargs -l 5 nmap, watch -d permanent nmap).
+				if i+1 < len(args) && optAmbMayConsume(prog, args[i+1]) {
+					walk(i + 2)
+				}
+				return
+			}
+			if consumedNext {
+				i += 2
+			} else {
+				i++
 			}
 		}
-		if consumedNext {
-			i += 2
-		} else {
-			i++
-		}
-	}
 
-	if spec.skipAssigns {
-		for i < len(args) && args[i].AssignLike {
-			i++
+		if spec.skipAssigns {
+			for i < len(args) && args[i].AssignLike {
+				i++
+			}
 		}
-	}
-
-	if spec.posBeforeCmd > 0 {
-		if i+spec.posBeforeCmd > len(args) {
-			return nil, false
+		if spec.posBeforeCmd > 0 {
+			if i+spec.posBeforeCmd > len(args) {
+				return
+			}
+			i += spec.posBeforeCmd
 		}
-		i += spec.posBeforeCmd
+		if i >= len(args) || seenIdx[i] {
+			return
+		}
+		seenIdx[i] = true
+		out = append(out, args[i:])
 	}
+	walk(0)
+	return out
+}
 
-	if i >= len(args) {
-		return nil, false
+func optAmbMayConsume(prog string, next callWord) bool {
+	if !next.Literal {
+		return true
 	}
-	return args[i:], true
+	switch prog {
+	case "xargs":
+		return isAllDigits(next.Value)
+	case "watch":
+		return next.Value == "permanent" || next.Value == "cumulative"
+	default:
+		return !strings.HasPrefix(next.Value, "-")
+	}
 }
 
 func isAllDigits(s string) bool {
