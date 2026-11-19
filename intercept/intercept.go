@@ -211,6 +211,9 @@ type Interceptor struct {
 	// upstreamProxy reports whether target traffic leaves through an upstream
 	// egress proxy (nil = no). Injected by the server layer.
 	upstreamProxy func() bool
+	// toolProxy reports whether one tool's own configuration routes its traffic
+	// through a proxy (nil = no). Injected by the server layer.
+	toolProxy func(string) bool
 	// derivedExempt lists the endpoints of the platform's own services (nil =
 	// none). Injected by the server layer. See SetDerivedExemptions.
 	derivedExempt func() []string
@@ -231,6 +234,15 @@ type Interceptor struct {
 func (i *Interceptor) SetUpstreamProxyCheck(f func() bool) {
 	i.mu.Lock()
 	i.upstreamProxy = f
+	i.mu.Unlock()
+}
+
+// SetToolProxyCheck installs the function that reports whether a tool sends its
+// own traffic through a proxy. The proxy then chooses the address it connects
+// to, so a target approval for that call is name-only. Passing nil disables it.
+func (i *Interceptor) SetToolProxyCheck(f func(string) bool) {
+	i.mu.Lock()
+	i.toolProxy = f
 	i.mu.Unlock()
 }
 
