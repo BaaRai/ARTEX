@@ -3676,7 +3676,8 @@ func (s *Server) getTrafficExchange(w http.ResponseWriter, r *http.Request) {
 }
 
 // getTrafficStream returns one page of a WebSocket/SSE exchange's messages in
-// order (limit 1..200, default 50).
+// order (limit 1..200, default 50). direction=c2s or s2c keeps one side of the
+// conversation (plus the meta limit marker); any other non-empty value is a 400.
 func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
 	tr := s.m.Traffic()
 	if tr == nil {
@@ -3691,7 +3692,12 @@ func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
 	}
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	msgs, total, err := tr.StreamMessages(id, offset, limit)
+	direction := strings.ToLower(strings.TrimSpace(q.Get("direction")))
+	msgs, total, err := tr.StreamMessagesByDirection(id, direction, offset, limit)
+	if errors.Is(err, traffic.ErrBadStreamDirection) {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

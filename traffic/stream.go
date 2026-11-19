@@ -528,6 +528,37 @@ type StreamMessage struct {
 // most streamPreview (4 KiB); a longer one lives in the blob store and the row
 // carries its hash for the rest (traffic_blob, GET /api/traffic/blob).
 func (t *Traffic) StreamMessages(exchangeID string, offset, limit int) ([]StreamMessage, int, error) {
+	return t.StreamMessagesByDirection(exchangeID, "", offset, limit)
+}
+
+// ErrBadStreamDirection is returned by StreamMessagesByDirection for a
+// direction other than "", "c2s" or "s2c".
+var ErrBadStreamDirection = errors.New(`direction must be "c2s", "s2c" or empty`)
+
+// streamDirectionFilter returns the SQL condition (after exchange_id=?) and its
+// argument for a direction filter. A filtered page keeps the 'meta' limit
+// marker, so a reader never misses that messages were dropped.
+func streamDirectionFilter(direction string) (cond string, args []any, err error) {
+	switch direction {
+	case "":
+		return "", nil, nil
+	case "c2s", "s2c":
+		return ` AND direction IN (?, 'meta')`, []any{direction}, nil
+	default:
+		return "", nil, ErrBadStreamDirection
+	}
+}
+
+// StreamMessagesByDirection is StreamMessages restricted to one direction:
+// "c2s" (client to server), "s2c" (server to client), or "" for both. total
+// counts only the matching rows, so offset pages through the filtered list.
+// The 'meta' row (messages dropped past the recorder's limits) is kept in a
+// filtered page. Seq stays the message's position in the whole stream.
+func (t *Traffic) StreamMessagesByDirection(exchangeID, direction string, offset, limit int) ([]StreamMessage, int, error) {
+	cond, dirArgs, err := streamDirectionFilter(direction)
+	if err != nil {
+		return nil, 0, err
+	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -538,11 +569,12 @@ func (t *Traffic) StreamMessages(exchangeID string, offset, limit int) ([]Stream
 		offset = 0
 	}
 	var total int
-	if err := t.db.QueryRow(`SELECT COUNT(*) FROM stream_messages WHERE exchange_id=?`, exchangeID).Scan(&total); err != nil {
+	args := append([]any{exchangeID}, dirArgs...)
+	if err := t.db.QueryRow(`SELECT COUNT(*) FROM stream_messages WHERE exchange_id=?`+cond, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := t.db.Query(`SELECT seq,ts,direction,kind,event,event_id,retry,size,payload,payload_blob,truncated
-FROM stream_messages WHERE exchange_id=? ORDER BY seq LIMIT ? OFFSET ?`, exchangeID, limit, offset)
+FROM stream_messages WHERE exchange_id=?`+cond+` ORDER BY seq LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}

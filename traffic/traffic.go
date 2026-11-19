@@ -2353,13 +2353,14 @@ func (t *Traffic) Tools() []actool.CoreTool {
 
 	messages := actool.Build(actool.Spec{
 		Name:        "traffic_messages",
-		Description: "List the messages of one captured WebSocket or SSE (Server-Sent Events) record in order: direction (c2s client→server, s2c server→client), type (text/binary/event, or meta when the recorder dropped messages past its limits), size and a preview of at most 1KB (binary as hex). A payload stored as a blob carries its hash; read the rest with traffic_blob. Returns 20 messages by default, at most 50; use offset to page.",
+		Description: "List the messages of one captured WebSocket or SSE (Server-Sent Events) record in order: direction (c2s client→server, s2c server→client), type (text/binary/event, or meta when the recorder dropped messages past its limits), size and a preview of at most 1KB (binary as hex). A payload stored as a blob carries its hash; read the rest with traffic_blob. Set direction to c2s or s2c to list only one side of the conversation (the meta row is kept). Returns 20 messages by default, at most 50; use offset to page.",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"id":     map[string]any{"type": "string", "description": "the record id from traffic_search (a WebSocket status-101 or SSE record)"},
-				"offset": map[string]any{"type": "integer", "description": "number of messages to skip, default 0"},
-				"limit":  map[string]any{"type": "integer", "description": "messages to return, default 20, max 50"},
+				"id":        map[string]any{"type": "string", "description": "the record id from traffic_search (a WebSocket status-101 or SSE record)"},
+				"direction": map[string]any{"type": "string", "enum": []any{"c2s", "s2c"}, "description": "only messages in this direction: c2s (client→server) or s2c (server→client); omit for both"},
+				"offset":    map[string]any{"type": "integer", "description": "number of messages to skip within the (filtered) list, default 0"},
+				"limit":     map[string]any{"type": "integer", "description": "messages to return, default 20, max 50"},
 			},
 			"required": []any{"id"},
 		},
@@ -2367,9 +2368,10 @@ func (t *Traffic) Tools() []actool.CoreTool {
 		Permissions: allow,
 		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
 			var a struct {
-				ID     string
-				Offset int
-				Limit  int
+				ID        string
+				Direction string
+				Offset    int
+				Limit     int
 			}
 			_ = json.Unmarshal(in, &a)
 			if strings.TrimSpace(a.ID) == "" {
@@ -2384,11 +2386,15 @@ func (t *Traffic) Tools() []actool.CoreTool {
 			if a.Offset < 0 {
 				a.Offset = 0
 			}
-			msgs, total, err := t.StreamMessages(a.ID, a.Offset, a.Limit)
+			a.Direction = strings.ToLower(strings.TrimSpace(a.Direction))
+			msgs, total, err := t.StreamMessagesByDirection(a.ID, a.Direction, a.Offset, a.Limit)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
 			if total == 0 {
+				if a.Direction != "" {
+					return actool.Text(fmt.Sprintf("No %s stream messages recorded for this id (not a WebSocket/SSE record, or no message was sent in that direction).", a.Direction)), nil
+				}
 				return actool.Text("No stream messages recorded for this id (not a WebSocket/SSE record, or no message was exchanged)."), nil
 			}
 			type liteMsg struct {
