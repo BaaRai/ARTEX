@@ -214,20 +214,20 @@ func TestParseArgvPattern(t *testing.T) {
 func TestArgvAllowBelowDeny(t *testing.T) {
 	ic := New(nil)
 	ic.SetRulesForTest([]db.InterceptRule{
-		{ID: 1, Name: "no force push", Enabled: true, Priority: 50, MatchTarget: "tool_input", MatchType: "regex",
+		{ID: 1, Name: "no force flag", Enabled: true, Priority: 50, MatchTarget: "tool_input", MatchType: "regex",
 			Pattern: `--force`, Action: "deny"},
-		{ID: 2, Name: "argv allow git push", Enabled: true, Priority: -1000, MatchTarget: "tool_input", MatchType: "argv",
-			Pattern: `["git","push"]`, Action: "allow"},
+		{ID: 2, Name: "argv allow nmap", Enabled: true, Priority: -1000, MatchTarget: "tool_input", MatchType: "argv",
+			Pattern: `["nmap"]`, Action: "allow"},
 	})
-	dec, ok := ic.Match("Bash", []byte(`{"command":"git push --force"}`))
+	dec, ok := ic.Match("Bash", []byte(`{"command":"nmap --force 10.0.0.1"}`))
 	if !ok || dec.Action != "deny" || dec.RuleID != 1 {
-		t.Fatalf("force push: %+v %v, want the deny rule", dec, ok)
+		t.Fatalf("force flag: %+v %v, want the deny rule", dec, ok)
 	}
-	dec, ok = ic.Match("Bash", []byte(`{"command":"git push origin"}`))
+	dec, ok = ic.Match("Bash", []byte(`{"command":"nmap 10.0.0.1"}`))
 	if !ok || dec.Action != "allow" || dec.RuleID != 2 {
-		t.Fatalf("push: %+v %v, want the argv allow", dec, ok)
+		t.Fatalf("nmap: %+v %v, want the argv allow", dec, ok)
 	}
-	if _, ok := ic.Match("Bash", []byte(`{"command":"git push; id"}`)); ok {
+	if _, ok := ic.Match("Bash", []byte(`{"command":"nmap 10.0.0.1; id"}`)); ok {
 		t.Fatal("a compound command matched the argv rule")
 	}
 	if _, ok := compileRule(db.InterceptRule{MatchType: "argv", Pattern: `["-x"]`}); ok {
