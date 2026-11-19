@@ -5,6 +5,7 @@ package db
 // *testing.T, *testing.B and the test-only wrappers all satisfy it.
 type skipper interface {
 	Helper()
+	Skip(args ...any)
 	Skipf(format string, args ...any)
 }
 
