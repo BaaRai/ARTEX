@@ -51,6 +51,24 @@ func TestApplySchemaRetriesOnlyDeadlocks(t *testing.T) {
 	}
 }
 
+func TestCreateDatabaseSQLQuotesName(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"artex", `CREATE DATABASE "artex"`},
+		{"artex-db", `CREATE DATABASE "artex-db"`},
+		{"café", `CREATE DATABASE "café"`},
+		{`artex"`, `CREATE DATABASE "artex"""`},
+		{`x"; DROP TABLE y; --`, `CREATE DATABASE "x""; DROP TABLE y; --"`},
+	}
+	for _, tt := range tests {
+		if got := createDatabaseSQL(tt.name); got != tt.want {
+			t.Errorf("createDatabaseSQL(%q)=%q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
 // testDSN returns the configured DSN, skipping the test when neither the env var
 // nor a config file supplies one (DSN no longer has a built-in default).
 func testDSN(t *testing.T) string {

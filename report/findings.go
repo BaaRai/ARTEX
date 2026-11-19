@@ -136,7 +136,7 @@ func FindingFilename(f *db.DBFinding) string {
 	// Defensive: strip one more path layer to rule out zip slip.
 	name = path.Base(name)
 	if len(name) > 120 {
-		name = name[:120]
+		name = strings.ToValidUTF8(name[:120], "")
 	}
 	return name + ".md"
 }
@@ -154,19 +154,34 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 	for _, f := range items {
 		_ = w.Write([]string{
 			fmt.Sprintf("%d", f.ID),
-			findingTitle(f),
-			f.VulnClass,
-			nz(f.Severity, "info"),
-			nz(f.Status, "pending"),
-			nz(f.ReportState, "none"),
-			f.TaskDescription,
-			f.CreatedAt.Format("2006-01-02 15:04:05"),
-			strings.TrimSpace(f.Summary),
-			fmt.Sprint(len(f.TrafficBindings)), findingTrafficIDs(f),
+			csvCell(findingTitle(f)),
+			csvCell(f.VulnClass),
+			csvCell(nz(f.Severity, "info")),
+			csvCell(nz(f.Status, "pending")),
+			csvCell(nz(f.ReportState, "none")),
+			csvCell(f.TaskDescription),
+			csvCell(f.CreatedAt.Format("2006-01-02 15:04:05")),
+			csvCell(strings.TrimSpace(f.Summary)),
+			fmt.Sprint(len(f.TrafficBindings)),
+			csvCell(findingTrafficIDs(f)),
 		})
 	}
 	w.Flush()
 	return buf.Bytes()
+}
+
+// csvCell prefixes cells that spreadsheet apps treat as formulas. encoding/csv
+// only quotes delimiters; Excel/LibreOffice still evaluate a leading
+// '=', '+', '-', '@', tab, or CR when the file is opened.
+func csvCell(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
 }
 
 func findingTrafficIDs(f *db.DBFinding) string {

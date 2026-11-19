@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/norma/llm"
 )
@@ -366,5 +367,18 @@ func TestExpiredWindowIsClosed(t *testing.T) {
 	reg.Restore(1, State{Trips: 1, OpenUntil: time.Now().Add(-time.Second)})
 	if reg.IsOpen(1) {
 		t.Fatal("expired window should read as closed")
+	}
+}
+
+// A provider error body in Chinese is cut at 300 bytes; the cut must not split
+// a rune, or the breaker's last_error is rejected by PostgreSQL as invalid UTF-8.
+func TestTrimErrKeepsValidUTF8(t *testing.T) {
+	err := errors.New("openai: status 503: " + strings.Repeat("服务暂时不可用，请稍后重试。", 10))
+	got := trimErr(err)
+	if !utf8.ValidString(got) {
+		t.Fatalf("trimErr returned invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") || len(got) > 300+len("…") {
+		t.Fatalf("trimErr = %q (%d bytes), want at most 300 bytes plus …", got, len(got))
 	}
 }

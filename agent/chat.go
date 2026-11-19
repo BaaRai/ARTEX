@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Autumn-27/artex/db"
@@ -98,6 +100,33 @@ func chatSystem(agentKey, dataDir, workDir string) string {
 // DefaultAssistantPrompt.
 type chatVars struct{ DataDir, Now string }
 
+const maxChatSessionID = 64
+
+// validChatSessionID is the session-directory name contract. Production uses
+// "conv-" plus a decimal id; tests use hyphenated suffixes. Path separators
+// and ".." are rejected so Join cannot leave <workDir>/sessions.
+func validChatSessionID(id string) bool {
+	if id == "" || len(id) > maxChatSessionID {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func sessionDirInside(workDir, sessionWorkDir string) bool {
+	base := filepath.Clean(filepath.Join(workDir, "sessions"))
+	clean := filepath.Clean(sessionWorkDir)
+	sep := string(os.PathSeparator)
+	return clean == base || strings.HasPrefix(clean, base+sep)
+}
+
 // Chat runs ONE turn of a conversation with the agent identified by agentKey,
 // resuming prior history keyed by sessionID. maxTurns is the per-turn agent step
 // budget (0 = unlimited). maxDuration is the wall-clock run budget per turn
@@ -114,9 +143,15 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		ws.Enabled = false
 	}
 
+	if !validChatSessionID(sessionID) {
+		return "", fmt.Errorf("invalid session id %q", sessionID)
+	}
 	// Per-session working directory: <workDir>/sessions/<sessionID>/
 	// Isolates file writes across conversations, mirroring how workers use i<intentID>/.
 	sessionWorkDir := filepath.Join(c.workDir, "sessions", sessionID)
+	if !sessionDirInside(c.workDir, sessionWorkDir) {
+		return "", fmt.Errorf("invalid session id %q", sessionID)
+	}
 	_ = os.MkdirAll(sessionWorkDir, 0o755)
 	ctx = intercept.WithReviewWorkingDirectory(ctx, sessionWorkDir)
 

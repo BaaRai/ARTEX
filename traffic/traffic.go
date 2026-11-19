@@ -942,14 +942,9 @@ func (t *Traffic) BlobRange(hash string, offset, length int64) (data []byte, tot
 		return nil, 0, err
 	}
 	defer f.Close()
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= size {
+	offset, length, empty := clampBlobRange(offset, length, size)
+	if empty {
 		return nil, size, nil
-	}
-	if length <= 0 || offset+length > size {
-		length = size - offset
 	}
 	buf := make([]byte, length)
 	n, err := f.ReadAt(buf, offset)
@@ -957,6 +952,23 @@ func (t *Traffic) BlobRange(hash string, offset, length int64) (data []byte, tot
 		return nil, size, err
 	}
 	return buf[:n], size, nil
+}
+
+// clampBlobRange returns a safe (offset, length) for a blob of size bytes.
+// length > size-offset is used instead of offset+length > size so a huge
+// length cannot wrap int64 and skip the cap.
+func clampBlobRange(offset, length, size int64) (off, n int64, empty bool) {
+	if offset < 0 {
+		offset = 0
+	}
+	if size <= 0 || offset >= size {
+		return offset, 0, true
+	}
+	remain := size - offset
+	if length <= 0 || length > remain {
+		length = remain
+	}
+	return offset, length, false
 }
 
 // ExchangeMeta is one row of the index (returned by Search).

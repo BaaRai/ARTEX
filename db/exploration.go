@@ -230,6 +230,13 @@ func (s *ExplorationStore) AddNode(kind string, payload map[string]any, priority
 		return 0, err
 	}
 	defer tx.Rollback()
+	// Validate fact anchors before creating a node. Key-share locks retain the
+	// checked assets through commit, closing the check/insert deletion race.
+	if kind == KindFact && len(anchors) > 0 {
+		if err := checkFactAnchorAssets(tx, anchors); err != nil {
+			return 0, err
+		}
+	}
 	var id int64
 	if err := tx.QueryRow(`
 INSERT INTO exploration_nodes(exploration_id, kind, payload, priority, state, origin)
@@ -243,6 +250,40 @@ VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		}
 	}
 	return id, tx.Commit()
+}
+
+func checkFactAnchorAssets(tx *sql.Tx, ids []int64) error {
+	rows, err := tx.Query("SELECT id FROM assets WHERE id = ANY($1::bigint[]) ORDER BY id FOR KEY SHARE", ids)
+	if err != nil {
+		return err
+	}
+	found := make(map[int64]bool, len(ids))
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		found[id] = true
+	}
+	err = rows.Err()
+	closeErr := rows.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	var missing []int64
+	for _, id := range ids {
+		if !found[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("asset IDs do not exist: %v; use existing IDs or register the assets first", missing)
+	}
+	return nil
 }
 
 // AddIntent is a convenience: an open intent.

@@ -1495,13 +1495,14 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 // must NOT be stuffed into the asset graph via upsert_asset.
 // factItem is one fact of a record_fact batch/single call.
 type factItem struct {
-	Summary    string            `json:"summary"`
-	Detail     string            `json:"detail"`
-	Evidence   string            `json:"evidence"`   // one line of key evidence (command + key output lines) supporting the conclusion, for later verification
-	Confidence string            `json:"confidence"` // observed (seen directly) | inferred (inferred from phenomena)
-	Source     string            `json:"source"`     // where the content came from, one of factSources; empty = inference
-	IntentID   json.RawMessage   `json:"intent_id"`
-	AssetIDs   []json.RawMessage `json:"asset_ids"`
+	Summary        string            `json:"summary"`
+	Detail         string            `json:"detail"`
+	Evidence       string            `json:"evidence"`   // one line of key evidence (command + key output lines) supporting the conclusion, for later verification
+	Confidence     string            `json:"confidence"` // observed (seen directly) | inferred (inferred from phenomena)
+	Source         string            `json:"source"`     // where the content came from, one of factSources; empty = inference
+	IntentID       json.RawMessage   `json:"intent_id"`
+	AssetIDs       []json.RawMessage `json:"asset_ids"`
+	TestedAssetIDs []json.RawMessage `json:"tested_asset_ids"`
 }
 
 // Fact sources (#124, F4): where a fact's content came from, as declared by the
@@ -1537,9 +1538,13 @@ func normalizeFactSource(s string) (string, error) {
 // intent_id).
 func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error) {
 	if strings.TrimSpace(it.Summary) == "" {
-		return 0, fmt.Errorf("summary must not be empty")
+		return 0, fmt.Errorf("summary must not be empty: every fact, including each batch item, requires its own one-sentence summary")
 	}
 	source, err := normalizeFactSource(it.Source)
+	if err != nil {
+		return 0, err
+	}
+	anchors, err := it.factAssetAnchors()
 	if err != nil {
 		return 0, err
 	}
@@ -1564,7 +1569,7 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 		}
 	}
 	// a fact is its OWN node kind (distinct from a vuln finding).
-	id, err := t.ts.AddNode(db.KindFact, payload, 5, "confirmed", t.worker, pidList(it.AssetIDs))
+	id, err := t.ts.AddNode(db.KindFact, payload, 5, "confirmed", t.worker, anchors)
 	if err != nil {
 		return 0, err
 	}
@@ -1584,23 +1589,12 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 		"  · confidence = observed (seen directly in output) | inferred (inferred from phenomena).\n"+
 		"  · source = where the content came from: target_response (content the target itself returned: page bodies, headers, error messages, banners, even when a tool fetched it) | tool_output (a tool's own result about the target: port states, scanner verdicts, status codes, timings) | third_party_intel (OSINT, CVE databases, public reports) | operator_input (given by the human operator) | inference (your own reasoning; the default when omitted). Any other value is refused.\n"+
 		"  · **Negative conclusions** (not injectable / port closed / no entry found, etc.) state only \"observation + tentative reading\" — state what you actually saw; whether to abandon the direction is for the planner to decide globally; always provide evidence, mark inferred when the means weren't exhausted or the evidence is weak (including probed only once, looks-like), and mark observed only when truly exhausted and directly seen.",
-		obj(map[string]any{
-			"facts":      map[string]any{"type": "array", "description": "[use when there are several distinct conclusions] array of facts; element fields same as the top-level fields below (summary/detail/evidence/confidence/source/intent_id/asset_ids); omitting intent_id falls back to the top-level intent_id. The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
-			"summary":    str("a [one-sentence summary] of this exploration's conclusion (a condensation of detail)"),
-			"intent_id":  idp("the id of the intent that produced this fact (the intent you claimed; the default for each item in batch mode)"),
-			"detail":     str("details related to this fact: write all of this exploration's observations here"),
-			"evidence":   str("[one line] of key evidence: the command + the one or two most proving output lines. Keep it brief; don't paste large output blocks (details go in detail)."),
-			"confidence": str("observed (seen directly in output) | inferred (inferred from phenomena). Always label negative conclusions honestly."),
-			"source":     map[string]any{"type": "string", "enum": factSources, "description": "where the content came from: target_response | tool_output | third_party_intel | operator_input | inference (default when omitted)"},
-			"asset_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "related asset ids (optional, 0/1/many): which assets this fact involves"},
-		}),
+		recordFactSchema(),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
-			var a struct {
-				Facts    []factItem `json:"facts"`
-				factItem            // single mode + batch default intent_id
+			a, batch, err := decodeRecordFactInput(in)
+			if err != nil {
+				return actool.Errorf("invalid record_fact input: " + err.Error() + "; no facts were written"), nil
 			}
-			_ = json.Unmarshal(in, &a)
-			batch := len(a.Facts) > 0
 			items := a.Facts
 			if !batch {
 				items = []factItem{a.factItem}
@@ -1627,8 +1621,11 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 			out := map[string]any{"ids": ids}
 			if len(errs) > 0 {
 				out["errors"] = errs
+				out["retry_instruction"] = "Retry only failed indices with complete facts, including summary. Successful indices were already saved; do not retry them."
 			}
-			return jsonResult(out)
+			result, err := jsonResult(out)
+			result.IsError = len(errs) > 0
+			return result, err
 		})
 }
 

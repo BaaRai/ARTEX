@@ -233,7 +233,11 @@ worker remains confined to the intent it claimed.
   </details>
 - **Verified findings**: findings carry a POE level, a verification status and a note; a finding is
   `verified` only when a bound proof/response and verbatim evidence quotes support it. Gzip/deflate
-  bodies are decoded before the quote check.
+  bodies are decoded before the quote check. The findings table supports bulk status updates, and
+  the report and export show each finding's proof strength next to its status.
+- **Traffic replay**: open a captured exchange and replay the recorded request (method, URL,
+  headers and stored body) from the traffic detail; replay stays disabled while only the body
+  preview is loaded.
 - **Vulnerability retest loop**: a dedicated `retester` agent re-runs a finding with optional fixed
   version/conditions, records `Still reproducible / Fixed / Cannot confirm`, and can move the
   finding to `Fixed` automatically. Original evidence and reports are preserved.
@@ -295,6 +299,9 @@ worker remains confined to the intent it claimed.
   for every call.
 - **MCP servers, skills, memory and a workspace**: extend the agent with remote tools and reusable
   prompt/playbook material.
+- **Web search**: the agent's search tool uses Brave, Tavily or the opt-in Keenable backend,
+  configured in **System → Settings** with the key encrypted at rest; search can also egress
+  through its own proxy.
 - **Single binary**: the Next.js UI is embedded with `go:embed`; PostgreSQL is the only external
   dependency.
 

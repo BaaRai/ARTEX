@@ -221,7 +221,9 @@ func marshalStringArray(items []string) string {
 	}
 	escaped := make([]string, len(items))
 	for i, s := range items {
-		escaped[i] = `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		s = strings.ReplaceAll(s, `"`, `\"`)
+		escaped[i] = `"` + s + `"`
 	}
 	return "{" + strings.Join(escaped, ",") + "}"
 }
