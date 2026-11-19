@@ -386,6 +386,27 @@ ON CONFLICT DO NOTHING`, r.kind, r.pattern, r.note); err != nil {
 // that MCP is enabled/configured.
 var builtinSkillVisibility = map[string][]string{
 	"api-recon": {"auto", "pentest", "worker"},
+
+	// Playbook packs ported from AIRecon (see docs/skill-sources.md). Each pack is
+	// one SKILL.md router plus a references/ tree, so the whole corpus costs the
+	// prompt ~3.9k of the 8k skill-listing budget instead of one skill per document.
+	// The solo pentest agent walks the full chain, so it carries every pack.
+	"recon-playbook":     {"pentest", "worker"},
+	"web-vuln":           {"pentest", "worker"},
+	"payload-cookbook":   {"pentest", "worker"},
+	"protocol-playbook":  {"pentest", "worker"},
+	"framework-playbook": {"pentest", "worker"},
+	"tech-playbook":      {"pentest", "worker"},
+	"tool-playbook":      {"pentest", "worker"},
+
+	// Higher-blast-radius packs: pentest only, never the worker by default.
+	// post-exploit assumes an existing foothold and its escalation steps need
+	// separate authorization; ctf-playbook and web3-playbook are lab material whose
+	// techniques do not transfer to a client engagement without explicit scope.
+	"post-exploit":  {"pentest"},
+	"ctf-playbook":  {"pentest"},
+	"web3-playbook": {"pentest"},
+	"ai-redteam":    {"pentest"},
 }
 
 // seedBuiltinSkillVisibility binds the shipped built-in skills to their default
