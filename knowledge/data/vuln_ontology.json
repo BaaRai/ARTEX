@@ -1,0 +1,189 @@
+{
+  "_comment": "Unified Vulnerability Ontology — replaces 8 independent keyword classifiers",
+  "_version": "1.0.0",
+  "_design": "Single source of truth for vuln detection, categorization, escalation, and dedup",
+  "_learning": "New categories discovered during engagements are appended here automatically",
+
+  "categories": {
+    "INJECTION": {
+      "parent": "CWE-74",
+      "children": ["SQL_INJECTION", "NOSQL_INJECTION", "COMMAND_INJECTION", "LDAP_INJECTION", "XXE", "SSTI", "TEMPLATE_INJECTION"],
+      "synonyms": ["injection", "inject", "payload", "sanitize", "escape", "bypass"],
+      "regex_signals": [
+        {"pattern": "(union\\s+(all\\s+)?select|'\\s*(or|and)\\s+'|sleep\\s*\\(|benchmark\\s*\\()", "label": "SQL_INJECTION", "weight": 0.9},
+        {"pattern": "(\\$ne|\\$gt|\\$regex|\\$where)", "label": "NOSQL_INJECTION", "weight": 0.85},
+        {"pattern": "(;\\s*(ls|cat|id|whoami)|`[^`]+`|\\$\\([^)]+\\))", "label": "COMMAND_INJECTION", "weight": 0.9},
+        {"pattern": "(\\{\\{.*\\}\\}|\\$\\{.*\\}|<%.*%>)", "label": "SSTI", "weight": 0.85},
+        {"pattern": "(doctype.*system|ENTITY.*SYSTEM)", "label": "XXE", "weight": 0.9}
+      ],
+      "escalation_targets": ["DATA", "CODE", "ACCESS"],
+      "dedup_key_fields": ["endpoint", "parameter", "injection_type"]
+    },
+
+    "AUTHENTICATION": {
+      "parent": "CWE-287",
+      "children": ["CREDENTIAL_EXPOSURE", "SESSION_HIJACK", "JWT_WEAKNESS", "OAUTH_BYPASS", "MFA_BYPASS", "DEFAULT_CREDS"],
+      "synonyms": ["auth", "login", "session", "token", "credential", "password", "jwt", "oauth", "mfa"],
+      "regex_signals": [
+        {"pattern": "(password|secret|key|token|api[_-]?key)\\s*[=:]\\s*[\"']?[\\w-]{8,}", "label": "CREDENTIAL_EXPOSURE", "weight": 0.8},
+        {"pattern": "(alg.*none|hs256.*public|kid.*traversal)", "label": "JWT_WEAKNESS", "weight": 0.85},
+        {"pattern": "(state.*bypass|redirect_uri.*manipulation|pkce.*missing)", "label": "OAUTH_BYPASS", "weight": 0.8}
+      ],
+      "escalation_targets": ["ACCESS", "DATA"],
+      "dedup_key_fields": ["endpoint", "auth_mechanism", "bypass_type"]
+    },
+
+    "ACCESS_CONTROL": {
+      "parent": "CWE-284",
+      "children": ["IDOR", "PRIVILEGE_ESCALATION", "BOLA", "BFLA", "FORCED_BROWSING"],
+      "synonyms": ["idor", "access control", "broken access", "privilege", "authorization", "bola", "bfla"],
+      "regex_signals": [
+        {"pattern": "(user[_-]?id=|account[_-]?id=|order[_-]?id=|doc[_-]?id=)", "label": "IDOR", "weight": 0.7},
+        {"pattern": "(admin.*access|privilege.*escalation|role.*manipulation)", "label": "PRIVILEGE_ESCALATION", "weight": 0.85}
+      ],
+      "escalation_targets": ["DATA", "CODE"],
+      "dedup_key_fields": ["endpoint", "object_type", "access_level"]
+    },
+
+    "DATA_EXPOSURE": {
+      "parent": "CWE-200",
+      "children": ["INFORMATION_DISCLOSURE", "PII_EXPOSURE", "ERROR_DISCLOSURE", "API_KEY_LEAK", "SOURCE_DISCLOSURE"],
+      "synonyms": ["data", "leak", "expose", "disclosure", "sensitive", "pii", "error", "stack trace"],
+      "regex_signals": [
+        {"pattern": "(mysql error|syntax error|exception|stacktrace|traceback)", "label": "ERROR_DISCLOSURE", "weight": 0.8},
+        {"pattern": "(aws_access|aws_secret|gcp_|azure_|firebase)", "label": "API_KEY_LEAK", "weight": 0.9}
+      ],
+      "escalation_targets": ["INJECTION", "AUTHENTICATION"],
+      "dedup_key_fields": ["data_type", "exposure_vector"]
+    },
+
+    "SERVER_SIDE_REQUEST": {
+      "parent": "CWE-918",
+      "children": ["SSRF", "OPEN_REDIRECT", "HEADER_INJECTION", "DNS_REBINDING"],
+      "synonyms": ["ssrf", "server-side request", "internal request", "metadata", "redirect", "forward"],
+      "regex_signals": [
+        {"pattern": "(127\\.0\\.0\\.1|localhost|169\\.254\\.169\\.254|metadata\\.google)", "label": "SSRF", "weight": 0.85},
+        {"pattern": "(redirect.*url|goto=|dest=|return_url=|callback=)", "label": "OPEN_REDIRECT", "weight": 0.7}
+      ],
+      "escalation_targets": ["NETWORK", "ACCESS", "DATA"],
+      "dedup_key_fields": ["target_endpoint", "protocol", "internal_resource"]
+    },
+
+    "FILE_OPERATIONS": {
+      "parent": "CWE-73",
+      "children": ["PATH_TRAVERSAL", "FILE_UPLOAD_BYPASS", "LFI", "RFI"],
+      "synonyms": ["file", "path", "directory", "traversal", "upload", "lfi", "rfi"],
+      "regex_signals": [
+        {"pattern": "(\\.\\./|\\.\\.\\\\|%2e%2e)", "label": "PATH_TRAVERSAL", "weight": 0.9},
+        {"pattern": "(upload|attach|import|avatar|profile.*file)", "label": "FILE_UPLOAD_BYPASS", "weight": 0.6}
+      ],
+      "escalation_targets": ["CODE", "DATA"],
+      "dedup_key_fields": ["file_path", "operation_type", "extension"]
+    },
+
+    "BUSINESS_LOGIC": {
+      "parent": "CWE-840",
+      "children": ["WORKFLOW_BYPASS", "RACE_CONDITION", "FINANCIAL_EXPLOIT", "STATE_MANIPULATION"],
+      "synonyms": ["workflow", "step", "process", "order", "checkout", "payment", "balance", "race", "concurrent"],
+      "regex_signals": [
+        {"pattern": "(race.*condition|simultaneous.*request|concurrent.*state)", "label": "RACE_CONDITION", "weight": 0.85},
+        {"pattern": "(workflow.*skip|step.*bypass|state.*transition)", "label": "WORKFLOW_BYPASS", "weight": 0.8},
+        {"pattern": "(negative.*balance|double.*spend|quantity.*-1)", "label": "FINANCIAL_EXPLOIT", "weight": 0.9}
+      ],
+      "escalation_targets": ["DATA", "ACCESS"],
+      "dedup_key_fields": ["workflow_name", "step_bypassed", "impact"]
+    },
+
+    "PROTOCOL_ABUSE": {
+      "parent": "CWE-444",
+      "children": ["HTTP_SMUGGLING", "CACHE_POISONING", "WEBSOCKET_ATTACK", "GRPC_ATTACK", "HTTP2_DOWNGRADE"],
+      "synonyms": ["smuggle", "desync", "cache", "poison", "websocket", "grpc", "protobuf", "http2"],
+      "regex_signals": [
+        {"pattern": "(content-length.*transfer-encoding|transfer-encoding.*content-length)", "label": "HTTP_SMUGGLING", "weight": 0.9},
+        {"pattern": "(cache.*poison|unkeyed.*header|x-forwarded-host.*reflect)", "label": "CACHE_POISONING", "weight": 0.85},
+        {"pattern": "(ws://|wss://|websocket|socket.*message)", "label": "WEBSOCKET_ATTACK", "weight": 0.7}
+      ],
+      "escalation_targets": ["AUTHENTICATION", "DATA"],
+      "dedup_key_fields": ["protocol", "attack_vector", "target_service"]
+    },
+
+    "CLIENT_SIDE": {
+      "parent": "CWE-79",
+      "children": ["XSS_REFLECTED", "XSS_STORED", "XSS_DOM", "CSRF", "CLICKJACKING", "CORS_MISCONFIG"],
+      "synonyms": ["xss", "cross-site", "script", "csrf", "cors", "clickjack"],
+      "regex_signals": [
+        {"pattern": "(<script|javascript:|on\\w+=|alert\\s*\\(|innerHTML|insertAdjacentHTML)", "label": "XSS", "weight": 0.9},
+        {"pattern": "(access-control-allow-origin.*\\*|cors.*misconfig)", "label": "CORS_MISCONFIG", "weight": 0.8}
+      ],
+      "escalation_targets": ["AUTHENTICATION", "ACCESS"],
+      "dedup_key_fields": ["sink", "source", "execution_context"]
+    },
+
+    "CODE_EXECUTION": {
+      "parent": "CWE-78",
+      "children": ["RCE_DIRECT", "DESERIALIZATION", "PROTOTYPE_POLLUTION", "REMOTE_FILE_INCLUSION"],
+      "synonyms": ["rce", "code execution", "deserialize", "unserialize", "pickle", "__proto__", "prototype"],
+      "regex_signals": [
+        {"pattern": "(eval|exec|system|shell_exec|passthru)\\s*\\(", "label": "RCE_DIRECT", "weight": 0.95},
+        {"pattern": "(__proto__|constructor\\.prototype|Object\\.prototype)", "label": "PROTOTYPE_POLLUTION", "weight": 0.9},
+        {"pattern": "(deserialize|unserialize|pickle|yaml.*load)", "label": "DESERIALIZATION", "weight": 0.85}
+      ],
+      "escalation_targets": ["NETWORK", "DATA", "ACCESS"],
+      "dedup_key_fields": ["execution_context", "payload_type", "privilege_level"]
+    },
+
+    "AI_LLM": {
+      "parent": "CWE-1392",
+      "children": ["PROMPT_INJECTION", "JAILBREAK", "CONTEXT_POISONING", "TOOL_ABUSE"],
+      "synonyms": ["ai", "llm", "chatbot", "prompt", "jailbreak", "dan mode", "ignore previous"],
+      "regex_signals": [
+        {"pattern": "(ignore.*previous|dan.*mode|system.*prompt)", "label": "PROMPT_INJECTION", "weight": 0.85},
+        {"pattern": "(tool.*abuse|function.*call|web.*search.*injection)", "label": "TOOL_ABUSE", "weight": 0.8}
+      ],
+      "escalation_targets": ["DATA_EXPOSURE", "SERVER_SIDE_REQUEST"],
+      "dedup_key_fields": ["model", "injection_type", "data_accessed"]
+    },
+
+    "SUPPLY_CHAIN": {
+      "parent": "CWE-1395",
+      "children": ["DEPENDENCY_CONFUSION", "TYPOSQUATTING", "CI_CD_INJECTION", "CONTAINER_ESCAPE"],
+      "synonyms": ["supply chain", "dependency", "npm", "pypi", "docker", "container", "ci/cd"],
+      "regex_signals": [
+        {"pattern": "(docker.*escape|container.*breakout|pod.*escape)", "label": "CONTAINER_ESCAPE", "weight": 0.85},
+        {"pattern": "(dependency.*confusion|typosquat|package.*hijack)", "label": "DEPENDENCY_CONFUSION", "weight": 0.8}
+      ],
+      "escalation_targets": ["CODE_EXECUTION", "ACCESS_CONTROL"],
+      "dedup_key_fields": ["package_name", "version", "attack_vector"]
+    }
+  },
+
+  "escalation_graph": {
+    "edges": [
+      {"from": "DATA_EXPOSURE", "to": "INJECTION", "weight": 0.7, "description": "Information disclosure reveals injection vectors"},
+      {"from": "DATA_EXPOSURE", "to": "AUTHENTICATION", "weight": 0.8, "description": "Exposed credentials enable auth bypass"},
+      {"from": "AUTHENTICATION", "to": "ACCESS_CONTROL", "weight": 0.85, "description": "Auth bypass enables access to protected resources"},
+      {"from": "INJECTION", "to": "CODE_EXECUTION", "weight": 0.75, "description": "Injection escalates to code execution"},
+      {"from": "INJECTION", "to": "DATA_EXPOSURE", "weight": 0.8, "description": "Injection extracts sensitive data"},
+      {"from": "SERVER_SIDE_REQUEST", "to": "ACCESS_CONTROL", "weight": 0.7, "description": "SSRF accesses internal services"},
+      {"from": "SERVER_SIDE_REQUEST", "to": "CODE_EXECUTION", "weight": 0.5, "description": "SSRF to internal admin interfaces"},
+      {"from": "FILE_OPERATIONS", "to": "CODE_EXECUTION", "weight": 0.8, "description": "File upload bypass leads to RCE"},
+      {"from": "FILE_OPERATIONS", "to": "DATA_EXPOSURE", "weight": 0.75, "description": "Path traversal reads sensitive files"},
+      {"from": "CLIENT_SIDE", "to": "AUTHENTICATION", "weight": 0.85, "description": "XSS steals session tokens"},
+      {"from": "BUSINESS_LOGIC", "to": "DATA_EXPOSURE", "weight": 0.6, "description": "Logic flaws expose data through workflow abuse"},
+      {"from": "PROTOCOL_ABUSE", "to": "AUTHENTICATION", "weight": 0.7, "description": "HTTP smuggling bypasses auth checks"},
+      {"from": "PROTOCOL_ABUSE", "to": "CLIENT_SIDE", "weight": 0.65, "description": "Cache poisoning stores malicious responses"},
+      {"from": "CODE_EXECUTION", "to": "SERVER_SIDE_REQUEST", "weight": 0.8, "description": "RCE enables internal network access"},
+      {"from": "AI_LLM", "to": "DATA_EXPOSURE", "weight": 0.75, "description": "Prompt injection extracts training data or context"},
+      {"from": "AI_LLM", "to": "SERVER_SIDE_REQUEST", "weight": 0.7, "description": "Tool abuse triggers SSRF via AI web search"},
+      {"from": "SUPPLY_CHAIN", "to": "CODE_EXECUTION", "weight": 0.85, "description": "Dependency confusion executes malicious code"},
+      {"from": "SUPPLY_CHAIN", "to": "ACCESS_CONTROL", "weight": 0.6, "description": "Container escape gains host access"}
+    ]
+  },
+
+  "dedup_rules": {
+    "semantic_threshold": 0.8,
+    "allow_retest_on_evidence_growth": true,
+    "max_retests_without_growth": 2,
+    "variant_tracking": true
+  }
+}

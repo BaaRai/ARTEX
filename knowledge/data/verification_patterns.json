@@ -1,0 +1,52 @@
+{
+    "auth_failure_patterns": {
+        "401_unauthorized": "401|unauthorized|authentication required",
+        "403_forbidden": "403|forbidden|access denied",
+        "session_expired": "session expired|session timeout|logged out",
+        "csrf_token": "csrf|xsrf|token mismatch",
+        "login_required": "login required|sign in|please log"
+    },
+    "login_form_patterns": {
+        "username": "name=[\"']?(username|user|email|login)[\"']?",
+        "password": "name=[\"']?(password|pass|pwd)[\"']?",
+        "csrf": "name=[\"']?(csrf|_token|authenticity_token)[\"']?"
+    },
+    "clean_response_patterns": [
+        "csrf[_-]?token", "xsrf[_-]?token", "__VIEWSTATE", "JSESSIONID",
+        "set-cookie", "random[_-]?id", "timestamp", "nonce=", "uuid", "session[_-]?id"
+    ],
+    "dynamic_content_markers": [
+        "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}",
+        "\\d{10,13}",
+        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        "Cache-Control:\\s*(no-cache|no-store|private)",
+        "Pragma:\\s*no-cache"
+    ],
+    "honeypot_indicators": [
+        "honeypot|canary|trap",
+        "thank.*you.*for.*your.*submission",
+        "your.*request.*has.*been.*logged",
+        "security.*team.*has.*been.*notified",
+        "decoy|bait|sinkhole"
+    ],
+    "waf_block_indicators": [
+        "access denied", "blocked", "forbidden", "not allowed", "security check"
+    ],
+    "lfi_file_indicators": [
+        "root:x:", "daemon:x:", "bin:x:", "[extensions]", "fonts", "driver"
+    ],
+    "sql_error_patterns": [
+        "sql syntax", "mysql_fetch", "ora-", "sqlite3::", "pg::", "unclosed quotation", "boolean expression"
+    ],
+    "false_positive_indicators": [
+        "location header.*(?:<script|alert%3[ce]|%3[cC]script)",
+        "(?:301|302).*redirect.*location.*(?:<script|alert|%3[cC])",
+        "redirects to.*test=<script>",
+        "reflects.*(?:user-controlled|user-supplied).*(?:input|parameter).*(?:verbatim|unmodified|unchanged).*(?:location|url|destination).*(?:header|301|302|redirect)",
+        "redirect.*verif(?:i|y|ication).*location.*header",
+        "payload.*verbatim.*location.*header"
+    ],
+    "url_encoding_checks": [
+        "%3C", "%3c", "%3E", "%3e", "%27", "%22", "%3C%2F", "%3c%2f"
+    ]
+}

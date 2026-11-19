@@ -1,0 +1,541 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "description": "Endpoint and subdomain attack value patterns for intelligent target prioritization. Used by target_prioritizer.py to score discovered URLs and subdomains by their bug bounty potential.",
+    "scoring": "0.0-1.0 where 1.0 = highest attack value, 0.05 = lowest (tracking pixel)"
+  },
+  "url_patterns": [
+    {
+      "pattern": "(?i)(login|auth|oauth|sso|signin|/session|/token|/jwt|/authorize|/callback)",
+      "score": 0.95,
+      "category": "authentication_endpoint",
+      "attack_vectors": [
+        "auth_bypass",
+        "jwt_manipulation",
+        "oauth_abuse",
+        "token_theft"
+      ],
+      "description": "Authentication and authorization endpoints \u2014 test for bypass, JWT/SSO flaws"
+    },
+    {
+      "pattern": "(?i)(admin|dashboard|console|manage|control-panel|/admin/|/wp-admin)",
+      "score": 0.9,
+      "category": "admin_panel",
+      "attack_vectors": [
+        "auth_bypass",
+        "privilege_escalation",
+        "default_credentials"
+      ],
+      "description": "Admin panels and management interfaces \u2014 often misconfigured or exposed"
+    },
+    {
+      "pattern": "(?i)(api/v\\d|/graphql|/api/|/rest/|/rpc|/gql)",
+      "score": 0.85,
+      "category": "api_endpoint",
+      "attack_vectors": [
+        "bola",
+        "bfla",
+        "injection",
+        "mass_assignment"
+      ],
+      "description": "API endpoints \u2014 test for IDOR, BOLA, BFLA, injection"
+    },
+    {
+      "pattern": "(?i)(upload|import|export|backup|dump|/file/upload)",
+      "score": 0.85,
+      "category": "file_operation",
+      "attack_vectors": [
+        "file_upload",
+        "path_traversal",
+        "xxe",
+        "command_injection"
+      ],
+      "description": "File upload/import endpoints \u2014 test for upload bypass, traversal, XXE"
+    },
+    {
+      "pattern": "(?i)(config|settings|\\.env|config\\.json|\\.git|\\.svn|wp-config)",
+      "score": 0.9,
+      "category": "config_exposure",
+      "attack_vectors": [
+        "information_disclosure",
+        "credential_theft"
+      ],
+      "description": "Configuration files and sensitive directories \u2014 may expose secrets"
+    },
+    {
+      "pattern": "(?i)(debug|trace|profiler|swagger|openapi|/api/docs|/graphql/playground)",
+      "score": 0.8,
+      "category": "debug_info",
+      "attack_vectors": [
+        "information_disclosure",
+        "api_enumeration"
+      ],
+      "description": "Debug interfaces and API documentation \u2014 reveals internal structure"
+    },
+    {
+      "pattern": "(?i)(webhook|callback|notify|hook|/webhook)",
+      "score": 0.75,
+      "category": "webhook_endpoint",
+      "attack_vectors": [
+        "ssrf",
+        "command_injection",
+        "xxe"
+      ],
+      "description": "Webhook endpoints \u2014 test for SSRF, injection via callback URLs"
+    },
+    {
+      "pattern": "(?i)(reset|forgot|password|change-pass|/password-reset)",
+      "score": 0.8,
+      "category": "password_flow",
+      "attack_vectors": [
+        "password_reset_bypass",
+        "token_manipulation",
+        "account_takeover"
+      ],
+      "description": "Password reset flows \u2014 test for token bypass, enumeration, ATO"
+    },
+    {
+      "pattern": "(?i)(register|signup|invite|onboard|/register)",
+      "score": 0.7,
+      "category": "user_registration",
+      "attack_vectors": [
+        "account_takeover",
+        "parameter_tampering",
+        "rate_limit_bypass"
+      ],
+      "description": "Registration flows \u2014 test for account takeover, parameter tampering"
+    },
+    {
+      "pattern": "(?i)(graphql|graphiql|playground|altair|/graphql)",
+      "score": 0.85,
+      "category": "graphql_endpoint",
+      "attack_vectors": [
+        "graphql_injection",
+        "introspection_abuse",
+        "batch_query_abuse"
+      ],
+      "description": "GraphQL endpoints \u2014 test for injection, introspection, batch abuse"
+    },
+    {
+      "pattern": "(?i)(/console|/actuator|/health|/metrics|/status|/ready|/live)",
+      "score": 0.8,
+      "category": "infrastructure",
+      "attack_vectors": [
+        "information_disclosure",
+        "service_abuse"
+      ],
+      "description": "Infrastructure endpoints \u2014 may expose internal state or allow abuse"
+    },
+    {
+      "pattern": "(?i)(/phpmyadmin|/adminer|/db|/database|/mysql|/pgadmin)",
+      "score": 0.95,
+      "category": "database_admin",
+      "attack_vectors": [
+        "auth_bypass",
+        "default_credentials",
+        "sql_injection"
+      ],
+      "description": "Database admin interfaces \u2014 critical if exposed"
+    },
+    {
+      "pattern": "(?i)(/jenkins|/gitlab|/github|/ci|/cd|/deploy|/buildkite)",
+      "score": 0.9,
+      "category": "ci_cd",
+      "attack_vectors": [
+        "rce",
+        "credential_theft",
+        "pipeline_injection"
+      ],
+      "description": "CI/CD systems \u2014 may allow RCE or credential theft"
+    },
+    {
+      "pattern": "(?i)(/kibana|/elasticsearch|/grafana|/prometheus|/datadog)",
+      "score": 0.85,
+      "category": "monitoring",
+      "attack_vectors": [
+        "auth_bypass",
+        "information_disclosure",
+        "log_injection"
+      ],
+      "description": "Monitoring dashboards \u2014 may expose sensitive logs or allow bypass"
+    },
+    {
+      "pattern": "(?i)(/n8n|/workflow|/automation|/zapier|/make|/ifttt)",
+      "score": 0.8,
+      "category": "workflow_automation",
+      "attack_vectors": [
+        "ssrf",
+        "command_injection",
+        "credential_theft"
+      ],
+      "description": "Workflow automation tools \u2014 may expose webhooks or credentials"
+    },
+    {
+      "pattern": "(?i)(/execute|/run|/eval|/shell|/terminal|/console|/sandbox)",
+      "score": 0.95,
+      "category": "code_execution",
+      "attack_vectors": [
+        "rce",
+        "command_injection",
+        "sandbox_escape"
+      ],
+      "description": "Code execution endpoints \u2014 highest priority for RCE testing"
+    },
+    {
+      "pattern": "(?i)(/proxy|/relay|/tunnel|/forward|/fetch)",
+      "score": 0.8,
+      "category": "proxy_endpoint",
+      "attack_vectors": [
+        "ssrf",
+        "open_redirect",
+        "header_injection"
+      ],
+      "description": "Proxy/relay endpoints \u2014 prime SSRF candidates"
+    },
+    {
+      "pattern": "(?i)(/redirect|/goto|/url|/navigate|/out|/link)",
+      "score": 0.7,
+      "category": "redirect_endpoint",
+      "attack_vectors": [
+        "open_redirect",
+        "ssrf"
+      ],
+      "description": "Redirect endpoints \u2014 test for open redirect and SSRF"
+    },
+    {
+      "pattern": "(?i)(/search|/query|/find|/lookup|/filter)",
+      "score": 0.6,
+      "category": "search_endpoint",
+      "attack_vectors": [
+        "sql_injection",
+        "nosql_injection",
+        "xss",
+        "ssti"
+      ],
+      "description": "Search/query endpoints \u2014 test for injection"
+    },
+    {
+      "pattern": "(?i)(/payment|/billing|/checkout|/invoice|/stripe|/paypal)",
+      "score": 0.9,
+      "category": "payment_endpoint",
+      "attack_vectors": [
+        "parameter_tampering",
+        "race_condition",
+        "payment_bypass"
+      ],
+      "description": "Payment endpoints \u2014 test for price manipulation, race conditions"
+    },
+    {
+      "pattern": "(?i)(/user|/profile|/account|/me|/settings)",
+      "score": 0.65,
+      "category": "user_endpoint",
+      "attack_vectors": [
+        "idor",
+        "mass_assignment",
+        "account_takeover"
+      ],
+      "description": "User profile endpoints \u2014 test for IDOR, mass assignment"
+    },
+    {
+      "pattern": "(?i)(/download|/file|/attachment|/media|/static)",
+      "score": 0.6,
+      "category": "file_endpoint",
+      "attack_vectors": [
+        "path_traversal",
+        "ssrf",
+        "xxe"
+      ],
+      "description": "File download endpoints \u2014 test for path traversal"
+    },
+    {
+      "pattern": "(?i)(/feed|/rss|/atom|/xml|/sitemap)",
+      "score": 0.4,
+      "category": "feed_endpoint",
+      "attack_vectors": [
+        "xxe",
+        "information_disclosure"
+      ],
+      "description": "Feed endpoints \u2014 low priority, test for XXE"
+    },
+    {
+      "pattern": "(?i)(/blog|/news|/article|/post|/page)",
+      "score": 0.2,
+      "category": "content_page",
+      "attack_vectors": [
+        "xss",
+        "ssti"
+      ],
+      "description": "Content pages \u2014 low priority, mainly test for stored XSS"
+    },
+    {
+      "pattern": "(?i)(/cdn-cgi|/cfapps|/cloudflare|/cdn-cgi/challenge)",
+      "score": 0.1,
+      "category": "cloudflare_internal",
+      "attack_vectors": [],
+      "description": "Cloudflare internal endpoints \u2014 skip, not target application"
+    },
+    {
+      "pattern": "(?i)(tracking|analytics|pixel|rum|__ptq|/collect|/track)",
+      "score": 0.05,
+      "category": "tracking_pixel",
+      "attack_vectors": [],
+      "description": "Tracking/analytics pixels \u2014 skip, third-party services"
+    }
+  ],
+  "subdomain_patterns": [
+    {
+      "pattern": "(?i)^admin|^manage|^control",
+      "score": 0.95,
+      "category": "admin_subdomain",
+      "attack_vectors": [
+        "auth_bypass",
+        "default_credentials",
+        "privilege_escalation"
+      ],
+      "description": "Admin subdomains \u2014 often less secured than production"
+    },
+    {
+      "pattern": "(?i)^api|^api-|^api\\.",
+      "score": 0.9,
+      "category": "api_subdomain",
+      "attack_vectors": [
+        "bola",
+        "bfla",
+        "injection",
+        "mass_assignment"
+      ],
+      "description": "API subdomains \u2014 test for authorization flaws and injection"
+    },
+    {
+      "pattern": "(?i)^dev|^staging|^test|^qa|^uat|^preprod|^preview",
+      "score": 0.85,
+      "category": "non_production",
+      "attack_vectors": [
+        "auth_bypass",
+        "debug_exposure",
+        "default_credentials",
+        "information_disclosure"
+      ],
+      "description": "Non-production environments \u2014 often have debug mode, weak auth, exposed configs"
+    },
+    {
+      "pattern": "(?i)^internal|^corp|^intranet|^private",
+      "score": 0.9,
+      "category": "internal_service",
+      "attack_vectors": [
+        "auth_bypass",
+        "information_disclosure",
+        "ssrf"
+      ],
+      "description": "Internal services \u2014 should not be externally accessible"
+    },
+    {
+      "pattern": "(?i)^grafana|^kibana|^monitor|^metrics|^prometheus|^datadog",
+      "score": 0.85,
+      "category": "monitoring",
+      "attack_vectors": [
+        "auth_bypass",
+        "information_disclosure",
+        "log_injection"
+      ],
+      "description": "Monitoring dashboards \u2014 may expose sensitive data"
+    },
+    {
+      "pattern": "(?i)^jenkins|^ci|^cd|^build|^deploy|^gitlab|^github",
+      "score": 0.9,
+      "category": "ci_cd",
+      "attack_vectors": [
+        "rce",
+        "credential_theft",
+        "pipeline_injection"
+      ],
+      "description": "CI/CD systems \u2014 critical if exposed"
+    },
+    {
+      "pattern": "(?i)^db|^database|^mysql|^postgres|^mongo|^redis|^elasticsearch",
+      "score": 0.95,
+      "category": "database",
+      "attack_vectors": [
+        "auth_bypass",
+        "default_credentials",
+        "unauthenticated_access"
+      ],
+      "description": "Database services \u2014 critical if exposed without auth"
+    },
+    {
+      "pattern": "(?i)^mail|^smtp|^imap|^pop|^exchange",
+      "score": 0.75,
+      "category": "email_service",
+      "attack_vectors": [
+        "open_relay",
+        "auth_bypass",
+        "information_disclosure"
+      ],
+      "description": "Email services \u2014 test for open relay, auth bypass"
+    },
+    {
+      "pattern": "(?i)^vpn|^ssh|^rdp|^remote|^bastion",
+      "score": 0.85,
+      "category": "remote_access",
+      "attack_vectors": [
+        "auth_bypass",
+        "brute_force",
+        "vulnerability_exploitation"
+      ],
+      "description": "Remote access services \u2014 test for auth bypass, known vulns"
+    },
+    {
+      "pattern": "(?i)^s3|^storage|^bucket|^cdn|^assets",
+      "score": 0.7,
+      "category": "storage",
+      "attack_vectors": [
+        "bucket_enumeration",
+        "information_disclosure",
+        "misconfiguration"
+      ],
+      "description": "Storage services \u2014 test for misconfigured buckets"
+    },
+    {
+      "pattern": "(?i)^execute|^screen|^ide|^code|^sandbox|^playground",
+      "score": 0.9,
+      "category": "code_execution",
+      "attack_vectors": [
+        "rce",
+        "sandbox_escape",
+        "command_injection"
+      ],
+      "description": "Code execution environments \u2014 highest priority for RCE"
+    },
+    {
+      "pattern": "(?i)^n8n|^workflow|^automation|^zapier|^make",
+      "score": 0.8,
+      "category": "workflow",
+      "attack_vectors": [
+        "ssrf",
+        "command_injection",
+        "credential_theft"
+      ],
+      "description": "Workflow automation \u2014 may expose webhooks or credentials"
+    },
+    {
+      "pattern": "(?i)^hydra|^oauth|^auth|^sso|^keycloak|^okta",
+      "score": 0.85,
+      "category": "auth_service",
+      "attack_vectors": [
+        "auth_bypass",
+        "token_manipulation",
+        "oauth_abuse"
+      ],
+      "description": "Authentication services \u2014 test for bypass, token flaws"
+    },
+    {
+      "pattern": "(?i)^ats|^hr|^recruit|^workday",
+      "score": 0.6,
+      "category": "hr_system",
+      "attack_vectors": [
+        "idor",
+        "information_disclosure",
+        "auth_bypass"
+      ],
+      "description": "HR/recruiting systems \u2014 may expose employee data"
+    },
+    {
+      "pattern": "(?i)^www|^blog|^docs|^help|^support|^status",
+      "score": 0.2,
+      "category": "public_content",
+      "attack_vectors": [
+        "xss",
+        "ssti"
+      ],
+      "description": "Public content sites \u2014 low priority"
+    },
+    {
+      "pattern": "(?i)^cdn|^static|^assets|^img|^css|^js",
+      "score": 0.1,
+      "category": "static_assets",
+      "attack_vectors": [],
+      "description": "Static asset hosts \u2014 very low priority"
+    },
+    {
+      "pattern": "(?i)^sendgrid|^mailchimp|^hubspot|^marketo|^intercom",
+      "score": 0.4,
+      "category": "marketing_service",
+      "attack_vectors": [
+        "information_disclosure",
+        "misconfiguration"
+      ],
+      "description": "Marketing services \u2014 low priority, check for misconfigurations"
+    },
+    {
+      "pattern": "(?i)^hydra-admin|^hydra",
+      "score": 0.9,
+      "category": "oauth_admin",
+      "attack_vectors": [
+        "auth_bypass",
+        "token_manipulation",
+        "oauth_abuse"
+      ],
+      "description": "OAuth/Hydra admin \u2014 critical auth infrastructure"
+    },
+    {
+      "pattern": "(?i)^interview|^execute|^screen|^tty",
+      "score": 0.9,
+      "category": "code_execution",
+      "attack_vectors": [
+        "rce",
+        "sandbox_escape",
+        "command_injection"
+      ],
+      "description": "Code execution/interview platforms \u2014 test for sandbox escape"
+    },
+    {
+      "pattern": "(?i)^grafana|^grafana2|^prometheus",
+      "score": 0.85,
+      "category": "monitoring",
+      "attack_vectors": [
+        "auth_bypass",
+        "information_disclosure"
+      ],
+      "description": "Monitoring infrastructure \u2014 may expose internal metrics"
+    },
+    {
+      "pattern": "(?i)^dev-n8n|^n8n",
+      "score": 0.8,
+      "category": "workflow",
+      "attack_vectors": [
+        "ssrf",
+        "webhook_abuse",
+        "credential_theft"
+      ],
+      "description": "n8n workflow automation \u2014 test for SSRF via webhooks"
+    },
+    {
+      "pattern": "(?i)^kibana",
+      "score": 0.85,
+      "category": "monitoring",
+      "attack_vectors": [
+        "auth_bypass",
+        "information_disclosure",
+        "log_injection"
+      ],
+      "description": "Kibana/Elasticsearch \u2014 may expose sensitive logs"
+    }
+  ],
+  "static_dir_patterns": [
+    "/assets/",
+    "/static/",
+    "/cdn/",
+    "/images/",
+    "/image/",
+    "/img/",
+    "/fonts/",
+    "/font/",
+    "/icons/",
+    "/icon/",
+    "/favicon",
+    "/apple-touch-icon",
+    "/opengraph",
+    "/og-",
+    "/social-image"
+  ]
+}

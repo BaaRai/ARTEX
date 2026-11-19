@@ -1,0 +1,6 @@
+{
+    "static": ["png", "jpg", "jpeg", "gif", "svg", "ico", "bmp", "webp", "avif", "tiff", "woff", "woff2", "ttf", "otf", "eot", "mp4", "webm", "ogg", "mp3", "wav", "flac", "avi", "mov", "dat", "bin", "exe", "dll", "so", "css", "scss", "sass", "less", "lock"],
+    "high_value": ["js", "jsx", "ts", "tsx", "mjs", "cjs", "map"],
+    "document": ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "xml", "yml", "yaml", "json", "toml", "ini", "conf", "cfg", "txt", "md", "log", "zip", "tar", "gz", "rar", "7z", "bz2"],
+    "backend": ["php", "phtml", "php3", "php4", "php5", "phps", "asp", "aspx", "ascx", "ashx", "asmx", "jsp", "jspx", "jhtml", "cgi", "pl", "py", "rb", "sh", "html", "htm"]
+}

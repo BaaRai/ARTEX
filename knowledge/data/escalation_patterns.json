@@ -1,0 +1,224 @@
+{
+  "_comment": "Escalation patterns + templates \u2014 merged into single file",
+  "_version": "2.0.0",
+  "patterns": [
+    {
+      "id": "seed_cred_to_access",
+      "from": [
+        "CREDENTIAL_EXPOSURE",
+        "AUTH"
+      ],
+      "to": "ACCESS",
+      "description": "Use exposed credentials to access protected resources",
+      "probability": 0.8
+    },
+    {
+      "id": "seed_file_to_code",
+      "from": [
+        "PATH_TRAVERSAL",
+        "QUERY_INJECTION"
+      ],
+      "to": "CODE",
+      "description": "Escalate to code execution via file write or database injection",
+      "probability": 0.7
+    },
+    {
+      "id": "seed_xss_to_auth",
+      "from": [
+        "SCRIPT_INJECTION"
+      ],
+      "to": "AUTH",
+      "description": "Use XSS to steal session tokens and hijack accounts",
+      "probability": 0.9
+    },
+    {
+      "id": "seed_sqli_to_data",
+      "from": [
+        "QUERY_INJECTION"
+      ],
+      "to": "DATA",
+      "description": "Extract sensitive data via UNION queries",
+      "probability": 0.85
+    },
+    {
+      "id": "seed_deser_to_code",
+      "from": [
+        "DESERIALIZATION"
+      ],
+      "to": "CODE",
+      "description": "Execute commands via gadget chain exploitation",
+      "probability": 0.75
+    },
+    {
+      "id": "seed_rce_to_network",
+      "from": [
+        "INSECURE_CODE_EXECUTION"
+      ],
+      "to": "NETWORK",
+      "description": "Pivot to internal network from compromised host",
+      "probability": 0.6
+    },
+    {
+      "id": "seed_cloud_to_access",
+      "from": [
+        "CLOUD_MISCONFIGURATION"
+      ],
+      "to": "ACCESS",
+      "description": "Escalate cloud access to full account compromise",
+      "probability": 0.8
+    },
+    {
+      "id": "seed_inject_to_config",
+      "from": [
+        "QUERY_INJECTION",
+        "PATH_TRAVERSAL"
+      ],
+      "to": "CONFIG",
+      "description": "Extract configuration files containing secrets",
+      "probability": 0.7
+    }
+  ],
+  "_learned_patterns": [],
+  "templates": {
+    "INJECTION": [
+      {
+        "step": "Try escalation via {param} parameter with different encoding",
+        "tool_hint": "advanced_fuzz"
+      },
+      {
+        "step": "Test for second-order injection in stored data",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for stack trace disclosure that reveals internals",
+        "tool_hint": "http_observe"
+      }
+    ],
+    "AUTH": [
+      {
+        "step": "Check if session token can be reused across different accounts",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Test for token expiration bypass",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for OAuth state parameter tampering",
+        "tool_hint": "manual"
+      }
+    ],
+    "ACCESS": [
+      {
+        "step": "Enumerate horizontal privilege escalation paths",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for IDOR in related resources",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Test for forced browsing to admin endpoints",
+        "tool_hint": "ffuf"
+      }
+    ],
+    "DATA": [
+      {
+        "step": "Check if sensitive data is cached by CDN/proxy",
+        "tool_hint": "browser"
+      },
+      {
+        "step": "Test for data exfiltration via response headers",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for PII in client-side storage",
+        "tool_hint": "browser_devtools"
+      }
+    ],
+    "CODE": [
+      {
+        "step": "Check for code execution in background jobs",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Test for deserialization gadget chains",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for template injection in email",
+        "tool_hint": "manual"
+      }
+    ],
+    "CONFIG": [
+      {
+        "step": "Check for debug endpoints in non-standard paths",
+        "tool_hint": "ffuf"
+      },
+      {
+        "step": "Test for alternate channel exposure (WebSocket, gRPC)",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for source code disclosure via backup files",
+        "tool_hint": "ffuf"
+      }
+    ],
+    "NETWORK": [
+      {
+        "step": "Check for internal service fingerprinting via SSRF",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Test for DNS zone transfer possibilities",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for internal port scanning via webhooks",
+        "tool_hint": "manual"
+      }
+    ],
+    "FILE": [
+      {
+        "step": "Check for symlink-based path traversal",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Test for archive extraction vulnerabilities",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for XML external entity in file upload",
+        "tool_hint": "manual"
+      }
+    ],
+    "BUSINESS_LOGIC": [
+      {
+        "step": "Test for negative quantity exploitation in checkout flow",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for race condition in coupon/promo code application",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Verify workflow state machine bypass (skip steps)",
+        "tool_hint": "manual"
+      }
+    ],
+    "API_ABUSE": [
+      {
+        "step": "Test for rate limit bypass via header manipulation",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Check for bulk operation abuse (mass actions)",
+        "tool_hint": "manual"
+      },
+      {
+        "step": "Test for GraphQL batching/alias abuse",
+        "tool_hint": "manual"
+      }
+    ]
+  }
+}

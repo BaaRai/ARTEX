@@ -20,11 +20,11 @@ func TestBuildCoverageLedgerGaps(t *testing.T) {
 		unexamined []string
 	}{
 		{"mandatory class with no entry is unexamined, never clean", nil, []string{"SQLi"},
-			[]string{"unrecorded_risk_class sqli"}, []string{"sqli"}},
+			[]string{"unrecorded_risk_class sql_injection"}, []string{"sql_injection"}},
 		{"needs_follow_up is a gap", []CoverageEntry{e("/login", "idor", OutcomeNeedsFollowUp, "", "")}, nil,
 			[]string{"needs_follow_up /login idor"}, nil},
 		{"no_issue_found without evidence is a gap", []CoverageEntry{e("/q", "sqli", OutcomeNoIssueFound, " ", "")}, []string{"sqli"},
-			[]string{"missing_evidence /q sqli"}, nil},
+			[]string{"missing_evidence /q sql_injection"}, nil},
 		{"no_issue_found with evidence closes the class", []CoverageEntry{e("/q", "sqli", OutcomeNoIssueFound, "fact 12", "")}, []string{"SQLi "},
 			nil, nil},
 		{"ruled_out without reason is a gap", []CoverageEntry{e("/a", "xss", OutcomeRuledOut, "", "")}, nil,
@@ -254,7 +254,7 @@ func TestNormalizeCoverageEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.Surface != "/a [[x]] b" || e.RiskArea != "sqli" || e.Evidence != "fact 12" || e.Reason != "r [31m" {
+	if e.Surface != "/a [[x]] b" || e.RiskArea != "sql_injection" || e.Evidence != "fact 12" || e.Reason != "r [31m" {
 		t.Fatalf("normalised=%+v", e)
 	}
 	ok := CoverageEntry{Surface: "/s", RiskArea: "xss", Outcome: OutcomeReported}

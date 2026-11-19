@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Autumn-27/artex/knowledge"
 )
 
 // Coverage ledger (modeled on Strix strix/report/coverage.py, skill_coverage_gaps).
@@ -104,7 +106,17 @@ type CoverageLedger struct {
 	Completeness    *CoverageCompleteness `json:"completeness"`
 }
 
-func normRiskArea(s string) string { return strings.ToLower(NormalizeCoverageField(s)) }
+// normRiskArea folds an agent-reported risk area to the canonical vulnerability
+// class the knowledge corpus defines, so one class spelled several ways is one
+// ledger class. "SQLi", "SQL injection" and "sql_injection" all normalise to
+// sql_injection; an unknown area falls back to its normalised form, which keeps
+// typo'd classes grouped with themselves rather than scattered.
+func normRiskArea(s string) string {
+	if k, err := knowledge.Load(); err == nil {
+		return k.Class(s)
+	}
+	return strings.ToLower(NormalizeCoverageField(s))
+}
 
 // NormalizeCoverageField folds an agent-reported ledger field to one line: every
 // control character (C0, DEL, C1) and the Unicode line/paragraph separators become
@@ -227,7 +239,7 @@ WHERE t.id=$1 AND n.kind='goal' AND COALESCE(btrim(n.payload->>'vulnclass'),'')<
 		return nil, err
 	}
 	byClass := map[string]int{}
-	frows, err := s.db.Query(`SELECT lower(btrim(vulnclass)), COUNT(*) FROM findings WHERE task_id=$1 AND btrim(vulnclass)<>'' GROUP BY 1`, taskID)
+	frows, err := s.db.Query(`SELECT COALESCE(vulnclass,''), COUNT(*) FROM findings WHERE task_id=$1 AND btrim(vulnclass)<>'' GROUP BY 1`, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +250,12 @@ WHERE t.id=$1 AND n.kind='goal' AND COALESCE(btrim(n.payload->>'vulnclass'),'')<
 		if err := frows.Scan(&c, &n); err != nil {
 			return nil, err
 		}
-		byClass[c] = n
+		// Folded here rather than in SQL: the canonical vocabulary lives in the
+		// knowledge corpus, and "SQLi" and "SQL injection" must land in one
+		// bucket instead of two.
+		if key := normRiskArea(c); key != "" {
+			byClass[key] += n
+		}
 	}
 	if err := frows.Err(); err != nil {
 		return nil, err
@@ -285,7 +302,11 @@ func BuildCoverageLedger(entries []CoverageEntry, mandatory []string, c Coverage
 	}
 	seen := map[string]bool{}
 	for _, e := range entries {
-		seen[normRiskArea(e.RiskArea)] = true
+		// Fold once here: the entry may arrive from the database already
+		// normalised, or from a caller that has not normalised it, and the gap
+		// lines must show the same class either way.
+		e.RiskArea = normRiskArea(e.RiskArea)
+		seen[e.RiskArea] = true
 		switch {
 		case e.Outcome == OutcomeNeedsFollowUp:
 			l.Gaps = append(l.Gaps, CoverageGap{GapNeedsFollowUp, e.Surface, e.RiskArea})

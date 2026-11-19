@@ -226,6 +226,20 @@ func marshalStringArray(items []string) string {
 	return "{" + strings.Join(escaped, ",") + "}"
 }
 
+// marshalJSONObject encodes a metadata bag for a jsonb column. A nil or empty bag
+// becomes an empty object rather than NULL, because the merge expression is
+// `assets.extra || EXCLUDED.extra` and NULL would erase what is already stored.
+func marshalJSONObject(m map[string]any) (string, error) {
+	if len(m) == 0 {
+		return "{}", nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 func marshalPortServices(ps []PortService) (string, error) {
 	items := make([]map[string]any, len(ps))
 	for i, p := range ps {
@@ -676,8 +690,12 @@ type UpsertHTTPServiceReq struct {
 	PageTitle     string
 	FaviconMMH3   string
 	Auth          []map[string]any
-	IP            string // optional, from async DNS
-	TaskID        int64
+	// Extra holds probe-derived metadata that is not a first-class column, such
+	// as the WAF verdict. It is merged key-by-key into the stored object, so a
+	// later probe adds to what an earlier one recorded instead of replacing it.
+	Extra  map[string]any
+	IP     string // optional, from async DNS
+	TaskID int64
 }
 
 // UpsertHTTPService inserts or merges an HTTP service asset. Domain, port,
@@ -719,6 +737,10 @@ func (s *AssetStore) UpsertHTTPService(req UpsertHTTPServiceReq) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
+	extraJSON, err := marshalJSONObject(req.Extra)
+	if err != nil {
+		return 0, err
+	}
 
 	var domainVal, ipVal, csegVal, titleVal, faviconVal any
 	if domain != "" {
@@ -742,12 +764,12 @@ func (s *AssetStore) UpsertHTTPService(req UpsertHTTPServiceReq) (int64, error) 
 INSERT INTO assets(
     type, url, service_type, service_name, domain, ip, port, root_domain,
     c_segment, favicon_mmh3, technologies, status_code, content_length, page_title,
-    auth, company_id, company_source, task_ids
+    auth, company_id, company_source, task_ids, extra
 )
 VALUES (
     'service', $1, 'http', $2, $3, $4, $5, $6,
     $7::cidr, $8, $9::text[], $10, $11, $12,
-    $13::jsonb[], $14, 'scope', $15::bigint[]
+    $13::jsonb[], $14, 'scope', $15::bigint[], $16::jsonb
 )
 ON CONFLICT (url) WHERE type = 'service' AND service_type = 'http' DO UPDATE SET
     status_code    = COALESCE(EXCLUDED.status_code,    assets.status_code),
@@ -757,6 +779,7 @@ ON CONFLICT (url) WHERE type = 'service' AND service_type = 'http' DO UPDATE SET
     ip             = COALESCE(EXCLUDED.ip,             assets.ip),
     c_segment      = COALESCE(EXCLUDED.c_segment,      assets.c_segment),
     technologies   = (SELECT ARRAY(SELECT DISTINCT unnest(assets.technologies || EXCLUDED.technologies))),
+    extra          = assets.extra || EXCLUDED.extra,
     auth           = (
         SELECT ARRAY(
             SELECT DISTINCT ON (elem::text) elem
@@ -777,7 +800,7 @@ ON CONFLICT (url) WHERE type = 'service' AND service_type = 'http' DO UPDATE SET
 RETURNING id`,
 		normURL, serviceName, domainVal, ipVal, nullableInt(port), rootDomain,
 		csegVal, faviconVal, techsArr, req.StatusCode, req.ContentLength, titleVal,
-		authJSON, companyID, taskIDs,
+		authJSON, companyID, taskIDs, extraJSON,
 	).Scan(&id)
 	if err != nil {
 		return 0, err

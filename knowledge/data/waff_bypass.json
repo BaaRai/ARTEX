@@ -1,0 +1,677 @@
+{
+  "_comment": "WAF Bypass & Validation Profiles: Comprehensive defensive WAF validation for authorized security testing. Edit here — never hardcode in Python. Fields: BYPASS_STRATEGIES (per-WAF techniques), WAF_PATTERNS (detection signatures), DETECTION_SCORING (thresholds), CHALLENGE_CLASSIFIERS (captcha/js/rate-limit detection), SAFE_TEST_POLICY (guardrails), OBSERVABILITY (telemetry), AUDIT_FIELDS (logging schema).",
+  "schema_version": "3.0.0",
+  "profile_type": "defensive_waf_validation",
+  "intent": "authorized_security_testing_only",
+  "description": "Comprehensive WAF validation profiles for controlled testing, detection quality checks, and response classification across 15+ WAF vendors.",
+  "BYPASS_STRATEGIES": {
+    "cloudflare": [
+      {
+        "name": "header_rotation",
+        "description": "Validate trust-boundary handling for forwarded IP headers in authorized tests",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 350,
+        "headers": {
+          "X-Forwarded-For": ["127.0.0.1", "10.0.0.1", "192.168.1.10", "172.16.0.1"],
+          "X-Real-IP": ["127.0.0.1", "10.0.0.1", "192.168.0.1"],
+          "CF-Connecting-IP": ["127.0.0.1", "10.10.10.10"],
+          "X-Client-IP": ["127.0.0.1", "192.168.1.1"],
+          "True-Client-IP": ["127.0.0.1", "10.0.0.100"]
+        }
+      },
+      {
+        "name": "encoding_bypass",
+        "description": "Check normalizer consistency across encoded input representations",
+        "priority": 2,
+        "max_attempts": 4,
+        "cooldown_ms": 400,
+        "encodings": ["url", "double_url", "unicode", "html_entity", "utf7", "base64"]
+      },
+      {
+        "name": "http_method",
+        "description": "Compare filtering consistency across HTTP methods",
+        "priority": 3,
+        "max_attempts": 5,
+        "cooldown_ms": 500,
+        "methods": ["GET", "POST", "PUT", "PATCH", "OPTIONS", "HEAD", "DELETE", "CONNECT"]
+      },
+      {
+        "name": "content_type",
+        "description": "Validate request parser parity across content-types",
+        "priority": 4,
+        "max_attempts": 4,
+        "cooldown_ms": 450,
+        "content_types": ["application/json", "application/xml", "application/x-www-form-urlencoded", "multipart/form-data", "text/plain", "application/graphql"]
+      },
+      {
+        "name": "path_traversal",
+        "description": "Test URL path normalization bypass techniques",
+        "priority": 5,
+        "max_attempts": 3,
+        "cooldown_ms": 400,
+        "techniques": ["dot_dot_slash", "backslash", "url_encoded", "double_encoded", "unicode"]
+      },
+      {
+        "name": "parameter_pollution",
+        "description": "Validate duplicate parameter handling behavior",
+        "priority": 6,
+        "max_attempts": 3,
+        "cooldown_ms": 350,
+        "technique": "duplicate_params"
+      }
+    ],
+    "modsecurity": [
+      {
+        "name": "null_byte",
+        "description": "Evaluate null-byte handling behavior in backend parser chain",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "payloads": ["%00", "%2500", "\\x00", "0x00"]
+      },
+      {
+        "name": "case_variation",
+        "description": "Evaluate case-insensitive token normalization behavior",
+        "priority": 2,
+        "max_attempts": 2,
+        "cooldown_ms": 350,
+        "transform": "case_mix"
+      },
+      {
+        "name": "whitespace",
+        "description": "Assess parser behavior around alternate whitespace characters",
+        "priority": 3,
+        "max_attempts": 4,
+        "cooldown_ms": 450,
+        "whitespace": ["%09", "%0A", "%0D", "%0C", "%20", "+"]
+      },
+      {
+        "name": "content_type",
+        "description": "Check content-type policy consistency for rule application",
+        "priority": 4,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "content_types": ["application/json", "application/x-www-form-urlencoded", "text/plain", "multipart/form-data"]
+      },
+      {
+        "name": "sql_comment",
+        "description": "Test SQL comment delimiter handling",
+        "priority": 5,
+        "max_attempts": 4,
+        "cooldown_ms": 300,
+        "comments": ["--", "#", "/*", "*/", "-- -", "#-", "/*-", "/*!"]
+      },
+      {
+        "name": "protocol_version",
+        "description": "Test HTTP/1.0 vs HTTP/1.1 vs HTTP/2 handling differences",
+        "priority": 6,
+        "max_attempts": 3,
+        "cooldown_ms": 400,
+        "protocols": ["HTTP/1.0", "HTTP/1.1", "HTTP/2"]
+      }
+    ],
+    "sucuri": [
+      {
+        "name": "cookie_bypass",
+        "description": "Validate cookie-driven challenge transitions under authorized scope",
+        "priority": 1,
+        "max_attempts": 2,
+        "cooldown_ms": 800,
+        "cookies": {
+          "sucuri_cloudproxy_vis": "1",
+          "__sucuri_cookie": "verified",
+          "sucuri_cache_bypass": "true"
+        }
+      },
+      {
+        "name": "http_method",
+        "description": "Evaluate challenge consistency across idempotent/non-idempotent verbs",
+        "priority": 2,
+        "max_attempts": 4,
+        "cooldown_ms": 650,
+        "methods": ["GET", "HEAD", "POST", "OPTIONS", "PUT"]
+      },
+      {
+        "name": "user_agent_rotation",
+        "description": "Test UA-based challenge triggering",
+        "priority": 3,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "user_agents": ["Mozilla/5.0", "curl/7.68.0", "python-requests/2.25.1", "Googlebot/2.1"]
+      }
+    ],
+    "akamai": [
+      {
+        "name": "parameter_pollution",
+        "description": "Check duplicated parameter canonicalization behavior",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 700,
+        "technique": "duplicate_params"
+      },
+      {
+        "name": "header_rotation",
+        "description": "Validate header trust boundaries for upstream metadata",
+        "priority": 2,
+        "max_attempts": 3,
+        "cooldown_ms": 650,
+        "headers": {
+          "X-Forwarded-Host": ["localhost", "internal.local", "admin.local"],
+          "X-Host": ["localhost", "127.0.0.1"],
+          "X-Forwarded-Server": ["internal.akamai.net"]
+        }
+      },
+      {
+        "name": "edge_cache_bypass",
+        "description": "Test cache key manipulation techniques",
+        "priority": 3,
+        "max_attempts": 3,
+        "cooldown_ms": 600,
+        "techniques": ["cache_buster_param", "header_manipulation", "cookie_injection"]
+      },
+      {
+        "name": "content_type",
+        "description": "Validate content-type based rule application",
+        "priority": 4,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "content_types": ["application/json", "application/xml", "text/plain"]
+      }
+    ],
+    "aws_waf": [
+      {
+        "name": "http_method",
+        "description": "Compare rule behavior between GET/POST/OPTIONS requests",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "methods": ["GET", "POST", "OPTIONS", "PUT", "PATCH"]
+      },
+      {
+        "name": "content_type",
+        "description": "Check parser and rule-set consistency by body encoding",
+        "priority": 2,
+        "max_attempts": 3,
+        "cooldown_ms": 450,
+        "content_types": ["application/json", "application/x-www-form-urlencoded", "text/plain", "application/graphql"]
+      },
+      {
+        "name": "regional_bypass",
+        "description": "Test geographic-based rule variations",
+        "priority": 3,
+        "max_attempts": 2,
+        "cooldown_ms": 600,
+        "headers": {
+          "CloudFront-Viewer-Country": ["US", "GB", "DE", "JP"],
+          "CloudFront-Is-Mobile-Viewer": ["true", "false"]
+        }
+      },
+      {
+        "name": "rate_limit_bypass",
+        "description": "Test rate limiting rule evasion",
+        "priority": 4,
+        "max_attempts": 5,
+        "cooldown_ms": 800,
+        "techniques": ["ip_rotation", "header_spoofing", "distributed_requests"]
+      }
+    ],
+    "imperva": [
+      {
+        "name": "header_rotation",
+        "description": "Evaluate IP and client-header canonicalization behavior",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 700,
+        "headers": {
+          "X-Forwarded-For": ["127.0.0.1", "10.1.1.10", "192.168.100.1"],
+          "X-Client-IP": ["127.0.0.1", "10.0.0.1"]
+        }
+      },
+      {
+        "name": "encoding_bypass",
+        "description": "Test decoder parity for encoded tokens",
+        "priority": 2,
+        "max_attempts": 4,
+        "cooldown_ms": 550,
+        "encodings": ["url", "double_url", "html_entity", "unicode"]
+      },
+      {
+        "name": "websocket_bypass",
+        "description": "Test WebSocket upgrade request handling",
+        "priority": 3,
+        "max_attempts": 2,
+        "cooldown_ms": 600,
+        "headers": {
+          "Upgrade": "websocket",
+          "Connection": "Upgrade"
+        }
+      },
+      {
+        "name": "http2_multiplex",
+        "description": "Test HTTP/2 multiplexing bypass",
+        "priority": 4,
+        "max_attempts": 2,
+        "cooldown_ms": 700,
+        "protocol": "HTTP/2"
+      }
+    ],
+    "f5_asm": [
+      {
+        "name": "content_type",
+        "description": "Validate policy handling for multi-format body parsing",
+        "priority": 1,
+        "max_attempts": 4,
+        "cooldown_ms": 600,
+        "content_types": ["application/json", "application/xml", "multipart/form-data", "application/x-www-form-urlencoded"]
+      },
+      {
+        "name": "case_variation",
+        "description": "Check token canonicalization across case variants",
+        "priority": 2,
+        "max_attempts": 3,
+        "cooldown_ms": 450,
+        "transform": "case_mix"
+      },
+      {
+        "name": "xml_attack",
+        "description": "Test XML parsing policy enforcement",
+        "priority": 3,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "payloads": ["<!DOCTYPE", "<!ENTITY", "<?xml", "<soap"]
+      },
+      {
+        "name": "json_manipulation",
+        "description": "Test JSON parsing edge cases",
+        "priority": 4,
+        "max_attempts": 3,
+        "cooldown_ms": 450,
+        "techniques": ["json_injection", "prototype_pollution", "nested_objects"]
+      }
+    ],
+    "fastly": [
+      {
+        "name": "http_method",
+        "description": "Assess method-specific edge filtering behavior",
+        "priority": 1,
+        "max_attempts": 4,
+        "cooldown_ms": 500,
+        "methods": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
+      },
+      {
+        "name": "surrogate_key",
+        "description": "Test cache surrogate key manipulation",
+        "priority": 2,
+        "max_attempts": 2,
+        "cooldown_ms": 600,
+        "headers": {
+          "Surrogate-Key": ["test", "bypass", "cache_clear"]
+        }
+      },
+      {
+        "name": "edge_dict",
+        "description": "Test edge dictionary based rule bypass",
+        "priority": 3,
+        "max_attempts": 2,
+        "cooldown_ms": 550,
+        "techniques": ["path_manipulation", "query_string_bypass"]
+      }
+    ],
+    "barracuda": [
+      {
+        "name": "cookie_injection",
+        "description": "Test cookie-based security policy bypass",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 600,
+        "cookies": {
+          "barra_counter": "0",
+          "bni__BARRACUDA_LB_COOKIE": "test"
+        }
+      },
+      {
+        "name": "url_encoding",
+        "description": "Test URL encoding normalization",
+        "priority": 2,
+        "max_attempts": 4,
+        "cooldown_ms": 500,
+        "encodings": ["url", "double_url", "unicode"]
+      },
+      {
+        "name": "form_field_manipulation",
+        "description": "Test form field validation bypass",
+        "priority": 3,
+        "max_attempts": 3,
+        "cooldown_ms": 450,
+        "techniques": ["field_omission", "extra_fields", "type_confusion"]
+      }
+    ],
+    "citrix_netscaler": [
+      {
+        "name": "appfirewall_bypass",
+        "description": "Test AppFirewall policy enforcement",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 600,
+        "techniques": ["start_url_bypass", "deny_url_bypass", "form_field_bypass"]
+      },
+      {
+        "name": "content_type",
+        "description": "Validate content-type based policy application",
+        "priority": 2,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "content_types": ["application/json", "application/xml", "text/plain"]
+      },
+      {
+        "name": "header_manipulation",
+        "description": "Test header-based security checks",
+        "priority": 3,
+        "max_attempts": 3,
+        "cooldown_ms": 550,
+        "headers": {
+          "X-Netscaler-Through": "test",
+          "Citrix-Through": "test"
+        }
+      }
+    ],
+    "fortinet_fortiwaf": [
+      {
+        "name": "profile_bypass",
+        "description": "Test security profile enforcement",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 600,
+        "techniques": ["web_protection_bypass", "advanced_protection_bypass"]
+      },
+      {
+        "name": "http_method",
+        "description": "Test method-based policy variations",
+        "priority": 2,
+        "max_attempts": 4,
+        "cooldown_ms": 500,
+        "methods": ["GET", "POST", "PUT", "DELETE"]
+      },
+      {
+        "name": "bot_detection_bypass",
+        "description": "Test bot detection evasion",
+        "priority": 3,
+        "max_attempts": 3,
+        "cooldown_ms": 700,
+        "headers": {
+          "X-FortiBot": "false",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+      }
+    ],
+    "radware_appwall": [
+      {
+        "name": "security_policy_bypass",
+        "description": "Test security policy rule enforcement",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 600,
+        "techniques": ["url_validation_bypass", "parameter_validation_bypass"]
+      },
+      {
+        "name": "content_type",
+        "description": "Validate content-type based rule application",
+        "priority": 2,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "content_types": ["application/json", "application/xml", "text/plain"]
+      }
+    ],
+    "stackpath": [
+      {
+        "name": "edge_rule_bypass",
+        "description": "Test edge rule enforcement",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 550,
+        "techniques": ["geo_bypass", "rate_limit_bypass"]
+      },
+      {
+        "name": "header_injection",
+        "description": "Test header-based security checks",
+        "priority": 2,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "headers": {
+          "X-StackPath-Edge": "test"
+        }
+      }
+    ],
+    "wordfence": [
+      {
+        "name": "firewall_bypass",
+        "description": "Test Wordfence firewall rules",
+        "priority": 1,
+        "max_attempts": 3,
+        "cooldown_ms": 600,
+        "techniques": ["sql_injection_bypass", "xss_bypass", "lfi_bypass"]
+      },
+      {
+        "name": "rate_limit_bypass",
+        "description": "Test rate limiting enforcement",
+        "priority": 2,
+        "max_attempts": 4,
+        "cooldown_ms": 700,
+        "techniques": ["ip_spoofing", "user_agent_rotation"]
+      }
+    ],
+    "generic": [
+      {
+        "name": "sql_comment",
+        "description": "Validate signature sensitivity around delimiter/comment tokens",
+        "priority": 1,
+        "max_attempts": 4,
+        "cooldown_ms": 300,
+        "comments": ["--", "#", "/*", "-- -", "#-", "/*-", "/*!", "*/"]
+      },
+      {
+        "name": "concatenation",
+        "description": "Validate parser handling of operator-based concatenation tokens",
+        "priority": 2,
+        "max_attempts": 3,
+        "cooldown_ms": 350,
+        "operators": ["||", "+", "CONCAT(", "CONCAT_WS(", "GROUP_CONCAT("]
+      },
+      {
+        "name": "http_method",
+        "description": "Baseline method variance check for unknown WAF profiles",
+        "priority": 3,
+        "max_attempts": 3,
+        "cooldown_ms": 400,
+        "methods": ["GET", "POST", "HEAD", "PUT", "OPTIONS"]
+      },
+      {
+        "name": "encoding_chain",
+        "description": "Test multi-layer encoding bypass",
+        "priority": 4,
+        "max_attempts": 5,
+        "cooldown_ms": 400,
+        "encodings": ["url", "double_url", "triple_url", "unicode", "html_entity"]
+      },
+      {
+        "name": "protocol_abuse",
+        "description": "Test protocol-level bypass techniques",
+        "priority": 5,
+        "max_attempts": 3,
+        "cooldown_ms": 500,
+        "techniques": ["chunked_encoding", "http_desync", "header_injection"]
+      }
+    ]
+  },
+  "WAF_PATTERNS": {
+    "cloudflare": {
+      "headers": ["cf-ray", "cf-cache-status", "cf-request-id", "cf-mitigated", "cf-chl-bypass"],
+      "cookies": ["__cfduid", "cf_clearance", "__cf_bm", "cf_use_ob"],
+      "server": ["cloudflare"],
+      "body": ["attention required", "checking your browser", "cloudflare ray id", "ddos protection", "please complete the security check"],
+      "status_codes": [403, 429, 503, 520, 521, 522, 523, 524],
+      "confidence_weights": {"headers": 0.35, "cookies": 0.25, "body": 0.2, "server": 0.2}
+    },
+    "modsecurity": {
+      "headers": ["mod_security", "x-modsecurity", "x-modsecurity-message"],
+      "body": ["modsecurity", "access denied by rule set", "not acceptable", "modsecurity audit log", "id"],
+      "status_codes": [403, 406, 503],
+      "confidence_weights": {"headers": 0.4, "body": 0.35, "status_codes": 0.25}
+    },
+    "sucuri": {
+      "headers": ["x-sucuri-id", "x-sucuri-cache", "x-sucuri-firewall"],
+      "cookies": ["sucuri_cloudproxy_vis", "__sucuri_cookie"],
+      "body": ["sucuri website firewall", "access denied", "contact the website owner"],
+      "status_codes": [403, 429],
+      "confidence_weights": {"headers": 0.4, "cookies": 0.3, "body": 0.3}
+    },
+    "akamai": {
+      "headers": ["x-akamai-transformed", "akamai-ghost", "x-akamai-request-id", "x-checkpoint"],
+      "server": ["akamai", "edge"],
+      "body": ["reference #", "access denied", "akamai technologies", "client ip"],
+      "status_codes": [403, 406, 429],
+      "confidence_weights": {"headers": 0.4, "server": 0.2, "body": 0.25, "status_codes": 0.15}
+    },
+    "aws_waf": {
+      "headers": ["x-amzn-waf", "x-amz-cf-id", "x-cache", "x-edge-result-type"],
+      "server": ["cloudfront", "amazon"],
+      "body": ["request blocked", "access denied", "generated by cloudfront"],
+      "status_codes": [403, 405, 429],
+      "confidence_weights": {"headers": 0.4, "server": 0.2, "body": 0.25, "status_codes": 0.15}
+    },
+    "imperva": {
+      "headers": ["x-iinfo", "x-cdn", "x-incap-sig"],
+      "cookies": ["visid_incap_", "incap_ses_", "nlbi_", "aicookie"],
+      "body": ["incapsula incident id", "access denied", "imperva", "your ip has been blocked"],
+      "status_codes": [403, 405, 429],
+      "confidence_weights": {"headers": 0.35, "cookies": 0.3, "body": 0.25, "status_codes": 0.1}
+    },
+    "f5_asm": {
+      "headers": ["x-waf-status", "x-support-id", "x-csrf-token"],
+      "body": ["the requested url was rejected", "f5", "asm", "access denied", "support id"],
+      "status_codes": [403, 429],
+      "confidence_weights": {"headers": 0.4, "body": 0.4, "status_codes": 0.2}
+    },
+    "fastly": {
+      "headers": ["x-served-by", "x-cache-hits", "x-cache", "fastly-req-id"],
+      "server": ["fastly"],
+      "status_codes": [403, 429],
+      "confidence_weights": {"headers": 0.5, "server": 0.3, "status_codes": 0.2}
+    },
+    "barracuda": {
+      "headers": ["x-barracuda-lb", "x-barracuda-cookie"],
+      "cookies": ["barra_counter", "bni__BARRACUDA_LB_COOKIE"],
+      "body": ["barracuda", "access denied", "blocked by security policy"],
+      "status_codes": [403, 429],
+      "confidence_weights": {"headers": 0.35, "cookies": 0.35, "body": 0.2, "status_codes": 0.1}
+    },
+    "citrix_netscaler": {
+      "headers": ["x-netscaler-through", "citrix-through", "ns-cache"],
+      "body": ["citrix", "netscaler", "access denied", "violation"],
+      "status_codes": [403, 406],
+      "confidence_weights": {"headers": 0.4, "body": 0.4, "status_codes": 0.2}
+    },
+    "fortinet_fortiwaf": {
+      "headers": ["x-fortiwaf", "x-fortigate-sid"],
+      "body": ["fortinet", "fortiwaf", "access denied", "web application firewall"],
+      "status_codes": [403, 429],
+      "confidence_weights": {"headers": 0.4, "body": 0.4, "status_codes": 0.2}
+    },
+    "radware_appwall": {
+      "headers": ["x-radware-protection"],
+      "body": ["radware", "appwall", "security violation", "access denied"],
+      "status_codes": [403, 429],
+      "confidence_weights": {"headers": 0.4, "body": 0.4, "status_codes": 0.2}
+    },
+    "stackpath": {
+      "headers": ["x-stackpath", "x-edge-location"],
+      "body": ["stackpath", "access denied", "blocked"],
+      "status_codes": [403, 429],
+      "confidence_weights": {"headers": 0.4, "body": 0.4, "status_codes": 0.2}
+    },
+    "wordfence": {
+      "headers": ["x-wordfence"],
+      "cookies": ["wf_captcha", "wf_logintime"],
+      "body": ["wordfence", "blocked by wordfence", "security check"],
+      "status_codes": [403, 429],
+      "confidence_weights": {"headers": 0.3, "cookies": 0.3, "body": 0.3, "status_codes": 0.1}
+    }
+  },
+  "DETECTION_SCORING": {
+    "minimum_detection_score": 2,
+    "minimum_confidence_for_active_profile": 0.55,
+    "status_block_weight": 0.2,
+    "max_confidence": 1.0,
+    "evidence_cap": 10,
+    "header_match_bonus": 0.15,
+    "cookie_match_bonus": 0.1,
+    "body_match_bonus": 0.1,
+    "server_match_bonus": 0.05,
+    "multi_indicator_bonus": 0.2
+  },
+  "CHALLENGE_CLASSIFIERS": {
+    "captcha_indicators": ["captcha", "hcaptcha", "recaptcha", "turnstile", "cloudflare challenge", "verify you are human"],
+    "js_challenge_indicators": ["checking your browser", "enable javascript", "jschl", "js_challenge", "browser verification"],
+    "rate_limit_indicators": ["too many requests", "rate limit", "retry later", "throttled", "quota exceeded"],
+    "auth_challenge_indicators": ["unauthorized", "authentication required", "access token", "401 unauthorized", "login required"],
+    "waf_block_indicators": ["access denied", "blocked", "forbidden", "security violation", "firewall", "waf"],
+    "bot_detection_indicators": ["bot detected", "suspicious activity", "automated access", "bot protection"]
+  },
+  "SAFE_TEST_POLICY": {
+    "require_authorized_scope": true,
+    "forbid_destructive_payloads": true,
+    "forbid_data_exfiltration_payloads": true,
+    "forbid_dos_payloads": true,
+    "max_total_attempts_per_endpoint": 20,
+    "max_strategies_per_profile": 6,
+    "default_cooldown_ms": 500,
+    "stop_on_repeated_5xx": {"enabled": true, "threshold": 3},
+    "stop_on_account_lockout_signal": {
+      "enabled": true,
+      "patterns": ["account locked", "temporarily blocked", "too many failed attempts", "suspended", "disabled"]
+    },
+    "stop_on_legal_warning": {
+      "enabled": true,
+      "patterns": ["legal action", "cease and desist", "unauthorized access", "computer fraud", "terms of service violation"]
+    },
+    "respect_robots_txt": true,
+    "respect_rate_limit_headers": true
+  },
+  "OBSERVABILITY": {
+    "record_request_fingerprint": true,
+    "record_response_status": true,
+    "record_response_size_delta": true,
+    "record_latency_ms": true,
+    "record_challenge_type": true,
+    "record_waf_evidence": true,
+    "record_bypass_success": true,
+    "record_false_positive_rate": true,
+    "record_detection_time_ms": true
+  },
+  "AUDIT_FIELDS": [
+    "strategy_name",
+    "waf_profile",
+    "target_host",
+    "target_path",
+    "http_method",
+    "request_headers_hash",
+    "request_body_hash",
+    "response_status",
+    "response_length",
+    "latency_ms",
+    "challenge_classifier",
+    "evidence",
+    "timestamp_utc",
+    "bypass_successful",
+    "detection_score",
+    "confidence_level"
+  ],
+  "REPORTING": {
+    "generate_summary": true,
+    "include_evidence": true,
+    "include_recommendations": true,
+    "severity_threshold": "MEDIUM",
+    "export_formats": ["json", "csv", "html"]
+  }
+}

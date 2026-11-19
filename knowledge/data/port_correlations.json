@@ -1,0 +1,513 @@
+{
+  "21": {
+    "service": "FTP",
+    "severity": "MEDIUM",
+    "notes": "Use PORT command to scan internal services via bounce attack"
+  },
+  "22": {
+    "service": "SSH",
+    "severity": "HIGH",
+    "notes": "Check for version strings exposing vulnerable implementations"
+  },
+  "23": {
+    "service": "Telnet",
+    "severity": "HIGH",
+    "notes": "Rarely used - indicates outdated/legacy systems"
+  },
+  "25": {
+    "service": "SMTP",
+    "severity": "MEDIUM",
+    "notes": "Open relay allows spam abuse - critical for mail servers"
+  },
+  "53": {
+    "service": "DNS",
+    "severity": "MEDIUM",
+    "notes": "AXFR should be restricted to authorized servers only"
+  },
+  "67": {
+    "service": "DHCP",
+    "severity": "MEDIUM",
+    "notes": "Layer 2 attack - requires network access"
+  },
+  "68": {
+    "service": "BOOTP",
+    "severity": "LOW",
+    "notes": "Legacy protocol - often alongside DHCP"
+  },
+  "69": {
+    "service": "TFTP",
+    "severity": "HIGH",
+    "notes": "Common on network devices - firmware exposure risk"
+  },
+  "80": {
+    "service": "HTTP",
+    "severity": "LOW",
+    "notes": "Standard web - combine with full web app scan"
+  },
+  "110": {
+    "service": "POP3",
+    "severity": "LOW",
+    "notes": "Insecure protocol - prefer POP3S (995)"
+  },
+  "111": {
+    "service": "RPCBind",
+    "severity": "HIGH",
+    "notes": "Find NFS, NIS, and other RPC services"
+  },
+  "113": {
+    "service": "IDENT",
+    "severity": "LOW",
+    "notes": "Often returns dummy data - low value"
+  },
+  "123": {
+    "service": "NTP",
+    "severity": "LOW",
+    "notes": "Amplification attack vector for DDoS"
+  },
+  "135": {
+    "service": "MS-RPC",
+    "severity": "HIGH",
+    "notes": "Windows-specific - gateway to SMB/DCOM attacks"
+  },
+  "137": {
+    "service": "NetBIOS-NS",
+    "severity": "LOW",
+    "notes": "Windows-specific - part of SMB stack"
+  },
+  "138": {
+    "service": "NetBIOS-DGM",
+    "severity": "LOW",
+    "notes": "Rarely used"
+  },
+  "139": {
+    "service": "NetBIOS-SSN",
+    "severity": "HIGH",
+    "notes": "Windows file sharing - critical for lateral movement"
+  },
+  "143": {
+    "service": "IMAP",
+    "severity": "LOW",
+    "notes": "Insecure protocol - prefer IMAPS (993)"
+  },
+  "161": {
+    "service": "SNMP",
+    "severity": "HIGH",
+    "notes": "SNMPv3 with auth+priv is secure"
+  },
+  "162": {
+    "service": "SNMP Trap",
+    "severity": "LOW",
+    "notes": "SNMP trap receiver - not an interactive service"
+  },
+  "389": {
+    "service": "LDAP",
+    "severity": "HIGH",
+    "notes": "AD LM/NTLM hashes often exposed"
+  },
+  "443": {
+    "service": "HTTPS",
+    "severity": "MEDIUM",
+    "notes": "Always scan with SSL/TLS tools"
+  },
+  "445": {
+    "service": "SMB",
+    "severity": "HIGH",
+    "notes": "Windows file sharing - critical for lateral movement"
+  },
+  "512": {
+    "service": "Rexec",
+    "severity": "HIGH",
+    "notes": "Rarely used - legacy remote execution"
+  },
+  "513": {
+    "service": "Rlogin",
+    "severity": "HIGH",
+    "notes": "Deprecated - use SSH instead"
+  },
+  "514": {
+    "service": "Rsh",
+    "severity": "HIGH",
+    "notes": "Deprecated - use SSH instead"
+  },
+  "515": {
+    "service": "LPD",
+    "severity": "MEDIUM",
+    "notes": "Print service - often misconfigured"
+  },
+  "593": {
+    "service": "HTTP-RPC",
+    "severity": "MEDIUM",
+    "notes": "Windows RPC over HTTP"
+  },
+  "636": {
+    "service": "LDAPS",
+    "severity": "HIGH",
+    "notes": "Secure LDAP - verify certificate validity"
+  },
+  "993": {
+    "service": "IMAPS",
+    "severity": "LOW",
+    "notes": "Secure IMAP - better than plaintext IMAP"
+  },
+  "995": {
+    "service": "POP3S",
+    "severity": "LOW",
+    "notes": "Secure POP3 - better than plaintext POP3"
+  },
+  "1098": {
+    "service": "RMI Activation",
+    "severity": "LOW",
+    "notes": "Java RMI activation daemon - pairs with the 1099 registry"
+  },
+  "1099": {
+    "service": "RMI Registry",
+    "severity": "HIGH",
+    "notes": "Java RMI - often exposes dangerous endpoints"
+  },
+  "1433": {
+    "service": "MSSQL",
+    "severity": "CRITICAL",
+    "notes": "SQL Server - xp_cmdshell is RCE gold"
+  },
+  "1494": {
+    "service": "ICA/Citrix",
+    "severity": "MEDIUM",
+    "notes": "Citrix presentation server"
+  },
+  "1521": {
+    "service": "Oracle",
+    "severity": "HIGH",
+    "notes": "Oracle TNS listener is attack surface"
+  },
+  "1723": {
+    "service": "PPTP",
+    "severity": "HIGH",
+    "notes": "Deprecated - use IPsec/L2TP instead"
+  },
+  "1755": {
+    "service": "MS Streaming (MMS)",
+    "severity": "HIGH",
+    "notes": "Microsoft Media Server streaming - not RDP, so no BlueKeep exposure here"
+  },
+  "1883": {
+    "service": "MQTT",
+    "severity": "MEDIUM",
+    "notes": "IoT messaging - often no auth"
+  },
+  "1900": {
+    "service": "SSDP",
+    "severity": "MEDIUM",
+    "notes": "UPnP often exposes internal services"
+  },
+  "2049": {
+    "service": "NFS",
+    "severity": "HIGH",
+    "notes": "Linux/Unix file sharing - often overly permissive"
+  },
+  "2181": {
+    "service": "ZooKeeper",
+    "severity": "HIGH",
+    "notes": "Distributed coordination - sensitive config often stored here"
+  },
+  "2375": {
+    "service": "Docker",
+    "severity": "CRITICAL",
+    "notes": "FULL HOST ACCESS - critical vulnerability"
+  },
+  "2376": {
+    "service": "Docker-TLS",
+    "severity": "HIGH",
+    "notes": "TLS-protected but misconfigured certs are common"
+  },
+  "3306": {
+    "service": "MySQL",
+    "severity": "CRITICAL",
+    "notes": "UDF injection can lead to RCE"
+  },
+  "3389": {
+    "service": "RDP",
+    "severity": "HIGH",
+    "notes": "Windows remote desktop - multiple CVEs"
+  },
+  "3632": {
+    "service": "Distcc",
+    "severity": "HIGH",
+    "notes": "Distributed C/C++ compilation - often misconfigured"
+  },
+  "3690": {
+    "service": "SVN",
+    "severity": "HIGH",
+    "notes": "Source code exposure - sensitive data leak"
+  },
+  "5000": {
+    "service": "Docker Registry",
+    "severity": "MEDIUM",
+    "notes": "Docker image registry - sensitive images exposed"
+  },
+  "5432": {
+    "service": "PostgreSQL",
+    "severity": "CRITICAL",
+    "notes": "COPY TO FILE can write webshell to filesystem"
+  },
+  "5601": {
+    "service": "Kibana",
+    "severity": "HIGH",
+    "notes": "Dev tools → arbitrary code execution"
+  },
+  "5672": {
+    "service": "AMQP",
+    "severity": "MEDIUM",
+    "notes": "Message queue - often exposes management"
+  },
+  "5900": {
+    "service": "VNC",
+    "severity": "HIGH",
+    "notes": "VNC server exposed - full desktop access"
+  },
+  "5984": {
+    "service": "CouchDB",
+    "severity": "HIGH",
+    "notes": "Erlang VM RCE - extremely dangerous"
+  },
+  "6379": {
+    "service": "Redis",
+    "severity": "CRITICAL",
+    "notes": "Write webshell to /var/www or cron for RCE"
+  },
+  "6443": {
+    "service": "Kubernetes API",
+    "severity": "CRITICAL",
+    "notes": "Full cluster compromise if unauthenticated"
+  },
+  "7001": {
+    "service": "WebLogic",
+    "severity": "CRITICAL",
+    "notes": "Java deserialization + T3 protocol exploitation"
+  },
+  "7002": {
+    "service": "WebLogic-TLS",
+    "severity": "HIGH",
+    "notes": "Encrypted WebLogic traffic"
+  },
+  "8000": {
+    "service": "Virtuoso",
+    "severity": "MEDIUM",
+    "notes": "Ontology/semantic web database"
+  },
+  "8009": {
+    "service": "Apache JServ",
+    "severity": "HIGH",
+    "notes": "AJP connector - read/modify Tomcat config"
+  },
+  "8020": {
+    "service": "Hadoop NameNode",
+    "severity": "MEDIUM",
+    "notes": "Hadoop filesystem metadata"
+  },
+  "8042": {
+    "service": "YARN NodeManager",
+    "severity": "MEDIUM",
+    "notes": "YARN compute node"
+  },
+  "8080": {
+    "service": "HTTP-Alt",
+    "severity": "MEDIUM",
+    "notes": "Common alternative HTTP port - full web scan"
+  },
+  "8088": {
+    "service": "YARN ResourceManager",
+    "severity": "HIGH",
+    "notes": "CVE-2022-26612 is critical YARN RCE"
+  },
+  "8089": {
+    "service": "Splunk",
+    "severity": "HIGH",
+    "notes": "Splunkd management API - often unauthenticated"
+  },
+  "8090": {
+    "service": "Obsidian",
+    "severity": "LOW",
+    "notes": "Knowledge base - often misconfigured"
+  },
+  "8188": {
+    "service": "Druid",
+    "severity": "HIGH",
+    "notes": "CVE-2021-36749 is Druid RCE via ingestion"
+  },
+  "8443": {
+    "service": "Alt-HTTPS",
+    "severity": "MEDIUM",
+    "notes": "Same as 443 but on alternate port"
+  },
+  "8888": {
+    "service": "HTTP-Alt2",
+    "severity": "MEDIUM",
+    "notes": "Jupyter often has no auth"
+  },
+  "9000": {
+    "service": "PHP-FPM",
+    "severity": "HIGH",
+    "notes": "PHP-FPM + Nginx misconfiguration = RCE"
+  },
+  "9001": {
+    "service": "Portainer/Docker",
+    "severity": "HIGH",
+    "notes": "CVE-2022-29178 allows bypassed auth"
+  },
+  "9042": {
+    "service": "Cassandra",
+    "severity": "MEDIUM",
+    "notes": "Apache Cassandra - no auth by default"
+  },
+  "9092": {
+    "service": "Kafka",
+    "severity": "MEDIUM",
+    "notes": "Apache Kafka - often exposed without auth"
+  },
+  "9200": {
+    "service": "Elasticsearch",
+    "severity": "HIGH",
+    "notes": "Log4Shell critical if Java < 8u191"
+  },
+  "9300": {
+    "service": "Elasticsearch-Transport",
+    "severity": "MEDIUM",
+    "notes": "Node-to-node communication port"
+  },
+  "9998": {
+    "service": "Druid-Router",
+    "severity": "HIGH",
+    "notes": "Druid query router"
+  },
+  "9999": {
+    "service": "HTTP-Alt3",
+    "severity": "LOW",
+    "notes": "Varies by service"
+  },
+  "10000": {
+    "service": "Webmin",
+    "severity": "CRITICAL",
+    "notes": "CVE-2019-15107 is critical unauthenticated RCE"
+  },
+  "10001": {
+    "service": "Riak",
+    "severity": "MEDIUM",
+    "notes": "Distributed database - often misconfigured"
+  },
+  "10002": {
+    "service": "Riak-MS",
+    "severity": "MEDIUM",
+    "notes": "Riak MapReduce/Search interface"
+  },
+  "10248": {
+    "service": "Kubernetes Healthz",
+    "severity": "LOW",
+    "notes": "Kubernetes health checks - informational"
+  },
+  "10249": {
+    "service": "Kubernetes Controller",
+    "severity": "MEDIUM",
+    "notes": "K8s control plane component"
+  },
+  "10250": {
+    "service": "Kubernetes Kubelet",
+    "severity": "CRITICAL",
+    "notes": "Full node access - container escape possible"
+  },
+  "10256": {
+    "service": "Kubernetes Node Authorizer",
+    "severity": "MEDIUM",
+    "notes": "K8s authorization component"
+  },
+  "11211": {
+    "service": "Memcached",
+    "severity": "MEDIUM",
+    "notes": "DDoS amplification vector"
+  },
+  "11371": {
+    "service": "OpenPGP",
+    "severity": "LOW",
+    "notes": "PGP keyserver -key exposure"
+  },
+  "16369": {
+    "service": "Virtuoso-AD",
+    "severity": "MEDIUM",
+    "notes": "Virtuoso admin interface"
+  },
+  "20000": {
+    "service": "D-Link",
+    "severity": "CRITICAL",
+    "notes": "D-Link router backdoor port"
+  },
+  "27017": {
+    "service": "MongoDB",
+    "severity": "HIGH",
+    "notes": "No auth by default - critical exposure"
+  },
+  "27018": {
+    "service": "MongoDB Shard",
+    "severity": "MEDIUM",
+    "notes": "Shard config server port"
+  },
+  "28017": {
+    "service": "MongoDB-HTTP",
+    "severity": "LOW",
+    "notes": "HTTP interface to MongoDB - deprecated after 3.2"
+  },
+  "31337": {
+    "service": "BackOrifice",
+    "severity": "CRITICAL",
+    "notes": "Malware backdoor port - compromise indicator"
+  },
+  "32768": {
+    "service": "HFR-HTTP",
+    "severity": "CRITICAL",
+    "notes": "Huawei router backdoor"
+  },
+  "32769": {
+    "service": "GigASET",
+    "severity": "HIGH",
+    "notes": "Gigaset VoIP devices"
+  },
+  "47001": {
+    "service": "WinRM",
+    "severity": "HIGH",
+    "notes": "Windows Remote Management - PowerShell access"
+  },
+  "49152": {
+    "service": "UPS",
+    "notes": "UPS web interface - often on 49152"
+  },
+  "50030": {
+    "service": "Hadoop JobTracker",
+    "severity": "MEDIUM",
+    "notes": "Legacy Hadoop component"
+  },
+  "50070": {
+    "service": "Hadoop",
+    "severity": "HIGH",
+    "notes": "YARN RCE allows container escape"
+  },
+  "50075": {
+    "service": "Hadoop TaskTracker",
+    "severity": "MEDIUM",
+    "notes": "Legacy Hadoop component"
+  },
+  "50090": {
+    "service": "Hadoop NameNode Secondary",
+    "severity": "LOW",
+    "notes": "Hadoop checkpoint node"
+  },
+  "55555": {
+    "service": "Plex",
+    "notes": "Plex Media Server - 32400 is primary"
+  },
+  "55556": {
+    "service": "VxWorks",
+    "notes": "Embedded RTOS debug port"
+  },
+  "60000": {
+    "service": "Radmin",
+    "notes": "Radmin Panel - remote admin tool"
+  }
+}

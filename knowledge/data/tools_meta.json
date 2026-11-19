@@ -1,0 +1,1246 @@
+{
+  "categories": {
+    "reconnaissance": {
+      "subdomain_enum": [
+        "subfinder",
+        "amass",
+        "assetfinder",
+        "findomain",
+        "shuffledns",
+        "massdns",
+        "dnsx",
+        "sublist3r"
+      ],
+      "port_scan": [
+        "nmap",
+        "masscan",
+        "naabu",
+        "rustscan"
+      ],
+      "web_probing": [
+        "httpx",
+        "httprobe",
+        "nrich",
+        "curl",
+        "wget"
+      ],
+      "fingerprinting": [
+        "whatweb",
+        "wappalyzer",
+        "fingerprintx",
+        "tlsx",
+        "nmap"
+      ],
+      "parameter_discovery": [
+        "arjun",
+        "x8",
+        "param-miner"
+      ],
+      "crawling": [
+        "katana",
+        "waybackurls",
+        "gau",
+        "gospider",
+        "waymore",
+        "hakrawler"
+      ],
+      "live_host_probe": [
+        "httpx",
+        "httprobe",
+        "dnsx",
+        "nrich"
+      ],
+      "directory_bruteforce": [
+        "gobuster",
+        "feroxbuster",
+        "ffuf",
+        "wfuzz",
+        "dirsearch",
+        "dirb"
+      ]
+    },
+    "vulnerability_scanning": {
+      "generic_scanners": [
+        "nuclei",
+        "nikto",
+        "zaproxy",
+        "vulnx",
+        "wapiti3"
+      ],
+      "cms_scanners": [
+        "wpscan",
+        "joomscan",
+        "cmseek"
+      ],
+      "fuzzing": [
+        "ffuf",
+        "feroxbuster",
+        "dirsearch",
+        "wfuzz",
+        "kiterunner",
+        "wapiti3",
+        "fuzzdb"
+      ],
+      "specific_vulnerabilities": [
+        "sqlmap",
+        "nosqli",
+        "dalfox",
+        "xsstrike",
+        "crlfuzz",
+        "jwt_tool",
+        "tplmap",
+        "headi",
+        "corsy",
+        "graphqlmap",
+        "gqlspection",
+        "toxicache"
+      ],
+      "evasion_and_waf": [
+        "wafw00f",
+        "whatwaf",
+        "bypass-firewalls-by-DNS-history",
+        "nowaf"
+      ]
+    },
+    "exploitation": {
+      "web": [
+        "commix",
+        "ghauri",
+        "sqlmap",
+        "ffuf"
+      ],
+      "network_pivoting": [
+        "ligolo-ng",
+        "chisel",
+        "socat"
+      ],
+      "ad_smb": [
+        "responder",
+        "impacket-scripts",
+        "netexec",
+        "smbclient",
+        "enum4linux"
+      ],
+      "bruteforce": [
+        "hydra",
+        "medusa",
+        "hashcat",
+        "john"
+      ],
+      "priv_esc": [
+        "linpeas",
+        "pspy64"
+      ],
+      "advanced_injection": [
+        "dalfox",
+        "xsstrike",
+        "kxss",
+        "tplmap",
+        "sstimap",
+        "smuggler"
+      ]
+    },
+    "javascript_analysis": {
+      "extraction": [
+        "linkfinder",
+        "js-scan",
+        "jsfinder",
+        "linksdumper",
+        "subjs",
+        "urlfinder"
+      ],
+      "analysis": [
+        "jsluice",
+        "jsleak",
+        "js_snooper",
+        "jsniper",
+        "csprecon",
+        "semgrep"
+      ]
+    },
+    "cloud_secrets": {
+      "secrets_scanning": [
+        "trufflehog",
+        "gitleaks",
+        "git-secrets",
+        "trivy"
+      ],
+      "cloud_enum": [
+        "cloud_enum",
+        "pacu",
+        "scoutsuite",
+        "s3scanner"
+      ],
+      "code_analysis": [
+        "semgrep",
+        "bandit",
+        "retire",
+        "eslint"
+      ],
+      "cloud_exploitation": [
+        "stratus-red-team",
+        "cloudsploit",
+        "pacu"
+      ]
+    },
+    "utilities": {
+      "data_manipulation": [
+        "jq",
+        "rg",
+        "grep",
+        "gf",
+        "meg",
+        "qsreplace",
+        "dsieve"
+      ],
+      "networking": [
+        "interactsh-client",
+        "testssl",
+        "dnstake",
+        "vhostfinder",
+        "hakip2host",
+        "hakoriginfinder",
+        "cut-cdn"
+      ],
+      "custom_scripting": [
+        "python3",
+        "bash",
+        "curl",
+        "wget",
+        "interactsh-client"
+      ]
+    }
+  },
+  "parallelizable_tools": [
+    "dnsx",
+    "masscan",
+    "csprecon",
+    "katana",
+    "nmap",
+    "x8",
+    "rg",
+    "grep",
+    "gospider",
+    "subfinder",
+    "param-miner",
+    "waybackurls",
+    "feroxbuster",
+    "ffuf",
+    "gf",
+    "gau",
+    "amass",
+    "wafw00f",
+    "dirsearch",
+    "findomain",
+    "naabu",
+    "assetfinder",
+    "jq"
+  ],
+  "tool_flag_conflicts": {
+    "curl": {
+      "flags": [
+        "-sc",
+        "-title",
+        "-server",
+        "-tech-detect",
+        "-td",
+        "-tls-grab",
+        "-web-server",
+        "-status-code",
+        "-content-length",
+        "-location"
+      ],
+      "correct_tool": "httpx"
+    },
+    "nmap": {
+      "flags": [
+        "--rate",
+        "--randomize-hosts",
+        "--banners"
+      ],
+      "correct_tool": "masscan"
+    },
+    "masscan": {
+      "flags": [
+        "-sV",
+        "-sC",
+        "-A",
+        "-O",
+        "--script"
+      ],
+      "correct_tool": "nmap"
+    }
+  },
+  "output_parser_tool_patterns": {
+    "nmap": "nmap",
+    "nuclei": "nuclei",
+    "subfinder": "subfinder",
+    "amass": "subfinder",
+    "assetfinder": "subfinder",
+    "findomain": "subfinder",
+    "httpx": "httpx",
+    "katana": "url_list",
+    "gospider": "url_list",
+    "waybackurls": "url_list",
+    "gau": "url_list",
+    "ffuf": "ffuf",
+    "naabu": "naabu",
+    "dnsx": "dnsx",
+    "whatweb": "whatweb",
+    "dig": "dig",
+    "wfuzz": "ffuf",
+    "dirsearch": "url_list",
+    "feroxbuster": "url_list",
+    "gobuster": "url_list",
+    "sqlmap": "sqlmap",
+    "ghauri": "sqlmap",
+    "nikto": "nikto",
+    "dalfox": "dalfox",
+    "wpscan": "wpscan",
+    "hydra": "hydra",
+    "medusa": "hydra",
+    "msfconsole": "metasploit",
+    "msfdb": "metasploit"
+  },
+  "output_parser_adaptive_hints": {
+    "content_rules": [
+      {
+        "parser": "nmap",
+        "contains_any": [
+          "<?xml",
+          "<nmaprun"
+        ]
+      },
+      {
+        "parser": "nuclei",
+        "contains_any": [
+          "template-id"
+        ],
+        "regex_any": [
+          "\\[[^\\]]+\\]\\s*\\[(critical|high|medium|low|info)\\]"
+        ]
+      },
+      {
+        "parser": "sqlmap",
+        "command_contains_any": [
+          "sqlmap"
+        ],
+        "contains_any": [
+          "appears injectable",
+          "parameter '"
+        ]
+      },
+      {
+        "parser": "whatweb",
+        "command_contains_any": [
+          "whatweb"
+        ],
+        "contains_all": [
+          "plugins",
+          "summary"
+        ]
+      }
+    ],
+    "count_rules": [
+      {
+        "parser": "naabu",
+        "metric": "host_port_lines",
+        "min_abs": 2,
+        "min_ratio": 0.5
+      },
+      {
+        "parser": "url_list",
+        "metric": "url_lines",
+        "min_abs": 2,
+        "min_ratio": 0.6
+      },
+      {
+        "parser": "subfinder",
+        "metric": "subdomain_lines",
+        "min_abs": 2,
+        "min_ratio": 0.6
+      },
+      {
+        "parser": "httpx",
+        "metric": "json_lines",
+        "min_abs": 2,
+        "min_ratio": 0.5
+      }
+    ],
+    "json_rules": [
+      {
+        "parser": "naabu",
+        "regex_all": [
+          "\"(?:host|ip)\"\\s*:\\s*\".+?\"",
+          "\"port\"\\s*:\\s*\\d+"
+        ]
+      },
+      {
+        "parser": "httpx",
+        "regex_all": [
+          "\"url\"\\s*:\\s*\".+?\"",
+          "\"status\"\\s*:\\s*\\d{3}"
+        ]
+      },
+      {
+        "parser": "nuclei",
+        "regex_all": [
+          "\"template-id\"\\s*:",
+          "\"severity\"\\s*:"
+        ]
+      }
+    ],
+    "command_hints": {
+      "wayback": "url_list",
+      "gau": "url_list",
+      "crawler": "url_list",
+      "spider": "url_list",
+      "hakrawler": "url_list",
+      "assetfinder": "subfinder",
+      "amass": "subfinder",
+      "harvester": "subfinder",
+      "scanner": "nuclei",
+      "vuln": "nuclei"
+    }
+  },
+  "causal_observation_confidence": {
+    "technology_detected": 0.86,
+    "endpoint_observed": 0.82,
+    "endpoint_accessible": 0.8,
+    "service_exposed": 0.8,
+    "port_state_observed": 0.78,
+    "endpoint_discovered": 0.74,
+    "asset_discovered": 0.72,
+    "vulnerability_signal": 0.68,
+    "tool_output_observed": 0.55
+  },
+  "agent_tuning": {
+    "chain_planner": {
+      "match_threshold": 0.45,
+      "min_trigger_without_evidence": 0.9,
+      "weights": {
+        "coverage": 0.6,
+        "trigger": 0.25,
+        "evidence": 0.15,
+        "combined_match": 0.45,
+        "combined_priority": 0.35,
+        "combined_evidence": 0.2
+      },
+      "trigger": {
+        "phrase_exact_score": 1.0,
+        "word_exact_score": 0.9,
+        "overlap_min": 0.6,
+        "overlap_base": 0.65,
+        "overlap_scale": 0.25,
+        "accept_threshold": 0.55
+      },
+      "evidence_support": {
+        "direct_evidence": 0.55,
+        "target_context": 0.25,
+        "confirmation_language": 0.2
+      }
+    },
+    "correlation": {
+      "chain_min_match_ratio": 0.5,
+      "chain_max_results": 10,
+      "confidence": {
+        "ratio_multiplier": 1.05,
+        "quality_per_hit": 0.04,
+        "quality_cap": 0.12,
+        "diversity_per_source": 0.05,
+        "diversity_cap": 0.1,
+        "mono_source_penalty": 0.08,
+        "min_sources_without_hq": 2,
+        "attack_chain_cross_source_bonus": 0.1,
+        "attack_chain_min_cross_sources": 2,
+        "attack_chain_min_matches_with_vuln_anchor": 2
+      }
+    },
+    "quality_scoring": {
+      "weak_penalty_per_vuln": 0.04,
+      "weak_penalty_cap": 0.2,
+      "evidence": {
+        "artifact": 0.16,
+        "high_conf": 0.1,
+        "backed_vuln": 0.14,
+        "non_error_event": 0.02
+      },
+      "repro": {
+        "execution": 0.03,
+        "artifact": 0.12,
+        "report": 0.26,
+        "replay_verified": 0.22,
+        "verified_vuln": 0.1
+      },
+      "impact": {
+        "flag": 0.45,
+        "verified_vuln": 0.22,
+        "report": 0.18,
+        "cve": 0.06,
+        "signal": 0.01
+      },
+      "overall": {
+        "evidence": 0.4,
+        "repro": 0.35,
+        "impact": 0.25
+      }
+    },
+    "validator": {
+      "replay": {
+        "thresholds": {
+          "strict_with_runtime": 0.58,
+          "strict_no_runtime": 0.48,
+          "non_strict": 0.38
+        },
+        "score_weights": {
+          "request_logged": 0.16,
+          "response_logged": 0.16,
+          "target_bound": 0.18,
+          "payload_observed": 0.14,
+          "matching_finding": 0.12,
+          "artifact_bound": 0.09,
+          "runtime_http": 0.09,
+          "runtime_signal": 0.06,
+          "runtime_impact": 0.05,
+          "runtime_host_bound": 0.05,
+          "runtime_payload_bound": 0.05,
+          "no_runtime_text_bonus": 0.08
+        },
+        "gap_messages": {
+          "request_logged": "describe the exact replay request that was executed",
+          "response_logged": "describe the exploit response that was observed",
+          "payload_observed": "link the payload to the observed output",
+          "target_bound": "bind the PoC to the same target/endpoint as the finding",
+          "runtime_command_logged": "include the exact replay command that was executed",
+          "runtime_response_logged": "include runtime response details (status/body) for that replay",
+          "runtime_http": "include HTTP status evidence from runtime replay",
+          "runtime_signal": "include impact evidence from runtime replay",
+          "runtime_impact": "show runtime impact (data/error/access change), not only heartbeat output",
+          "runtime_host_bound": "use the same PoC host in runtime replay evidence",
+          "runtime_payload_bound": "use the same PoC payload in runtime replay evidence"
+        }
+      }
+    },
+    "causal_reasoning": {
+      "support_threshold": 0.72,
+      "refute_threshold": 0.2,
+      "chain_min_posterior": 0.62,
+      "chain_high_posterior": 0.82,
+      "hypothesis_rules": [
+        {
+          "observation_type": "endpoint_accessible",
+          "id_prefix": "endpoint_access",
+          "statement_template": "Reachable endpoint {entity} may expose actionable attack surface.",
+          "prior": 0.5,
+          "evidence_weight": 0.3,
+          "allow_support": true
+        },
+        {
+          "observation_type": "service_exposed",
+          "id_prefix": "service_exposure",
+          "statement_template": "Exposed service on {entity}:{value} should be tested for service-level abuse.",
+          "prior": 0.48,
+          "evidence_weight": 0.32,
+          "allow_support": true
+        },
+        {
+          "observation_type": "technology_detected",
+          "id_prefix": "tech_risk",
+          "statement_template": "Detected technology {entity} {value} may contain version-specific weaknesses.",
+          "prior": 0.45,
+          "evidence_weight": 0.26,
+          "allow_support": true
+        },
+        {
+          "observation_type": "vulnerability_signal",
+          "id_prefix": "vuln_signal",
+          "statement_template": "Vulnerability signal from {source_tool} against {entity} should be replay-validated.",
+          "prior": 0.56,
+          "evidence_weight": 0.36,
+          "allow_support": true
+        }
+      ]
+    }
+  },
+  "analysis_phase_vuln_tools": [
+    "sqlmap",
+    "dalfox",
+    "nuclei",
+    "xsser",
+    "ffuf",
+    "wfuzz",
+    "nikto"
+  ],
+  "watchdog_safe_command_prefixes": [
+    "nmap",
+    "naabu",
+    "masscan",
+    "httpx",
+    "ffuf",
+    "dirsearch",
+    "gobuster",
+    "katana",
+    "hakrawler",
+    "subfinder",
+    "amass",
+    "assetfinder",
+    "wpscan",
+    "nikto",
+    "sqlmap",
+    "ghauri",
+    "dalfox",
+    "curl",
+    "wget",
+    "python",
+    "python3",
+    "bash",
+    "sh",
+    "ls",
+    "cat",
+    "find",
+    "grep",
+    "echo"
+  ],
+  "tool_alternatives": {
+    "nmap": "[BLOCKED BY FW / SLOW] Nmap failed. SUGGESTION: 1) Try `naabu -top-ports 1000 -c 50`. 2) If still blocked, use `masscan` or perform highly targeted TCP SYN via custom Scapy script.",
+    "sqlmap": "[WAF / TIME-BLIND] SQLmap failed. SUGGESTION: 1) Switch to `ghauri` for advanced evasion. 2) Fallback to `curl` with manual time-delay payloads (e.g., `pg_sleep(10)`). 3) Test for NoSQLi instead (`nosqli`).",
+    "subfinder": "[API LIMITS] Subfinder exhausted. SUGGESTION: 1) Correlate with `amass enum -passive`. 2) Use `shosubgo` or `github-subdomains` for OSINT discovery.",
+    "ffuf": "[WAF BAN / 403s] Ffuf getting 403s. SUGGESTION: 1) Add header `-H 'X-Forwarded-For: 127.0.0.1'`. 2) Try path normalization evasion (`/%2e/`). 3) Use `feroxbuster --random-agent`.",
+    "httpx": "[TIMEOUTS] Httpx hanging. SUGGESTION: Run with `-rl 50 -t 50 -retries 2` to throttle requests and prevent WAF blacklisting.",
+    "nuclei": "[NO CVE FOUND] Nuclei finished with no results. SUGGESTION: STOP relying on templates. Transition immediately to Phase 5: Manual Business Logic testing. Open Python and write a script to test IDORs on API endpoints.",
+    "waybackurls": "Try gau or waymore",
+    "katana": "[JS RENDER FAILED] Katana cannot see links. SUGGESTION: The target is a modern SPA (React/Vue). Katana won't work well alone. Use a Puppeteer script or manually inspect the main `.js` bundle using `linkfinder` or `jsluice`.",
+    "arjun": "Try x8 or param-miner for parameter discovery",
+    "jwt_tool": "Use Burp Suite's JWT extension if intercepting",
+    "wpscan": "[API REQUIRED] WPScan limited. SUGGESTION: Use `nuclei -t http/wordpress/` or manually inspect `/wp-content/plugins/` directory.",
+    "wfuzz": "Migrate to ffuf or feroxbuster for better performance in Go/Rust",
+    "dirbuster": "Deprecated. Use ffuf or feroxbuster",
+    "trufflehog": "[FALSE POSITIVES] Trufflehog overwhelming. SUGGESTION: Use `gitleaks detect` or manually run `ripgrep` for specific patterns (e.g., `rg -i 'api_key|secret|password'` in `.js` files).",
+    "dalfox": "[BLIND XSS] Dalfox failed. SUGGESTION: Use `interactsh-client` and manually inject payload `<script>fetch('http://[id].interact.sh')</script>` into every parameter and header via `var_mapper.py`.",
+    "browser_action": "[DOM INTERACTION] Browser automation failed. SUGGESTION: Don't give up. The application might require a specific sequence of clicks or login state. Write a targeted Python Playwright/Puppeteer script to interact with the DOM slowly."
+  },
+  "recon_phase_hints": {
+    "live_host_validation": "Best practice: After subdomain enumeration, validate which hosts are alive before port scanning or directory brute-force. Use host probing tools to filter dead/unresolved hosts. Avoid scanning dead hosts."
+  },
+  "analysis_phase_hints": [
+    "Compare authenticated vs unauthenticated responses — missing access controls often show here",
+    "HTTP method override: check for _method, X-HTTP-Method-Override, X-Method-Override headers",
+    "Mass assignment: submit extra parameters that should be admin-only (role=admin, is_admin=true, privilege_level=9)",
+    "Cache poisoning: modify X-Forwarded-For, Origin, Host headers to poison cached responses",
+    "Parameter pollution: submit duplicate parameters (a=safe&a=dangerous) to confuse validators",
+    "JWT claims manipulation: if JWT visible, inspect claims in base64 — modify exp, role, user_id offline",
+    "CORS misconfiguration: check if Access-Control-Allow-Origin reflects your origin or is wildcard",
+    "Content-Type confusion: change Content-Type to application/json while sending form data or vice versa",
+    "Data type confusion: submit strings where integers expected (e.g., amount=1e5 instead of 100000)",
+    "Business logic flaws: race conditions in transfers, order/payment confirmations, or approval workflows",
+    "Session fixation: check if Set-Cookie lacks secure/HttpOnly/SameSite flags",
+    "Account enumeration: profile registration/password-reset responses for timing or content differences",
+    "Insecure deserialization: if app accepts serialized objects (PHP, Java, Python pickle), probe for gadgets",
+    "IDOR via pattern: increment numeric IDs (user_id=1, 2, 3) or test predictable identifiers (usernames)",
+    "Template injection: if user input reaches template engines, test {{ }}, <% %>, ${} syntax for execution"
+  ],
+  "specialist_prompts": {
+    "sqli": "Focus primarily on SQL injection. Test input parameters for error-based, blind time-based, and UNION-based SQLi. Use manual payloads first, then confirm with automated tooling.",
+    "xss": "Focus primarily on Cross-Site Scripting (XSS). Test reflection points for stored, reflected, and DOM-based XSS. Use manual confirmation first, then automated scanning to verify findings.",
+    "ssrf": "Focus primarily on SSRF. Test URL/redirect/callback parameters. Try cloud metadata endpoints (169.254.169.254), internal hosts (127.0.0.1, localhost), and protocol schemes (file://, gopher://, dict://).",
+    "lfi": "Focus primarily on LFI and Path Traversal. Test file/path/include parameters with traversal sequences (../), null bytes, and encoding variants.",
+    "recon": "Perform deep reconnaissance ONLY. Enumerate subdomains, open ports, directories, and JavaScript files. Map all endpoints and parameters. Do NOT attempt exploitation.",
+    "exploit": "Test and exploit all discovered input parameters. Use all available fuzzing and scanning tools. Focus on achieving demonstrable impact.",
+    "analyzer": "Focus on source code and configuration analysis. Use code_analysis where available. Review application logic, authentication flows, and data handling patterns. Look for hardcoded secrets, insecure crypto, and logic flaws.",
+    "reporter": "Focus on generating vulnerability reports. Review confirmed findings from the session and create create_vulnerability_report entries for each confirmed issue. Include CVSS scores, PoC scripts, and remediation steps when available."
+  },
+  "phase_sequence": [
+    "RECON",
+    "ANALYSIS",
+    "EXPLOIT",
+    "REPORT",
+    "COMPLETE"
+  ],
+  "phase_criteria": {
+    "RECON": [
+      "subdomains_discovered",
+      "live_hosts_validated",
+      "ports_scanned",
+      "recon_artifacts_saved",
+      "subdomain_depth_met",
+      "url_discovery_met"
+    ],
+    "ANALYSIS": [
+      "urls_collected",
+      "technologies_identified",
+      "injection_points_found"
+    ],
+    "EXPLOIT": [
+      "vulnerabilities_tested"
+    ],
+    "REPORT": [
+      "reports_generated"
+    ]
+  },
+  "phase_category_map": {
+    "RECON": [
+      "subdomain_enum",
+      "port_scan",
+      "web_probing",
+      "fingerprinting",
+      "parameter_discovery",
+      "crawling",
+      "live_host_probe",
+      "directory_bruteforce",
+      "extraction"
+    ],
+    "ANALYSIS": [
+      "generic_scanners",
+      "cms_scanners",
+      "fuzzing",
+      "specific_vulnerabilities",
+      "evasion_and_waf",
+      "analysis"
+    ],
+    "EXPLOIT": [
+      "web",
+      "network_pivoting",
+      "ad_smb",
+      "bruteforce",
+      "priv_esc",
+      "advanced_injection",
+      "secrets_scanning",
+      "cloud_enum",
+      "code_analysis",
+      "cloud_exploitation"
+    ],
+    "REPORT": []
+  },
+  "phase_extras": {
+    "RECON": [
+      "run_parallel_agents",
+      "caido_set_scope",
+      "caido_sitemap",
+      "caido_list_requests"
+    ],
+    "ANALYSIS": [
+      "code_analysis",
+      "caido_list_requests",
+      "caido_send_request",
+      "caido_sitemap"
+    ],
+    "EXPLOIT": [
+      "quick_fuzz",
+      "advanced_fuzz",
+      "deep_fuzz",
+      "generate_wordlist",
+      "spawn_agent",
+      "schemathesis_fuzz",
+      "caido_send_request",
+      "caido_automate",
+      "caido_list_requests",
+      "caido_get_findings"
+    ],
+    "REPORT": []
+  },
+  "report_tools": [
+    "create_vulnerability_report",
+    "create_file",
+    "read_file",
+    "list_files"
+  ],
+  "callable_core_tools": [
+    "execute",
+    "browser_action",
+    "request_user_input",
+    "create_file",
+    "read_file",
+    "list_files",
+    "web_search",
+    "caido_intercept",
+    "http_observe",
+    "record_hypothesis",
+    "load_skill",
+    "edit_file",
+    "think",
+    "create_note",
+    "list_notes",
+    "export_notes_wiki",
+    "search_notes",
+    "read_note"
+  ],
+  "tool_descriptions": {
+    "nmap": "Network scanner — ports, services, OS, vulnerabilities (-sV, -O, --script vuln)",
+    "masscan": "Fast TCP port scanner — all ports in minutes",
+    "rustscan": "Modern port scanner — pipe to nmap for service detection",
+    "naabu": "Fast port scanner from projectdiscovery",
+    "httpx": "HTTP probe — check live web servers, status codes, tech detection",
+    "httprobe": "HTTP probe for domain lists",
+    "subfinder": "Passive subdomain discovery",
+    "amass": "Subdomain enumeration with active/passive methods",
+    "assetfinder": "Find domains and subdomains related to a target",
+    "nuclei": "Template-based vulnerability scanner — fast targeted tests",
+    "nikto": "Web server vulnerability scanner",
+    "wpscan": "WordPress vulnerability scanner",
+    "ffuf": "Fast web fuzzer — directory/file/content discovery",
+    "gobuster": "Directory/file/FUZZ scanning for web servers",
+    "dirsearch": "Web path/brute force scanner",
+    "feroxbuster": "Fast content discovery for web servers",
+    "katana": "Crawler — discover all endpoints, JS files, forms",
+    "waybackurls": "Fetch URLs from wayback machine for domain",
+    "gau": "GetAllUrls — fetch URLs from multiple sources (wayback, commoncrawl, OTX)",
+    "hakrawler": "Web crawler — find endpoints, JS, parameters",
+    "whatweb": "Technology detection for web servers",
+    "dalfox": "XSS scanner — fast, targeted XSS testing",
+    "sqlmap": "SQL injection detection and exploitation",
+    "arjun": "HTTP parameter discovery — find hidden parameters",
+    "paramspider": "Mine URLs for parameters",
+    "commix": "Command injection testing tool",
+    "wafw00f": "WAF detection and fingerprinting",
+    "kiterunner": "API endpoint discovery with content routing",
+    "fingerprintx": "Service fingerprinting — identify protocols",
+    "tlsx": "TLS/SSL scanner — certificate analysis",
+    "dnsx": "DNS resolver and enumeration",
+    "massdns": "Fast DNS resolver for subdomain validation",
+    "shuffledns": "Subdomain brute force with massdns",
+    "findomain": "Subdomain enumeration",
+    "sublist3r": "Subdomain enumeration via search engines",
+    "gospider": "Web spider — crawl and discover endpoints",
+    "waymore": "Wayback machine URL discovery with filtering",
+    "wfuzz": "Web application brute force fuzzer",
+    "nrich": "Network reconnaissance and vulnerability info",
+    "wapiti3": "Web application vulnerability scanner",
+    "zaproxy": "OWASP ZAP — web application security scanner",
+    "joomscan": "Joomla vulnerability scanner",
+    "cmseek": "CMS detection and exploitation (WordPress, Joomla, Drupal)",
+    "nosqli": "NoSQL injection scanner",
+    "xsstrike": "Advanced XSS detection with context analysis",
+    "crlfuzz": "CRLF injection fuzzer",
+    "jwt_tool": "JWT token testing and manipulation",
+    "tplmap": "Server-side template injection tester",
+    "headi": "HTTP header manipulation",
+    "corsy": "CORS misconfiguration scanner",
+    "graphqlmap": "GraphQL endpoint mapper and tester",
+    "gqlspection": "GraphQL API scanner",
+    "toxicache": "HTTP cache poisoning tester",
+    "wafw00f_desc_waf": "WAF detection and fingerprinting",
+    "whatwaf": "WAF bypass tool",
+    "ghauri": "Advanced SQL injection tool",
+    "chisel": "HTTP tunnel — port forwarding through web proxies",
+    "socat": "Bidirectional data relay — port forwarding, reverse shells",
+    "ligolo-ng": "Advanced tunneling/pivoting tool",
+    "responder": "LLMNR/NBT-NS/mDNS responder — credential capture on LAN",
+    "impacket-scripts": "Windows domain attack scripts",
+    "netexec": "Network scanner for Windows/AD environments",
+    "smbclient": "SMB share enumeration and download",
+    "enum4linux": "SMB enumeration — users, shares, policies",
+    "hydra": "Login brute force — HTTP, SSH, FTP, SMB",
+    "medusa": "Login brute force — alternative to hydra",
+    "hashcat": "Password hash cracking — GPU accelerated",
+    "john": "John the Ripper — password hash cracking",
+    "smuggler": "HTTP request smuggling tester",
+    "linkfinder": "Find endpoints and parameters in JavaScript files",
+    "js-scan": "Analyze JavaScript for secrets, endpoints, APIs",
+    "jsfinder": "Find URLs and secrets in JS files",
+    "linksdumper": "Extract links from JavaScript at scale",
+    "subjs": "Fetch JS files from URLs",
+    "urlfinder": "Discover URLs from multiple sources",
+    "jsluice": "JavaScript AST analysis — extract secrets/endpoints",
+    "jsleak": "Find secrets/secrets in JavaScript",
+    "js_snooper": "JavaScript file enumerator",
+    "jsniper": "JavaScript security analysis",
+    "csprecon": "CSP domain discovery",
+    "semgrep": "Static code analysis — find vulnerability patterns",
+    "grep": "Search files for patterns — secrets, endpoints, parameters",
+    "rg": "ripgrep — fast code search",
+    "trufflehog": "Secrets scanner — git, filesystem, S3",
+    "gitleaks": "Git history secrets scanner",
+    "git-secrets": "Prevent committing secrets to git",
+    "trivy": "Container and filesystem vulnerability scanner",
+    "cloud_enum": "Cloud resource enumeration",
+    "pacu": "AWS exploitation framework",
+    "scoutsuite": "Multi-cloud security posture assessment",
+    "s3scanner": "S3 bucket permission enumeration",
+    "bandit": "Python code security linter",
+    "retire": "JavaScript vulnerability scanner for dependencies",
+    "eslint": "JavaScript linter — can detect security issues",
+    "stratus-red-team": "Cloud attack simulation tool",
+    "cloudsploit": "Cloud security configuration scanner",
+    "gf": "Pattern-based grep for security testing",
+    "cut-cdn": "Remove CDN IPs from IP lists",
+    "vulnx": "CMS vulnerability scanner with automatic exploitation",
+    "fuzzdb": "Fuzzing database of payloads and wordlists",
+    "linpeas": "Linux privilege escalation enumeration script",
+    "pspy64": "Process snooping — detect scheduled tasks and cron jobs",
+    "kxss": "XSS scanner — find reflected XSS in URL parameters",
+    "sstimap": "Server-side template injection detection and exploitation",
+    "bypass-firewalls-by-DNS-history": "Bypass WAF by resolving IP from DNS history",
+    "nowaf": "Find origin IPs behind Cloudflare/WAF",
+    "wget": "Download files and mirror websites",
+    "wappalyzer": "Technology fingerprinting library",
+    "x8": "HTTP parameter discovery",
+    "param-miner": "Parameter mining — find hidden query parameters",
+    "dnstake": "DNS takeover detection",
+    "vhostfinder": "Virtual host discovery",
+    "hakip2host": "Convert IP range to hostname list",
+    "hakoriginfinder": "Find origin hosts behind CDN",
+    "testssl": "SSL/TLS protocol testing and cipher analysis",
+    "interactsh-client": "Out-of-band interaction testing (OAST) for blind vulns",
+    "jq": "JSON processing and filtering",
+    "python3": "Custom scripting for PoC, automation, and complex tests",
+    "bash": "Shell scripting for chaining tools and automating workflows",
+    "curl": "HTTP client — flexible request building and API testing",
+    "meg": "Mass HTTP fetcher — parallel request handling for many URLs/paths",
+    "qsreplace": "Replace query string parameters — useful for payload injection",
+    "dsieve": "Filter and deduplicate lists of domains/IPs"
+  },
+  "skills_catalog": {
+    "ctf": {
+      "crypto": "CTF cryptography challenges — RSA attacks, AES weaknesses, padding oracle, hash cracking, XOR, elliptic curves, and classical ciphers with Python pycryptodome and CLI tools",
+      "forensics": "CTF forensics — file carving, steganography, pcap/network analysis, memory forensics, disk forensics, and metadata extraction using CLI tools in Kali Linux",
+      "heap_advanced": "CTF Heap Exploitation — Advanced Techniques",
+      "pwn": "CTF binary exploitation — buffer overflow, format string, ROP chains, ret2libc, heap exploitation, shellcode, using pwntools and GDB with PEDA/pwndbg in Docker Kali Linux",
+      "reversing": "CTF reverse engineering — static analysis with radare2/objdump, dynamic analysis with GDB/ltrace/strace, anti-debug bypass, patching, and decompilation without GUI tools"
+    },
+    "frameworks": {
+      "django": "Security testing playbook for Django applications covering debug mode, admin exposure, ORM injection, CSRF, SSTI, and Django-specific misconfigurations",
+      "dotnet": "Security testing playbook for ASP.NET / .NET Core applications covering ViewState deserialization, Razor SSTI, NTLM auth bypass, IIS misconfigurations, and .NET-specific attack techniques",
+      "express": "Security testing playbook for Express.js/Node.js applications covering prototype pollution, SSRF, regex DoS, JWT misuse, path traversal, and Node.js-specific misconfigurations",
+      "fastapi": "Security testing playbook for FastAPI applications covering ASGI, dependency injection, and API vulnerabilities",
+      "flask": "Security testing playbook for Flask applications covering Werkzeug debugger RCE, SSTI via Jinja2, session forgery, misconfigurations, and Flask-specific attack patterns",
+      "laravel": "Security testing playbook for Laravel applications covering debug mode, route enumeration, mass assignment, deserialization, and Laravel-specific misconfigurations",
+      "nextjs": "Security testing playbook for Next.js covering App Router, Server Actions, RSC, and Edge runtime vulnerabilities",
+      "php": "Security testing playbook for generic PHP applications covering type juggling, file inclusion, deserialization, phpinfo exposure, eval injection, and PHP-specific misconfigurations",
+      "rails": "Security testing playbook for Ruby on Rails applications covering mass assignment, CSRF, route enumeration, deserialization, and Rails-specific misconfigurations",
+      "spring": "Security testing playbook for Spring Boot/MVC applications covering Actuator endpoints, SSTI via Thymeleaf, Spring4Shell, EL injection, and Java deserialization",
+      "wordpress": "Security testing playbook for WordPress covering user enumeration, xmlrpc abuse, plugin/theme vulnerabilities, wp-admin brute force, and wpscan methodology"
+    },
+    "payloads": {
+      "command_injection": "Full Command Injection Payload Library",
+      "http_parameter_pollution": "HTTP Parameter Pollution (HPP) Payloads",
+      "ldap_injection": "LDAP Injection Payloads",
+      "lfi": "Full LFI/RFI Payload Library (300+ payloads)",
+      "sqli": "Full SQL Injection Payload Library (400+ payloads)",
+      "ssrf": "SSRF Payloads",
+      "ssti": "Full SSTI (Server-Side Template Injection) Payload Library",
+      "xss": "Full XSS Payload Library (500+ payloads)",
+      "xxe": "XXE (XML External Entity) Payloads"
+    },
+    "postexploit": {
+      "ad_credential_attacks": "Active Directory Credential Attacks",
+      "container_escape": "Container Escape & Docker Breakout",
+      "credential_dumping": "Windows Credential Dumping",
+      "lateral_movement": "Lateral movement techniques — pass-the-hash, pass-the-ticket, psexec, wmiexec, evil-winrm, crackmapexec spray, and moving through Windows/Linux networks after initial access",
+      "linux_privesc": "Linux privilege escalation — SUID/SGID abuse, sudo misconfigurations, writable cron jobs, capabilities, PATH hijacking, kernel exploits, and linpeas automation",
+      "netexec_workflow": "NetExec (CrackMapExec) — Complete Workflow",
+      "pivoting": "Network pivoting and tunneling — chisel SOCKS proxy, ligolo-ng, socat port forwarding, SSH tunneling, proxychains, and reaching internal networks through a compromised host",
+      "windows_privesc": "Windows privilege escalation — AlwaysInstallElevated, unquoted service paths, weak service permissions, token impersonation, SeImpersonatePrivilege, winpeas, and credential dumping"
+    },
+    "protocols": {
+      "active_directory": "Active Directory attack techniques covering enumeration, Kerberoasting, AS-REP Roasting, Pass-the-Hash, DCSync, ADCS ESC attacks, and ACL abuse",
+      "dns": "DNS security testing — zone transfer, subdomain enumeration, DNS cache poisoning, DNS tunneling detection, DNSSEC bypass, and DNS-based information disclosure",
+      "ftp": "FTP security testing — anonymous login, brute force, bounce attacks, FTPS misconfiguration, vsftpd backdoor CVE, and sensitive file extraction",
+      "graphql": "GraphQL security testing covering introspection, resolver injection, batching attacks, and authorization bypass",
+      "kerberos": "Kerberos attack techniques — AS-REP Roasting, Kerberoasting, Pass-the-Ticket, Golden/Silver Ticket, Overpass-the-Hash using impacket and kerbrute in Kali Linux",
+      "ldap": "LDAP security testing covering injection, anonymous bind, enumeration, LDAP-based auth bypass, and Active Directory LDAP attacks",
+      "rdp": "RDP security testing — BlueKeep CVE-2019-0708, DejaBlue, credential brute force, NLA bypass, session hijacking, and RDP-specific misconfiguration testing",
+      "smb": "SMB/NetBIOS security testing — null session, share enumeration, EternalBlue, pass-the-hash, relay attacks, crackmapexec, smbclient, and SMB-specific CVEs",
+      "smtp_imap": "SMTP and IMAP security testing covering open relay, email header injection, user enumeration, credential brute force, and SMTP as SSRF pivot",
+      "snmp": "SNMP security testing — community string enumeration, MIB walking, SNMP v1/v2c/v3 brute force, information disclosure, and device configuration extraction",
+      "ssh": "SSH security testing covering user enumeration, brute force, key analysis, tunneling for pivoting, known CVEs, and SSH-specific misconfiguration testing"
+    },
+    "reconnaissance": {
+      "asn_whois_osint": "ASN/CIDR discovery, WHOIS lookups, BGP enumeration, IP range mapping, and OSINT passive reconnaissance to map the full attack surface of an organization without active scanning",
+      "ctf_methodology": "CTF Challenge Methodology — Thinking + Execution Framework",
+      "dorking": "Google dorking and OSINT search techniques for passive reconnaissance — find exposed panels, leaked credentials, sensitive files, and attack surface using web_search without API keys",
+      "exposed_devtools_detection": "Detect and assess publicly exposed development tools including Storybook component libraries, serial terminals, hardware debug interfaces, admin panels on dev clusters, and developer-only services that are typically not intended to be internet-facing",
+      "full_recon": "Full Recon Standard Operating Procedure",
+      "internal_pentest": "Local & Internal Penetration Testing — Methodology Framework",
+      "javascript_analysis": "JavaScript Endpoint & Secret Extraction",
+      "js_internal_hostname_intelligence": "Deep JavaScript bundle analysis focused on extracting internal hostnames, fleet/cluster naming conventions, obfuscated infrastructure references, and non-API internal service URLs that reveal backend topology",
+      "monitoring_secrets_exposure": "Detect and exploit exposed monitoring/observability credentials including Sentry DSN, OpenTelemetry keys, Datadog API keys, Honeycomb tokens, and similar secrets in JS bundles and HTTP responses",
+      "shodan_censys": "Shodan, Censys & Internet-Wide Recon",
+      "subdomain_enum": "Subdomain Enumeration — Full Spectrum Playbook"
+    },
+    "technologies": {
+      "cicd_attacks": "CI/CD Pipeline Security Attacks",
+      "cloud_security": "Cloud security assessment for AWS, GCP, and Azure covering credential abuse, IAM privilege escalation, storage misconfigs, and serverless attacks",
+      "docker_container": "Security testing playbook for Docker and container environments covering container escape, privileged containers, exposed Docker API, misconfigurations, and Kubernetes enumeration",
+      "elasticsearch": "Security testing playbook for Elasticsearch covering unauthenticated access, data extraction, index enumeration, and Kibana security misconfigurations",
+      "firebase_firestore": "Firebase/Firestore security testing covering security rules, Cloud Functions, and client-side trust issues",
+      "frida_hooking": "Frida — Dynamic Instrumentation & Runtime Hooking",
+      "gitlab_github": "Security testing playbook for GitLab and GitHub Enterprise covering exposed repositories, CI/CD pipeline injection, token extraction, IDOR, and self-hosted instance vulnerabilities",
+      "jenkins": "Security testing playbook for Jenkins CI/CD covering unauthenticated access, Script Console RCE, Groovy injection, job configuration abuse, credential extraction, and known CVEs",
+      "kubernetes_pentest": "Kubernetes Security Assessment",
+      "memcached": "Security testing playbook for Memcached covering unauthenticated access, data extraction, cache poisoning, SSRF-to-Memcached, and UDP reflection amplification",
+      "mobile_app_pentesting": "Mobile application security testing for Android APK and iOS IPA in headless Docker environments, covering static analysis, constrained dynamic testing, and evidence-focused reporting.",
+      "mongodb": "Security testing playbook for MongoDB covering unauthenticated access, NoSQL injection, data extraction, and MongoDB-specific attack techniques",
+      "nginx_apache": "Security testing playbook for Nginx and Apache web servers covering misconfigurations, path traversal, alias bypass, server-side includes, and common CVEs",
+      "observability_stack_attacks": "Attack techniques against exposed observability infrastructure including OpenTelemetry collectors, Prometheus /metrics, Grafana, Jaeger, Zipkin, and similar monitoring backends — including credential brute-force, data injection, and information extraction",
+      "redis": "Security testing playbook for Redis covering unauthenticated access, RCE via cron/SSH key injection, SSRF-to-Redis, Lua scripting, and data extraction",
+      "supabase": "Supabase security testing covering Row Level Security, PostgREST, Edge Functions, and service key exposure",
+      "tomcat": "Security testing playbook for Apache Tomcat covering manager app RCE, AJP Ghostcat, default credentials, WAR file deployment, and Tomcat-specific misconfigurations"
+    },
+    "tools": {
+      "advanced_fuzzing": "Advanced Fuzzing & Expert Testing Guide",
+      "browser_automation": "Browser Automation for Security Testing",
+      "caido": "Caido CLI — Complete GraphQL API Guide for AIRecon",
+      "code_review": "Headless code review workflow for AIRecon Docker engine (CLI-only), focused on bug discovery, security risks, regressions, and test gaps.",
+      "dalfox": "dalfox — XSS Scanner Usage Guide for AIRecon",
+      "hashcat_john": "Password cracking with hashcat and John the Ripper — hash identification, attack modes, rules, wordlists, specific hash types for Windows NTLM, Linux shadow, web hashes, and Kerberos tickets",
+      "impacket": "Impacket toolkit — secretsdump, psexec, wmiexec, smbexec, GetUserSPNs, GetNPUsers, ntlmrelayx, ticketer, and other Windows protocol attack tools in Kali Linux",
+      "install": "Environment bootstrap and tool installation workflow for AIRecon.",
+      "metasploit": "Metasploit Framework — module selection, msfconsole workflow, msfvenom payload generation, handlers, meterpreter post-exploitation, and common exploit modules for pentest/CTF",
+      "nmap": "nmap & naabu — Usage Guide for AIRecon",
+      "nuclei": "Nuclei — Usage Guide for AIRecon",
+      "reporting": "Reporting workflow for working notes, evidence curation, and final create_vulnerability_report usage.",
+      "scripting": "Custom scripting and raw HTTP automation patterns for AIRecon tools such as execute, edit_file, and http_observe.",
+      "semgrep": "semgrep — Usage Guide for AIRecon",
+      "source_audit": "source_audit — Source Code Security Analysis Guide",
+      "sqlmap": "sqlmap & ghauri — Usage Guide for AIRecon",
+      "tool_catalog": "Tool Catalog — AIRecon Kali Linux Sandbox",
+      "wapiti": "Wapiti & Nikto — Web Vulnerability Scanning"
+    },
+    "vulnerabilities": {
+      "2fa_bypass": "2FA/MFA bypass techniques — OTP brute force, response manipulation, race conditions, backup code abuse, CSRF bypass, SIM swapping indicators, and authentication flow manipulation",
+      "account_takeover": "Account takeover methodology — password reset flaws, token predictability, OAuth misconfigurations, email verification bypass, username collision, and full ATO attack chains",
+      "api_schema_exposure": "Public OpenAPI/Swagger specification exposure - detection, deep content analysis, internal hostname extraction, endpoint inventory, and attack chain building",
+      "api_testing": "REST/GraphQL API security testing covering OWASP API Top 10, BOLA, mass assignment, versioning bypass, and auth flaws",
+      "auth_workflow": "Authentication Workflow — Complete Tool Reference",
+      "authentication_jwt": "JWT and OIDC security testing covering token forgery, algorithm confusion, and claim manipulation",
+      "bfla": "BFLA testing for action-level authorization failures across endpoints, admin functions, and API operations",
+      "blind_xss": "Blind XSS (Out-of-Band XSS)",
+      "business_logic": "Business logic testing for workflow bypass, state manipulation, and domain invariant violations",
+      "cors": "CORS misconfiguration testing covering origin reflection, null origin bypass, trusted subdomain abuse, pre-flight bypass, and credential-bearing cross-origin requests",
+      "crlf_injection": "CRLF injection — HTTP header injection, response splitting, session fixation via Set-Cookie injection, log injection, and open redirect via Location header manipulation",
+      "csrf": "CSRF testing covering token bypass, SameSite cookies, CORS misconfigurations, and state-changing request abuse",
+      "csrf_advanced_bypass": "Advanced CSRF bypass techniques beyond standard token removal — JSON content-type bypass, SameSite Lax exploitation, null Origin bypass, method override, parser differential attacks, and CSRF chains for maximum impact",
+      "deserialization": "Insecure deserialization attacks covering Java gadget chains, PHP object injection, Python pickle, .NET, and Node.js",
+      "dom_based_vulnerabilities": "DOM-Based Vulnerabilities",
+      "exploitation": "Post-exploitation methodology covering shell stabilization, lateral movement, persistence, credential harvesting, and container escape",
+      "grpc": "Exploitation techniques for gRPC services, targeting Protobuf serialization, HTTP/2 misconfigurations, and method enumeration.",
+      "host_header_injection": "Host header injection — password reset poisoning, cache poisoning via Host header, SSRF via Host, routing bypass, and web cache deception using manipulated Host headers",
+      "http_smuggling": "HTTP request smuggling via CL.TE, TE.CL, TE.TE, H2.CL, H2.TE desync attacks",
+      "idor": "IDOR/BOLA testing for object-level authorization failures and cross-account data access, with automated enumeration scripts and multi-principal validation",
+      "information_disclosure": "Information disclosure testing with automated scripts for .git recovery, source map extraction, JS bundle secret scanning, and DVCS artifact exploitation",
+      "insecure_file_uploads": "File upload security testing covering extension bypass, content-type manipulation, and path traversal",
+      "jwt_attacks": "JWT Attacks — Algorithm Confusion, None Attack, Key Confusion",
+      "kubernetes": "Advanced exploitation techniques and post-exploitation for Kubernetes clusters, including container escapes, RBAC abuse, and API server attacks.",
+      "mass_assignment": "Mass assignment testing with framework-specific exploitation scripts for Rails, Django, Laravel, Node.js/Express, Mongoose, and Prisma",
+      "nosql_injection": "NoSQL injection testing — MongoDB operator injection, authentication bypass, blind injection, Redis command injection, and CouchDB exploitation techniques",
+      "oauth_misconfig": "OAuth 2.0 / OpenID Connect Misconfigurations",
+      "oauth_saml": "Exploitation techniques for OAuth 2.0, OpenID Connect (OIDC), and SAML 2.0 implementations",
+      "open_redirect": "Open redirect testing for phishing pivots, OAuth token theft, and allowlist bypass",
+      "password_reset_poisoning": "Password Reset Poisoning",
+      "path_traversal": "Path traversal and file inclusion testing for local/remote file access and code execution",
+      "privilege_escalation": "Linux and Windows privilege escalation techniques covering SUID, sudo, services, credentials, and container escape",
+      "prototype_pollution": "Prototype pollution attacks covering client-side DOM XSS gadgets, server-side Node.js RCE chains, and framework-specific exploitation",
+      "race_conditions": "Race condition testing for TOCTOU bugs, double-spend, and concurrent state manipulation",
+      "rce": "RCE testing covering command injection, deserialization, template injection, and code evaluation",
+      "sensitive_file_pii_exposure": "Detect and confirm publicly accessible sensitive documents (PDFs, DOCX, XLSX, images) containing PII via CMS REST APIs, cloud storage, directory listings, and misconfigured file servers — with PII extraction and country-specific ID pattern matching",
+      "spring4shell": "Spring4Shell (CVE-2022-22965) — Exploitation Guide",
+      "sql_injection": "SQL injection testing covering union, blind, error-based, and ORM bypass techniques",
+      "ssrf": "SSRF testing for cloud metadata access, internal service discovery, and protocol smuggling",
+      "ssti": "Server-Side Template Injection detection and exploitation across all major template engines",
+      "subdomain_takeover": "Subdomain takeover testing for dangling DNS records and unclaimed cloud resources",
+      "supply_chain": "Exploitation techniques targeting CI/CD pipelines, package ecosystems, dependency confusion, and build infrastructure.",
+      "unhandled_exception_differential": "Detect unhandled exceptions in security-sensitive endpoints via differential error analysis — comparing HTTP status codes for well-formed-invalid vs. malformed inputs to identify missing exception handlers in token parsing, JSON processing, and auth validation paths",
+      "waf_detection": "WAF Detection and Bypass",
+      "web_cache_poisoning": "Web cache poisoning and cache deception attacks covering unkeyed headers, fat GET, parameter cloaking, CPDoS, and path normalization",
+      "websocket": "Exploitation techniques for WebSockets including CSWSH, Smuggling, Auth bypass, and Injection attacks.",
+      "xss": "XSS testing covering reflected, stored, and DOM-based vectors with CSP bypass techniques",
+      "xxe": "XXE testing for external entity injection, file disclosure, and SSRF via XML parsers"
+    }
+  },
+  "browser_config": {
+    "tracking_url_patterns": [
+      "/api/count",
+      "/api/analytics",
+      "/analytics/",
+      "/track/",
+      "/tracking/",
+      "/pixel",
+      "/beacon",
+      "/collect",
+      "/_track",
+      "/_analytics",
+      "/ga\\.",
+      "/gtag",
+      "/google-analytics",
+      "/matomo\\.",
+      "/piwik\\.",
+      "/hotjar",
+      "/mixpanel",
+      "/segment\\.",
+      "/telemetry",
+      "/metrics",
+      "/ad(s)?/",
+      "/banner",
+      "/campaign",
+      "/click-through",
+      "/impression",
+      "/cdn-cgi/",
+      "/cdn\\.cgi",
+      "/\\.well-known/cf-",
+      "/__cf",
+      "/_next/static",
+      "/_nuxt/",
+      "/webpack",
+      "/hot-update",
+      "/share\\?",
+      "/embed\\?",
+      "/oembed",
+      "/widget",
+      "/iframe",
+      "/favicon\\.",
+      "/apple-touch-icon",
+      "/manifest\\.json",
+      "/robots\\.txt",
+      "/sitemap\\.xml",
+      "/\\.ico\\b",
+      "/\\.png\\b",
+      "/\\.jpg\\b",
+      "/\\.jpeg\\b",
+      "/\\.gif\\b",
+      "/\\.svg\\b",
+      "/\\.woff",
+      "/\\.ttf\\b",
+      "/\\.eot\\b"
+    ],
+    "tracking_query_params": [
+      "utm_",
+      "fbclid",
+      "gclid",
+      "ref",
+      "source",
+      "medium",
+      "campaign",
+      "cid",
+      "sid",
+      "tid",
+      "uuid",
+      "session_id",
+      "visitor_id",
+      "client_id",
+      "rand",
+      "r=",
+      "t=",
+      "v=",
+      "cb=",
+      "cache",
+      "bust",
+      "width=",
+      "height="
+    ],
+    "guidance_messages": {
+      "tracking_url_blocked": "URL blocked: tracking pixel, analytics endpoint, or static asset. Browser navigation to these is usually low-value for vulnerability testing. Use curl or httpx for HTTP-level analysis instead.",
+      "tracking_url_suggestion": "Avoid browser_action for this URL. If you need to analyze it, use: execute(command='curl -sI {url}') for headers. Focus browser_action on interactive pages: login forms, dashboards, multi-step workflows.",
+      "redirect_loop_detected": "The page redirect chain exceeded 10 hops. This is usually caused by tracking pixels, ad blockers, or SSO redirect chains — not a real page.",
+      "redirect_loop_suggestion": "Avoid retrying the same URL. This URL has been registered as dead. If it redirected to a third-party domain (ads, analytics, SSO, or CDN), skip it and test the next endpoint.",
+      "domain_dead": "Unreachable. Remove from target list and proceed to next subdomain.",
+      "timeout_error": "Browser action timed out. Browser close requested.",
+      "js_extraction_note": "Full page source saved. Analyze JS files for API endpoints, secrets, and vulnerabilities.",
+      "console_logs_note": "Console logs saved. Check for errors, debug info, and leaked sensitive data.",
+      "network_logs_note": "Network entries saved. Review for API endpoints, auth tokens, and sensitive data in responses."
+    }
+  },
+  "tool_classifications": {
+    "shallow_tools": [
+      "execute",
+      "browser_action",
+      "web_search",
+      "http_observe",
+      "list_files",
+      "read_file"
+    ],
+    "deep_tools": [
+      "advanced_fuzz",
+      "quick_fuzz",
+      "deep_fuzz",
+      "schemathesis_fuzz",
+      "caido_send_request",
+      "caido_automate"
+    ],
+    "exploit_heavy_tools": [
+      "quick_fuzz",
+      "advanced_fuzz",
+      "deep_fuzz",
+      "schemathesis_fuzz",
+      "create_vulnerability_report"
+    ],
+    "caido_blocked_tools": [
+      "spawn_agent",
+      "quick_fuzz",
+      "advanced_fuzz",
+      "deep_fuzz",
+      "schemathesis_fuzz",
+      "caido_automate",
+      "caido_send_request",
+      "caido_get_findings"
+    ],
+    "mini_agent_blocked_tools": [
+      "spawn_agent",
+      "run_parallel_agents"
+    ]
+  },
+  "ui_tool_kinds": {
+    "browser_action": "browser",
+    "quick_fuzz": "fuzz",
+    "advanced_fuzz": "fuzz",
+    "deep_fuzz": "fuzz",
+    "schemathesis_fuzz": "fuzz"
+  },
+  "phase_exploration_hints": {
+    "recon_osint": [
+      "Passive OSINT: crt.sh, Shodan dorks, WHOIS, ASN lookup, reverse-IP",
+      "Certificate transparency: crt.sh JSON API or tlsx finds subdomains brute-force misses",
+      "Wayback Machine CDX API — historical endpoints not in current sitemap",
+      "DMARC/SPF/DKIM records leak internal mail servers and infrastructure hostnames"
+    ],
+    "recon_fingerprint": [
+      "favicon.ico hash lookup → identify framework, find related assets on Shodan",
+      "HTTP response headers: Server, X-Powered-By, Via, Set-Cookie — full stack fingerprint",
+      "WAF/CDN fingerprint FIRST — scanning a CDN IP wastes time, find real origin",
+      "TLS certificate SAN fields contain sibling subdomains not visible via DNS",
+      "Try HTTP/2 or HTTP/3 — some endpoints respond differently under h2/h3"
+    ],
+    "recon_surface": [
+      "JS file analysis finds more endpoints on SPAs than directory brute-force",
+      "robots.txt + sitemap.xml list hidden paths the operator wants hidden",
+      "Check for exposed VCS or backups: /.git/, /.svn/, /backup.zip, /.env, /dump.sql",
+      "Open directory listing on /uploads/, /files/, /backup/, /static/, /assets/",
+      "Cloud storage: enumerate target-name S3/GCS buckets",
+      "Probe non-standard ports (8080, 8443, 8888, 9000, 9200, 6379, 27017) first",
+      "DNS zone transfer attempt — takes <1 second",
+      "Reverse IP lookup: shared hosting exposes sibling vhosts on same IP"
+    ],
+    "analysis_auth": [
+      "Auth testing: try token replay, JWT algorithm confusion, session fixation",
+      "OAuth/OpenID Flow: test redirect_uri manipulation, state param bypass",
+      "API auth: check for BOLA/IDOR by iterating resource IDs across sessions",
+      "Test for broken session management: concurrent sessions, logout bypass"
+    ],
+    "analysis_injection": [
+      "Beyond SQLi: test template injection (SSTI), LDAP injection, XPath injection",
+      "Parameter pollution: duplicate params with different values",
+      "Header injection: try injecting payloads in Host, Referer, User-Agent, X-Forwarded-For",
+      "File upload: test content-type bypass, double extension, null byte truncation"
+    ],
+    "analysis_logic": [
+      "Business logic: test state transitions, skip workflow steps, modify order quantities",
+      "Race conditions: parallel requests to payment/balance/quantity endpoints",
+      "Price/quantity manipulation: negative values, overflow, floating-point precision",
+      "Multi-tenancy: access another tenant's data by changing org/company ID"
+    ],
+    "analysis_tech": [
+      "Tech-specific: research CVEs for the EXACT versions found, not just product names",
+      "Framework-specific: check default configs, admin panels, known debug endpoints",
+      "API surface: GraphQL introspection, REST parameter pollution, GraphQL batching attacks"
+    ],
+    "exploit_verify": [
+      "Proof-of-concept: demonstrate actual impact, not just theoretical vulnerability",
+      "Chain findings: combine info disclosure + auth bypass for full access",
+      "Exfiltration test: extract actual data (database entries, config values)"
+    ],
+    "exploit_advanced": [
+      "WAF evasion: test encoding variations, parameter fragmentation, protocol switching",
+      "Authentication bypass: try JWT manipulation, cookie tampering, rate limit bypass",
+      "Privilege escalation: horizontal (same role, different user) and vertical (admin access)"
+    ]
+  }
+}

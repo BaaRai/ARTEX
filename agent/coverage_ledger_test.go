@@ -55,10 +55,10 @@ func TestRenderCoverageLedger(t *testing.T) {
 		{"no entries: no planner line", gapsOnly, false, nil, []string{"Coverage ledger"}},
 		{"no ledger", nil, true, nil, []string{"Coverage ledger"}},
 		{"counters and top gaps", mixed, false,
-			[]string{"entries 4", "no_issue_found 2", "gaps 4", "unrecorded_risk_class sqli", "…"}, []string{"rce"}},
+			[]string{"entries 4", "no_issue_found 2", "gaps 4", "unrecorded_risk_class sql_injection", "…"}, []string{"rce"}},
 		{"wrap-up lists every gap", mixed, true,
-			[]string{"remaining gaps at wrap-up (4)", "- unrecorded_risk_class sqli", "- missing_evidence /c rce"}, nil},
-		{"wrap-up lists unrecorded classes without entries", gapsOnly, true, []string{"- unrecorded_risk_class sqli"}, nil},
+			[]string{"remaining gaps at wrap-up (4)", "- unrecorded_risk_class sql_injection", "- missing_evidence /c rce"}, nil},
+		{"wrap-up lists unrecorded classes without entries", gapsOnly, true, []string{"- unrecorded_risk_class sql_injection"}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

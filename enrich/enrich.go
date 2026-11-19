@@ -23,6 +23,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/knowledge"
 
 	"github.com/miekg/dns"
 	"github.com/projectdiscovery/dnsx/libs/dnsx"
@@ -239,6 +240,60 @@ func (e *Engine) doDNS(id int64, host string) {
 
 var reTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
+// knowledgeSet is the embedded corpus used for WAF and technology detection. It
+// is loaded once; a load failure disables detection and leaves the probe intact,
+// because a corpus defect must never stop an asset from being recorded. Load is
+// sticky, so one attempt is all there is.
+var knowledgeSet = sync.OnceValue(func() *knowledge.Set {
+	s, err := knowledge.Load()
+	if err != nil {
+		log.Printf("[enrich] knowledge corpus unavailable, tech/WAF detection disabled: %v", err)
+		return nil
+	}
+	return s
+})
+
+// wafObservation is how a WAF verdict is stored in assets.extra: the wire shape
+// is explicit rather than inherited from the query type, so the stored JSON stays
+// stable if the detection API changes.
+type wafObservation struct {
+	Name       string   `json:"name"`
+	Confidence float64  `json:"confidence"`
+	Evidence   []string `json:"evidence,omitempty"`
+}
+
+// detect derives what a probe result reveals: the technology names for the
+// technologies column, and the metadata bag for extra. Technologies stay a bare
+// name list because the column is a text[]; the WAF verdict is metadata, so it
+// goes in the bag.
+//
+// An empty bag means "nothing seen" and is what the caller should pass when
+// nothing was found: the upsert merges key by key, so an empty bag is a no-op
+// while a populated one would otherwise have to carry stale keys forward.
+func detect(h http.Header, body []byte, rawURL string, status int) ([]string, map[string]any) {
+	kb := knowledgeSet()
+	if kb == nil {
+		return nil, nil
+	}
+
+	var techs []string
+	for _, hit := range kb.FingerprintTech(h, body, rawURL) {
+		techs = append(techs, hit.Name)
+	}
+
+	var extra map[string]any
+	if verdicts := kb.IdentifyWAF(h, body, status); len(verdicts) > 0 {
+		obs := make([]wafObservation, len(verdicts))
+		for i, v := range verdicts {
+			obs[i] = wafObservation{Name: v.Name, Confidence: v.Confidence, Evidence: v.Evidence}
+		}
+		// Key-level merge semantics: this probe's verdicts replace a previous
+		// probe's, which is right — a WAF that was removed is no longer there.
+		extra = map[string]any{"waf": obs}
+	}
+	return techs, extra
+}
+
 func (e *Engine) doHTTP(ctx context.Context, id int64, rawURL string) {
 	host := hostOf(rawURL)
 	if host == "" {
@@ -257,12 +312,64 @@ func (e *Engine) doHTTP(ctx context.Context, id int64, rawURL string) {
 	statusCode := resp.StatusCode
 	bodyLen := int64(len(body))
 	title := extractTitle(body)
+	techs, extra := detect(resp.Header, body, rawURL, statusCode)
 	_, _ = e.as.UpsertHTTPService(db.UpsertHTTPServiceReq{
 		URL:           rawURL,
+		Technologies:  techs,
 		StatusCode:    &statusCode,
 		ContentLength: &bodyLen,
 		PageTitle:     title,
+		Extra:         extra,
 	})
+}
+
+// fingerprint turns a response into the technology list and the metadata bag the
+// asset stores. Technologies are names only (the asset column is a text[]); the
+// evidence travels in extra, keyed by technology name, so the reason a name was
+// recorded is not lost. The WAF verdict is recorded only when the corpus names a
+// vendor or the corpus's block-status rule fires — an empty bag means "nothing
+// seen", which merges into the stored object as a no-op.
+func fingerprint(h http.Header, body []byte, rawURL string, status int) ([]string, map[string]any) {
+	s := knowledgeSet()
+	if s == nil {
+		return nil, nil
+	}
+
+	hits := s.FingerprintTech(h, body, rawURL)
+	var techs []string
+	var evidence map[string]any
+	if len(hits) > 0 {
+		techs = make([]string, 0, len(hits))
+		evidence = make(map[string]any, len(hits))
+		for _, hit := range hits {
+			techs = append(techs, hit.Name)
+			evidence[hit.Name] = hit.Evidence
+		}
+	}
+
+	var extra map[string]any
+	if len(techs) > 0 {
+		extra = map[string]any{"tech_evidence": evidence}
+	}
+	if verdicts := s.IdentifyWAF(h, body, status); len(verdicts) > 0 {
+		if extra == nil {
+			extra = map[string]any{}
+		}
+		top := verdicts[0]
+		extra["waf"] = map[string]any{
+			"name":       top.Name,
+			"confidence": top.Confidence,
+			"evidence":   top.Evidence,
+		}
+		if len(verdicts) > 1 {
+			others := make([]string, 0, len(verdicts)-1)
+			for _, v := range verdicts[1:] {
+				others = append(others, v.Name)
+			}
+			extra["waf_also"] = others
+		}
+	}
+	return techs, extra
 }
 
 func extractTitle(body []byte) string {

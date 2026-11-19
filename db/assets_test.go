@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -332,6 +333,68 @@ func TestUpsertHTTPService(t *testing.T) {
 	d.QueryRow(`SELECT array_length(technologies, 1) FROM assets WHERE id = $1`, id1).Scan(&techCnt)
 	if techCnt != 4 {
 		t.Errorf("technologies merge: want 4, got %d", techCnt)
+	}
+}
+
+func TestUpsertHTTPServiceExtraMerge(t *testing.T) {
+	d, av2, _ := testSetup(t)
+	defer d.Close()
+
+	id1, err := av2.UpsertHTTPService(UpsertHTTPServiceReq{
+		URL:    "https://extratest.example.com/",
+		Extra:  map[string]any{"waf": map[string]any{"name": "Cloudflare", "confidence": 0.95}},
+		TaskID: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Exec(`DELETE FROM assets WHERE url = 'https://extratest.example.com' OR domain IN ('extratest.example.com', 'www.extratest.example.com')`)
+
+	// A second probe with a different key must add to the object, not replace it.
+	id2, err := av2.UpsertHTTPService(UpsertHTTPServiceReq{
+		URL:    "https://extratest.example.com/",
+		Extra:  map[string]any{"tech_evidence": map[string]any{"nginx": "response header mentions nginx"}},
+		TaskID: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id2 != id1 {
+		t.Fatalf("http service dedup failed: %d vs %d", id2, id1)
+	}
+
+	var extraRaw []byte
+	if err := d.QueryRow(`SELECT extra FROM assets WHERE id = $1`, id1).Scan(&extraRaw); err != nil {
+		t.Fatal(err)
+	}
+	var extra map[string]any
+	if err := json.Unmarshal(extraRaw, &extra); err != nil {
+		t.Fatalf("extra is not an object: %v (%s)", err, extraRaw)
+	}
+	if _, ok := extra["waf"]; !ok {
+		t.Errorf("second upsert dropped the waf key: %v", extra)
+	}
+	if _, ok := extra["tech_evidence"]; !ok {
+		t.Errorf("second upsert did not merge tech_evidence: %v", extra)
+	}
+
+	// An empty bag must be a no-op rather than a wipe.
+	if _, err := av2.UpsertHTTPService(UpsertHTTPServiceReq{
+		URL:    "https://extratest.example.com/",
+		TaskID: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	extraRaw = nil
+	if err := d.QueryRow(`SELECT extra FROM assets WHERE id = $1`, id1).Scan(&extraRaw); err != nil {
+		t.Fatal(err)
+	}
+	extra = nil
+	if err := json.Unmarshal(extraRaw, &extra); err != nil {
+		t.Fatalf("extra is not an object after empty upsert: %v (%s)", err, extraRaw)
+	}
+	if len(extra) != 2 {
+		t.Errorf("an empty Extra erased stored metadata: %v", extra)
 	}
 }
 
