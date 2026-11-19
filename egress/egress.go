@@ -250,8 +250,15 @@ func (g *Governor) reserve(h *hostState) time.Duration {
 // asks for more than MaxDelay.
 func (g *Governor) backoff(h http.Header, attempt int) (d time.Duration, ok bool) {
 	v := strings.TrimSpace(h.Get("Retry-After"))
-	if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-		return time.Duration(n) * time.Second, time.Duration(n)*time.Second <= g.p.MaxDelay
+	if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+		maxSec := int64(g.p.MaxDelay / time.Second)
+		if maxSec < 0 {
+			maxSec = 0
+		}
+		if n > maxSec {
+			return 0, false
+		}
+		return time.Duration(n) * time.Second, true
 	}
 	if t, err := http.ParseTime(v); err == nil {
 		return max(time.Until(t), 0), time.Until(t) <= g.p.MaxDelay
