@@ -49,6 +49,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Remote MCP response bound**: Streamable HTTP JSON-RPC bodies and SSE data payloads are refused above 8 MiB, so a remote MCP server cannot force an unbounded decode.
 - **LLM response capture bound**: each recorded provider attempt keeps at most 1 MiB, and a call keeps at most 8 attempts, so a large or retrying stream cannot grow the recorder without bound. The live stream is unchanged.
 - **Intercept audit ring**: `preToolUse` records allow only after intercept and the target gate decide, so a blocked call no longer leaves a leftover allow row in `Guard.Audit()`.
 - **DSN password redaction**: `config.Redact` now masks libpq `password=` keywords and `?password=` query values as well as URL userinfo, so a ping-failure log cannot print the database password.

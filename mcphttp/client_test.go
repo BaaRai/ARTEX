@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -231,5 +232,30 @@ func TestStreamableClientVersionRejectionForms(t *testing.T) {
 				t.Fatalf("requests after initialize = %+v", after)
 			}
 		})
+	}
+}
+
+func TestDecodeRPCCapsBody(t *testing.T) {
+	ok := `{"jsonrpc":"2.0","id":1,"result":{}}`
+	got, err := decodeRPC(strings.NewReader(ok))
+	if err != nil || got == nil || got.ID != 1 {
+		t.Fatalf("small body: got=%+v err=%v", got, err)
+	}
+	if _, err := decodeRPC(strings.NewReader(strings.Repeat("x", mcpMaxRPCBytes+1))); err == nil {
+		t.Fatal("oversize body must fail")
+	}
+}
+
+func TestParseSSECapsPayload(t *testing.T) {
+	chunk := strings.Repeat("a", 64*1024)
+	var b strings.Builder
+	for b.Len() <= mcpMaxRPCBytes {
+		b.WriteString("data: ")
+		b.WriteString(chunk)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+	if _, err := parseSSE(strings.NewReader(b.String()), 1); err == nil {
+		t.Fatal("oversize SSE payload must fail")
 	}
 }
