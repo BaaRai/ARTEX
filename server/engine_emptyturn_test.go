@@ -2,11 +2,70 @@ package server
 
 import (
 	"context"
+	"iter"
 	"sync/atomic"
 	"testing"
 
+	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
 )
+
+// stopReasonProvider ends a streamed call with the given stop reason and no
+// content, the shape of a provider refusal before any output.
+type stopReasonProvider struct{ stop string }
+
+func (p stopReasonProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+	return func(yield func(llm.StreamEvent, error) bool) {
+		if !yield(llm.StreamEvent{Type: llm.SEMessageStart, Usage: llm.Usage{InputTokens: 41}}, nil) {
+			return
+		}
+		if !yield(llm.StreamEvent{Type: llm.SEMessageDelta, StopReason: p.stop}, nil) {
+			return
+		}
+		yield(llm.StreamEvent{Type: llm.SEMessageStop}, nil)
+	}
+}
+
+func (p stopReasonProvider) Complete(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	return llm.Message{Role: llm.RoleAssistant}, p.stop, llm.Usage{}, nil
+}
+
+// runCtxAfter returns a run context whose latest recorded model call ended with stop.
+func runCtxAfter(t *testing.T, stop string) context.Context {
+	t.Helper()
+	ctx := agent.WithStopTracker(context.Background())
+	rec := llmrec.Wrap(stopReasonProvider{stop: stop}, nil, "model", "profile", "", "", func() bool { return false })
+	for _, err := range rec.Stream(ctx, llm.CompletionRequest{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return ctx
+}
+
+// A provider refusal leaves an assistant turn with no text and no tools, the same
+// shape as an idle turn, but rerunning it only sends the same conversation to be
+// refused again.
+func TestSteerHooksStopDoesNotRerunProviderRefusal(t *testing.T) {
+	refused := []llm.Message{llm.UserText("start"), {Role: llm.RoleAssistant}}
+	for _, stop := range []string{"refusal", "content_filter"} {
+		h := steerHooks{nudges: &atomic.Int64{}, limit: defaultEmptyTurnNudges, label: "worker-1 · #1"}
+		prevent, blocking, _ := h.Stop(runCtxAfter(t, stop), refused)
+		if prevent || blocking != nil {
+			t.Fatalf("%s: refusal was rerun: prevent=%v blocking=%v", stop, prevent, blocking)
+		}
+		if n := h.nudges.Load(); n != 0 {
+			t.Fatalf("%s: refusal consumed the idle-turn quota: %d", stop, n)
+		}
+	}
+
+	// Control: the same empty turn after an ordinary end of turn is still nudged.
+	h := steerHooks{nudges: &atomic.Int64{}, limit: defaultEmptyTurnNudges, label: "worker-1 · #1"}
+	if _, blocking, _ := h.Stop(runCtxAfter(t, "end_turn"), refused); len(blocking) != 1 || blocking[0] != emptyTurnNudge {
+		t.Fatalf("idle turn after end_turn not nudged: %v", blocking)
+	}
+}
 
 // Identifying and nudging empty turns (thinking only, no text, no tools); see steerHooks.Stop.
 

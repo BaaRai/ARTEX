@@ -782,8 +782,12 @@ func decodeStrSlice(raw json.RawMessage) []string {
 
 func decodeStrMap(raw json.RawMessage) map[string]string {
 	out := map[string]string{}
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &out)
+	if len(raw) == 0 {
+		return out
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		// JSON null unmarshals into a nil map. Callers write env["k"]=v.
+		return map[string]string{}
 	}
 	return out
 }

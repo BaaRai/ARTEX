@@ -1,6 +1,8 @@
 package report
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
 	"strings"
 	"testing"
@@ -312,5 +314,44 @@ func TestFindingsExportsCarryQuality(t *testing.T) {
 		t.Errorf("export repeats the binding count next to its traffic section\n%s", md)
 	} else if !strings.Contains(md, "bindings: 1") {
 		t.Errorf("export lost the binding count entirely\n%s", md)
+	}
+}
+
+func TestFindingsCSVNeutralizesFormulas(t *testing.T) {
+	out := FindingsCSV([]*db.DBFinding{{
+		ID:              7,
+		Name:            `=HYPERLINK("http://evil.example/x","x")`,
+		VulnClass:       "+cmd",
+		Severity:        "high",
+		Status:          "pending",
+		ReportState:     "none",
+		TaskDescription: "@SUM(1+1)",
+		CreatedAt:       time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		Summary:         "-2+3",
+	}})
+	if !bytes.HasPrefix(out, []byte("\xEF\xBB\xBF")) {
+		t.Fatal("CSV lost the UTF-8 BOM")
+	}
+	records, err := csv.NewReader(bytes.NewReader(out[3:])).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("rows=%d, want header+1", len(records))
+	}
+	row := records[1]
+	want := map[int]string{
+		1: `'=HYPERLINK("http://evil.example/x","x")`,
+		2: `'+cmd`,
+		6: `'@SUM(1+1)`,
+		8: `'-2+3`,
+	}
+	for i, prefix := range want {
+		if row[i] != prefix {
+			t.Errorf("col %d = %q, want %q", i, row[i], prefix)
+		}
+	}
+	if strings.HasPrefix(row[3], "'") {
+		t.Errorf("plain severity %q should not be prefixed", row[3])
 	}
 }

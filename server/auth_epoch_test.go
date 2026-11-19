@@ -59,6 +59,7 @@ func TestChangePasswordRevokesOldTokenAndKeepsItWhenSaveFails(t *testing.T) {
 		m:              m,
 		jwtKey:         []byte("0123456789abcdef0123456789abcdef"),
 		loginLimit:     newLoginLimiter(time.Now),
+		pwdLimit:       newLoginLimiter(time.Now),
 		authHashKey:    fmt.Sprintf("test.password_hash.%d", stamp),
 		authVersionKey: fmt.Sprintf("test.password_version.%d", stamp),
 	}
@@ -153,7 +154,7 @@ func TestUnreadablePasswordVersionRejectsSessions(t *testing.T) {
 	}
 	defer m.Close()
 	key := []byte("0123456789abcdef0123456789abcdef")
-	s := &Server{m: m, jwtKey: key, loginLimit: newLoginLimiter(time.Now)}
+	s := &Server{m: m, jwtKey: key, loginLimit: newLoginLimiter(time.Now), pwdLimit: newLoginLimiter(time.Now)}
 	s.authVersionKey = fmt.Sprintf("test.password_version.%d", time.Now().UnixNano())
 	tok, err := signJWTVersion(key, 1)
 	if err != nil {
@@ -194,6 +195,7 @@ func TestLoginRereadsPasswordVersionWhenUnreadable(t *testing.T) {
 		m:              m,
 		jwtKey:         []byte("0123456789abcdef0123456789abcdef"),
 		loginLimit:     newLoginLimiter(time.Now),
+		pwdLimit:       newLoginLimiter(time.Now),
 		authHashKey:    fmt.Sprintf("test.password_hash.%d", stamp),
 		authVersionKey: fmt.Sprintf("test.password_version.%d", stamp),
 	}
