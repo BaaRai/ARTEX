@@ -7,17 +7,13 @@ import (
 	"testing"
 
 	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/config"
 )
 
-// The startup snapshot is meant to be safe to paste into an issue: no DSN
-// password may survive redaction.
-func TestConfigSnapshotRedactsDSNPassword(t *testing.T) {
-	const raw = "postgres://artex:super-secret@localhost:5432/artex?sslmode=disable"
-	redacted := config.Redact(raw)
-	if redacted == raw || !strings.Contains(redacted, "*") {
-		t.Fatalf("config.Redact did not mask the DSN: %q", redacted)
-	}
+// The snapshot must be serializable and must not add fields. Password masking
+// itself is config.Redact's contract, covered by config/config_test.go;
+// cmd/artex only passes its result through to the log line.
+func TestConfigSnapshotSerializesRedactedDSN(t *testing.T) {
+	redacted := "postgres://artex:***@localhost:5432/artex?sslmode=disable"
 	s := configSnapshot{
 		Version:         "test",
 		ConfigFileFound: true,
@@ -30,11 +26,8 @@ func TestConfigSnapshotRedactsDSNPassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := string(b)
-	if strings.Contains(out, "super-secret") {
-		t.Fatalf("DSN password leaked into snapshot: %s", out)
-	}
-	if !strings.Contains(out, redacted) {
-		t.Fatalf("snapshot does not carry the redacted DSN: %s", out)
+	if !strings.Contains(out, `"pg_dsn":"`+redacted+`"`) {
+		t.Fatalf("snapshot did not serialize the redacted DSN: %s", out)
 	}
 }
 
