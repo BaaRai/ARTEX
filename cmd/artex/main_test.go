@@ -13,10 +13,15 @@ import (
 // The startup snapshot is meant to be safe to paste into an issue: no DSN
 // password may survive redaction.
 func TestConfigSnapshotRedactsDSNPassword(t *testing.T) {
+	const raw = "postgres://artex:super-secret@localhost:5432/artex?sslmode=disable"
+	redacted := config.Redact(raw)
+	if redacted == raw || !strings.Contains(redacted, "*") {
+		t.Fatalf("config.Redact did not mask the DSN: %q", redacted)
+	}
 	s := configSnapshot{
 		Version:         "test",
 		ConfigFileFound: true,
-		PGDSN:           config.Redact("postgres://artex:super-secret@localhost:5432/artex?sslmode=disable"),
+		PGDSN:           redacted,
 		PGDSNSource:     "environment variable ARTEX_PG_DSN",
 		TrustedProxies:  []string{},
 	}
@@ -28,8 +33,8 @@ func TestConfigSnapshotRedactsDSNPassword(t *testing.T) {
 	if strings.Contains(out, "super-secret") {
 		t.Fatalf("DSN password leaked into snapshot: %s", out)
 	}
-	if !strings.Contains(out, "****") {
-		t.Fatalf("redaction marker missing from snapshot: %s", out)
+	if !strings.Contains(out, redacted) {
+		t.Fatalf("snapshot does not carry the redacted DSN: %s", out)
 	}
 }
 
