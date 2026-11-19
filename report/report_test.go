@@ -13,6 +13,8 @@ import (
 // The exported report carries the coverage gaps and the completeness caveat;
 // nothing is added when the task's coverage feature is off (nil ledger).
 func TestMarkdownCoverageGaps(t *testing.T) {
+	// The mandatory class "sqli" is folded to its canonical token sql_injection by
+	// BuildCoverageLedger, so the unexamined line and its gap carry that token.
 	l := db.BuildCoverageLedger([]db.CoverageEntry{{Surface: "/a", RiskArea: "xss", Outcome: db.OutcomeNeedsFollowUp}},
 		[]string{"sqli"}, db.CoverageCompletenessFor("timeout", false, false, true))
 	cases := []struct {
@@ -20,7 +22,7 @@ func TestMarkdownCoverageGaps(t *testing.T) {
 		l    *db.CoverageLedger
 		want []string
 	}{
-		{"ledger", l, []string{"## Coverage gaps", "timeout", "Incomplete scan", "open gaps: 2", "- unrecorded_risk_class sqli", "- needs_follow_up /a xss"}},
+		{"ledger", l, []string{"## Coverage gaps", "timeout", "Incomplete scan", "open gaps: 2", "- unrecorded_risk_class sql_injection", "- needs_follow_up /a xss"}},
 		{"coverage off", nil, nil},
 	}
 	for _, c := range cases {

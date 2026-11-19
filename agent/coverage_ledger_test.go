@@ -194,7 +194,7 @@ func TestRecordCoverageToolWritesEntry(t *testing.T) {
 	if res.IsError || !strings.Contains(res.Flatten(), "missing_evidence") {
 		t.Fatalf("result=%+v", res)
 	}
-	if s := ts.coverageLedgerBlock(false, newDataEnvelope()); !strings.Contains(s, "missing_evidence /q sqli") {
+	if s := ts.coverageLedgerBlock(false, newDataEnvelope()); !strings.Contains(s, "missing_evidence /q sql_injection") {
 		t.Fatalf("planner line=%q", s)
 	}
 }
