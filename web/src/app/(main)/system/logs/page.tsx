@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { sseUrl } from "@/lib/api";
@@ -37,6 +38,7 @@ function fmtTime(ts: string) {
 }
 
 export default function LogsPage() {
+  const t = useTranslations("logs");
   const [lines, setLines] = React.useState<LogLine[]>([]);
   const [q, setQ] = React.useState("");
   const [level, setLevel] = React.useState<"all" | LogLine["level"]>("all");
@@ -142,13 +144,13 @@ export default function LogsPage() {
   return (
     <div className="flex flex-1 flex-col gap-3">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">System logs</h1>
-        <p className="text-muted-foreground text-sm">Live backend log stream (planner / worker / database / traffic …)</p>
+        <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
+        <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
       </div>
       <div className="flex flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            placeholder="Filter (text / tag)…"
+            placeholder={t("filterPlaceholder")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="h-8 max-w-xs"
@@ -162,7 +164,7 @@ export default function LogsPage() {
                 className="h-8"
                 onClick={() => setLevel(lv)}
               >
-                {lv === "all" ? "All" : lv}
+                {lv === "all" ? t("filter.all") : lv}
               </Button>
             ))}
           </div>
@@ -172,15 +174,15 @@ export default function LogsPage() {
             className="h-8"
             onClick={() => setPaused((p) => !p)}
           >
-            {paused ? "Paused" : "Pause"}
+            {paused ? t("buttons.paused") : t("buttons.pause")}
           </Button>
           <Button size="sm" variant="outline" className="h-8" onClick={() => setLines([])}>
-            Clear
+            {t("buttons.clear")}
           </Button>
           <span className="ml-auto text-xs text-muted-foreground">
-            {counts.total} lines ·{" "}
-            <span className="text-amber-600 dark:text-amber-400">{counts.warn} warnings</span> ·{" "}
-            <span className="text-red-600 dark:text-red-400">{counts.error} errors</span>
+            {t("stats.lines", { count: counts.total })} ·{" "}
+            <span className="text-amber-600 dark:text-amber-400">{t("stats.warnings", { count: counts.warn })}</span> ·{" "}
+            <span className="text-red-600 dark:text-red-400">{t("stats.errors", { count: counts.error })}</span>
           </span>
         </div>
 
@@ -200,12 +202,12 @@ export default function LogsPage() {
                 disabled={loadingHistory}
                 onClick={loadOlderHistory}
               >
-                {loadingHistory ? "Loading…" : "Load older logs"}
+                {loadingHistory ? t("history.loading") : t("history.loadOlder")}
               </Button>
             </div>
           )}
           {filtered.length === 0 ? (
-            <p className="py-10 text-center text-muted-foreground">No logs yet.</p>
+            <p className="py-10 text-center text-muted-foreground">{t("empty")}</p>
           ) : (
             filtered.map((l) => {
               const body =

@@ -1,0 +1,23 @@
+{
+  "title": "Link to vulnerability",
+  "description": "Save the {count} selected traffic records as evidence of an existing vulnerability.",
+  "query": {
+    "label": "Find vulnerability",
+    "placeholder": "Name / summary / vulnerability class"
+  },
+  "loading": "Loading…",
+  "empty": "No matching vulnerabilities; register one first",
+  "pagination": {
+    "previous": "Previous",
+    "page": "Page {page} · {total} total",
+    "next": "Next"
+  },
+  "selected": "Selected: #{id} {name}",
+  "selectPrompt": "Select a vulnerability",
+  "cancel": "Cancel",
+  "saving": "Saving…",
+  "link": "Link",
+  "toasts": {
+    "linked": "Linked {count} traffic records to vulnerability #{id}"
+  }
+}

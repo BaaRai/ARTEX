@@ -1,0 +1,17 @@
+{
+  "status": {
+    "unableToLocate": "위치를 찾지 못했습니다: {error}",
+    "expanded": "승인 #{id}의 도구 호출을 펼쳤습니다",
+    "loading": "승인 #{id}의 대화 내 위치를 불러오는 중…"
+  },
+  "actions": {
+    "retry": "위치 찾기 재시도",
+    "cancel": "위치 찾기 취소"
+  },
+  "errors": {
+    "sourceMismatch": "승인 출처가 현재 대화와 일치하지 않습니다",
+    "originalExecutionNotFound": "원본 실행을 찾을 수 없습니다",
+    "toolCallNotFoundDeleted": "대화에서 일치하는 도구 호출을 찾을 수 없습니다. 기록이 삭제되었을 수 있습니다",
+    "toolCallNotFound": "대화에서 일치하는 도구 호출을 찾을 수 없습니다"
+  }
+}

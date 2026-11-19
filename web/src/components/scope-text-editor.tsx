@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import { useTranslations } from "next-intl";
+
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,8 +23,8 @@ export function ScopeTextEditor({
   value,
   onValueChange,
   parsed,
-  label = "Asset scope",
-  description = "One per line; domains, IPs, CIDRs, ICP filings, and company keywords are recognized automatically.",
+  label,
+  description,
 }: {
   id: string;
   value: string;
@@ -31,6 +33,7 @@ export function ScopeTextEditor({
   label?: string;
   description?: string;
 }) {
+  const t = useTranslations("scopeTextEditor");
   const counts = React.useMemo(() => {
     const result = new Map<CompanyScopeKind, number>();
     for (const rule of parsed.rules) result.set(rule.kind, (result.get(rule.kind) ?? 0) + 1);
@@ -39,8 +42,8 @@ export function ScopeTextEditor({
 
   return (
     <Field data-invalid={parsed.errors.length > 0}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <FieldDescription>{description}</FieldDescription>
+      <FieldLabel htmlFor={id}>{label ?? t("label")}</FieldLabel>
+      <FieldDescription>{description ?? t("description")}</FieldDescription>
       <Textarea
         id={id}
         rows={8}
@@ -52,7 +55,7 @@ export function ScopeTextEditor({
       />
       {parsed.rules.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
-          <span>{parsed.rules.length} recognized</span>
+          <span>{t("recognized", { count: parsed.rules.length })}</span>
           {Object.entries(SCOPE_KIND_LABELS).map(([kind, kindLabel]) => {
             const count = counts.get(kind as CompanyScopeKind) ?? 0;
             return count > 0 ? (
@@ -67,10 +70,12 @@ export function ScopeTextEditor({
         <FieldError>
           {parsed.errors.slice(0, 5).map((item) => (
             <span key={`${item.line}-${item.error}`} className="block">
-              Line {item.line}: {item.error}
+              {t("errorLine", { line: item.line, error: item.error })}
             </span>
           ))}
-          {parsed.errors.length > 5 && <span className="block">{parsed.errors.length - 5} more errors</span>}
+          {parsed.errors.length > 5 && (
+            <span className="block">{t("moreErrors", { count: parsed.errors.length - 5 })}</span>
+          )}
         </FieldError>
       )}
     </Field>

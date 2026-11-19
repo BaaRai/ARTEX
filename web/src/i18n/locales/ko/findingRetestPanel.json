@@ -1,0 +1,37 @@
+{
+  "header": {
+    "title": "취약점 재검증",
+    "description": "별도 세션에서 현재 상태를 검증하며, 각 재검증의 판정과 증거를 보관합니다."
+  },
+  "running": {
+    "linkTitle": "실행 중인 재검증 세션 보기",
+    "label": "재검증 중"
+  },
+  "actions": {
+    "startRetest": "재검증 시작",
+    "retry": "재시도",
+    "viewSession": "세션 보기"
+  },
+  "errors": {
+    "loadFailed": "재검증 기록을 불러오지 못했습니다: {message}"
+  },
+  "empty": {
+    "title": "재검증 기록 없음",
+    "description": "수정 사항이 배포되면 재검증을 시작하여 새 증거와 이전 증거를 비교하세요."
+  },
+  "conversationDeleted": "대화가 삭제됨",
+  "notesLabel": "메모: {notes}",
+  "evidenceSummary": "재검증 증거",
+  "status": {
+    "pending": "시작 대기 중",
+    "running": "재검증 중",
+    "completed": "완료",
+    "failed": "재검증 실패",
+    "stopped": "중지됨"
+  },
+  "verdict": {
+    "reproduced": "여전히 재현 가능",
+    "fixed": "수정됨",
+    "inconclusive": "판정 불가"
+  }
+}

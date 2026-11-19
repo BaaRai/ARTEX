@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { PlusIcon, Trash2Icon } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ export function AssetInterceptRulesEditor({
   value: AssetInterceptRuleInput[];
   onChange: (v: AssetInterceptRuleInput[]) => void;
 }) {
+  const t = useTranslations("assetInterceptRulesEditor");
   function update(i: number, patch: Partial<AssetInterceptRuleInput>) {
     onChange(value.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
@@ -56,8 +58,8 @@ export function AssetInterceptRulesEditor({
               value={r.action}
               onChange={(e) => update(i, { action: e.target.value as "block" | "allow" })}
             >
-              <NativeSelectOption value="block">Block</NativeSelectOption>
-              <NativeSelectOption value="allow">Allow</NativeSelectOption>
+              <NativeSelectOption value="block">{t("action.block")}</NativeSelectOption>
+              <NativeSelectOption value="allow">{t("action.allow")}</NativeSelectOption>
             </NativeSelect>
             <NativeSelect
               size="sm"
@@ -67,7 +69,7 @@ export function AssetInterceptRulesEditor({
             >
               {ASSET_INTERCEPT_KIND_OPTIONS.map((o) => (
                 <NativeSelectOption key={o.value} value={o.value}>
-                  {o.label}
+                  {t.has(`kind.${o.value}`) ? t(`kind.${o.value}`) : o.label}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -79,7 +81,7 @@ export function AssetInterceptRulesEditor({
             />
             <Input
               className="w-[120px] shrink-0"
-              placeholder="Note (optional)"
+              placeholder={t("notePlaceholder")}
               value={r.note}
               onChange={(e) => update(i, { note: e.target.value })}
             />
@@ -96,7 +98,7 @@ export function AssetInterceptRulesEditor({
         );
       })}
       <Button type="button" size="sm" variant="outline" className="w-fit" onClick={add}>
-        <PlusIcon className="size-4" /> Add row
+        <PlusIcon className="size-4" /> {t("addRow")}
       </Button>
     </div>
   );

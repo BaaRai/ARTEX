@@ -1,0 +1,58 @@
+{
+  "button": {
+    "label": "Side question",
+    "title": "/btw side question"
+  },
+  "panel": {
+    "ariaLabel": "Side question panel",
+    "heading": "Side question <btw>/btw</btw>",
+    "clearHistoryAriaLabel": "Clear side-question history",
+    "closeAriaLabel": "Close side-question panel"
+  },
+  "snapshot": {
+    "contextUpdated": "Context updated {time}",
+    "waiting": "Ask anytime after the main agent's first run"
+  },
+  "status": {
+    "running": "Answering",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Stopped",
+    "interrupted": "Interrupted"
+  },
+  "loadEarlier": "Load earlier side Q&A",
+  "empty": {
+    "title": "Ask a question anytime",
+    "description": "Answered from the current agent's context while the main task keeps running."
+  },
+  "item": {
+    "contextTime": "Context {time}",
+    "recentExchanges": "Last {count} Q&A exchanges verbatim",
+    "historySummarized": " · earlier Q&A summarized",
+    "snapshotSummarized": " · uses the main-context digest"
+  },
+  "preparationLabels": {
+    "preparing": "Preparing context…",
+    "summarizing_history": "Summarizing earlier side Q&A…",
+    "compressing_snapshot": "Compressing the side-question context copy…",
+    "retrying": "Model context exceeded, shrinking and retrying…",
+    "answering": "Answering…"
+  },
+  "composer": {
+    "ariaLabel": "Side question",
+    "placeholder": "Ask about the current context…",
+    "note": "Standalone Q&A · No tool execution",
+    "stopAriaLabel": "Stop the side answer",
+    "sendAriaLabel": "Send side question"
+  },
+  "clearDialog": {
+    "title": "Clear side-question history?",
+    "description": "Deletes this agent's side Q&A and stops any answer still being generated. The main session and context snapshot are kept.",
+    "cancel": "Cancel",
+    "confirm": "Clear history"
+  },
+  "workspace": {
+    "drawerTitle": "Side question",
+    "drawerDescription": "Standalone Q&A for {label}"
+  }
+}

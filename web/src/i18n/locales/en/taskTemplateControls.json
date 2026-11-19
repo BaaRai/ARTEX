@@ -1,0 +1,63 @@
+{
+  "picker": {
+    "label": "Task template",
+    "placeholderLoading": "Loading templates",
+    "placeholderEmpty": "No task templates yet",
+    "placeholderReady": "Search and select a task template",
+    "empty": "No matching templates",
+    "description": "Selecting copies the template's description, goal, category, and task-level rules; no link to the template is kept."
+  },
+  "actions": {
+    "manage": "Manage templates",
+    "saveAsTemplate": "Save as template"
+  },
+  "applyDialog": {
+    "title": "Use template \"{name}\"?",
+    "description": "The description and goal already filled in will be overwritten by the template.",
+    "cancel": "Cancel",
+    "confirm": "Overwrite and use"
+  },
+  "manager": {
+    "title": "Task template management",
+    "description": "Templates store the description, goal, category, and task-level intercept/allow rules; edits do not affect already-created tasks.",
+    "createTemplate": "Create template",
+    "noTemplates": "No templates yet",
+    "fields": {
+      "name": "Template name",
+      "namePlaceholder": "e.g. External web penetration testing",
+      "description": "Description",
+      "descriptionPlaceholder": "Test target and background",
+      "goal": "Goal",
+      "goalPlaceholder": "Goals the task needs to achieve",
+      "category": "Task category",
+      "categoryUncategorized": "Uncategorized",
+      "categoryHint": "This category is prefilled when the template is applied (still editable).",
+      "rules": "Task-level intercept / allow rules",
+      "rulesHint": "These task-level rules are prefilled when the template is applied (intercept/allow, effective only for new tasks, never global)."
+    },
+    "footer": {
+      "deleteTemplate": "Delete template",
+      "close": "Close",
+      "saving": "Saving",
+      "saveChanges": "Save changes",
+      "createTemplate": "Create template"
+    }
+  },
+  "deleteDialog": {
+    "title": "Delete template \"{name}\"?",
+    "untitled": "Untitled template",
+    "description": "Tasks already created from this template are not affected.",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleting": "Deleting"
+  },
+  "toasts": {
+    "validation": "Fill in the template name, description, and goal",
+    "created": "Template created",
+    "updated": "Template updated",
+    "deleted": "Template deleted",
+    "saveFailed": "Save failed: {message}",
+    "deleteFailed": "Delete failed: {message}",
+    "loadFailed": "Failed to load templates: {message}"
+  }
+}

@@ -1,0 +1,231 @@
+{
+  "common": {
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "notRecorded": "Not recorded",
+    "decidedBy": "Decided by",
+    "source": "Source",
+    "requestedAt": "Requested at",
+    "decidedAt": "Decided at"
+  },
+  "title": {
+    "task": "Interception approval",
+    "records": "Approval records"
+  },
+  "description": "Expand a record to view the tool request and approval decision, along with the context and execution result at the time.",
+  "pendingBadge": "{count} pending",
+  "ruleRef": "Rule #{id}",
+  "origin": {
+    "task": "Task {id}",
+    "conversation": "Conversation #{id}",
+    "locateAria": "Locate the source of approval #{id}: {label}",
+    "locateError": "Unable to locate the corresponding execution"
+  },
+  "status": {
+    "pending": "Pending approval",
+    "allowed": "Allowed",
+    "denied": "Denied",
+    "timeout": "Timed out"
+  },
+  "decidedByBadge": {
+    "legacy": "Legacy"
+  },
+  "decidedBy": {
+    "human": "Human",
+    "rule": "Rule",
+    "model": "Model",
+    "system": "System"
+  },
+  "risk": {
+    "scoreTitle": "Risk score {score}/100",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High"
+  },
+  "match": {
+    "modelDecision": "Model decision",
+    "ruleMissing": "Rule not recorded or deleted",
+    "noReason": "No reason recorded"
+  },
+  "context": {
+    "user": "User message",
+    "assistant": "Agent message",
+    "text": "Agent message",
+    "tool_use": "Tool request",
+    "tool_result": "Tool output",
+    "error": "error"
+  },
+  "codeBlock": {
+    "copied": "Copied",
+    "copyFailed": "Copy failed; select the content manually to copy",
+    "copyAria": "Copy {label}",
+    "truncated": "Content truncated; the above is the saved excerpt."
+  },
+  "modelContext": {
+    "title": "Model review context",
+    "intro": "Below is the snapshot of the input actually sent to the review model for this decision. The background only helps it understand the current action; the verdict follows the review policy.",
+    "legacyFormat": "This record used the legacy input format; the content actually sent at the time is preserved.",
+    "callUnderReview": "Call under review",
+    "backgroundUserMessage": "Background · user message",
+    "backgroundWorkerIntent": "Background · Worker intent summary (legacy)",
+    "fromUserMessage": "Taken from the current user message.",
+    "legacyWorkerIntent": "This is the legacy Worker intent summary that used to be sent; the new Worker review no longer sends it.",
+    "noBackground": "No background message was attached to this review.",
+    "currentTurnInput": "Current turn input (legacy)",
+    "taskDescription": "Task description (legacy)",
+    "taskGoals": "Task goals (legacy)",
+    "taskConstraints": "Task operation constraints (legacy)",
+    "workerIntent": "Worker intent (legacy)",
+    "workingDirectory": "Working directory",
+    "noHistorySent": "No past calls or execution results were sent for this review.",
+    "pastCallsHeading": "Past calls provided to the model at the time (legacy)",
+    "historySucceeded": "Succeeded",
+    "historyFailed": "Failed (may have partial side effects)",
+    "pastCallArgs": "Past call arguments",
+    "pastExecResult": "Past execution result",
+    "noPairedHistory": "No paired past tool executions were provided.",
+    "historyTruncated": "History is a limited window; some content is truncated.",
+    "viewFullJson": "View full model review input JSON",
+    "reviewInput": "Model review input"
+  },
+  "actions": {
+    "allow": "Allow",
+    "deny": "Deny"
+  },
+  "action": {
+    "allow": "Allow",
+    "ask": "Escalate to human approval",
+    "deny": "Deny"
+  },
+  "execution": {
+    "not_started": "Not started",
+    "not_executed": "Not executed",
+    "awaiting_result": "Allowed, awaiting execution result",
+    "succeeded": "Execution succeeded",
+    "failed": "Execution failed",
+    "unknown": "Execution result unknown"
+  },
+  "alwaysAllow": {
+    "created": "Rule created, the request is still pending approval",
+    "exists": "Rule already exists, the request is still pending approval",
+    "buttonPrefix": "Always allow \"{prefix} *\"",
+    "button": "Always allow",
+    "hint": "The prefix does not constrain flags, and it does not cover what the program does next (git hooks, npm scripts, docker images)."
+  },
+  "detail": {
+    "executionNotStarted": "Not started",
+    "noLinkedResult": "No linked execution result",
+    "initialModel": "Model initial decision",
+    "initialRule": "Rule initial decision",
+    "initialFallback": "Model error fallback",
+    "agentFallback": "Agent",
+    "toolRequestLabel": "{name} · tool request",
+    "viewCommand": "View command content",
+    "commandContent": "Command content",
+    "executionResultLabel": "Execution result:",
+    "loading": "Loading…",
+    "reviewStatus": "Review status",
+    "approvalDecision": "Approval decision",
+    "noReason": "No approval reason recorded",
+    "finalAction": "Final action: {action}",
+    "risk": "Risk",
+    "ruleSnapshot": "Rule snapshot",
+    "modelProfile": "Approval model profile",
+    "loadDetailFailed": "Failed to load details: {error}",
+    "loadErrorFallback": "Failed to load details",
+    "noSnapshot": "This record has no saved approval detail snapshot, so the context, model initial decision, and execution output at the time cannot be restored.",
+    "collapseContext": "Collapse context",
+    "viewContext": "View context and execution result",
+    "digestOnly": "This legacy record saved only the review input fingerprint, not the input itself, so the context sent to the model at the time cannot be restored. This does not mean the review had no context; newly produced model decisions keep an input snapshot.",
+    "noModelInput": "This record has no saved model review input; it may have been decided directly by a rule, failed before the model call, or come from an old version.",
+    "viewAuditExcerptNotSent": "View conversation audit excerpt (not sent to model)",
+    "viewAuditExcerpt": "View conversation audit excerpt",
+    "conversationTurnInput": "Conversation current-turn input (audit excerpt)",
+    "visibleContext": "Visible conversation context",
+    "contextExcerptNote": "Conversation record excerpt saved at {time}. What the model actually used follows \"Model review input\".",
+    "contextTruncated": "Only the most recent context is saved; some content is truncated.",
+    "noLinkableContext": "No linkable context recorded",
+    "judgeAnswers": "Judge answers",
+    "executionOutput": "Execution output",
+    "toolNotExecuted": "Tool not executed.",
+    "noOutputYet": "No execution output yet",
+    "correlationAmbiguous": "Concurrent calls with identical arguments exist, so the tool call cannot be uniquely linked; this record does not show a guessed execution result.",
+    "correlationNone": "No uniquely linkable tool call ID recorded.",
+    "toolCallId": "Tool call ID: {id}",
+    "argsDigest": "Arguments digest SHA-256: {digest}",
+    "configDigest": "Review config fingerprint SHA-256: {digest}",
+    "modelInputDigest": "Model review input SHA-256: {digest}",
+    "resultRecordedAt": "Result recorded at: {time}"
+  },
+  "table": {
+    "selectAllAria": "Select all pending approvals on this page",
+    "expandDetails": "Expand details",
+    "tool": "Tool",
+    "matchedRule": "Matched rule",
+    "arguments": "Arguments",
+    "status": "Status",
+    "selectRowAria": "Select approval #{id}",
+    "collapseRowAria": "Collapse approval #{id}",
+    "expandRowAria": "Expand approval #{id}",
+    "detailsAria": "Approval details #{id}",
+    "pendingLabel": "Pending approvals",
+    "recordListLabel": "Approval record list"
+  },
+  "filters": {
+    "aria": "Approval record filters",
+    "statusLabel": "Approval status",
+    "statusAll": "All statuses",
+    "sourceLabel": "Decision source",
+    "sourceAll": "All sources",
+    "sourceRule": "Rule decision",
+    "sourceUnknown": "Unknown source",
+    "decidedByAll": "All actors",
+    "decidedByModel": "AI-decided",
+    "decidedByHuman": "Human",
+    "decidedByRule": "Rule",
+    "decidedBySystem": "System",
+    "clear": "Clear filters"
+  },
+  "errors": {
+    "loadFallback": "Failed to load",
+    "loadRecords": "Failed to load records: {error}. Click Refresh to retry.",
+    "loadPending": "Failed to load pending approvals: {error}. Click Refresh to retry."
+  },
+  "pending": {
+    "heading": "Pending ({count})",
+    "hint": "expand to allow or deny"
+  },
+  "batch": {
+    "selectedCount": "{count} selected",
+    "approveSelected": "Approve selected",
+    "denySelected": "Deny selected",
+    "confirmTitleApprove": "Approve {count} request(s)?",
+    "confirmTitleDeny": "Deny {count} request(s)?",
+    "highRiskSome": "{count} of them are high risk.",
+    "highRiskNone": "None of them is high risk.",
+    "confirmBody": "Each request is decided on its own; one that cannot be decided stays pending and is listed.",
+    "errorsHeading": "{count} selected request(s) were not decided and stay pending:",
+    "verbAllowed": "allowed",
+    "verbDenied": "denied",
+    "toastAll": "{decided} {verb}",
+    "toastPartial": "{decided} {verb}, {failed} not decided (see the errors listed above)",
+    "notDecided": "Not decided",
+    "notSent": "Not sent: {message}",
+    "requestFailed": "request failed"
+  },
+  "toasts": {
+    "allowed": "Execution allowed",
+    "denied": "Execution denied"
+  },
+  "results": {
+    "filtered": "Filtered results",
+    "all": "All records"
+  },
+  "empty": {
+    "title": "No approval records",
+    "filteredTitle": "No approval records match the filters",
+    "description": "Records will appear here once a rule or model makes an approval decision.",
+    "filteredDescription": "Adjust the approval status, decision source or deciding actor, or clear the filters to see all records."
+  }
+}

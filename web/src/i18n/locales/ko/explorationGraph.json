@@ -1,0 +1,40 @@
+{
+  "empty": "탐색 데이터 없음",
+  "node": {
+    "inheritedTitle": "작업 #{id}에서 상속됨, 읽기 전용",
+    "sourceBadge": "소스 #{id}"
+  },
+  "nodeType": {
+    "task": "루트 작업",
+    "begin": "시작",
+    "goal": "목표",
+    "hint": "힌트",
+    "intent": "인텐트",
+    "fact": "사실",
+    "finding": "취약점",
+    "digest": "다이제스트"
+  },
+  "relation": {
+    "spawns": "생성",
+    "derived_from": "인텐트 체인",
+    "yields": "산출",
+    "proves": "입증"
+  },
+  "detail": {
+    "sourceTaskBadge": "소스 작업 #{id} · 읽기 전용",
+    "properties": "속성",
+    "type": "유형",
+    "status": "상태",
+    "priority": "우선순위",
+    "source": "출처",
+    "sourceTask": "소스 작업",
+    "sourceTaskValue": "#{id} (상속됨, 읽기 전용)",
+    "time": "시간",
+    "digestConclusions": "다이제스트 결론",
+    "compressedNodes": "압축된 노드 ({count})",
+    "membersNotLoaded": "현재 그래프에 로드되지 않은 멤버 노드 {count}개",
+    "rawData": "원시 데이터",
+    "copy": "복사",
+    "copied": "복사됨"
+  }
+}

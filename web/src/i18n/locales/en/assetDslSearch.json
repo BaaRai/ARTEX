@@ -1,0 +1,43 @@
+{
+  "placeholder": "DSL search: domain=example AND status_code>=400",
+  "status": {
+    "searching": "Searching…",
+    "found": "Found {count}"
+  },
+  "fieldDesc": {
+    "domain": "Domain (root domain/subdomain/service domain)",
+    "ip": "IPv4/IPv6 address",
+    "url": "Full URL (service/endpoint)",
+    "root_domain": "Root domain",
+    "page_title": "Page title (HTTP service)",
+    "icp": "ICP filing number",
+    "service_name": "Service name (non-HTTP service)",
+    "app_name": "App name",
+    "bundle_id": "App Bundle ID",
+    "category": "App category",
+    "app_icp": "App ICP filing",
+    "method": "HTTP method GET/POST/PUT/…",
+    "service_type": "Service type: http | other",
+    "record_type": "DNS record type A/CNAME/MX/…",
+    "technology": "Technology fingerprint (array field)",
+    "port": "Port number (integer)",
+    "status_code": "HTTP status code (integer)",
+    "company_id": "Owning company ID (integer)",
+    "task_id": "Source task ID (integer)"
+  },
+  "opDesc": {
+    "fuzzy match": "fuzzy match",
+    "exact match": "exact match",
+    "exclude": "exclude",
+    "equals": "equals",
+    "not equals": "not equals",
+    "greater than": "greater than",
+    "greater than or equal": "greater than or equal",
+    "less than": "less than",
+    "less than or equal": "less than or equal"
+  },
+  "logicDesc": {
+    "AND": "AND (both conditions must match)",
+    "OR": "OR (either one matches)"
+  }
+}

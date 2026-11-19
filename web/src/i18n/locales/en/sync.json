@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "Asset sync",
+    "subtitle": "Sync assets into the store from external data sources"
+  },
+  "panel": {
+    "notReady": "Once the data source is ready, you can pick projects / tasks to sync."
+  },
+  "dataSource": {
+    "title": "Data source status",
+    "refresh": "Refresh",
+    "noneYet": "No ScopeSentry data source yet. Creating one adds a placeholder MCP (empty URL/key, disabled).",
+    "create": "Create data source",
+    "notConfigured": "The data source is created but not configured; fill in the MCP URL and API key, then enable it.",
+    "notEnabled": "The data source is configured but not enabled; it will be enabled automatically on save.",
+    "apiKeyLabel": "API Key (X-API-Key; leave empty to keep the current value)",
+    "save": "Save & enable",
+    "toolsDiscovered": "{count} tools discovered"
+  },
+  "status": {
+    "checking": "Checking…",
+    "notCreated": "Not created",
+    "notConfigured": "Not configured",
+    "notEnabled": "Not enabled",
+    "connected": "Connected",
+    "unreachable": "Unreachable"
+  },
+  "workbench": {
+    "title": "Pick data to sync",
+    "byProject": "By project",
+    "byTask": "By task",
+    "assetsToSync": "Assets to sync:",
+    "createCompany": "Create a company per project and write its asset scope",
+    "searchProject": "Search project names",
+    "searchTask": "Search task names",
+    "selectedCount": "{count} selected",
+    "syncSelected": "Sync selected",
+    "assetType": {
+      "subdomain": "Subdomain",
+      "service": "Service",
+      "app": "App"
+    }
+  },
+  "table": {
+    "projectName": "Project name",
+    "taskName": "Task name",
+    "tag": "Tag",
+    "assets": "Assets",
+    "status": "Status",
+    "time": "Time",
+    "loading": "Loading…",
+    "noData": "No data"
+  },
+  "pagination": {
+    "previous": "Previous",
+    "page": "Page {page}",
+    "next": "Next"
+  },
+  "result": {
+    "companies": "Companies created/updated: {companies}",
+    "errorsTotal": "… {count} errors in total"
+  },
+  "toasts": {
+    "statusReadFailed": "Failed to read data source status: {message}",
+    "created": "ScopeSentry data source created; fill in the URL and key",
+    "createFailed": "Create failed: {message}",
+    "enterUrl": "Please enter the MCP URL",
+    "savedEnabled": "Data source saved and enabled",
+    "savedNotEnabled": "Saved (enable conditions not yet met)",
+    "saveFailed": "Save failed: {message}",
+    "selectProject": "Select at least one project",
+    "selectTask": "Select at least one task",
+    "selectAssetType": "Select at least one asset type",
+    "syncFinished": "Sync finished; {count} assets ingested in total",
+    "syncFailed": "Sync failed: {message}",
+    "loadListFailed": "Failed to load the list: {message}"
+  }
+}

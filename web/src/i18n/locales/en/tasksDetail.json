@@ -1,0 +1,62 @@
+{
+  "tabs": {
+    "sessions": "Sessions",
+    "overview": "Overview",
+    "graph": "Exploration graph",
+    "broadcast": "Broadcast",
+    "findings": "Findings",
+    "retests": "Retests",
+    "assets": "Test assets",
+    "credentials": "Credentials",
+    "coverage": "Asset coverage",
+    "intercept": "Interception approval",
+    "report": "Report"
+  },
+  "llm": {
+    "chainExhausted": "Configuration chain exhausted",
+    "workerRotation": "Worker rotation ({count})",
+    "configNumber": "Config #{id}",
+    "followDefault": "Follow default config",
+    "backupsCount": "{count} backups",
+    "editorDescription": "Rotation changes apply to new worker intents. Profile changes apply to subsequent LLM calls; in-flight calls keep their provider. Saving resets exhausted profiles.",
+    "editorDescriptionTerminal": "The task has ended; changes only affect subsequent main agent conversations.",
+    "save": "Save",
+    "saveAndReset": "Save and reset",
+    "saving": "Saving",
+    "updatedWithReopened": "LLM configs updated and {count} quota-blocked intents reopened",
+    "updated": "LLM configs updated",
+    "updateFailed": "Update failed: {message}",
+    "triggerAriaLabel": "View or switch the task LLM config",
+    "chainTitle": "Task LLM config chain",
+    "rotationOnSuffix": " · Worker rotation on",
+    "quotaExhaustedTitle": "Configuration chain quota exhausted",
+    "quotaExhaustedFallback": "All selected configs were judged to be out of quota. Saving the chain resets the failure state.",
+    "close": "Close"
+  },
+  "toasts": {
+    "explorationPaused": "Exploration paused",
+    "explorationResumed": "Exploration resumed",
+    "operationFailed": "Operation failed: {message}",
+    "archiveQueued": "Task queued for archiving",
+    "archiveFailed": "Archive failed: {message}"
+  },
+  "notFound": "Task {id} was deleted, archived, or does not exist",
+  "loading": "Loading…",
+  "backToTaskList": "Back to task list",
+  "archive": {
+    "reasonQueued": "Queued tasks must be paused first",
+    "reasonRunning": "Running tasks must be paused first",
+    "reasonBlocked": "The task is directly inherited by unarchived task #{id}; archive the dependent task first",
+    "ariaLabel": "Archive task",
+    "dialogTitle": "Archive task #{id}?",
+    "dialogDescription": "The task graph, related records, exclusive assets and traffic, working files, and LLM history will be compressed into cold storage. Once archiving completes, restore it from the \"Archived\" tab of the task list.",
+    "cancel": "Cancel",
+    "confirm": "Confirm archive"
+  },
+  "control": {
+    "pause": "Pause",
+    "completed": "Completed",
+    "ended": "Ended",
+    "resume": "Resume"
+  }
+}

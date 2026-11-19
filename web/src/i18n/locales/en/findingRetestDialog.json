@@ -1,0 +1,15 @@
+{
+  "title": "Retest vulnerability #{id}",
+  "agentDescription": "Retest Agent Reads the original evidence and test constraints, then runs targeted verification in a separate session. When the retest completes successfully and confirms the fix, the vulnerability status automatically becomes \"Fixed\"; other verdicts keep the current status.",
+  "notesLabel": "Notes (optional)",
+  "notesPlaceholder": "e.g. verify the original endpoint with the original test account; fix version is v2.",
+  "notesDescription": "Add the fix version, test conditions, or limitations of this run.",
+  "cancel": "Cancel",
+  "start": "Start retest",
+  "creating": "Creating…",
+  "toasts": {
+    "started": "Retest started; click 'Retesting' to view the session",
+    "alreadyRunning": "This vulnerability is already being retested; view the existing session",
+    "startError": "Failed to start retest: {message}"
+  }
+}

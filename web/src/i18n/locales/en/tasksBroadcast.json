@@ -1,0 +1,87 @@
+{
+  "search": {
+    "placeholder": "Search content / source / node id",
+    "ariaLabel": "Search broadcasts"
+  },
+  "filters": {
+    "clear": "Clear"
+  },
+  "sort": {
+    "newest": "Newest first",
+    "oldest": "Oldest first",
+    "ariaToOldest": "Currently newest first; click to switch to oldest first",
+    "ariaToNewest": "Currently oldest first; click to switch to newest first"
+  },
+  "refresh": {
+    "auto": "Auto-refresh",
+    "paused": "Paused",
+    "ariaPause": "Pause auto-refresh",
+    "ariaResume": "Resume auto-refresh"
+  },
+  "unread": {
+    "banner": "{count} new broadcasts · Back to latest"
+  },
+  "empty": {
+    "noMatch": "No broadcasts match the filters.",
+    "noNodes": "This task has not produced any exploration nodes yet."
+  },
+  "group": {
+    "unknownDate": "Unknown date"
+  },
+  "entry": {
+    "new": "New",
+    "deletionReason": "Deletion reason",
+    "payload": "payload",
+    "upstream": "Upstream · comes from these",
+    "downstream": "Downstream · produced by this",
+    "noSummary": "(no summary)",
+    "assetsInvolved": "Assets involved · {count}",
+    "nodeLabel": "Node #{id}"
+  },
+  "fields": {
+    "node": "Node",
+    "type": "Type",
+    "source": "Source"
+  },
+  "kind": {
+    "begin": "Start",
+    "task": "Root task",
+    "goal": "Goal",
+    "intent": "Intent",
+    "fact": "Fact",
+    "finding": "Vulnerability",
+    "hint": "Hint",
+    "digest": "Digest"
+  },
+  "rel": {
+    "spawns": "Spawns",
+    "derived_from": "Intent chain",
+    "yields": "Yields",
+    "proves": "Proves",
+    "covers": "Compresses"
+  },
+  "state": {
+    "fact": {
+      "origin": "Start",
+      "confirmed": "Confirmed",
+      "dismissed": "Dismissed"
+    },
+    "finding": {
+      "confirmed": "Confirmed",
+      "dismissed": "Excluded"
+    },
+    "hint": {
+      "active": "Pending adoption",
+      "consumed": "Adopted"
+    },
+    "digest": {
+      "active": "Active",
+      "superseded": "Superseded"
+    }
+  },
+  "pagination": {
+    "perPage": "{n} / page",
+    "prevPage": "Previous page",
+    "nextPage": "Next page"
+  }
+}

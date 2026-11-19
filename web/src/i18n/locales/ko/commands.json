@@ -1,0 +1,40 @@
+{
+  "header": {
+    "title": "도구 실행"
+  },
+  "toolbar": {
+    "searchPlaceholder": "도구 / 인수 검색...",
+    "taskIdPlaceholder": "작업 ID",
+    "perPage": "{n} / 페이지",
+    "stats": "통계"
+  },
+  "table": {
+    "columns": {
+      "time": "시간",
+      "task": "작업",
+      "worker": "워커",
+      "tool": "도구",
+      "input": "입력",
+      "status": "상태"
+    },
+    "empty": "아직 도구 실행 기록이 없습니다"
+  },
+  "status": {
+    "failed": "실패",
+    "success": "성공"
+  },
+  "stats": {
+    "title": "도구 호출 통계",
+    "descFiltered": "현재 필터에 해당하는 모든 기록",
+    "descAll": "모든 도구 실행 기록",
+    "summary": "도구 <num>{tools}</num>개 · 호출 <num>{calls}</num>회",
+    "failedSummary": " · 실패 <err>{errors}</err>",
+    "empty": "통계 데이터가 없습니다"
+  },
+  "detail": {
+    "title": "도구 실행 세부 정보",
+    "input": "입력",
+    "output": "출력",
+    "empty": "(비어 있음)"
+  }
+}

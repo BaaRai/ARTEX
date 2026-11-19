@@ -1,0 +1,63 @@
+{
+  "page": {
+    "subtitle": "외부 MCP 도구 서버 · 에이전트별로 표시 권한 부여"
+  },
+  "card": {
+    "add": "MCP 추가",
+    "down": "다운: {detail}",
+    "connectFailed": "연결 실패",
+    "ok": "정상 {time}",
+    "notConnected": "아직 연결되지 않음",
+    "enableAria": "활성화",
+    "deleteAria": "삭제",
+    "noTools": "아직 발견된 도구가 없습니다",
+    "visibility": "표시 권한 (에이전트별 부여)"
+  },
+  "form": {
+    "transport": "전송 방식",
+    "transportStdio": "stdio (로컬)",
+    "transportHttp": "http (원격)",
+    "transportSse": "sse (레거시)",
+    "name": "이름",
+    "command": "명령",
+    "argsLabel": "인수 (공백으로 구분)",
+    "remoteUrl": "원격 URL",
+    "skipTls": "TLS 인증서 검증 건너뛰기 (자체 서명 인증서)",
+    "timeout": "요청 제한 시간 (초, 기본값 120)",
+    "headersLabel": "요청 헤더 (한 줄에 KEY=VALUE 하나, 예: Authorization=Bearer xxx)",
+    "envLabel": "환경 변수 (한 줄에 KEY=VALUE 하나)"
+  },
+  "tools": {
+    "count": "도구 {count}개",
+    "refresh": "새로 고침",
+    "loading": "불러오는 중…",
+    "empty": "아직 발견된 도구가 없습니다. 새로 고침을 클릭하여 다시 가져오세요."
+  },
+  "tabs": {
+    "config": "설정",
+    "tools": "도구"
+  },
+  "sheet": {
+    "addTitle": "MCP 서버 추가",
+    "description": "stdio (로컬 프로세스) 또는 http (원격 Streamable HTTP)"
+  },
+  "actions": {
+    "save": "저장",
+    "add": "추가"
+  },
+  "toasts": {
+    "fillName": "이름을 입력하세요",
+    "fillCommand": "명령을 입력하세요",
+    "fillUrl": "원격 URL을 입력하세요",
+    "saved": "저장되었습니다",
+    "added": "MCP 서버가 추가되었습니다",
+    "saveFailed": "저장 실패: {message}",
+    "toolsFound": "도구 {count}개를 발견했습니다",
+    "refreshFailed": "새로 고침 실패: {message}",
+    "deleted": "삭제됨: {name}",
+    "deleteFailed": "삭제 실패: {message}",
+    "operationFailed": "작업 실패: {message}",
+    "visibilityGranted": "\"{name}\"에 표시 권한을 부여했습니다",
+    "visibilityRevoked": "\"{name}\"의 표시 권한을 해제했습니다"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "button": {
+    "label": "사이드 질문",
+    "title": "/btw 사이드 질문"
+  },
+  "panel": {
+    "ariaLabel": "사이드 질문 패널",
+    "heading": "사이드 질문 <btw>/btw</btw>",
+    "clearHistoryAriaLabel": "사이드 질문 기록 지우기",
+    "closeAriaLabel": "사이드 질문 패널 닫기"
+  },
+  "snapshot": {
+    "contextUpdated": "컨텍스트 업데이트 {time}",
+    "waiting": "메인 에이전트의 첫 실행 후 언제든지 질문하세요"
+  },
+  "status": {
+    "running": "답변 중",
+    "completed": "완료",
+    "failed": "실패",
+    "cancelled": "중지됨",
+    "interrupted": "중단됨"
+  },
+  "loadEarlier": "이전 사이드 Q&A 불러오기",
+  "empty": {
+    "title": "언제든지 질문하세요",
+    "description": "메인 작업이 계속 실행되는 동안 현재 에이전트의 컨텍스트에서 답변합니다."
+  },
+  "item": {
+    "contextTime": "컨텍스트 {time}",
+    "recentExchanges": "최근 Q&A 교환 {count}개 원문 그대로",
+    "historySummarized": " · 이전 Q&A 요약됨",
+    "snapshotSummarized": " · 메인 컨텍스트 요약본 사용"
+  },
+  "preparationLabels": {
+    "preparing": "컨텍스트 준비 중…",
+    "summarizing_history": "이전 사이드 Q&A 요약 중…",
+    "compressing_snapshot": "사이드 질문 컨텍스트 사본 압축 중…",
+    "retrying": "모델 컨텍스트 초과, 축소 후 재시도 중…",
+    "answering": "답변 중…"
+  },
+  "composer": {
+    "ariaLabel": "사이드 질문",
+    "placeholder": "현재 컨텍스트에 대해 질문하세요…",
+    "note": "독립 Q&A · 도구 실행 없음",
+    "stopAriaLabel": "사이드 답변 중지",
+    "sendAriaLabel": "사이드 질문 전송"
+  },
+  "clearDialog": {
+    "title": "사이드 질문 기록을 지우시겠습니까?",
+    "description": "이 에이전트의 사이드 Q&A를 삭제하고 아직 생성 중인 답변을 중지합니다. 메인 세션과 컨텍스트 스냅샷은 유지됩니다.",
+    "cancel": "취소",
+    "confirm": "기록 지우기"
+  },
+  "workspace": {
+    "drawerTitle": "사이드 질문",
+    "drawerDescription": "{label} 독립 Q&A"
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "header": {
+    "title": "Assets",
+    "totalAssets": "<num>{count}</num> assets in total"
+  },
+  "tabs": {
+    "company": "Companies",
+    "root_domain": "Root domains",
+    "ip": "IP",
+    "subdomain": "Subdomains",
+    "app": "Apps",
+    "service": "Services",
+    "endpoint": "Endpoints"
+  },
+  "actions": {
+    "deleteSelected": "Delete selected ({count})",
+    "refresh": "Refresh",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "edit": "Edit"
+  },
+  "companyTable": {
+    "columns": {
+      "company": "Company",
+      "assets": "Assets",
+      "scope": "Asset scope",
+      "actions": "Actions"
+    },
+    "noScope": "No scope set",
+    "deleteAria": "Delete company {name}",
+    "empty": "No companies yet. Click \"Add company\" in the top-right corner and fill in the asset scope; the system will automatically claim matching assets."
+  },
+  "columns": {
+    "domain": "Domain",
+    "icpFiling": "ICP filing",
+    "company": "Company",
+    "cSegment": "C-segment",
+    "boundDomains": "Bound domains",
+    "openPorts": "Open ports",
+    "rootDomain": "Root domain",
+    "recordType": "Record type",
+    "recordValue": "Record value",
+    "appName": "App name",
+    "bundleId": "Bundle ID",
+    "category": "Category",
+    "service": "Service",
+    "port": "Port",
+    "status": "Status",
+    "title": "Title",
+    "fingerprint": "Fingerprint",
+    "auth": "Auth",
+    "method": "Method",
+    "fullUrl": "Full URL",
+    "params": "Params"
+  },
+  "row": {
+    "unassigned": "Unassigned",
+    "deleteAria": "Delete asset {name}"
+  },
+  "pagination": {
+    "perPage": "{n} / page"
+  },
+  "grid": {
+    "noData": "No data.",
+    "loading": "Loading…"
+  },
+  "delete": {
+    "title": "Confirm delete",
+    "description": "This will permanently delete <num>{count}</num> asset records. This action cannot be undone.",
+    "confirm": "Confirm delete",
+    "deleting": "Deleting…"
+  },
+  "companyDelete": {
+    "title": "Delete company · {name}",
+    "description": "This will permanently delete the company and its asset scope configuration. This action cannot be undone.",
+    "alsoDeleteAssets": "Also delete all assets under this company",
+    "alsoDeleteAssetsHint": "Leave unchecked to keep the assets and only remove the ownership"
+  },
+  "companyDialog": {
+    "title": "Add company",
+    "description": "Configure the company and its asset scope. Keywords only serve as agent hints and do not automatically assign assets.",
+    "nameLabel": "Company name",
+    "namePlaceholder": "e.g. Acme Corp (name must be unique)"
+  },
+  "scope": {
+    "reasonLabel": "Attribution basis (optional)",
+    "reasonPlaceholder": "e.g. certificate / whois / ASN evidence"
+  },
+  "editScope": {
+    "title": "Edit asset scope · {name}",
+    "description": "Saving replaces all existing scopes. ICP matches assets exactly; company keywords only serve as agent hints.",
+    "overwriteSave": "Overwrite save"
+  },
+  "appendScope": {
+    "action": "Append",
+    "title": "Append asset scope · {name}",
+    "description": "New scopes are appended to the existing ones. ICP matches assets exactly; company keywords only serve as agent hints."
+  },
+  "toasts": {
+    "deleted": "Deleted {count} assets",
+    "deleteFailed": "Delete failed: {error}",
+    "companyDeleted": "Company deleted",
+    "companyDeletedWithAssets": "Company deleted, along with {count} assets",
+    "enterCompanyName": "Please enter a company name",
+    "fixInvalidScope": "Please fix the invalid asset scope",
+    "companyCreated": "Company created, {added} scopes added",
+    "companyCreatedWithInvalid": "Company created, {added} scopes added; {invalid} invalid lines",
+    "companyExists": "Company already exists; try a different name",
+    "saveFailed": "Save failed: {error}",
+    "savedWithInvalid": "Saved; {count} invalid lines",
+    "scopeUpdated": "Scope updated, {count} entries in total",
+    "enterScopesToAppend": "Please enter the scopes to append",
+    "scopeAppended": "Appended {count} scopes"
+  }
+}

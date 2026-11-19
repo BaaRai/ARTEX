@@ -1,0 +1,48 @@
+{
+  "common": {
+    "loading": "Loading…"
+  },
+  "liveStreaming": "Live streaming…",
+  "intercept": {
+    "approvalRequest": "Approval request",
+    "historyReadOnly": "History · Read-only",
+    "status": {
+      "allowed": "Allowed",
+      "timedOut": "Timed out",
+      "denied": "Denied"
+    },
+    "allow": "Allow",
+    "deny": "Deny",
+    "expandDetails": "Expand approval details",
+    "collapseDetails": "Collapse approval details",
+    "retryDetails": "Retry details",
+    "loadingDetails": "Loading approval details…",
+    "loadFailed": "Failed to load approval details",
+    "toastAllowed": "Execution allowed",
+    "toastDenied": "Execution denied"
+  },
+  "tool": {
+    "running": "Running…",
+    "failed": "✕ Failed",
+    "focusedAria": "Focused tool call #{seq}"
+  },
+  "kindLabel": {
+    "thinking": "Thinking",
+    "result": "Summary",
+    "note": "Note"
+  },
+  "round": {
+    "new": "New round"
+  },
+  "segment": {
+    "command": "Command",
+    "output": "Output"
+  },
+  "message": {
+    "includesThinking": "· includes thinking"
+  },
+  "user": {
+    "targetDerivedTooltip": "This request names hosts that are not in the task goal; they may come from target content.",
+    "targetDerivedText": "Contains target-derived text: {hosts}"
+  }
+}

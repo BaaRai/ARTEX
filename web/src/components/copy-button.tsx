@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -23,12 +24,13 @@ type CopyButtonProps = {
 // contexts it degrades automatically (see copyText).
 export function CopyButton({
   text,
-  successMessage = "Copied",
-  label = "Copy",
+  successMessage,
+  label,
   size = "sm",
   variant = "outline",
   className,
 }: CopyButtonProps) {
+  const t = useTranslations("copyButton");
   const [copied, setCopied] = React.useState(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -43,25 +45,18 @@ export function CopyButton({
     const ok = await copyText(text);
     if (ok) {
       setCopied(true);
-      toast.success(successMessage);
+      toast.success(successMessage ?? t("toasts.copied"));
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 1500);
     } else {
-      toast.error("Copy failed; select the text manually to copy");
+      toast.error(t("toasts.copyFailed"));
     }
   }
 
   return (
-    <Button
-      type="button"
-      size={size}
-      variant={variant}
-      className={cn(className)}
-      disabled={!text}
-      onClick={handleCopy}
-    >
+    <Button type="button" size={size} variant={variant} className={cn(className)} disabled={!text} onClick={handleCopy}>
       {copied ? <CheckIcon /> : <CopyIcon />}
-      {label}
+      {label ?? t("copy")}
     </Button>
   );
 }

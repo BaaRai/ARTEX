@@ -1,0 +1,210 @@
+{
+  "page": {
+    "title": "Notifications",
+    "subtitle": "Push findings to DingTalk / Feishu / WeCom and other channels · each channel has its own delivery timing and filter rules",
+    "masterSwitch": "Master switch",
+    "masterSwitchAria": "Push master switch",
+    "stats": {
+      "channels": "Channels",
+      "channelsHint": "On / total",
+      "sentToday": "Sent today",
+      "pending": "Pending",
+      "failed": "Failed",
+      "oldestBacklog": "Oldest backlog",
+      "backlogStuckHint": "Push may be stuck"
+    },
+    "global": {
+      "title": "Global settings",
+      "linkBackUrl": "Link-back URL",
+      "linkBackHelp": "The address the \"View details\" button in messages points to. Leave empty to omit the button.",
+      "digestInterval": "Digest interval (minutes)",
+      "digestHelp": "Only applies to channels in \"digest\" mode.",
+      "summaryLength": "Summary length (characters)",
+      "summaryHelp": "Longest finding summary shown in a message, 0–{max}. 0 = no truncation.",
+      "assetsListed": "Assets listed per finding",
+      "assetsHelp": "Most asset names listed for a finding, 0–{max}. 0 = no truncation (all assets listed).",
+      "save": "Save global settings"
+    },
+    "tabs": {
+      "channels": "Channels",
+      "deliveryLog": "Delivery log"
+    },
+    "channels": {
+      "add": "Add channel",
+      "disabled": "Disabled",
+      "enableAria": "Enable",
+      "deleteAria": "Delete"
+    },
+    "mode": {
+      "digest": "Digest",
+      "realtime": "Realtime"
+    },
+    "form": {
+      "addTitle": "Add notification channel",
+      "defaultRateLimit": " · default rate limit {rate}/min",
+      "noRateLimit": " · no rate limit",
+      "channelType": "Channel type",
+      "typeLocked": "The channel type cannot be changed — a different type means a different set of credentials; create a new channel instead.",
+      "channelName": "Channel name",
+      "namePlaceholder": "Incident response group / Daily broadcast group",
+      "noFieldsDefined": "The form for this channel type is not defined yet (the frontend is missing a CHANNEL_FIELDS entry); add it and retry.",
+      "deliveryTiming": "Delivery timing",
+      "modeRealtime": "Realtime · one message per finding",
+      "modeDigest": "Digest · merged into one message per interval",
+      "modeHelp": "For \"realtime for High, digest for the rest\", create two channels: one realtime with a High threshold, one digest with no severity limit.",
+      "rateLimit": "Rate limit (messages/min)",
+      "rateUnlimited": "0 = unlimited",
+      "rateHelp": "Leave empty to use the channel default; 0 means no limit. Going over the limit never drops messages, only delays them.",
+      "filterRules": "Filter rules (empty = no filtering)",
+      "minSeverity": "Minimum severity",
+      "includeLabel": "Only these vulnerability types",
+      "includePlaceholder": "SQL injection\ncommand execution",
+      "includeHelp": "One keyword per line, matched case-insensitively as a substring. Leave empty for all types.",
+      "excludeLabel": "Exclude these vulnerability types",
+      "excludePlaceholder": "Information disclosure",
+      "excludeHelp": "Exclusion beats inclusion: an item matching both is excluded.",
+      "taskIds": "Restrict to task IDs",
+      "assetIds": "Restrict to asset IDs",
+      "idsHelp": "Empty task/asset = no restriction; when filled, the finding must intersect them.",
+      "statusChangeAria": "Include status changes",
+      "statusChangeLabel": "Also push when a finding's status changes (realtime mode only)",
+      "enableAria": "Enable",
+      "enableChannel": "Enable this channel",
+      "save": "Save",
+      "add": "Add",
+      "sendTest": "Send test message"
+    },
+    "toasts": {
+      "loadMetaFailed": "Failed to load notification settings: {message}",
+      "loadLimitsFailed": "Failed to load message limits: {message}",
+      "loadChannelsFailed": "Failed to load channels: {message}",
+      "nameRequired": "Please fill in a channel name",
+      "saved": "Saved",
+      "channelAdded": "Channel added",
+      "saveFailed": "Save failed: {message}",
+      "testSent": "Test message sent ({ms} ms); check the group to confirm",
+      "testFailed": "Test failed: {message}",
+      "deleted": "Deleted: {name}",
+      "deleteFailed": "Delete failed: {message}",
+      "operationFailed": "Operation failed: {message}",
+      "pushEnabled": "Push enabled",
+      "pushPaused": "Push paused",
+      "summaryRangeError": "Summary length must be a whole number between 0 and {max}",
+      "assetsRangeError": "Assets listed must be a whole number between 0 and {max}"
+    }
+  },
+  "channelForm": {
+    "saved": "Saved · enter a new value to overwrite, clear to remove it",
+    "savedWithTail": "Saved (tail {tail}) · enter a new value to overwrite, clear to remove it",
+    "filterSummary": {
+      "typeKeywords": "{count} type keywords",
+      "excludeKeywords": "excludes {count} keywords",
+      "tasks": "{count} tasks",
+      "assets": "{count} assets",
+      "statusChanges": "includes status changes",
+      "allVulns": "All vulnerabilities"
+    }
+  },
+  "channelFields": {
+    "dingtalk": {
+      "webhook": { "label": "Webhook URL" },
+      "secret": {
+        "label": "Signing secret",
+        "help": "Fill in when the robot's security settings use 'Sign'; leave empty for 'Custom keywords' or when no security setting is enabled"
+      }
+    },
+    "feishu": {
+      "webhook": { "label": "Webhook URL" },
+      "secret": {
+        "label": "Signature verification secret",
+        "help": "Fill in when the robot enables 'Signature verification'; otherwise leave empty"
+      }
+    },
+    "wecom": {
+      "webhook": { "label": "Webhook URL" }
+    },
+    "webhook": {
+      "url": { "label": "Target URL" },
+      "method": {
+        "label": "HTTP method",
+        "options": {
+          "POST": "POST (with body)",
+          "PUT": "PUT (with body)",
+          "PATCH": "PATCH (with body)",
+          "GET": "GET (no body)"
+        }
+      },
+      "headers": {
+        "label": "Custom headers",
+        "help": "One KEY=VALUE per line, e.g. Authorization=Bearer xxx"
+      },
+      "body_template": {
+        "label": "Body template",
+        "help": "Leave empty to use the built-in default template. Variables: '{{.Title}}' '{{.Batch}}' '{{.Count}}' '{{.HomeURL}}' '{{.SentAt}}', plus .Name/.VulnClass/.Severity/.Summary/.Assets/.DetailURL/.StatusLabel under range .Items. Use '{{json .Xxx}}' instead of '{{.Xxx}}' to insert strings, or quotes in titles will break the JSON."
+      }
+    },
+    "telegram": {
+      "bot_token": { "label": "Bot Token" },
+      "chat_id": { "label": "Chat ID" },
+      "base_url": {
+        "label": "API URL",
+        "help": "Leave empty for the official URL; fill in when proxying a self-hosted Bot API"
+      }
+    },
+    "email": {
+      "host": { "label": "SMTP server" },
+      "port": {
+        "label": "Port",
+        "help": "587 uses STARTTLS; for 465 turn 'Implicit TLS' on"
+      },
+      "username": { "label": "Account" },
+      "password": { "label": "Password / auth code" },
+      "from": { "label": "From" },
+      "to": {
+        "label": "Recipients",
+        "help": "Separate multiple addresses with commas"
+      },
+      "tls": {
+        "label": "Implicit TLS",
+        "help": "On for port 465; keep off for 587 (STARTTLS is automatic)"
+      }
+    }
+  },
+  "kindLabel": {
+    "dingtalk": "DingTalk",
+    "feishu": "Feishu",
+    "wecom": "WeCom",
+    "webhook": "Generic Webhook",
+    "telegram": "Telegram",
+    "email": "Email"
+  },
+  "severityOption": {
+    "all": "All severities",
+    "low": "Low and above",
+    "medium": "Medium and above",
+    "high": "High and above",
+    "critical": "Critical only"
+  },
+  "deliveryList": {
+    "allChannels": "All channels",
+    "allStatuses": "All statuses",
+    "refresh": "Refresh",
+    "total": "{count} in total",
+    "colTime": "Time",
+    "colVulnerability": "Vulnerability",
+    "colChannel": "Channel",
+    "colStatus": "Status",
+    "colAttempts": "Attempts",
+    "colError": "Error",
+    "loading": "Loading…",
+    "empty": "No delivery records",
+    "untitled": "(untitled)",
+    "statusChange": "Status change",
+    "retry": "Retry",
+    "previous": "Previous",
+    "next": "Next",
+    "loadFailed": "Failed to load delivery records: {message}",
+    "requeued": "Re-queued",
+    "retryFailed": "Retry failed: {message}"
+  }
+}

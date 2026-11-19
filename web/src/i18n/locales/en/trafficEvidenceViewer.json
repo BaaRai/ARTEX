@@ -1,0 +1,23 @@
+{
+  "evidence": {
+    "title": "Traffic evidence #{id}",
+    "descriptionFallback": "View the request and response saved at binding time"
+  },
+  "captured": {
+    "title": "Traffic preview",
+    "description": "Traffic ID: {id}. The full body is saved when binding."
+  },
+  "tabs": {
+    "request": "Request",
+    "response": "Response"
+  },
+  "body": {
+    "size": "Body {size} bytes",
+    "previewSuffix": " · preview"
+  },
+  "download": {
+    "request": "Download full request body",
+    "response": "Download full response body"
+  },
+  "loadMore": "Load more body"
+}

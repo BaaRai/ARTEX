@@ -1,0 +1,23 @@
+{
+  "title": "System logs",
+  "subtitle": "Live backend log stream (planner / worker / database / traffic …)",
+  "filterPlaceholder": "Filter (text / tag)…",
+  "filter": {
+    "all": "All"
+  },
+  "buttons": {
+    "pause": "Pause",
+    "paused": "Paused",
+    "clear": "Clear"
+  },
+  "stats": {
+    "lines": "{count} lines",
+    "warnings": "{count} warnings",
+    "errors": "{count} errors"
+  },
+  "history": {
+    "loading": "Loading…",
+    "loadOlder": "Load older logs"
+  },
+  "empty": "No logs yet."
+}

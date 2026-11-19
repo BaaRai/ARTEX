@@ -1,0 +1,7 @@
+{
+  "copy": "Copy",
+  "toasts": {
+    "copied": "Copied",
+    "copyFailed": "Copy failed; select the text manually to copy"
+  }
+}

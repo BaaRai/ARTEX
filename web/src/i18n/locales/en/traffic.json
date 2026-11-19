@@ -1,0 +1,150 @@
+{
+  "page": {
+    "title": "Traffic",
+    "subtitle": "Global recording proxy · all HTTP traffic",
+    "status": {
+      "recording": "Recording",
+      "disabled": "Disabled"
+    },
+    "records": "<num>{count}</num> records",
+    "toolbar": {
+      "selectTargets": "Select targets…",
+      "selectTargetsCount": "Select targets ({count})",
+      "hostPlaceholder": "host…",
+      "deleteThisTarget": "Delete this target",
+      "deleteHostDisabledHint": "Select a target on the left or enter a host first",
+      "purgeAll": "Purge all",
+      "purgeAllHint": "Delete all traffic and compact storage",
+      "purgeAllHintEmpty": "No traffic records yet",
+      "searchPlaceholder": "Search everything (URL / method / type / status…)",
+      "allMethods": "All methods",
+      "perPage": "{n} / page"
+    },
+    "picker": {
+      "title": "Batch delete by target",
+      "sortDescToAsc": "Packet count is currently descending; click to switch to ascending",
+      "sortAscToDesc": "Packet count is currently ascending; click to switch to descending",
+      "sortTooltip": "By packet count, {direction}",
+      "descending": "descending",
+      "ascending": "ascending",
+      "selectAll": "Select all",
+      "clearAll": "Clear all",
+      "empty": "No traffic records",
+      "deleteSelected": "Delete selected ({count})"
+    },
+    "filters": {
+      "title": "Advanced filters",
+      "bodyPlaceholder": "Response content (body keyword, ≥3 chars)",
+      "pathPlaceholder": "Path (e.g. /api/user/…)",
+      "statusPlaceholder": "Status",
+      "allStatuses": "All statuses",
+      "responseSize": "Response size",
+      "minPlaceholder": "Min (B)",
+      "maxPlaceholder": "Max (B)",
+      "clear": "Clear filters"
+    },
+    "selection": {
+      "flowsSelected": "{count} flows selected",
+      "linkToFinding": "Link to finding",
+      "clearSelection": "Clear selection"
+    },
+    "table": {
+      "selectPage": "Select this page''s traffic",
+      "selectRow": "Select traffic {id}",
+      "columns": {
+        "time": "Time",
+        "host": "host",
+        "method": "Method",
+        "status": "Status",
+        "responseSize": "Response size"
+      },
+      "loading": "Loading…",
+      "noMatch": "No matching traffic."
+    },
+    "detail": {
+      "tabs": {
+        "request": "Request",
+        "response": "Response",
+        "stream": "Stream",
+        "replay": "Replay"
+      },
+      "replayUnsupported": "stream replay is not supported",
+      "loadingMessages": "Loading messages…",
+      "loading": "Loading…",
+      "loadFailed": "(failed to load the messages)"
+    },
+    "delete": {
+      "verb": {
+        "purge": "Purge",
+        "delete": "Delete"
+      },
+      "title": {
+        "all": "Purge all traffic records?",
+        "selected": "Delete all traffic for the {count} selected targets?",
+        "filter": "Delete all traffic for this target?"
+      },
+      "desc": {
+        "all": "This will permanently delete all <num>{count}</num> traffic records (including raw requests/responses), ignoring the current filters. This action cannot be undone. Traffic evidence already bound to findings lives in a separate evidence store and is unaffected.<br></br><muted>Purging also compacts storage, returning the index''s disk space to the system; traffic recording pauses briefly during this time.</muted>",
+        "selected": "This will permanently delete all traffic records for <num>{count}</num> targets (<mono>{hosts}</mono>), including raw requests/responses. This action cannot be undone.",
+        "filter": "This will permanently delete all traffic records for hosts containing <mono>{host}</mono> (including raw requests/responses). This action cannot be undone."
+      },
+      "cancel": "Cancel",
+      "button": {
+        "inProgress": "{verb}…",
+        "confirm": "Confirm {verb}"
+      },
+      "toast": {
+        "purged": "Purged {count} traffic records{freed}",
+        "freed": ", freeing {size} of storage",
+        "purgeFailed": "Purge failed: {message}"
+      }
+    }
+  },
+  "replayPanel": {
+    "methodLabel": "Method",
+    "headers": "Headers",
+    "addHeader": "Add header",
+    "hostFromUrl": "Host is taken from the URL.",
+    "notSent": "Not sent (hop-by-hop or recomputed by the server): {headers}",
+    "headerNameLabel": "Header name",
+    "namePlaceholder": "Name",
+    "headerValueLabel": "Header value",
+    "valuePlaceholder": "Value",
+    "removeHeader": "Remove header",
+    "struckThrough": "Struck-through headers are not sent by the server.",
+    "body": "Body",
+    "binaryBody": "The recorded body is binary (it contains NUL bytes). Replaying a binary body is not supported.",
+    "bodyPreviewOnly": "The recorded body was too large to keep inline; only its preview is loaded, so replay is disabled for this exchange.",
+    "send": "Send",
+    "truncated": "truncated",
+    "passthrough": "Passthrough host: the response is shown here but was not recorded.",
+    "resultHeaderCol": "Header",
+    "resultValueCol": "Value",
+    "errorTitles": {
+      "invalidRequest": "Invalid request",
+      "bodyTooLarge": "Request body too large",
+      "proxyError": "Proxy or upstream error",
+      "captureDisabled": "Traffic capture is disabled",
+      "timedOut": "Timed out"
+    },
+    "describeError": {
+      "failed": "Replay failed",
+      "failedWithStatus": "Replay failed ({status})"
+    }
+  },
+  "streamMessages": {
+    "direction": {
+      "c2s": "client -> server",
+      "s2c": "server -> client"
+    },
+    "truncated": "truncated",
+    "limitReached": "Recording limit reached: later messages were not stored",
+    "loadFull": "Load full payload",
+    "messageCount": "{count} of {total} messages",
+    "refresh": "Refresh",
+    "loadingMessages": "Loading messages…",
+    "loadError": "Failed to load messages: {error}",
+    "empty": "No messages recorded for this stream.",
+    "loadMore": "Load more"
+  }
+}

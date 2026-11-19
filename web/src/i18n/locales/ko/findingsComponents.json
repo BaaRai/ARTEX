@@ -1,0 +1,99 @@
+{
+  "assetTree": {
+    "filterPlaceholder": "자산 필터",
+    "refresh": "자산 트리 새로 고침",
+    "allAssets": "전체 자산",
+    "empty": {
+      "default": "현재 필터에서 자산에 연결된 발견 사항이 없습니다.",
+      "loading": "불러오는 중…",
+      "noMatch": "일치하는 자산이 없습니다."
+    },
+    "truncatedHint": "자산이 너무 많습니다. {kinds} 레벨은 숨겨졌습니다(개수는 상위 항목에 합산됩니다). 필터나 필터 상자로 범위를 좁혀 전체 계층을 확인하세요.",
+    "actions": {
+      "collapse": "접기",
+      "expand": "펼치기"
+    },
+    "kind": {
+      "company": "회사",
+      "root_domain": "루트 도메인",
+      "subdomain": "서브도메인",
+      "ip": "IP",
+      "app": "앱",
+      "service": "서비스",
+      "endpoint": "엔드포인트",
+      "none": "미연결"
+    },
+    "tooltips": {
+      "critical": "심각 {count}",
+      "high": "높음 {count}",
+      "total": "총 {count}개 발견 사항"
+    }
+  },
+  "findingsTable": {
+    "columns": {
+      "severity": "심각도",
+      "vulnerability": "취약점",
+      "asset": "자산",
+      "status": "상태",
+      "report": "보고서",
+      "task": "작업",
+      "time": "시간",
+      "actions": "동작"
+    },
+    "selectAllPage": "이 페이지 전체 선택",
+    "selectOne": "이 취약점 선택",
+    "viewDetails": "발견 사항 세부 정보 보기",
+    "uncategorized": "미분류",
+    "trafficEvidence": "트래픽 증거: {count}",
+    "reportState": {
+      "none": "제출 안 됨",
+      "submitted": "제출됨",
+      "accepted": "승인됨",
+      "rejected": "거부됨",
+      "duplicate": "중복 보고서"
+    },
+    "verification": {
+      "verified": "검증됨",
+      "unverified": "미검증",
+      "blocked": "차단됨",
+      "not_assessed": "미평가",
+      "false_positive": "오탐"
+    },
+    "retest": {
+      "viewInProgress": "진행 중인 재검증 보기",
+      "running": "재검증 중",
+      "start": "재검증",
+      "startTitle": "별도 대화에서 이 취약점 재검증"
+    },
+    "deepen": "심화 분석",
+    "delete": {
+      "ariaLabel": "취약점 삭제",
+      "title": "이 취약점을 삭제하시겠습니까?",
+      "description": "\"<name></name>\" 항목이 영구적으로 삭제되며 발견 사항 목록, 작업 발견 사항 탭, 탐색 그래프에서 제거됩니다. 이 작업은 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "삭제"
+    },
+    "edit": {
+      "vulnerability": "취약점",
+      "namePlaceholder": "읽기 쉬운 제목. 비어 있으면 분류로 대체됩니다",
+      "category": "분류",
+      "categoryPlaceholder": "예: SQL Injection",
+      "severity": "심각도",
+      "saving": "저장 중…",
+      "save": "저장"
+    },
+    "evidence": {
+      "label": "증거",
+      "type": "· 유형:",
+      "assets": "· 자산:"
+    },
+    "report": {
+      "label": "상세 보고서",
+      "copied": "상세 보고서가 복사되었습니다",
+      "loading": "불러오는 중…",
+      "error": "보고서를 불러오지 못했습니다.",
+      "empty": "아직 상세 보고서가 없습니다."
+    },
+    "empty": "일치하는 발견 사항이 없습니다."
+  }
+}

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export function ChangePasswordDialog({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("chrome");
   const [oldPassword, setOldPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
@@ -41,21 +43,21 @@ export function ChangePasswordDialog({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!oldPassword || !newPassword) {
-      toast.error("Fill in the current password and the new password");
+      toast.error(t("changePassword.errorFillRequired"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error("The two new passwords do not match");
+      toast.error(t("changePassword.errorMismatch"));
       return;
     }
     setSaving(true);
     api
       .changePassword(oldPassword, newPassword)
       .then(() => {
-        toast.success("Password changed");
+        toast.success(t("changePassword.success"));
         onOpenChange(false);
       })
-      .catch((err) => toast.error(`Change failed: ${(err as Error).message}`))
+      .catch((err) => toast.error(t("changePassword.errorFailed", { message: (err as Error).message })))
       .finally(() => setSaving(false));
   }
 
@@ -64,14 +66,14 @@ export function ChangePasswordDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>Change password</DialogTitle>
+            <DialogTitle>{t("changePassword.title")}</DialogTitle>
             <DialogDescription>
-              The username is fixed as <b>ARTEX</b>. Enter the current password to verify; login tokens issued before the change stay valid until they expire.
+              {t.rich("changePassword.description", { b: (chunks) => <b>{chunks}</b> })}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cp-old">Current password</Label>
+              <Label htmlFor="cp-old">{t("changePassword.current")}</Label>
               <Input
                 id="cp-old"
                 type="password"
@@ -82,7 +84,7 @@ export function ChangePasswordDialog({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cp-new">New password</Label>
+              <Label htmlFor="cp-new">{t("changePassword.new")}</Label>
               <Input
                 id="cp-new"
                 type="password"
@@ -93,7 +95,7 @@ export function ChangePasswordDialog({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cp-confirm">Confirm new password</Label>
+              <Label htmlFor="cp-confirm">{t("changePassword.confirm")}</Label>
               <Input
                 id="cp-confirm"
                 type="password"
@@ -106,10 +108,10 @@ export function ChangePasswordDialog({
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-              Cancel
+              {t("changePassword.cancel")}
             </Button>
             <Button type="submit" disabled={saving}>
-              {saving ? "Changing…" : "Confirm change"}
+              {saving ? t("changePassword.saving") : t("changePassword.submit")}
             </Button>
           </DialogFooter>
         </form>

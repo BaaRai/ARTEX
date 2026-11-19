@@ -1,11 +1,13 @@
+"use client";
+
 import { cn } from "@/lib/utils";
 import {
-  statusMeta,
   toneClasses,
   toneDot,
   type StatusDomain,
   type Tone,
 } from "@/lib/status";
+import { useStatusMeta } from "@/lib/use-status-meta";
 
 export function StatusBadge({
   domain,
@@ -18,6 +20,7 @@ export function StatusBadge({
   dot?: boolean;
   className?: string;
 }) {
+  const statusMeta = useStatusMeta();
   const meta = statusMeta(domain, value);
   return (
     <span

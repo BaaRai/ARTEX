@@ -1,29 +1,16 @@
 "use client";
 
 import * as React from "react";
+
 import type { Graph as G6Graph } from "@antv/g6";
-import {
-  AppWindow,
-  Building2,
-  Globe,
-  Link2,
-  type LucideIcon,
-  Radio,
-  RefreshCw,
-  Server,
-  Waypoints,
-} from "lucide-react";
+import { AppWindow, Building2, Globe, Link2, type LucideIcon, Radio, RefreshCw, Server, Waypoints } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api } from "@/lib/api";
 import type { CoverageAssetRef, CoverageAssetRefs, CoverageGraphEdge, CoverageGraphNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -45,6 +32,11 @@ const kindMeta: Record<Kind, KindMeta> = {
   app: { label: "App", icon: AppWindow, iconBg: "bg-fuchsia-500", hex: "#d946ef", size: 26 },
   endpoint: { label: "Endpoint", icon: Link2, iconBg: "bg-rose-500", hex: "#f43f5e", size: 20 },
 };
+
+// Render the localized kind label via the i18n guard; falls back to the literal English label in kindMeta.
+function kindLabel(t: ReturnType<typeof useTranslations<"tasksCoverage">>, k: Kind): string {
+  return t.has(`kind.${k}`) ? t(`kind.${k}`) : kindMeta[k].label;
+}
 
 // G6 node icons use the platform's lucide icons: render lucide SVG paths (v1.22) as white-stroked
 // data URIs for node iconSrc (white reads well on both solid and gray fills). Hand-inlined to avoid react-dom/server
@@ -211,7 +203,7 @@ function graphLabel(n: CoverageGraphNode): string {
   return n.label;
 }
 
-function toG6Nodes(renderNodes: RenderNode[]): G6NodeDatum[] {
+function toG6Nodes(renderNodes: RenderNode[], t: ReturnType<typeof useTranslations<"tasksCoverage">>): G6NodeDatum[] {
   return renderNodes.map((rn) => {
     if (rn.fold) {
       return {
@@ -220,7 +212,7 @@ function toG6Nodes(renderNodes: RenderNode[]): G6NodeDatum[] {
         fold: true,
         tested: false,
         inScope: false,
-        lbl: `${rn.hidden.length} more ${kindMeta[rn.kind].label}`,
+        lbl: t("canvas.foldMore", { label: kindLabel(t, rn.kind), count: rn.hidden.length }),
         size: 24,
       };
     }
@@ -230,7 +222,7 @@ function toG6Nodes(renderNodes: RenderNode[]): G6NodeDatum[] {
       fold: false,
       tested: rn.node.tested,
       inScope: rn.node.in_scope,
-      lbl: trunc(graphLabel(rn.node) || kindMeta[rn.kind].label),
+      lbl: trunc(graphLabel(rn.node) || kindLabel(t, rn.kind)),
       size: kindMeta[rn.kind].size,
     };
   });
@@ -267,6 +259,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 }
 
 function RefList({ title, items }: { title: string; items: CoverageAssetRef[] }) {
+  const t = useTranslations("tasksCoverage");
   if (items.length === 0) return null;
   return (
     <div>
@@ -284,7 +277,7 @@ function RefList({ title, items }: { title: string; items: CoverageAssetRef[] })
             <span className="min-w-32 flex-1 break-words text-foreground">{r.summary || "—"}</span>
             {r.inherited && r.source_task_id && (
               <Badge variant="outline" className="shrink-0">
-                Source #{r.source_task_id} · read-only
+                {t("ref.inheritedBadge", { id: r.source_task_id ?? "" })}
               </Badge>
             )}
           </div>
@@ -303,6 +296,7 @@ function AssetSheet({
   taskId: string;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("tasksCoverage");
   const meta = node ? kindMeta[node.kind] : null;
   const Icon = meta?.icon;
   const raw = node ? JSON.stringify(node, null, 2) : "";
@@ -331,11 +325,13 @@ function AssetSheet({
           <>
             <SheetHeader className="border-b p-4">
               <div className="flex items-center gap-2.5 pr-8">
-                <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg shadow-sm", meta.iconBg)}>
+                <span
+                  className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg shadow-sm", meta.iconBg)}
+                >
                   <Icon className="size-4 text-white" />
                 </span>
                 <div className="min-w-0">
-                  <SheetTitle className="leading-tight">{meta.label}</SheetTitle>
+                  <SheetTitle className="leading-tight">{kindLabel(t, node.kind)}</SheetTitle>
                   <span className="text-muted-foreground truncate font-mono text-xs" title={node.label}>
                     {node.label}
                   </span>
@@ -345,42 +341,42 @@ function AssetSheet({
             <ScrollArea className="min-h-0 flex-1">
               <div className="flex w-full min-w-0 flex-col gap-4 p-4">
                 <section>
-                  <h4 className="text-muted-foreground mb-1 text-xs font-medium">Properties</h4>
-                  <DetailRow label="Type">{meta.label}</DetailRow>
-                  <DetailRow label="Test status">
+                  <h4 className="text-muted-foreground mb-1 text-xs font-medium">{t("asset.properties")}</h4>
+                  <DetailRow label={t("asset.type")}>{kindLabel(t, node.kind)}</DetailRow>
+                  <DetailRow label={t("asset.testStatus")}>
                     {node.in_scope ? (
                       node.tested ? (
-                        <span className="text-emerald-600 dark:text-emerald-400">Tested</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">{t("asset.tested")}</span>
                       ) : (
-                        <span className="text-neutral-500">Untested</span>
+                        <span className="text-neutral-500">{t("asset.untested")}</span>
                       )
                     ) : (
-                      <span className="text-neutral-400">Out of scope (connecting node)</span>
+                      <span className="text-neutral-400">{t("asset.outOfScopeNode")}</span>
                     )}
                   </DetailRow>
-                  <DetailRow label="Domain">{node.domain}</DetailRow>
-                  <DetailRow label="Root domain">{node.root_domain}</DetailRow>
-                  <DetailRow label="IP">{node.ip}</DetailRow>
-                  <DetailRow label="Port">{node.port ? node.port : undefined}</DetailRow>
-                  <DetailRow label="URL">
+                  <DetailRow label={t("asset.domain")}>{node.domain}</DetailRow>
+                  <DetailRow label={t("asset.rootDomain")}>{node.root_domain}</DetailRow>
+                  <DetailRow label={t("asset.ip")}>{node.ip}</DetailRow>
+                  <DetailRow label={t("asset.port")}>{node.port ? node.port : undefined}</DetailRow>
+                  <DetailRow label={t("asset.url")}>
                     {node.url ? <span className="font-mono text-xs break-all">{node.url}</span> : undefined}
                   </DetailRow>
-                  <DetailRow label="Title">{node.page_title}</DetailRow>
-                  <DetailRow label="Status code">{node.status_code ? node.status_code : undefined}</DetailRow>
-                  <DetailRow label="App">{node.app_name}</DetailRow>
-                  <DetailRow label="Asset ID">
+                  <DetailRow label={t("asset.title")}>{node.page_title}</DetailRow>
+                  <DetailRow label={t("asset.statusCode")}>{node.status_code ? node.status_code : undefined}</DetailRow>
+                  <DetailRow label={t("asset.app")}>{node.app_name}</DetailRow>
+                  <DetailRow label={t("asset.assetId")}>
                     {node.asset_id ? <span className="font-mono text-xs">{node.asset_id}</span> : undefined}
                   </DetailRow>
                 </section>
                 {refs && (refs.intents.length > 0 || refs.facts.length > 0 || refs.findings.length > 0) && (
                   <section className="flex flex-col gap-3 border-t pt-3">
-                    <RefList title="Related intents" items={refs.intents} />
-                    <RefList title="Related facts" items={refs.facts} />
-                    <RefList title="Related findings" items={refs.findings} />
+                    <RefList title={t("asset.relatedIntents")} items={refs.intents} />
+                    <RefList title={t("asset.relatedFacts")} items={refs.facts} />
+                    <RefList title={t("asset.relatedFindings")} items={refs.findings} />
                   </section>
                 )}
                 <section className="border-t pt-3">
-                  <h4 className="text-muted-foreground mb-1.5 text-xs font-medium">Raw data</h4>
+                  <h4 className="text-muted-foreground mb-1.5 text-xs font-medium">{t("asset.rawData")}</h4>
                   <pre className="bg-muted/50 text-foreground max-w-full overflow-hidden rounded-md border p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
                     {raw}
                   </pre>
@@ -405,6 +401,7 @@ function FoldSheet({
   onShowMore: (groupId: string) => void;
   onPick: (n: CoverageGraphNode) => void;
 }) {
+  const t = useTranslations("tasksCoverage");
   const meta = fold ? kindMeta[fold.kind] : null;
   const Icon = meta?.icon;
   return (
@@ -414,9 +411,9 @@ function FoldSheet({
           <>
             <SheetHeader className="border-b p-4">
               <SheetTitle className="text-base">
-                Hidden {meta.label} ({fold.hidden.length})
+                {t("fold.hiddenTitle", { type: kindLabel(t, fold.kind), count: fold.hidden.length })}
               </SheetTitle>
-              <p className="text-muted-foreground text-xs">Tested items are shown first. Click "Show more" to pull the next batch into the graph.</p>
+              <p className="text-muted-foreground text-xs">{t("fold.help")}</p>
             </SheetHeader>
             <ScrollArea className="min-h-0 flex-1">
               <div className="flex flex-col gap-1 p-3">
@@ -445,7 +442,7 @@ function FoldSheet({
             </ScrollArea>
             <div className="border-t p-3">
               <Button className="w-full" variant="outline" onClick={() => onShowMore(fold.groupId)}>
-                Show more (+{FOLD_STEP})
+                {t("fold.showMore", { step: FOLD_STEP })}
               </Button>
             </div>
           </>
@@ -457,6 +454,7 @@ function FoldSheet({
 
 // ---------------------------------------------------------------------------
 function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; coverageEnabled?: boolean }) {
+  const t = useTranslations("tasksCoverage");
   const [data, setData] = React.useState<{
     nodes: CoverageGraphNode[];
     edges: CoverageGraphEdge[];
@@ -506,13 +504,16 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   // Structure signature: rebuild the graph and re-run layout only when the visible node/edge set changes, to avoid needless jitter.
   const sig = React.useMemo(
     () =>
-      `${renderNodes.map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`).sort().join(",")}|${renderEdges.length}`,
+      `${renderNodes
+        .map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`)
+        .sort()
+        .join(",")}|${renderEdges.length}`,
     [renderNodes, renderEdges],
   );
 
   // Maintain gDataRef + renderMapRef (read by events and graph data application).
   gDataRef.current = {
-    nodes: toG6Nodes(renderNodes),
+    nodes: toG6Nodes(renderNodes, t),
     edges: renderEdges.map((e) => ({ source: e.src, target: e.dst })),
   };
   const rmap = new Map<string, RenderNode>();
@@ -644,19 +645,19 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         <div className="flex items-center justify-between gap-3">
           {total > 0 ? (
             <span className="text-muted-foreground">
-              In scope <span className="text-foreground font-semibold tabular-nums">{inScope}</span>
+              {t("legend.inScope")} <span className="text-foreground font-semibold tabular-nums">{inScope}</span>
               {coverageEnabled && (
                 <>
                   {" "}
-                  · Tested{" "}
+                  · {t("legend.tested")}{" "}
                   <span className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{tested}</span>
                 </>
               )}
             </span>
           ) : (
-            <span className="text-muted-foreground">{loading ? "Loading…" : "No in-scope assets yet (anchor the task scope first)"}</span>
+            <span className="text-muted-foreground">{loading ? t("loading") : t("empty")}</span>
           )}
-          <Button variant="ghost" size="icon" className="size-6" onClick={fetchGraph} title="Refresh">
+          <Button variant="ghost" size="icon" className="size-6" onClick={fetchGraph} title={t("refresh")}>
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           </Button>
         </div>
@@ -669,7 +670,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
                 <span className={cn("flex size-4 items-center justify-center rounded", m.iconBg)}>
                   <Icon className="size-2.5 text-white" />
                 </span>
-                {m.label}
+                {kindLabel(t, k)}
               </span>
             );
           })}
@@ -678,20 +679,19 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           {coverageEnabled && (
             <>
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-3 rounded-full bg-emerald-500" /> Tested (highlighted)
+                <span className="size-3 rounded-full bg-emerald-500" /> {t("legend.testedHighlighted")}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-3 rounded-full bg-neutral-400" /> Untested
+                <span className="size-3 rounded-full bg-neutral-400" /> {t("legend.untested")}
               </span>
             </>
           )}
           <span className="inline-flex items-center gap-1.5">
-            <span className="size-3 rounded-full border border-dashed border-neutral-400 bg-neutral-200" /> Out of scope
+            <span className="size-3 rounded-full border border-dashed border-neutral-400 bg-neutral-200" />{" "}
+            {t("legend.outOfScope")}
           </span>
         </div>
-        <p className="text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed">
-          Force-directed layout; drag nodes and scroll to zoom. The gray "⋯" is a fold node — click it to expand more.
-        </p>
+        <p className="text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed">{t("legend.help")}</p>
       </div>
 
       <AssetSheet node={selectedAsset} taskId={taskId} onOpenChange={(o) => !o && setSelectedAsset(null)} />

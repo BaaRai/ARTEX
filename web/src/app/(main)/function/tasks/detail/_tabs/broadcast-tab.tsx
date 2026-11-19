@@ -20,6 +20,7 @@ import {
   SearchIcon,
   TargetIcon,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -29,11 +30,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { setVisibleInterval } from "@/lib/polling";
 import { type Tone, toneClasses, toneDot } from "@/lib/status";
 import { taskAssetTypeLabel } from "@/lib/task-assets";
 import type { Edge, ExploreKind, FindingAsset, NewAssetType, TaskNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { setVisibleInterval } from "@/lib/polling";
 
 const PAGE_SIZES = [20, 50, 100];
 const POLL_MS = 8000;
@@ -160,7 +161,7 @@ function summaryOf(n: TaskNode): string {
 }
 
 function prettyPayload(raw?: string): string {
-  if (!raw?.trim()) return "(no payload)";
+  if (!raw?.trim()) return "(페이로드 없음)";
   try {
     return JSON.stringify(JSON.parse(raw), null, 2);
   } catch {
@@ -177,8 +178,8 @@ function relTime(ts: number, now: number): string {
   return `${Math.floor(sec / 86400)} days ago`;
 }
 
-const dayFmt = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" });
-const clockFmt = new Intl.DateTimeFormat("zh-CN", {
+const dayFmt = new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "short" });
+const clockFmt = new Intl.DateTimeFormat("ko-KR", {
   hour: "2-digit",
   minute: "2-digit",
   second: "2-digit",
@@ -186,6 +187,7 @@ const clockFmt = new Intl.DateTimeFormat("zh-CN", {
 });
 
 function NodeStateBadge({ node }: { node: TaskNode }) {
+  const t = useTranslations("tasksBroadcast");
   if (node.type === "goal") return <StatusBadge domain="goal" value={node.state} dot />;
   if (node.type === "intent") return <StatusBadge domain="intent" value={node.state} dot />;
   const meta = STATE_META[node.type]?.[node.state];
@@ -198,30 +200,40 @@ function NodeStateBadge({ node }: { node: TaskNode }) {
       )}
     >
       <span className={cn("size-1.5 rounded-full", toneDot[meta.tone])} />
-      {meta.label}
+      {t.has(`state.${node.type}.${node.state}`) ? t(`state.${node.type}.${node.state}`) : meta.label}
     </span>
   );
 }
 
 function KindChip({ kind }: { kind: string }) {
+  const t = useTranslations("tasksBroadcast");
   const meta = KIND_META[kind] ?? KIND_META.fact;
   return (
-    <span className={cn("rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap", meta.chip)}>{meta.label}</span>
+    <span className={cn("rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap", meta.chip)}>
+      {t.has(`kind.${kind}`) ? t(`kind.${kind}`) : meta.label}
+    </span>
   );
 }
 
 // Assets anchored to a node: type label + identifiable text. The data ships with the broadcast page (node id → assets),
 // and is shown on expand without extra requests.
 function AssetList({ assets, dense = false }: { assets: FindingAsset[]; dense?: boolean }) {
+  const t = useTranslations("tasksBroadcast");
+  const tAssets = useTranslations("taskAssets");
   if (assets.length === 0) return null;
   return (
     <div>
-      <div className="mb-1.5 text-xs font-medium text-muted-foreground">Assets involved · {assets.length}</div>
+      <div className="mb-1.5 text-xs font-medium text-muted-foreground">
+        {t("entry.assetsInvolved", { count: assets.length })}
+      </div>
       <ul className="flex flex-wrap gap-1.5">
         {assets.map((a) => {
           // At runtime a.type may be a kind not covered by the label table; fall back to the raw string. The type cast keeps the fallback from being flagged as redundant.
           const typeLabel =
-            (taskAssetTypeLabel as (t: NewAssetType) => string | undefined)(a.type as NewAssetType) || a.type;
+            (taskAssetTypeLabel as (type: NewAssetType, tr: typeof tAssets) => string | undefined)(
+              a.type as NewAssetType,
+              tAssets,
+            ) || a.type;
           return (
             <li
               key={a.id}
@@ -244,6 +256,7 @@ function AssetList({ assets, dense = false }: { assets: FindingAsset[]; dense?: 
 // Node card shown when hovering an upstream/downstream entry: type/state/source/time + summary + payload snippet + involved assets.
 // Data comes from refs already fetched on this page — the broadcast API returns neighbor nodes in full.
 function RelatedNodeCard({ node, assets }: { node: TaskNode; assets: FindingAsset[] }) {
+  const t = useTranslations("tasksBroadcast");
   const kind = viewKind(node);
   const meta = KIND_META[kind] ?? KIND_META.fact;
   const ts = Date.parse(node.ts);
@@ -259,11 +272,15 @@ function RelatedNodeCard({ node, assets }: { node: TaskNode; assets: FindingAsse
         )}
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-        <span>Type {meta.label}</span>
-        <span>Source {node.origin || "system"}</span>
-        <span>{Number.isNaN(ts) ? node.ts : new Date(ts).toLocaleString("zh-CN")}</span>
+        <span>
+          {t("fields.type")} {t.has(`kind.${kind}`) ? t(`kind.${kind}`) : meta.label}
+        </span>
+        <span>
+          {t("fields.source")} {node.origin || "system"}
+        </span>
+        <span>{Number.isNaN(ts) ? node.ts : new Date(ts).toLocaleString("ko-KR")}</span>
       </div>
-      <p className="line-clamp-4 text-xs break-words">{summary || "(no summary)"}</p>
+      <p className="line-clamp-4 text-xs break-words">{summary || t("entry.noSummary")}</p>
       <AssetList assets={assets} dense />
       <pre className="max-h-40 overflow-auto rounded border bg-muted/40 p-2 font-mono text-[11px] whitespace-pre-wrap">
         {prettyPayload(node.payload)}
@@ -284,6 +301,7 @@ function RelatedList({
   refs: Record<string, TaskNode>;
   assets: Record<string, FindingAsset[]>;
 }) {
+  const t = useTranslations("tasksBroadcast");
   if (rows.length === 0) return null;
   return (
     <div className="min-w-0 flex-1">
@@ -291,10 +309,11 @@ function RelatedList({
       <ul className="flex flex-col gap-1.5">
         {rows.map((row) => {
           const node = refs[row.id];
+          const relLabel = REL_LABEL[row.rel] ?? row.rel;
           return (
             <li key={`${row.rel}-${row.id}`} className="flex min-w-0 items-center gap-2 text-xs">
               <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
-                {REL_LABEL[row.rel] ?? row.rel}
+                {t.has(`rel.${row.rel}`) ? t(`rel.${row.rel}`) : relLabel}
               </span>
               {node ? (
                 <HoverCard openDelay={150} closeDelay={100}>
@@ -304,7 +323,7 @@ function RelatedList({
                       className="flex min-w-0 cursor-help items-center gap-2 text-left hover:underline"
                     >
                       <KindChip kind={viewKind(node)} />
-                      <span className="truncate">{summaryOf(node) || `Node #${node.id}`}</span>
+                      <span className="truncate">{summaryOf(node) || t("entry.nodeLabel", { id: node.id })}</span>
                     </button>
                   </HoverCardTrigger>
                   <HoverCardContent align="start" className="w-96">
@@ -312,7 +331,7 @@ function RelatedList({
                   </HoverCardContent>
                 </HoverCard>
               ) : (
-                <span className="text-muted-foreground">Node #{row.id}</span>
+                <span className="text-muted-foreground">{t("entry.nodeLabel", { id: row.id })}</span>
               )}
             </li>
           );
@@ -338,6 +357,7 @@ function BroadcastRow({
   fresh: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
+  const t = useTranslations("tasksBroadcast");
   const kind = viewKind(node);
   const meta = KIND_META[kind] ?? KIND_META.fact;
   const Icon = meta.icon;
@@ -387,12 +407,14 @@ function BroadcastRow({
               )}
               {fresh && (
                 <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
-                  New
+                  {t("entry.new")}
                 </span>
               )}
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">{node.origin || "system"}</span>
             </div>
-            <p className={cn("mt-1 text-sm", !open && "line-clamp-2")}>{summary || `Node #${node.id}`}</p>
+            <p className={cn("mt-1 text-sm", !open && "line-clamp-2")}>
+              {summary || t("entry.nodeLabel", { id: node.id })}
+            </p>
           </div>
         </button>
 
@@ -400,27 +422,31 @@ function BroadcastRow({
           <div className="mt-2 ml-5 flex flex-col gap-3 rounded-md border bg-muted/30 p-3">
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <span>
-                Node <code className="font-mono">#{node.id}</code>
+                {t("fields.node")} <code className="font-mono">#{node.id}</code>
               </span>
-              <span>Type {meta.label}</span>
-              <span>Source {node.origin || "system"}</span>
-              <span>{Number.isNaN(ts) ? node.ts : new Date(ts).toLocaleString("zh-CN")}</span>
+              <span>
+                {t("fields.type")} {t.has(`kind.${kind}`) ? t(`kind.${kind}`) : meta.label}
+              </span>
+              <span>
+                {t("fields.source")} {node.origin || "system"}
+              </span>
+              <span>{Number.isNaN(ts) ? node.ts : new Date(ts).toLocaleString("ko-KR")}</span>
             </div>
             {node.state === "deleted" && node.delete_reason && (
               <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs">
-                <span className="font-medium text-destructive">Deletion reason</span>
+                <span className="font-medium text-destructive">{t("entry.deletionReason")}</span>
                 <span className="ml-2 break-words text-muted-foreground">{node.delete_reason}</span>
               </div>
             )}
             <AssetList assets={assets[node.id] ?? []} />
             {(upstream.length > 0 || downstream.length > 0) && (
               <div className="flex flex-col gap-3 sm:flex-row">
-                <RelatedList title="Upstream · comes from these" rows={upstream} refs={refs} assets={assets} />
-                <RelatedList title="Downstream · produced by this" rows={downstream} refs={refs} assets={assets} />
+                <RelatedList title={t("entry.upstream")} rows={upstream} refs={refs} assets={assets} />
+                <RelatedList title={t("entry.downstream")} rows={downstream} refs={refs} assets={assets} />
               </div>
             )}
             <div>
-              <div className="mb-1.5 text-xs font-medium text-muted-foreground">payload</div>
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">{t("entry.payload")}</div>
               <pre className="max-h-64 overflow-auto rounded-md border bg-background p-3 font-mono text-xs whitespace-pre-wrap">
                 {prettyPayload(node.payload)}
               </pre>
@@ -433,6 +459,7 @@ function BroadcastRow({
 }
 
 export function BroadcastTab({ taskId }: { taskId: string }) {
+  const t = useTranslations("tasksBroadcast");
   const [kinds, setKinds] = React.useState<ExploreKind[]>([]);
   const [queryInput, setQueryInput] = React.useState("");
   const [query, setQuery] = React.useState("");
@@ -559,7 +586,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
   const groups: Array<{ day: string; rows: TaskNode[] }> = [];
   for (const node of items) {
     const ts = Date.parse(node.ts);
-    const day = Number.isNaN(ts) ? "Unknown date" : dayFmt.format(ts);
+    const day = Number.isNaN(ts) ? t("group.unknownDate") : dayFmt.format(ts);
     const last = groups[groups.length - 1];
     if (last && last.day === day) last.rows.push(node);
     else groups.push({ day, rows: [node] });
@@ -574,9 +601,9 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
           <Input
             value={queryInput}
             onChange={(e) => setQueryInput(e.target.value)}
-            placeholder="Search content / source / node id"
+            placeholder={t("search.placeholder")}
             className="h-8 pl-8"
-            aria-label="Search broadcasts"
+            aria-label={t("search.ariaLabel")}
           />
         </div>
         <div className="flex flex-wrap items-center gap-1">
@@ -594,7 +621,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
                   active ? meta.chip : "border-transparent text-muted-foreground hover:bg-accent",
                 )}
               >
-                {meta.label}
+                {t.has(`kind.${kind}`) ? t(`kind.${kind}`) : meta.label}
               </button>
             );
           })}
@@ -608,7 +635,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
                 setPage(1);
               }}
             >
-              Clear
+              {t("filters.clear")}
             </Button>
           )}
         </div>
@@ -621,20 +648,20 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
               setOrder((o) => (o === "desc" ? "asc" : "desc"));
               setPage(1);
             }}
-            aria-label={order === "desc" ? "Currently newest first; click to switch to oldest first" : "Currently oldest first; click to switch to newest first"}
+            aria-label={order === "desc" ? t("sort.ariaToOldest") : t("sort.ariaToNewest")}
           >
             {order === "desc" ? <ArrowDownIcon /> : <ArrowUpIcon />}
-            {order === "desc" ? "Newest first" : "Oldest first"}
+            {order === "desc" ? t("sort.newest") : t("sort.oldest")}
           </Button>
           <Button
             variant={live ? "outline" : "secondary"}
             size="sm"
             className="h-8"
             onClick={() => setLive((v) => !v)}
-            aria-label={live ? "Pause auto-refresh" : "Resume auto-refresh"}
+            aria-label={live ? t("refresh.ariaPause") : t("refresh.ariaResume")}
           >
             {live ? <PauseIcon /> : <PlayIcon />}
-            {live ? "Auto-refresh" : "Paused"}
+            {live ? t("refresh.auto") : t("refresh.paused")}
           </Button>
         </div>
       </div>
@@ -647,7 +674,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
           className="flex w-full items-center justify-center gap-1.5 border-b bg-primary/10 py-1.5 text-xs font-medium text-primary hover:bg-primary/15"
         >
           <ArrowUpToLineIcon className="size-3.5" />
-          {pending > 99 ? "99+" : pending} new broadcasts · Back to latest
+          {t("unread.banner", { count: pending > 99 ? "99+" : pending })}
         </button>
       )}
 
@@ -660,7 +687,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
           </div>
         ) : items.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">
-            {query || kinds.length > 0 ? "No broadcasts match the filters." : "This task has not produced any exploration nodes yet."}
+            {query || kinds.length > 0 ? t("empty.noMatch") : t("empty.noNodes")}
           </p>
         ) : (
           groups.map((group) => (
@@ -697,7 +724,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
             <SelectGroup>
               {PAGE_SIZES.map((n) => (
                 <SelectItem key={n} value={String(n)}>
-                  {n} / page
+                  {t("pagination.perPage", { n })}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -712,7 +739,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
             size="icon-sm"
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            aria-label="Previous page"
+            aria-label={t("pagination.prevPage")}
           >
             <ChevronLeftIcon />
           </Button>
@@ -724,7 +751,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
             size="icon-sm"
             disabled={page >= pageCount}
             onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-            aria-label="Next page"
+            aria-label={t("pagination.nextPage")}
           >
             <ChevronRightIcon />
           </Button>

@@ -1,0 +1,17 @@
+{
+  "status": {
+    "unableToLocate": "Unable to locate: {error}",
+    "expanded": "Expanded the tool call for approval #{id}",
+    "loading": "Loading the conversation position of approval #{id}…"
+  },
+  "actions": {
+    "retry": "Retry locate",
+    "cancel": "Cancel locate"
+  },
+  "errors": {
+    "sourceMismatch": "Approval source does not match the current conversation",
+    "originalExecutionNotFound": "Unable to locate the original execution",
+    "toolCallNotFoundDeleted": "Matching tool call not found in the conversation; the record may have been deleted",
+    "toolCallNotFound": "Matching tool call not found in the conversation"
+  }
+}

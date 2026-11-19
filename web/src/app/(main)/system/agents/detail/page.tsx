@@ -5,6 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
+import { useTranslations } from "next-intl";
 import { ArrowLeftIcon } from "lucide-react";
 
 import { AgentEditor } from "@/components/agent-editor";
@@ -14,6 +15,7 @@ import { Button } from "@/components/ui/button";
 // /system/agents; this page reuses the same AgentEditor component full-width so a
 // direct URL (or an external link) still opens the editor.
 function AgentDetailInner() {
+  const t = useTranslations("agents");
   const searchParams = useSearchParams();
   const key = searchParams.get("key") ?? "";
 
@@ -26,7 +28,7 @@ function AgentDetailInner() {
           </Link>
         </Button>
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Agent</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{t("page.title")}</h1>
           <p className="text-muted-foreground font-mono text-xs">{key}</p>
         </div>
       </div>

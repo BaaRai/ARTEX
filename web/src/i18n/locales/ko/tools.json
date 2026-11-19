@@ -1,0 +1,125 @@
+{
+  "page": {
+    "title": "도구",
+    "subtitle": "시스템 도구의 설명/바인딩 및 사용자 지정 도구 (command/script/http)",
+    "searchPlaceholder": "도구 이름, 설명, 에이전트 검색…"
+  },
+  "tabs": {
+    "system": "시스템 도구",
+    "custom": "사용자 지정 도구"
+  },
+  "system": {
+    "title": "시스템 도구",
+    "descMatching": "{matched} / {total}개 일치, 카드를 클릭하여 설명, 파라미터 기본값, 에이전트 바인딩을 편집하세요",
+    "descTotal": "총 {total}개, 카드를 클릭하여 설명, 파라미터 기본값, 에이전트 바인딩을 편집하세요",
+    "emptyNoMatch": "일치하는 시스템 도구가 없습니다",
+    "empty": "(아직 시스템 도구가 없습니다. 백엔드 시드를 기다리는 중)"
+  },
+  "custom": {
+    "title": "사용자 지정 도구",
+    "descMatching": "shell/command/script/http, {matched} / {total}개 일치, 카드를 클릭하여 편집",
+    "descTotal": "shell (bash 선언) / command (명령 템플릿) / script (Python) / http (API), 총 {total}개, 카드를 클릭하여 편집",
+    "create": "사용자 지정 도구 생성",
+    "emptyNoMatch": "일치하는 사용자 지정 도구가 없습니다",
+    "empty": "(아직 사용자 지정 도구가 없습니다. 오른쪽 위의 '사용자 지정 도구 생성'을 클릭하세요)"
+  },
+  "card": {
+    "system": "시스템",
+    "custom": "사용자 지정 · {kind}",
+    "disabled": "비활성화됨",
+    "calls": "{count}회 호출",
+    "callsTooltip": "총 {count}회 호출",
+    "noDescription": "(설명 없음)",
+    "noAgentsBound": "(바인딩된 에이전트 없음)"
+  },
+  "editor": {
+    "sheetDescription": "설명, 파라미터 기본값, 에이전트 바인딩 편집",
+    "trafficGated": "이 도구는 <b>트래픽 캡처</b>에 의존합니다. 에이전트에 바인딩하고 활성화하기 전에 먼저 \"시스템 설정\"에서 트래픽 캡처를 활성화하세요.",
+    "bindAgents": "에이전트 바인딩 (어떤 에이전트가 이 도구를 받을지 제어)",
+    "noAgents": "(에이전트 없음)",
+    "enable": "활성화",
+    "description": "도구 설명 (모델에 전송됨)",
+    "paramsLabel": "파라미터 (이름 / 유형 / 필수는 읽기 전용, 설명과 기본값은 편집 가능)",
+    "noParams": "(파라미터 없음)",
+    "params": {
+      "required": "필수",
+      "itemsSubField": "items 하위 필드",
+      "description": "설명",
+      "default": "기본값",
+      "defaultPlaceholderScalar": "(비어 있음 = 기본값 없음)",
+      "defaultPlaceholderNonScalar": "스칼라만 가능"
+    },
+    "actions": {
+      "save": "저장",
+      "restoreDefaults": "기본값 복원"
+    },
+    "toasts": {
+      "saved": "\"{key}\" 도구를 저장했습니다",
+      "saveFailed": "저장 실패: {message}",
+      "restored": "\"{key}\" 도구를 코드 기본값으로 복원했습니다",
+      "restoreFailed": "복원 실패: {message}"
+    }
+  },
+  "dialog": {
+    "createTitle": "사용자 지정 도구 생성",
+    "editTitle": "{key} 편집",
+    "description": "shell = bash 환경 선언 (이름 + 설명만, 모델에 bash를 사용할 수 있음을 알림), command/script/http는 실행 사양이 필요합니다.",
+    "keyLabel": "키",
+    "keyPlaceholder": "예: nmap_scan",
+    "descriptionLabel": "설명 (모델에 전송됨)",
+    "typeLabel": "유형",
+    "kind": {
+      "shell": "shell (bash 환경 선언)",
+      "command": "command (셸 명령 템플릿)",
+      "script": "script (Python 스크립트)",
+      "http": "http (API 요청)"
+    },
+    "shellHint": "nmap, sqlmap, ffuf 같은 잘 알려진 도구에 적합합니다. 모델이 이미 사용법을 알고 있으므로 \"bash에서 호출 가능\"하다고 선언하기만 하면 됩니다. 이름 + 설명이 Bash 도구의 설명에 추가됩니다.",
+    "command": {
+      "templateLabel": "명령 템플릿 (플레이스홀더 '{param}', 예: nmap -p '{ports}' '{target}')"
+    },
+    "script": {
+      "bodyLabel": "Python 본문 (파라미터가 stdin JSON / os.environ[\"TOOL_X\"]을 통해 전달됨)"
+    },
+    "http": {
+      "method": "메서드",
+      "url": "URL ('{param}' 포함 가능)",
+      "headers": "헤더 (JSON, '{param}' 포함 가능)",
+      "body": "본문 ('{param}' 포함 가능)",
+      "proxy": "프록시 URL (비어 있음 = 직접 연결)",
+      "useRecordingProxy": "기록 프록시 사용"
+    },
+    "timeout": "제한 시간 (ms, 비어 있음 = 기본값)",
+    "schema": {
+      "labelHttp": "파라미터 JSON Schema (http 도구에 필수, properties 포함 필요)",
+      "labelAuto": "파라미터 JSON Schema (비어 있음 = 얇은 '{args}' 셸이 자동으로 생성됨)"
+    },
+    "bindAgents": "에이전트 바인딩",
+    "enable": "활성화",
+    "deferred": "deferred (드물게 사용하는 도구가 많을 때만 활성화)",
+    "test": {
+      "label": "테스트 실행 (현재 양식 사용, 저장되지 않음)",
+      "paramsPlaceholder": "샘플 파라미터 JSON, 예: '{\"target\":\"example.com\"}'",
+      "run": "테스트 실행",
+      "running": "실행 중…",
+      "noOutput": "(출력 없음)"
+    },
+    "actions": {
+      "create": "생성",
+      "save": "저장",
+      "delete": "삭제"
+    },
+    "toasts": {
+      "invalidKey": "키는 소문자로 시작하고 소문자, 숫자, 밑줄만 포함해야 합니다",
+      "invalidSchema": "잘못된 파라미터 JSON Schema",
+      "invalidHeaders": "잘못된 헤더 JSON",
+      "httpNeedsSchema": "http 도구는 파라미터 JSON Schema를 제공해야 합니다 (properties 포함, 비어 있을 수 없음)",
+      "created": "사용자 지정 도구가 생성되었습니다",
+      "saved": "저장되었습니다",
+      "saveFailed": "저장 실패: {message}",
+      "deleted": "삭제되었습니다",
+      "deleteFailed": "삭제 실패: {message}",
+      "invalidTestParams": "잘못된 테스트 파라미터 JSON"
+    }
+  }
+}

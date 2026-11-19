@@ -1,0 +1,9 @@
+{
+  "perPage": "per page",
+  "range": "{from}–{to} / {total} total",
+  "rangeEmpty": "0 total",
+  "aria": {
+    "previousPage": "Previous page",
+    "nextPage": "Next page"
+  }
+}

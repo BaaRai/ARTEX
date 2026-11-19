@@ -1,0 +1,57 @@
+{
+  "title": "LLM recording",
+  "toolbar": {
+    "searchPlaceholder": "Search Session ID...",
+    "modelPlaceholder": "Model",
+    "taskPlaceholder": "Select a task…",
+    "noTaskRecords": "No task records yet",
+    "deleteTaskTooltip": "Select a task above first",
+    "deleteTask": "Delete task conversations",
+    "perPage": "{size} / page",
+    "recording": "Recording",
+    "off": "Off"
+  },
+  "table": {
+    "columns": {
+      "time": "Time",
+      "task": "Task",
+      "worker": "Worker",
+      "profile": "Profile",
+      "model": "Model",
+      "latency": "Latency",
+      "tokens": "Tokens",
+      "status": "Status"
+    }
+  },
+  "empty": {
+    "noRecords": "No LLM call records yet",
+    "recordingOff": "LLM call recording is off. Turn on the Recording toggle above to start capturing calls."
+  },
+  "status": {
+    "ok": "OK",
+    "error": "Error"
+  },
+  "detail": {
+    "taskBadge": "Task #{id}",
+    "rawToggle": "Raw",
+    "rawAvailableTooltip": "View the raw HTTP actually exchanged with the provider",
+    "rawUnavailableTooltip": "This record was captured before the feature launched; no raw data",
+    "request": "Request",
+    "response": "Response",
+    "raw": "raw",
+    "rawSse": "raw (SSE)",
+    "loading": "Loading…",
+    "empty": "(empty)"
+  },
+  "copy": {
+    "copy": "Copy content",
+    "copied": "Copied"
+  },
+  "deleteDialog": {
+    "title": "Delete all LLM conversations for task \"{task}\"?",
+    "description": "This will permanently delete all LLM call records for this task (including raw requests/responses). This action cannot be undone.",
+    "cancel": "Cancel",
+    "deleting": "Deleting…",
+    "confirm": "Confirm delete"
+  }
+}

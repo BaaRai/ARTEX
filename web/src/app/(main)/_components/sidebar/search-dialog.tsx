@@ -5,6 +5,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { Search } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +32,12 @@ type SearchItem = {
 };
 
 const sidebarGroupLabels = new Set(sidebarItems.flatMap((group) => (group.label ? [group.label] : [])));
+
+// Group labels are stored as English strings in the nav data; map them to nav-namespace keys for translation.
+const GROUP_LABEL_KEYS: Record<string, string> = {
+  Functions: "groupFunctions",
+  System: "groupSystem",
+};
 
 function getSubItemGroup(groupLabel: string | undefined, itemTitle: string) {
   return sidebarGroupLabels.has(itemTitle) ? (groupLabel ?? "Other") : itemTitle;
@@ -78,6 +85,8 @@ function groupBy(items: SearchItem[]) {
 }
 
 export function SearchDialog() {
+  const t = useTranslations("nav");
+  const tc = useTranslations("chrome");
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const router = useRouter();
@@ -108,27 +117,36 @@ export function SearchDialog() {
     }
   };
 
+  const translateGroup = (group: string) => (GROUP_LABEL_KEYS[group] ? t(GROUP_LABEL_KEYS[group]) : group);
+  const translateItem = (item: SearchItem) => (t.has(item.id) ? t(item.id) : item.label);
+
   const renderGroups = (items: SearchItem[]) =>
-    groupBy(items).map(({ group, items: groupItems }, index) => (
-      <React.Fragment key={group}>
-        {index > 0 && <CommandSeparator />}
-        <CommandGroup heading={group}>
-          {groupItems.map((item) => (
-            <CommandItem
-              disabled={item.disabled}
-              key={`${group}-${item.id}`}
-              value={`${item.group} ${item.label}`}
-              onSelect={() => handleSelect(item)}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                {item.icon && <item.icon />}
-                <span className="truncate">{item.label}</span>
-              </span>
-            </CommandItem>
-          ))}
-        </CommandGroup>
-      </React.Fragment>
-    ));
+    groupBy(items).map(({ group, items: groupItems }, index) => {
+      const groupLabel = translateGroup(group);
+      return (
+        <React.Fragment key={group}>
+          {index > 0 && <CommandSeparator />}
+          <CommandGroup heading={groupLabel}>
+            {groupItems.map((item) => {
+              const itemLabel = translateItem(item);
+              return (
+                <CommandItem
+                  disabled={item.disabled}
+                  key={`${group}-${item.id}`}
+                  value={`${groupLabel} ${itemLabel}`}
+                  onSelect={() => handleSelect(item)}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    {item.icon && <item.icon />}
+                    <span className="truncate">{itemLabel}</span>
+                  </span>
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        </React.Fragment>
+      );
+    });
 
   return (
     <>
@@ -138,16 +156,16 @@ export function SearchDialog() {
         className="px-0! font-normal text-muted-foreground hover:no-underline"
       >
         <Search data-icon="inline-start" />
-        Search
+        {tc("search.button")}
         <kbd className="inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-medium text-[10px]">
           <span className="text-xs">⌘</span>J
         </kbd>
       </Button>
       <CommandDialog open={open} onOpenChange={handleOpenChange}>
         <Command>
-          <CommandInput placeholder="Search dashboards, users, and more…" value={query} onValueChange={setQuery} />
+          <CommandInput placeholder={tc("search.placeholder")} value={query} onValueChange={setQuery} />
           <CommandList>
-            <CommandEmpty>No results found.</CommandEmpty>
+            <CommandEmpty>{tc("search.empty")}</CommandEmpty>
             {query ? renderGroups(searchItems) : renderGroups(recommendations)}
           </CommandList>
         </Command>

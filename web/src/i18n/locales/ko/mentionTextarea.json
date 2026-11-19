@@ -1,0 +1,40 @@
+{
+  "ariaLabel": {
+    "textarea": "메시지, @를 입력하여 레코드를 참조하세요",
+    "popover": "참조할 레코드 선택",
+    "listbox": "참조 후보",
+    "removeReference": "{label} 참조 제거"
+  },
+  "kind": {
+    "finding": "발견 사항",
+    "asset": "자산",
+    "company": "회사",
+    "endpoint": "엔드포인트",
+    "ip": "IP",
+    "app": "앱",
+    "root_domain": "도메인",
+    "subdomain": "서브도메인",
+    "service": "서비스"
+  },
+  "header": {
+    "chooseType": "참조 유형 선택",
+    "searchKind": "{label} 검색",
+    "allRecords": "모든 레코드",
+    "hint": "↑↓ 선택 · Enter 확인 · Esc 닫기"
+  },
+  "status": {
+    "searching": "검색 중…",
+    "searchFailed": "검색 실패: {error}. 다시 입력한 뒤 재시도하세요.",
+    "noMatches": "일치하는 레코드가 없습니다; 다른 이름, 주소 또는 ID를 시도하세요"
+  },
+  "pagination": {
+    "loadingMore": "더 불러오는 중…",
+    "retry": "불러오기 실패, 클릭하여 재시도",
+    "showingMore": "{count}개 표시 중, 아래로 스크롤하여 더 보기",
+    "allShown": "전체 {count}개 표시됨",
+    "searchPrompt": "이름, 주소 또는 ID를 입력하여 레코드 검색"
+  },
+  "footer": {
+    "selectedHint": "전송 시 최신 세부 정보 조회 · 최대 10개 레코드"
+  }
+}

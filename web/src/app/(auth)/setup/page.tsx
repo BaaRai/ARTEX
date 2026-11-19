@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 
 import { useRouter } from "next/navigation";
 
+import { useTranslations } from "next-intl";
+
+import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +14,7 @@ import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
 
 export default function SetupPage() {
+  const t = useTranslations("auth");
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -29,20 +33,20 @@ export default function SetupPage() {
         if (initialized) router.replace("/login");
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "Unable to connect to the backend service");
+        setError(err instanceof Error ? err.message : t("backendUnavailable"));
         setUnavailable(true);
       })
       .finally(() => setChecking(false));
-  }, [router]);
+  }, [router, t]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (password !== confirm) {
-      setError("The two passwords do not match");
+      setError(t("setup.mismatch"));
       return;
     }
     if (password.length < 12) {
-      setError("Password must be at least 12 characters");
+      setError(t("setup.tooShort"));
       return;
     }
     setLoading(true);
@@ -52,7 +56,7 @@ export default function SetupPage() {
       auth.setToken(token);
       router.replace("/function/tasks");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Initialization failed");
+      setError(err instanceof Error ? err.message : t("setup.initFailed"));
     } finally {
       setLoading(false);
     }
@@ -61,7 +65,8 @@ export default function SetupPage() {
   if (checking) return null;
 
   return (
-    <div className="flex h-dvh">
+    <div className="relative flex h-dvh">
+      <LanguageToggle className="absolute right-4 top-4 z-20 text-muted-foreground" />
       {/* Left panel */}
       <div className="hidden flex-col items-center justify-center bg-primary p-12 text-center lg:flex lg:w-1/3">
         <div className="relative flex items-center justify-center">
@@ -77,52 +82,50 @@ export default function SetupPage() {
       <div className="flex w-full items-center justify-center bg-background p-8 lg:w-2/3">
         <div className="w-full max-w-md space-y-10 py-24 lg:py-32">
           <div className="space-y-4 text-center">
-            <h2 className="text-2xl font-medium tracking-tight">{unavailable ? "Cannot confirm initialization state" : "Set initial password"}</h2>
+            <h2 className="text-2xl font-medium tracking-tight">{unavailable ? t("setup.cannotConfirm") : t("setup.title")}</h2>
             <p className="mx-auto max-w-xl text-muted-foreground">
-              {unavailable
-                ? "The backend or database is temporarily unavailable. To avoid overwriting a password already set on this instance, setup is temporarily closed — restore the service and try again."
-                : "First time using ARTEX? Enter the setup token from the server log, then set a login password for the account (at least 12 characters)"}
+              {unavailable ? t("setup.unavailableDesc") : t("setup.desc")}
             </p>
           </div>
           {unavailable ? (
             <div className="flex flex-col gap-4">
               {error && <p className="text-center text-sm text-destructive">{error}</p>}
               <Button type="button" className="w-full" onClick={() => window.location.reload()}>
-                Retry
+                {t("setup.retry")}
               </Button>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor="setup-token">Setup token</Label>
+                <Label htmlFor="setup-token">{t("setup.token")}</Label>
                 <Input
                   id="setup-token"
                   value={setupToken}
                   onChange={(e) => setSetupToken(e.target.value)}
-                  placeholder="Printed in the server log at startup"
+                  placeholder={t("setup.tokenPlaceholder")}
                   autoFocus
                   autoComplete="off"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password">New password</Label>
+                <Label htmlFor="password">{t("setup.newPassword")}</Label>
                 <Input
                   id="password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 12 characters"
+                  placeholder={t("setup.newPasswordPlaceholder")}
                   autoComplete="new-password"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="confirm">Confirm password</Label>
+                <Label htmlFor="confirm">{t("setup.confirmPassword")}</Label>
                 <Input
                   id="confirm"
                   type="password"
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
-                  placeholder="Enter the password again"
+                  placeholder={t("setup.confirmPasswordPlaceholder")}
                   autoComplete="new-password"
                 />
               </div>
@@ -132,7 +135,7 @@ export default function SetupPage() {
                 className="w-full"
                 disabled={loading || !setupToken.trim() || !password || !confirm}
               >
-                {loading ? "Saving..." : "Set password and sign in"}
+                {loading ? t("setup.saving") : t("setup.submit")}
               </Button>
             </form>
           )}

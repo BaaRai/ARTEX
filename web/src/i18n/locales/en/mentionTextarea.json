@@ -1,0 +1,40 @@
+{
+  "ariaLabel": {
+    "textarea": "Message, type @ to reference records",
+    "popover": "Choose a reference record",
+    "listbox": "Reference candidates",
+    "removeReference": "Remove reference {label}"
+  },
+  "kind": {
+    "finding": "finding",
+    "asset": "asset",
+    "company": "company",
+    "endpoint": "endpoint",
+    "ip": "IP",
+    "app": "app",
+    "root_domain": "domain",
+    "subdomain": "subdomain",
+    "service": "service"
+  },
+  "header": {
+    "chooseType": "Choose a reference type",
+    "searchKind": "Search {label}",
+    "allRecords": "all records",
+    "hint": "↑↓ Select · Enter Confirm · Esc Close"
+  },
+  "status": {
+    "searching": "Searching…",
+    "searchFailed": "Search failed: {error}. Please retype and try again.",
+    "noMatches": "No matching records; try a different name, address, or ID"
+  },
+  "pagination": {
+    "loadingMore": "Loading more…",
+    "retry": "Failed to load, click to retry",
+    "showingMore": "Showing {count}, scroll down for more",
+    "allShown": "All {count} shown",
+    "searchPrompt": "Type a name, address, or ID to search records"
+  },
+  "footer": {
+    "selectedHint": "Latest details read on send · Up to 10 records"
+  }
+}

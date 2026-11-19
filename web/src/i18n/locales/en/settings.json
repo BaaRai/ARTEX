@@ -1,0 +1,171 @@
+{
+  "page": {
+    "title": "System settings",
+    "subtitle": "Global runtime switches",
+    "actions": {
+      "save": "Save"
+    },
+    "onSuffix": " · On",
+    "offSuffix": " · Off",
+    "toasts": {
+      "saveFailed": "Save failed: {message}",
+      "concurrencyInvalid": "Concurrency must be an integer greater than 0",
+      "workersSaved": "Saved the concurrent worker agent count (applies to tasks started afterwards)",
+      "pythonSaved": "Saved Python interpreter config",
+      "agentBindingEnabled": "Enabled automatic agent traffic binding",
+      "agentBindingDisabled": "Disabled automatic agent traffic binding",
+      "noaEnabled": "Enabled noa context compaction (applies to runs started afterwards)",
+      "noaDisabled": "Disabled noa context compaction (built-in compaction restored)",
+      "webSearchSaved": "Saved web search config",
+      "braveKeySaved": "Saved Brave API Key",
+      "tavilyKeySaved": "Saved Tavily API Key",
+      "keenableKeySaved": "Saved Keenable API Key",
+      "proxySaved": "Saved egress proxy",
+      "proxyCleared": "Cleared egress proxy (direct connection)",
+      "globalProxySaved": "Saved global proxy",
+      "globalProxyCleared": "Cleared global proxy (direct connection)",
+      "testSucceeded": "Search test succeeded · {backend} returned {count} results",
+      "testFailed": "Search test failed: {error}",
+      "unknownError": "unknown error"
+    },
+    "trafficCapture": {
+      "title": "Traffic capture",
+      "description": "When enabled, every agent's HTTP traffic is stored in full through the recording proxy, and agents are injected with the traffic_search / traffic_get tools and proxy configuration (the prompt includes proxy notes).<br></br>When off (default) no traffic is recorded: the agent does <b>not</b> receive proxy configuration or traffic tools, and the prompt contains <b>no</b> proxy-related content. Agents are rebuilt immediately after switching.",
+      "labelOn": "On · recording traffic and injecting proxy",
+      "labelOff": "Off · no recording, no proxy injection"
+    },
+    "agentBinding": {
+      "title": "Automatic agent traffic binding",
+      "description": "Off by default. When enabled, the report agent triggered on vulnerability creation reviews existing HTTP requests/responses and links the matching traffic before writing the report. <b>Reading packets and the extra tool calls increase token consumption.</b><br></br>Reporting still works for TCP, uncaptured traffic, or when no traffic matches. This switch does not affect traffic capture, manual binding, or viewing saved evidence. It takes effect for the next round of agents; once disabled, new automatic bindings are rejected immediately.",
+      "labelOn": "On · increases token consumption",
+      "labelOff": "Off · manual binding still available"
+    },
+    "globalProxy": {
+      "title": "Global proxy",
+      "description": "All agents' <b>target traffic</b> egresses through this proxy (hide the source IP / use a jump host). Supports <b>http / https / socks5</b>, optionally with <code>user:pass</code> authentication. Empty = direct connection.<br></br>With <b>traffic capture</b> on, it acts as the recording proxy's <b>upstream</b> (traffic is still stored in full, then egresses through this proxy); with capture off, it is injected directly into the agent's bash / WebFetch egress. Independent of the web search proxy and the LLM proxy.<br></br><b>Note</b>: with <b>capture off</b>, socks5 relies on each CLI tool honoring <code>ALL_PROXY</code> (curl works; some tools may ignore it). If you mainly use socks5, enable traffic capture — on that path the MITM does the dialing itself, invisible to tools and reliably effective.",
+      "addressLabel": "Proxy address",
+      "placeholder": "socks5://user:pass@host:1080 or http://host:port (empty = direct)",
+      "statusConfigured": "Configured · all target traffic egresses through this proxy",
+      "statusNotConfigured": "Not configured · target traffic egresses directly"
+    },
+    "constraints": {
+      "title": "Operation constraint injection",
+      "description": "When enabled, each task's <b>operation constraints</b> (the allow/deny entries maintained under \"Operation constraints\" in the task overview) are spliced into the corresponding agent's system prompt to bound the exploration scope (e.g. \"only test the current port\", \"no brute forcing\").<br></br>You can control injection into the <b>planner</b> and the <b>worker</b> separately; both are on by default. Switching takes effect immediately (read on the next turn) without rebuilding agents. When off, the agent no longer sees the constraints.",
+      "planner": "Inject into planner",
+      "worker": "Inject into worker"
+    },
+    "experimental": {
+      "title": "Experimental features",
+      "description": "Mechanisms still being validated, off by default. They may change agent behavior or affect stability; enable only after understanding the impact.<br></br><b>noa context compaction</b>: the model actively compacts long conversation history (norma v0.4.0). When enabled, the four agent types integrated into the platform (<b>planner / worker / main agent / chat</b>) switch to noa-managed context in place of the built-in compaction, and the pre-compaction originals are archived under the task working directory for later review. Switching takes effect immediately (for runs started afterwards) without rebuilding agents; when disabled, the built-in compaction is restored immediately.",
+      "noaLabel": "noa context compaction"
+    },
+    "webSearch": {
+      "title": "Web search",
+      "description": "This is the web search <b>master switch + source config</b>. Only when it is enabled can <b>each agent's config</b> separately choose whether to enable <b>web_search</b> (returns only titles/links/snippets without fetching bodies; fetching is handled by WebFetch). Web search does <b>not</b> go through the recording proxy and is independent of traffic capture.<br></br>Sources: <b>DuckDuckGo (ddgs)</b> (no key needed), <b>Brave (free tier)</b> (requires a Brave API Key), <b>Tavily</b> (requires a Tavily API Key) or <b>DeepSeek</b> (reuses the current LLM config). When the master switch is off, the per-agent web search switches are unavailable.",
+      "labelOn": "Master switch on · can be enabled per agent config",
+      "labelOff": "Off · agents cannot enable web search",
+      "sourceLabel": "Search source",
+      "sourcePlaceholder": "Choose a source",
+      "sourceDdgs": "DuckDuckGo (ddgs · free, no key)",
+      "sourceBrave": "Brave (free tier · requires key)",
+      "sourceTavily": "Tavily (requires key)",
+      "sourceKeenable": "Keenable (keyless, optional key)",
+      "sourceDeepseek": "DeepSeek (official)",
+      "configured": "Configured",
+      "keyPlaceholderSet": "Configured (leave empty to keep)",
+      "deepseek": {
+        "heading": "DeepSeek official web search",
+        "note1": "This source directly reuses the <b>currently active LLM config</b>. It therefore supports <b>official DeepSeek models only</b>, and that config <b>must use the anthropic protocol</b> — DeepSeek's OpenAI-protocol endpoint does not support server-side search. This source may stop working after switching LLM configs.",
+        "note2": "Unlike other sources, the search runs <b>server-side on DeepSeek</b>: each search consumes an extra model call (incurring token costs), search requests <b>do not go through the egress proxy above</b> and are <b>not recorded as traffic</b>; results contain <b>titles and links only</b> (no snippets); use WebFetch when you need the page body.",
+        "note3": "Verify these conditions yourself; the system does not block on them. Use the \"Test search\" button below to run a real search and check."
+      },
+      "brave": {
+        "keyLabel": "Brave Search API Key",
+        "placeholder": "Enter Brave API Key",
+        "needsKey": "Brave is selected but no key is configured — the search tool stays disabled until you save one.",
+        "help": "The free tier allows about 2,000 queries/month. Get a key at https://brave.com/search/api/."
+      },
+      "tavily": {
+        "keyLabel": "Tavily Search API Key",
+        "placeholder": "Enter Tavily API Key (tvly-…)",
+        "needsKey": "Tavily is selected but no key is configured — the search tool stays disabled until you save one.",
+        "help": "Register and get an API key at https://tavily.com."
+      },
+      "keenable": {
+        "keyLabel": "Keenable Search API Key (optional)",
+        "placeholder": "Optional: leave empty for the keyless endpoint",
+        "help": "Queries leave this instance and go to api.keenable.ai. The request carries <b>X-Keenable-Title: ARTEX</b> so the provider can identify the caller. With no key, the public endpoint is rate-limited per IP; a key raises the limit, but the backend works without one."
+      },
+      "egressProxy": {
+        "label": "Egress proxy (optional)",
+        "placeholder": "http://host:port or socks5://host:port (empty = direct)",
+        "help": "A dedicated egress proxy used only to reach search endpoints (VPN/SOCKS etc.). Unrelated to the traffic-recording MITM proxy; use it to reach endpoints when the network is blocked."
+      },
+      "test": {
+        "hint": "Run a real \"test\" search with the current config (source + proxy + key) to verify it works.",
+        "button": "Test search",
+        "testing": "Testing…"
+      }
+    },
+    "python": {
+      "title": "Custom scripts · Python interpreter",
+      "description": "Custom <b>script</b> tools run Python with it. Auto-detected at startup (python3 first); you can enter an absolute path to a venv / specific version here; leave empty to auto-detect at runtime.",
+      "placeholder": "/usr/bin/python3 (empty = auto-detect)",
+      "redetect": "Re-detect"
+    },
+    "concurrency": {
+      "title": "Work concurrency · worker agent count",
+      "description": "The number of worker agents running concurrently per task (default 3). Higher values mean more parallel probing and higher consumption. Changes <b>apply to tasks started afterwards</b>; running tasks are unaffected."
+    },
+    "chatSend": {
+      "title": "Chat input send key binding",
+      "description": "Shared by the main-agent chat inputs on the chat page and task details; takes effect immediately on selection, no saving needed.<br></br>This preference <b>lives only in this browser</b>, does not sync with the account, and must be set again after switching browsers or clearing site data.",
+      "label": "Send mode",
+      "options": {
+        "enter": "Enter to send, Shift+Enter for newline",
+        "ctrl-enter": "Ctrl+Enter to send, Enter for newline"
+      }
+    }
+  },
+  "noiseProfile": {
+    "title": "Target noise",
+    "description": "Paces the requests ARTEX itself sends to targets (WebFetch, http custom tools, the enrich probe) and sets the low-and-slow guidance in agent prompts. With traffic capture on, Bash commands that use the proxy (curl, wget, python-requests…) are paced too, by rate and jitter only: the in-flight, cache and retry limits apply to ARTEX's own requests. Raw scanners such as nmap, and commands that bypass the proxy, are not paced; this is best effort, not a security boundary. This setting takes precedence over ARTEX_NOISE_PROFILE and applies to the next request.",
+    "profiles": {
+      "off": {
+        "label": "Off",
+        "limits": "Off: requests and their timing are unchanged, and nothing is counted."
+      },
+      "quiet": {
+        "label": "Quiet",
+        "limits": "2 req/s per host (burst 4), 1 in flight per host, 8 overall, jitter up to 250 ms, identical GETs of a task cached 60 s, up to 3 retries on 429/503."
+      },
+      "balanced": {
+        "label": "Balanced",
+        "limits": "5 req/s per host (burst 10), 2 in flight per host, 16 overall, jitter up to 40 ms, identical GETs of a task cached 30 s, up to 3 retries on 429/503."
+      },
+      "aggressive": {
+        "label": "Aggressive",
+        "limits": "20 req/s per host (burst 40), 4 in flight per host, 32 overall, jitter up to 5 ms, identical GETs of a task cached 10 s, up to 2 retries on 429/503."
+      }
+    },
+    "profileLabel": "Profile",
+    "loadingPlaceholder": "Loading…",
+    "hostsCurrentMinute": "Hosts, current minute",
+    "refresh": "Refresh",
+    "tableAria": "Noise counters per host",
+    "columns": {
+      "host": "Host",
+      "rpm": "RPM",
+      "peakRpm": "Peak RPM",
+      "inFlight": "In flight (peak)",
+      "duplicates": "Duplicates"
+    },
+    "emptyOff": "Off counts no request.",
+    "emptyNone": "No paced request yet.",
+    "toasts": {
+      "loadFailed": "Failed to load the noise counters: {message}",
+      "saved": "Noise profile set to {value}",
+      "saveFailed": "Save failed: {message}"
+    }
+  }
+}

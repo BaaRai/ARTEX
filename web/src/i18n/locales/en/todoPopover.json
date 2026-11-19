@@ -1,0 +1,13 @@
+{
+  "button": "Todo",
+  "trigger": {
+    "title": "View latest todos",
+    "disabledTitle": "No todos in this session"
+  },
+  "heading": "Latest todos",
+  "loadingSuffix": " · Loading…",
+  "empty": "(empty)",
+  "error": {
+    "parseFailed": "Failed to parse todos"
+  }
+}

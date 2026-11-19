@@ -1,0 +1,116 @@
+{
+  "header": {
+    "title": "자산",
+    "totalAssets": "총 <num>{count}</num>개 자산"
+  },
+  "tabs": {
+    "company": "회사",
+    "root_domain": "루트 도메인",
+    "ip": "IP",
+    "subdomain": "서브도메인",
+    "app": "앱",
+    "service": "서비스",
+    "endpoint": "엔드포인트"
+  },
+  "actions": {
+    "deleteSelected": "선택 항목 삭제 ({count})",
+    "refresh": "새로 고침",
+    "cancel": "취소",
+    "save": "저장",
+    "saving": "저장 중…",
+    "edit": "편집"
+  },
+  "companyTable": {
+    "columns": {
+      "company": "회사",
+      "assets": "자산",
+      "scope": "자산 범위",
+      "actions": "동작"
+    },
+    "noScope": "설정된 범위 없음",
+    "deleteAria": "회사 {name} 삭제",
+    "empty": "아직 회사가 없습니다. 오른쪽 상단의 \"회사 추가\"를 클릭하고 자산 범위를 입력하면 시스템이 일치하는 자산을 자동으로 귀속시킵니다."
+  },
+  "columns": {
+    "domain": "도메인",
+    "icpFiling": "ICP 등록",
+    "company": "회사",
+    "cSegment": "C 세그먼트",
+    "boundDomains": "연결된 도메인",
+    "openPorts": "열린 포트",
+    "rootDomain": "루트 도메인",
+    "recordType": "레코드 유형",
+    "recordValue": "레코드 값",
+    "appName": "앱 이름",
+    "bundleId": "번들 ID",
+    "category": "카테고리",
+    "service": "서비스",
+    "port": "포트",
+    "status": "상태",
+    "title": "제목",
+    "fingerprint": "핑거프린트",
+    "auth": "인증",
+    "method": "메서드",
+    "fullUrl": "전체 URL",
+    "params": "파라미터"
+  },
+  "row": {
+    "unassigned": "미할당",
+    "deleteAria": "자산 {name} 삭제"
+  },
+  "pagination": {
+    "perPage": "{n} / 페이지"
+  },
+  "grid": {
+    "noData": "데이터 없음",
+    "loading": "불러오는 중…"
+  },
+  "delete": {
+    "title": "삭제 확인",
+    "description": "자산 레코드 <num>{count}</num>개를 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
+    "confirm": "삭제 확인",
+    "deleting": "삭제 중…"
+  },
+  "companyDelete": {
+    "title": "회사 삭제 · {name}",
+    "description": "회사와 해당 자산 범위 설정을 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
+    "alsoDeleteAssets": "이 회사의 모든 자산도 함께 삭제",
+    "alsoDeleteAssetsHint": "선택하지 않으면 자산은 유지하고 소유 관계만 제거합니다"
+  },
+  "companyDialog": {
+    "title": "회사 추가",
+    "description": "회사와 해당 자산 범위를 설정합니다. 키워드는 에이전트 힌트로만 사용되며 자산을 자동으로 할당하지 않습니다.",
+    "nameLabel": "회사 이름",
+    "namePlaceholder": "예: Acme Corp (이름은 고유해야 합니다)"
+  },
+  "scope": {
+    "reasonLabel": "귀속 근거 (선택 사항)",
+    "reasonPlaceholder": "예: 인증서 / whois / ASN 증거"
+  },
+  "editScope": {
+    "title": "자산 범위 편집 · {name}",
+    "description": "저장하면 기존 범위를 모두 대체합니다. ICP는 자산과 정확히 일치하며, 회사 키워드는 에이전트 힌트로만 사용됩니다.",
+    "overwriteSave": "덮어쓰기 저장"
+  },
+  "appendScope": {
+    "action": "추가",
+    "title": "자산 범위 추가 · {name}",
+    "description": "새 범위가 기존 범위에 추가됩니다. ICP는 자산과 정확히 일치하며, 회사 키워드는 에이전트 힌트로만 사용됩니다."
+  },
+  "toasts": {
+    "deleted": "자산 {count}개를 삭제했습니다",
+    "deleteFailed": "삭제 실패: {error}",
+    "companyDeleted": "회사를 삭제했습니다",
+    "companyDeletedWithAssets": "회사와 자산 {count}개를 삭제했습니다",
+    "enterCompanyName": "회사 이름을 입력하세요",
+    "fixInvalidScope": "잘못된 자산 범위를 수정하세요",
+    "companyCreated": "회사를 생성했습니다. 범위 {added}개를 추가했습니다",
+    "companyCreatedWithInvalid": "회사를 생성했습니다. 범위 {added}개를 추가했습니다. 잘못된 줄 {invalid}개",
+    "companyExists": "회사가 이미 존재합니다. 다른 이름을 사용하세요",
+    "saveFailed": "저장 실패: {error}",
+    "savedWithInvalid": "저장했습니다. 잘못된 줄 {count}개",
+    "scopeUpdated": "범위를 업데이트했습니다. 총 {count}개 항목",
+    "enterScopesToAppend": "추가할 범위를 입력하세요",
+    "scopeAppended": "범위 {count}개를 추가했습니다"
+  }
+}

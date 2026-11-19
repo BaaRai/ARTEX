@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { SearchIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -276,6 +277,7 @@ export function AssetDslSearch({
   error: string;
   count?: number;
 }) {
+  const t = useTranslations("assetDslSearch");
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [suggestions, setSuggestions] = React.useState<DslSuggestion[]>([]);
   const [selIdx, setSelIdx] = React.useState(0);
@@ -314,6 +316,19 @@ export function AssetDslSearch({
     [query, onChange, refresh],
   );
 
+  // Resolve a suggestion's desc to Korean via the i18n maps, keyed by the literal
+  // field name / AND-OR token / operator desc. Falls back to the English desc.
+  const descText = React.useCallback(
+    (s: DslSuggestion) => {
+      let key: string;
+      if (s.kind === "field") key = `fieldDesc.${s.label}`;
+      else if (s.kind === "logic") key = `logicDesc.${s.label}`;
+      else key = `opDesc.${s.desc}`;
+      return t.has(key) ? t(key) : s.desc;
+    },
+    [t],
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!open || suggestions.length === 0) return;
     if (e.key === "ArrowDown") {
@@ -341,7 +356,7 @@ export function AssetDslSearch({
         <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={inputRef}
-          placeholder="DSL search: domain=example AND status_code>=400"
+          placeholder={t("placeholder")}
           value={query}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
@@ -367,7 +382,7 @@ export function AssetDslSearch({
                 }}
               >
                 <span className={cn("shrink-0 font-mono text-xs font-semibold", KIND_STYLE[s.kind])}>{s.label}</span>
-                <span className="text-xs text-muted-foreground">{s.desc}</span>
+                <span className="text-xs text-muted-foreground">{descText(s)}</span>
               </button>
             ))}
           </div>
@@ -375,7 +390,13 @@ export function AssetDslSearch({
       </div>
       {query.trim() && !open && (
         <p className="pl-1 text-[11px] text-muted-foreground">
-          {loading ? "Searching…" : error ? <span className="text-destructive">{error}</span> : `Found ${count ?? 0}`}
+          {loading ? (
+            t("status.searching")
+          ) : error ? (
+            <span className="text-destructive">{error}</span>
+          ) : (
+            t("status.found", { count: count ?? 0 })
+          )}
         </p>
       )}
     </div>

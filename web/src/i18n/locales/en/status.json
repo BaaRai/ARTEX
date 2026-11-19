@@ -1,0 +1,65 @@
+{
+  "intent": {
+    "open": "Open",
+    "running": "Running",
+    "paused": "Paused",
+    "done": "Completed",
+    "blocked": "Error",
+    "exhausted": "Budget exhausted",
+    "stopped": "Stopped",
+    "deleted": "Deleted"
+  },
+  "task": {
+    "created": "Created",
+    "queued": "Queued",
+    "running": "Running",
+    "paused": "Paused",
+    "done": "Completed",
+    "failed": "Failed",
+    "timeout": "Timed out"
+  },
+  "severity": {
+    "critical": "Critical",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low"
+  },
+  "finding": {
+    "pending": "Pending",
+    "in_progress": "In progress",
+    "confirmed": "Confirmed",
+    "resolved": "Resolved",
+    "fixed": "Fixed",
+    "false_positive": "False positive",
+    "ignored": "Ignored",
+    "duplicate": "Duplicate",
+    "risk_accepted": "Risk accepted"
+  },
+  "engine": {
+    "exploring": "Exploring",
+    "paused": "Paused",
+    "stalled": "Stalled",
+    "idle": "Idle"
+  },
+  "goal": {
+    "open": "In progress",
+    "met": "Met",
+    "abandoned": "Abandoned"
+  },
+  "audit": {
+    "allow": "Allow",
+    "block": "Block"
+  },
+  "node": {
+    "observed": "Observed",
+    "confirmed": "Confirmed",
+    "tombstoned": "Tombstoned"
+  },
+  "delivery": {
+    "pending": "Pending",
+    "sending": "Sending",
+    "sent": "Sent",
+    "failed": "Failed",
+    "skipped": "Skipped"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "perPage": "페이지당 행",
+  "range": "{from}–{to} / 총 {total}개",
+  "rangeEmpty": "총 0개",
+  "aria": {
+    "previousPage": "이전 페이지",
+    "nextPage": "다음 페이지"
+  }
+}

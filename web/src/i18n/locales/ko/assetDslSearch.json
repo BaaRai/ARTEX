@@ -1,0 +1,43 @@
+{
+  "placeholder": "DSL 검색: domain=example AND status_code>=400",
+  "status": {
+    "searching": "검색 중…",
+    "found": "검색 결과 {count}개"
+  },
+  "fieldDesc": {
+    "domain": "도메인 (루트 도메인/서브도메인/서비스 도메인)",
+    "ip": "IPv4/IPv6 주소",
+    "url": "전체 URL (서비스/엔드포인트)",
+    "root_domain": "루트 도메인",
+    "page_title": "페이지 제목 (HTTP 서비스)",
+    "icp": "ICP 등록 번호",
+    "service_name": "서비스 이름 (HTTP가 아닌 서비스)",
+    "app_name": "앱 이름",
+    "bundle_id": "앱 Bundle ID",
+    "category": "앱 카테고리",
+    "app_icp": "앱 ICP 등록",
+    "method": "HTTP 메서드 GET/POST/PUT/…",
+    "service_type": "서비스 유형: http | other",
+    "record_type": "DNS 레코드 유형 A/CNAME/MX/…",
+    "technology": "기술 핑거프린트 (배열 필드)",
+    "port": "포트 번호 (정수)",
+    "status_code": "HTTP 상태 코드 (정수)",
+    "company_id": "소유 회사 ID (정수)",
+    "task_id": "소스 작업 ID (정수)"
+  },
+  "opDesc": {
+    "fuzzy match": "유사 일치",
+    "exact match": "정확히 일치",
+    "exclude": "제외",
+    "equals": "같음",
+    "not equals": "같지 않음",
+    "greater than": "초과",
+    "greater than or equal": "이상",
+    "less than": "미만",
+    "less than or equal": "이하"
+  },
+  "logicDesc": {
+    "AND": "AND (두 조건이 모두 일치)",
+    "OR": "OR (둘 중 하나만 일치)"
+  }
+}

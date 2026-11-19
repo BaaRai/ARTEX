@@ -1,0 +1,99 @@
+{
+  "assetTree": {
+    "filterPlaceholder": "Filter assets",
+    "refresh": "Refresh asset tree",
+    "allAssets": "All assets",
+    "empty": {
+      "default": "No findings are linked to assets under the current filters.",
+      "loading": "Loading…",
+      "noMatch": "No matching assets."
+    },
+    "truncatedHint": "Too many assets; the {kinds} levels are hidden (their counts still roll up into the parents). Narrow with the filters or the filter box to see the full hierarchy.",
+    "actions": {
+      "collapse": "Collapse",
+      "expand": "Expand"
+    },
+    "kind": {
+      "company": "Company",
+      "root_domain": "Root domain",
+      "subdomain": "Subdomain",
+      "ip": "IP",
+      "app": "App",
+      "service": "Service",
+      "endpoint": "Endpoint",
+      "none": "Unlinked"
+    },
+    "tooltips": {
+      "critical": "Critical {count}",
+      "high": "High {count}",
+      "total": "{count} findings total"
+    }
+  },
+  "findingsTable": {
+    "columns": {
+      "severity": "Severity",
+      "vulnerability": "Vulnerability",
+      "asset": "Asset",
+      "status": "Status",
+      "report": "Report",
+      "task": "Task",
+      "time": "Time",
+      "actions": "Actions"
+    },
+    "selectAllPage": "Select all on this page",
+    "selectOne": "Select this vulnerability",
+    "viewDetails": "View finding details",
+    "uncategorized": "Uncategorized",
+    "trafficEvidence": "Traffic evidence: {count}",
+    "reportState": {
+      "none": "Not submitted",
+      "submitted": "Submitted",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "duplicate": "Duplicate report"
+    },
+    "verification": {
+      "verified": "Verified",
+      "unverified": "Unverified",
+      "blocked": "Blocked",
+      "not_assessed": "Not assessed",
+      "false_positive": "False positive"
+    },
+    "retest": {
+      "viewInProgress": "View the retest in progress",
+      "running": "Retesting",
+      "start": "Retest",
+      "startTitle": "Retest this vulnerability in a separate conversation"
+    },
+    "deepen": "Deepen",
+    "delete": {
+      "ariaLabel": "Delete vulnerability",
+      "title": "Delete this vulnerability?",
+      "description": "\"<name></name>\" will be permanently deleted and removed from the findings list, the task findings tab, and the exploration graph. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "edit": {
+      "vulnerability": "Vulnerability",
+      "namePlaceholder": "Readable title; falls back to category when empty",
+      "category": "Category",
+      "categoryPlaceholder": "e.g. SQL Injection",
+      "severity": "Severity",
+      "saving": "Saving…",
+      "save": "Save"
+    },
+    "evidence": {
+      "label": "Evidence",
+      "type": "· Type:",
+      "assets": "· Assets:"
+    },
+    "report": {
+      "label": "Detailed report",
+      "copied": "Detailed report copied",
+      "loading": "Loading…",
+      "error": "Failed to load the report.",
+      "empty": "No detailed report yet."
+    },
+    "empty": "No matching findings."
+  }
+}

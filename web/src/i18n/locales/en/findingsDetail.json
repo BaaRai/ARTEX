@@ -1,0 +1,56 @@
+{
+  "loading": "Loading…",
+  "notFound": "Finding {id} not found",
+  "backToFindings": "Back to findings",
+  "uncategorized": "Uncategorized",
+  "sourceTaskReadOnly": "Source task #{id} · read-only",
+  "tabs": {
+    "overview": "Overview",
+    "lineage": "Exploration graph"
+  },
+  "digest": {
+    "title": "Digest",
+    "empty": "(no digest)"
+  },
+  "evidence": {
+    "title": "Evidence / PoC",
+    "empty": "(no evidence)"
+  },
+  "counterevidence": {
+    "title": "Counterevidence"
+  },
+  "confidenceRationale": {
+    "title": "Confidence rationale"
+  },
+  "report": {
+    "title": "Detailed report",
+    "copied": "Detailed report copied",
+    "stale": "Traffic evidence has changed; the detailed report is pending an update.",
+    "empty": "No detailed report yet."
+  },
+  "status": {
+    "title": "Status"
+  },
+  "fields": {
+    "vulnerabilityId": "Vulnerability ID",
+    "severity": "Severity",
+    "triageStatus": "Triage status",
+    "reportStage": "Report stage",
+    "verification": "Verification",
+    "vulnerabilityType": "Vulnerability type",
+    "assets": "Assets",
+    "task": "Task",
+    "taskDeleted": "— (task deleted)",
+    "foundAt": "Found at"
+  },
+  "toasts": {
+    "severityChanged": "Severity changed to \"{label}\"",
+    "statusChanged": "Status changed to \"{label}\"",
+    "reportStageChanged": "Report stage changed to \"{label}\"",
+    "updateFailed": "Update failed: {message}"
+  },
+  "lineage": {
+    "empty": "No lineage to display (this vulnerability is not linked to an exploration node, or its task has been deleted).",
+    "emptyHint": "No lineage"
+  }
+}

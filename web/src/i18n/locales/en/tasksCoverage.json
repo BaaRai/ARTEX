@@ -1,0 +1,54 @@
+{
+  "loading": "Loading…",
+  "empty": "No in-scope assets yet (anchor the task scope first)",
+  "refresh": "Refresh",
+  "legend": {
+    "inScope": "In scope",
+    "tested": "Tested",
+    "testedHighlighted": "Tested (highlighted)",
+    "untested": "Untested",
+    "outOfScope": "Out of scope",
+    "help": "Force-directed layout; drag nodes and scroll to zoom. The gray \"⋯\" is a fold node — click it to expand more."
+  },
+  "asset": {
+    "properties": "Properties",
+    "type": "Type",
+    "testStatus": "Test status",
+    "tested": "Tested",
+    "untested": "Untested",
+    "outOfScopeNode": "Out of scope (connecting node)",
+    "domain": "Domain",
+    "rootDomain": "Root domain",
+    "ip": "IP",
+    "port": "Port",
+    "url": "URL",
+    "title": "Title",
+    "statusCode": "Status code",
+    "app": "App",
+    "assetId": "Asset ID",
+    "relatedIntents": "Related intents",
+    "relatedFacts": "Related facts",
+    "relatedFindings": "Related findings",
+    "rawData": "Raw data"
+  },
+  "ref": {
+    "inheritedBadge": "Source #{id} · read-only"
+  },
+  "fold": {
+    "hiddenTitle": "Hidden {type} ({count})",
+    "help": "Tested items are shown first. Click \"Show more\" to pull the next batch into the graph.",
+    "showMore": "Show more (+{step})"
+  },
+  "canvas": {
+    "foldMore": "{count} more {label}"
+  },
+  "kind": {
+    "company": "Company",
+    "root_domain": "Root domain",
+    "subdomain": "Subdomain",
+    "ip": "IP",
+    "service": "Service",
+    "app": "App",
+    "endpoint": "Endpoint"
+  }
+}

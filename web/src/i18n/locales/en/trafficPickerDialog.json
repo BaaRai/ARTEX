@@ -1,0 +1,40 @@
+{
+  "title": "Bind traffic",
+  "description": "Filter and multi-select requests/responses; selections persist across pages. After binding you can set purpose, notes, and order.",
+  "filters": {
+    "hostLabel": "Target host",
+    "hostPlaceholder": "Domain or IP",
+    "methodLabel": "Request method",
+    "allMethods": "All methods",
+    "keywordLabel": "Keyword",
+    "keywordPlaceholder": "URL / body keyword"
+  },
+  "table": {
+    "selectAllAria": "Select unbound traffic on this page",
+    "selectRowAria": "Select traffic {id}",
+    "columns": {
+      "methodUrl": "Method / URL",
+      "time": "Time",
+      "statusCode": "Status code",
+      "actions": "Actions"
+    },
+    "bound": "Bound",
+    "preview": "Preview",
+    "loading": "Loading…",
+    "empty": "No matching traffic"
+  },
+  "footer": {
+    "selectedTotal": "{count} selected · {total} total",
+    "previous": "Previous",
+    "page": "Page {page}",
+    "next": "Next"
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "bind": "Bind {count} traffic records"
+  },
+  "toasts": {
+    "bound": "Bound {count} traffic records"
+  }
+}

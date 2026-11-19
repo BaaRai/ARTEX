@@ -1,0 +1,63 @@
+{
+  "page": {
+    "subtitle": "External MCP tool servers · visibility granted per agent"
+  },
+  "card": {
+    "add": "Add MCP",
+    "down": "down: {detail}",
+    "connectFailed": "connect failed",
+    "ok": "ok {time}",
+    "notConnected": "not connected yet",
+    "enableAria": "Enable",
+    "deleteAria": "Delete",
+    "noTools": "No tools discovered yet",
+    "visibility": "Visibility (granted per agent)"
+  },
+  "form": {
+    "transport": "Transport",
+    "transportStdio": "stdio (local)",
+    "transportHttp": "http (remote)",
+    "transportSse": "sse (legacy)",
+    "name": "Name",
+    "command": "Command",
+    "argsLabel": "Arguments (space-separated)",
+    "remoteUrl": "Remote URL",
+    "skipTls": "Skip TLS certificate verification (self-signed certs)",
+    "timeout": "Request timeout (seconds, default 120)",
+    "headersLabel": "Request headers (one KEY=VALUE per line, e.g. Authorization=Bearer xxx)",
+    "envLabel": "Environment variables (one KEY=VALUE per line)"
+  },
+  "tools": {
+    "count": "{count} tools",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "empty": "No tools discovered yet; click refresh to fetch again."
+  },
+  "tabs": {
+    "config": "Config",
+    "tools": "Tools"
+  },
+  "sheet": {
+    "addTitle": "Add MCP server",
+    "description": "stdio (local process) or http (remote Streamable HTTP)"
+  },
+  "actions": {
+    "save": "Save",
+    "add": "Add"
+  },
+  "toasts": {
+    "fillName": "Please fill in the name",
+    "fillCommand": "Please fill in the command",
+    "fillUrl": "Please fill in the remote URL",
+    "saved": "Saved",
+    "added": "MCP server added",
+    "saveFailed": "Save failed: {message}",
+    "toolsFound": "Found {count} tools",
+    "refreshFailed": "Refresh failed: {message}",
+    "deleted": "Deleted: {name}",
+    "deleteFailed": "Delete failed: {message}",
+    "operationFailed": "Operation failed: {message}",
+    "visibilityGranted": "Granted visibility to \"{name}\"",
+    "visibilityRevoked": "Revoked visibility to \"{name}\""
+  }
+}

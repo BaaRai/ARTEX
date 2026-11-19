@@ -1,0 +1,13 @@
+{
+  "button": "할 일",
+  "trigger": {
+    "title": "최신 할 일 보기",
+    "disabledTitle": "이 세션에는 할 일이 없습니다"
+  },
+  "heading": "최신 할 일",
+  "loadingSuffix": " · 불러오는 중…",
+  "empty": "(비어 있음)",
+  "error": {
+    "parseFailed": "할 일을 분석하지 못했습니다"
+  }
+}

@@ -1,55 +1,24 @@
 "use client";
 
 import * as React from "react";
+
+import { BotIcon, ListFilterIcon, PencilIcon, PlusIcon, ShieldAlertIcon, Trash2Icon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import {
-  BotIcon,
-  ListFilterIcon,
-  PencilIcon,
-  PlusIcon,
-  ShieldAlertIcon,
-  Trash2Icon,
-} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type {
   InterceptAction,
@@ -80,6 +49,7 @@ function JudgeStat({ label, value }: { label: string; value: string }) {
 
 // JudgeSparkbars draws a mini bar chart of daily consumption (input+output) over the last N days with plain divs, avoiding a chart library dependency.
 function JudgeSparkbars({ daily }: { daily: JudgeDayUsage[] }) {
+  const t = useTranslations("intercept");
   const max = Math.max(1, ...daily.map((d) => d.input_tokens + d.output_tokens));
   return (
     <div className="flex h-16 items-end gap-0.5">
@@ -89,7 +59,7 @@ function JudgeSparkbars({ daily }: { daily: JudgeDayUsage[] }) {
         return (
           <div
             key={d.date}
-            title={`${d.date} · ${d.calls} calls · ${fmtTokens(total)} tokens`}
+            title={t("page.judge.sparkbarTooltip", { date: d.date, calls: d.calls, tokens: fmtTokens(total) })}
             className="min-w-[2px] flex-1 rounded-sm bg-violet-500/60 hover:bg-violet-500"
             style={{ height: `${h}%` }}
           />
@@ -109,36 +79,37 @@ function sdkTool(key: string, description: string): Tool {
 }
 
 const SDK_EXEC: Tool[] = [
-  sdkTool("Bash",        "Execute commands in a shell"),
-  sdkTool("WebFetch",    "Make HTTP/HTTPS requests (with proxy support)"),
-  sdkTool("web_search",  "Web search"),
-  sdkTool("shell_open",  "Open a persistent PTY interactive session"),
-  sdkTool("shell_send",  "Send input to an interactive session"),
-  sdkTool("shell_read",  "Read output from an interactive session"),
+  sdkTool("Bash", "Execute commands in a shell"),
+  sdkTool("WebFetch", "Make HTTP/HTTPS requests (with proxy support)"),
+  sdkTool("web_search", "Web search"),
+  sdkTool("shell_open", "Open a persistent PTY interactive session"),
+  sdkTool("shell_send", "Send input to an interactive session"),
+  sdkTool("shell_read", "Read output from an interactive session"),
   sdkTool("shell_close", "Close an interactive session"),
-  sdkTool("shell_list",  "List all interactive sessions"),
+  sdkTool("shell_list", "List all interactive sessions"),
 ];
 
 const SDK_WRITE: Tool[] = [
-  sdkTool("Write",     "Write files"),
-  sdkTool("Edit",      "Edit files (exact replacement)"),
+  sdkTool("Write", "Write files"),
+  sdkTool("Edit", "Edit files (exact replacement)"),
   sdkTool("MultiEdit", "Edit files in batch"),
 ];
 
 const SDK_KEYS = new Set([...SDK_EXEC, ...SDK_WRITE].map((t) => t.key));
 
 function groupTools(dbTools: Tool[]) {
-  const sys: Tool[] = [], custom: Tool[] = [];
+  const sys: Tool[] = [],
+    custom: Tool[] = [];
   for (const t of dbTools) {
     if (SDK_KEYS.has(t.key)) continue; // already covered by hardcoded groups
     if (t.system) sys.push(t);
-    else          custom.push(t);
+    else custom.push(t);
   }
   return [
-    { label: "Execution",      tools: SDK_EXEC },
-    { label: "Write/Edit", tools: SDK_WRITE },
-    { label: "System tools",    tools: sys },
-    { label: "Custom tools",  tools: custom },
+    { label: "execution", tools: SDK_EXEC },
+    { label: "writeEdit", tools: SDK_WRITE },
+    { label: "system", tools: sys },
+    { label: "custom", tools: custom },
   ].filter((g) => g.tools.length > 0);
 }
 
@@ -186,17 +157,20 @@ function argvLabel(pattern: string): string {
 // ---- small components ----
 
 function ActionBadge({ action }: { action: InterceptAction }) {
-  if (action === "allow") return <Badge variant="secondary">Allow</Badge>;
-  if (action === "deny")  return <Badge variant="destructive">Block</Badge>;
-  return <Badge variant="outline" className="border-amber-400 text-amber-600">Ask</Badge>;
+  const t = useTranslations("intercept");
+  if (action === "allow") return <Badge variant="secondary">{t("page.badge.allow")}</Badge>;
+  if (action === "deny") return <Badge variant="destructive">{t("page.badge.block")}</Badge>;
+  return (
+    <Badge variant="outline" className="border-amber-400 text-amber-600">
+      {t("page.badge.ask")}
+    </Badge>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-        {label}
-      </Label>
+      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</Label>
       {children}
     </div>
   );
@@ -218,6 +192,7 @@ const defaultJudge = (): JudgeConfig => ({
 });
 
 function JudgeCard() {
+  const t = useTranslations("intercept");
   const [cfg, setCfg] = React.useState<JudgeConfig>(defaultJudge());
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -240,11 +215,11 @@ function JudgeCard() {
       setCfg(j);
       setProfiles(ps);
     } catch (e) {
-      toast.error("Failed to load model fallback config: " + (e as Error).message);
+      toast.error(t("page.judge.toasts.loadFailed", { message: (e as Error).message }));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     load();
@@ -263,10 +238,10 @@ function JudgeCard() {
     setSaving(true);
     try {
       await api.interceptSetJudgeConfig(cfg);
-      toast.success("Model fallback config saved");
+      toast.success(t("page.judge.toasts.saved"));
       await load(); // read back: if the prompt was cleared, the built-in template is refilled
     } catch (e) {
-      toast.error("Save failed: " + (e as Error).message);
+      toast.error(t("page.toasts.saveFailed", { message: (e as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -279,9 +254,9 @@ function JudgeCard() {
       await api.interceptSetJudgeConfig({ ...cfg, prompt: "" });
       const j = await api.interceptGetJudgeConfig();
       setCfg(j);
-      toast.success("Built-in default template restored");
+      toast.success(t("page.judge.toasts.templateRestored"));
     } catch (e) {
-      toast.error("Restore failed: " + (e as Error).message);
+      toast.error(t("page.judge.toasts.restoreFailed", { message: (e as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -298,14 +273,19 @@ function JudgeCard() {
         <div className="flex items-center gap-2.5">
           <BotIcon className={`h-5 w-5 shrink-0 ${cfg.enabled ? "text-violet-600" : "text-muted-foreground"}`} />
           <div>
-            <p className="text-sm font-semibold leading-tight">Model fallback approval</p>
+            <p className="text-sm font-semibold leading-tight">{t("page.judge.title")}</p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Only commands inside the <span className="font-medium text-foreground">interception scope</span> that <span className="font-medium text-foreground">match no interception rule</span> are semantically judged by the model (allow / escalate to human / block)
+              {t.rich("page.judge.description", {
+                scope: (c) => <span className="font-medium text-foreground">{c}</span>,
+                rule: (c) => <span className="font-medium text-foreground">{c}</span>,
+              })}
             </p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-muted-foreground">{cfg.enabled ? "Enabled" : "Disabled"}</span>
+          <span className="text-xs text-muted-foreground">
+            {cfg.enabled ? t("page.judge.enabled") : t("page.judge.disabled")}
+          </span>
           <Switch checked={cfg.enabled} disabled={loading} onCheckedChange={(v) => patch({ enabled: v })} />
         </div>
       </div>
@@ -316,26 +296,24 @@ function JudgeCard() {
           <CardContent className="p-4">
             <div className="mb-3 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">Approval token consumption</p>
-                <p className="text-xs text-muted-foreground">
-                  Cumulative model fallback approval usage, metered separately (worker=judge), not mixed with per-model config stats
-                </p>
+                <p className="text-sm font-medium">{t("page.judge.usage.title")}</p>
+                <p className="text-xs text-muted-foreground">{t("page.judge.usage.subtitle")}</p>
               </div>
               <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={loadUsage}>
-                Refresh
+                {t("page.judge.usage.refresh")}
               </Button>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <JudgeStat label="Approval calls" value={usage.calls.toLocaleString()} />
-              <JudgeStat label="Input tokens" value={fmtTokens(usage.input_tokens)} />
-              <JudgeStat label="Output tokens" value={fmtTokens(usage.output_tokens)} />
-              <JudgeStat label="Cache read" value={fmtTokens(usage.cache_read_tokens)} />
-              <JudgeStat label="Cache write" value={fmtTokens(usage.cache_write_tokens)} />
+              <JudgeStat label={t("page.judge.usage.calls")} value={usage.calls.toLocaleString()} />
+              <JudgeStat label={t("page.judge.usage.inputTokens")} value={fmtTokens(usage.input_tokens)} />
+              <JudgeStat label={t("page.judge.usage.outputTokens")} value={fmtTokens(usage.output_tokens)} />
+              <JudgeStat label={t("page.judge.usage.cacheRead")} value={fmtTokens(usage.cache_read_tokens)} />
+              <JudgeStat label={t("page.judge.usage.cacheWrite")} value={fmtTokens(usage.cache_write_tokens)} />
             </div>
             {usage.daily.length > 0 && (
               <div className="mt-4">
                 <p className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Daily consumption over the last 30 days (input + output)
+                  {t("page.judge.usage.dailyLabel")}
                 </p>
                 <JudgeSparkbars daily={usage.daily} />
               </div>
@@ -351,21 +329,23 @@ function JudgeCard() {
             <CardContent className="flex h-full flex-col gap-2 p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium">Approval prompt</p>
-                  <p className="text-xs text-muted-foreground">The model decides ALLOW / ASK / DENY based on this; directly editable</p>
+                  <p className="text-sm font-medium">{t("page.judge.promptSection.title")}</p>
+                  <p className="text-xs text-muted-foreground">{t("page.judge.promptSection.subtitle")}</p>
                 </div>
                 <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={restorePrompt} disabled={saving}>
-                  Restore default template
+                  {t("page.judge.promptSection.restore")}
                 </Button>
               </div>
               <Textarea
                 className="min-h-[22rem] flex-1 resize-none font-mono text-xs leading-relaxed"
                 value={cfg.prompt}
                 onChange={(e) => patch({ prompt: e.target.value })}
-                placeholder="Leave empty to use the built-in template"
+                placeholder={t("page.judge.promptSection.placeholder")}
                 spellCheck={false}
               />
-              <p className="text-right text-[11px] text-muted-foreground">{cfg.prompt.length} chars</p>
+              <p className="text-right text-[11px] text-muted-foreground">
+                {t("page.judge.promptSection.chars", { count: cfg.prompt.length })}
+              </p>
             </CardContent>
           </Card>
 
@@ -373,12 +353,16 @@ function JudgeCard() {
           <Card className="lg:col-span-2">
             <CardContent className="space-y-5 p-4">
               <div className="space-y-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Judge model and policy</p>
-                <Field label="Approval model">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("page.judge.policy.heading")}
+                </p>
+                <Field label={t("page.judge.policy.modelLabel")}>
                   <Select value={String(cfg.profile_id || 0)} onValueChange={(v) => patch({ profile_id: Number(v) })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={FOLLOW_ACTIVE}>Follow active profile</SelectItem>
+                      <SelectItem value={FOLLOW_ACTIVE}>{t("page.judge.policy.followActive")}</SelectItem>
                       {profiles.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.name} ({p.model})
@@ -387,16 +371,18 @@ function JudgeCard() {
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="Judge mode">
+                <Field label={t("page.judge.policy.modeLabel")}>
                   <Select value={cfg.mode ?? "closed"} onValueChange={(v) => patch({ mode: v as JudgeConfig["mode"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="closed">Closed questions (code decides; prompt is the operator policy; failure asks)</SelectItem>
-                      <SelectItem value="freeform">Free-form prompt (model decides)</SelectItem>
+                      <SelectItem value="closed">{t("page.judge.policy.modeClosed")}</SelectItem>
+                      <SelectItem value="freeform">{t("page.judge.policy.modeFreeform")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="Model judge timeout (seconds)">
+                <Field label={t("page.judge.policy.timeoutLabel")}>
                   <Input
                     type="number"
                     min={1}
@@ -407,13 +393,18 @@ function JudgeCard() {
                     }}
                   />
                 </Field>
-                <Field label="When the model fails (error / timeout / unparsable)">
-                  <Select value={cfg.fail_action} onValueChange={(v) => patch({ fail_action: v as JudgeConfig["fail_action"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                <Field label={t("page.judge.policy.failLabel")}>
+                  <Select
+                    value={cfg.fail_action}
+                    onValueChange={(v) => patch({ fail_action: v as JudgeConfig["fail_action"] })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="allow">Allow</SelectItem>
-                      <SelectItem value="ask">Escalate to human approval</SelectItem>
-                      <SelectItem value="deny">Block</SelectItem>
+                      <SelectItem value="allow">{t("page.judge.policy.failAllow")}</SelectItem>
+                      <SelectItem value="ask">{t("page.judge.policy.failEscalate")}</SelectItem>
+                      <SelectItem value="deny">{t("page.judge.policy.failBlock")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
@@ -422,8 +413,10 @@ function JudgeCard() {
               <Separator />
 
               <div className="space-y-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Human approval (when the model decides "ask")</p>
-                <Field label="Approval wait timeout (seconds)">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("page.judge.human.heading")}
+                </p>
+                <Field label={t("page.judge.human.timeoutLabel")}>
                   <Input
                     type="number"
                     min={5}
@@ -434,12 +427,17 @@ function JudgeCard() {
                     }}
                   />
                 </Field>
-                <Field label="Default action after timeout">
-                  <Select value={cfg.ask_timeout_action} onValueChange={(v) => patch({ ask_timeout_action: v as JudgeConfig["ask_timeout_action"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                <Field label={t("page.judge.human.timeoutActionLabel")}>
+                  <Select
+                    value={cfg.ask_timeout_action}
+                    onValueChange={(v) => patch({ ask_timeout_action: v as JudgeConfig["ask_timeout_action"] })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="deny">Block</SelectItem>
-                      <SelectItem value="allow">Allow</SelectItem>
+                      <SelectItem value="deny">{t("page.judge.human.deny")}</SelectItem>
+                      <SelectItem value="allow">{t("page.judge.human.allow")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
@@ -451,7 +449,7 @@ function JudgeCard() {
 
       <div className="flex justify-end">
         <Button size="sm" onClick={save} disabled={saving || loading}>
-          {saving ? "Saving…" : "Save config"}
+          {saving ? t("page.common.saving") : t("page.judge.saveConfig")}
         </Button>
       </div>
     </div>
@@ -461,22 +459,23 @@ function JudgeCard() {
 // ---- page ----
 
 export default function InterceptPage() {
-  const [rules, setRules]     = React.useState<InterceptRule[]>([]);
+  const t = useTranslations("intercept");
+  const [rules, setRules] = React.useState<InterceptRule[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [open, setOpen]       = React.useState(false);
+  const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<InterceptRule | null>(null);
-  const [form, setForm]       = React.useState<RuleForm>(defaultForm());
-  const [saving, setSaving]   = React.useState(false);
+  const [form, setForm] = React.useState<RuleForm>(defaultForm());
+  const [saving, setSaving] = React.useState(false);
   const [regexErr, setRegexErr] = React.useState("");
   const [regexWarn, setRegexWarn] = React.useState(false); // true = JS cannot parse it but it may be valid Go syntax
 
   // ---- tool scope dialog ----
-  const [scopeOpen, setScopeOpen]       = React.useState(false);
-  const [allTools, setAllTools]         = React.useState<Tool[]>([]);
+  const [scopeOpen, setScopeOpen] = React.useState(false);
+  const [allTools, setAllTools] = React.useState<Tool[]>([]);
   const [enabledTools, setEnabledTools] = React.useState<Set<string>>(new Set());
   const [scopeLoading, setScopeLoading] = React.useState(false);
-  const [scopeSaving, setScopeSaving]   = React.useState(false);
-  const [scopeTools, setScopeTools]     = React.useState<string[]>([]); // header info bar: tools currently under interception
+  const [scopeSaving, setScopeSaving] = React.useState(false);
+  const [scopeTools, setScopeTools] = React.useState<string[]>([]); // header info bar: tools currently under interception
 
   // ---- data ----
 
@@ -494,16 +493,23 @@ export default function InterceptPage() {
       const r = await api.interceptRules();
       setRules(r);
     } catch {
-      toast.error("Failed to load interception rules");
+      toast.error(t("page.toasts.loadRulesFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  React.useEffect(() => { load(); loadScope(); }, [load, loadScope]);
+  }, [t]);
 
   React.useEffect(() => {
-    if (form.match_type !== "regex" || !form.pattern) { setRegexErr(""); setRegexWarn(false); return; }
+    load();
+    loadScope();
+  }, [load, loadScope]);
+
+  React.useEffect(() => {
+    if (form.match_type !== "regex" || !form.pattern) {
+      setRegexErr("");
+      setRegexWarn(false);
+      return;
+    }
     try {
       new RegExp(form.pattern);
       setRegexErr("");
@@ -518,7 +524,9 @@ export default function InterceptPage() {
 
   // ---- rule handlers ----
 
-  function set(patch: Partial<RuleForm>) { setForm(f => ({ ...f, ...patch })); }
+  function set(patch: Partial<RuleForm>) {
+    setForm((f) => ({ ...f, ...patch }));
+  }
 
   function openNew() {
     setEditing(null);
@@ -530,10 +538,16 @@ export default function InterceptPage() {
   function openEdit(rule: InterceptRule) {
     setEditing(rule);
     setForm({
-      name: rule.name, enabled: rule.enabled, priority: rule.priority,
-      match_target: rule.match_target, match_type: rule.match_type,
-      pattern: rule.pattern, action: rule.action, message: rule.message,
-      timeout_enabled: rule.timeout_enabled, timeout_seconds: rule.timeout_seconds,
+      name: rule.name,
+      enabled: rule.enabled,
+      priority: rule.priority,
+      match_target: rule.match_target,
+      match_type: rule.match_type,
+      pattern: rule.pattern,
+      action: rule.action,
+      message: rule.message,
+      timeout_enabled: rule.timeout_enabled,
+      timeout_seconds: rule.timeout_seconds,
       timeout_action: rule.timeout_action,
     });
     setRegexErr("");
@@ -541,17 +555,26 @@ export default function InterceptPage() {
   }
 
   async function handleSave() {
-    if (!form.name.trim())    { toast.error("Name cannot be empty"); return; }
-    if (!form.pattern.trim()) { toast.error("Pattern cannot be empty"); return; }
-    if (regexErr)             { toast.error("Invalid regex syntax"); return; }
+    if (!form.name.trim()) {
+      toast.error(t("page.toasts.nameRequired"));
+      return;
+    }
+    if (!form.pattern.trim()) {
+      toast.error(t("page.toasts.patternRequired"));
+      return;
+    }
+    if (regexErr) {
+      toast.error(t("page.toasts.invalidRegex"));
+      return;
+    }
     setSaving(true);
     try {
       if (editing) {
         await api.updateInterceptRule(editing.id, form);
-        toast.success("Rule updated");
+        toast.success(t("page.toasts.ruleUpdated"));
       } else {
         await api.createInterceptRule(form);
-        toast.success("Rule created");
+        toast.success(t("page.toasts.ruleCreated"));
       }
       setOpen(false);
       load();
@@ -565,7 +588,7 @@ export default function InterceptPage() {
   async function handleDelete(id: number) {
     try {
       await api.deleteInterceptRule(id);
-      toast.success("Rule deleted");
+      toast.success(t("page.toasts.ruleDeleted"));
       load();
     } catch (e) {
       toast.error((e as Error).message);
@@ -591,16 +614,17 @@ export default function InterceptPage() {
       setAllTools(tools);
       setEnabledTools(new Set(cfg.enabled_tools));
     } catch (e) {
-      toast.error("Load failed: " + (e as Error).message);
+      toast.error(t("page.toasts.loadFailed", { message: (e as Error).message }));
     } finally {
       setScopeLoading(false);
     }
   }
 
   function toggleTool(key: string, val: boolean) {
-    setEnabledTools(prev => {
+    setEnabledTools((prev) => {
       const next = new Set(prev);
-      if (val) next.add(key); else next.delete(key);
+      if (val) next.add(key);
+      else next.delete(key);
       return next;
     });
   }
@@ -609,11 +633,11 @@ export default function InterceptPage() {
     setScopeSaving(true);
     try {
       await api.interceptSetToolConfig([...enabledTools]);
-      toast.success("Interception scope saved");
+      toast.success(t("page.toasts.scopeSaved"));
       setScopeTools([...enabledTools]);
       setScopeOpen(false);
     } catch (e) {
-      toast.error("Save failed: " + (e as Error).message);
+      toast.error(t("page.toasts.saveFailed", { message: (e as Error).message }));
     } finally {
       setScopeSaving(false);
     }
@@ -625,36 +649,31 @@ export default function InterceptPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-5 p-6">
-
       {/* ---- header ---- */}
       <div className="flex items-center gap-2.5">
         <ShieldAlertIcon className="h-5 w-5 shrink-0" />
         <div>
-          <h1 className="text-lg font-semibold leading-tight">Command interception</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Tools are matched against interception rules before execution; unmatched commands can be judged by the model fallback
-          </p>
+          <h1 className="text-lg font-semibold leading-tight">{t("page.header.title")}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{t("page.header.subtitle")}</p>
         </div>
       </div>
 
       {/* ---- interception scope info bar (shared by rule matching and the model fallback: tools outside the scope are handled by neither) ---- */}
       <div
         className={`flex items-center justify-between gap-3 rounded-lg border px-4 py-2.5 ${
-          scopeTools.length === 0
-            ? "border-amber-400/60 bg-amber-50/50 dark:bg-amber-950/20"
-            : "bg-muted/40"
+          scopeTools.length === 0 ? "border-amber-400/60 bg-amber-50/50 dark:bg-amber-950/20" : "bg-muted/40"
         }`}
       >
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <ListFilterIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 font-medium">Interception scope</span>
+          <span className="shrink-0 font-medium">{t("page.scope.label")}</span>
           {scopeTools.length === 0 ? (
-            <span className="text-amber-700 dark:text-amber-500">
-              No tools enabled — neither interception rules nor the model fallback take effect
-            </span>
+            <span className="text-amber-700 dark:text-amber-500">{t("page.scope.empty")}</span>
           ) : (
             <>
-              <Badge variant="secondary" className="shrink-0">{scopeTools.length} tools</Badge>
+              <Badge variant="secondary" className="shrink-0">
+                {t("page.scope.toolCount", { count: scopeTools.length })}
+              </Badge>
               <span className="truncate text-muted-foreground" title={scopeTools.join(", ")}>
                 {scopeTools.join(", ")}
               </span>
@@ -668,108 +687,107 @@ export default function InterceptPage() {
           onClick={openScope}
         >
           <ListFilterIcon className="h-4 w-4" />
-          Adjust scope
+          {t("page.scope.adjust")}
         </Button>
       </div>
 
       <Tabs defaultValue="rules" className="flex-1">
         <TabsList>
-          <TabsTrigger value="rules">Interception rules</TabsTrigger>
-          <TabsTrigger value="judge">Model config</TabsTrigger>
+          <TabsTrigger value="rules">{t("page.tabs.rules")}</TabsTrigger>
+          <TabsTrigger value="judge">{t("page.tabs.judge")}</TabsTrigger>
         </TabsList>
 
         {/* ---- tab: interception rules ---- */}
         <TabsContent value="rules" className="mt-4 flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">
-              Rules are matched one by one in priority order (higher numbers first); the first match wins
-            </p>
+            <p className="text-xs text-muted-foreground">{t("page.rules.hint")}</p>
             <Button onClick={openNew} size="sm" className="shrink-0">
               <PlusIcon className="h-4 w-4" />
-              Create rule
+              {t("page.rules.create")}
             </Button>
           </div>
 
           <Card>
             <CardContent className="p-0">
-          {loading ? (
-            <p className="p-6 text-sm text-muted-foreground">Loading…</p>
-          ) : rules.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-              <ShieldAlertIcon className="h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">No rules yet</p>
-              <Button size="sm" variant="outline" onClick={openNew}>
-                <PlusIcon className="h-4 w-4" />
-                Create the first rule
-              </Button>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[72px]">Priority</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="w-[90px]">Target</TableHead>
-                  <TableHead className="w-[80px]">Type</TableHead>
-                  <TableHead>Pattern</TableHead>
-                  <TableHead className="w-[72px]">Policy</TableHead>
-                  <TableHead className="w-[64px] text-center">Enabled</TableHead>
-                  <TableHead className="w-[80px]" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rules.map((rule) => (
-                  <TableRow key={rule.id} className={!rule.enabled ? "opacity-40" : ""}>
-                    <TableCell>
-                      <span className="font-mono text-xs tabular-nums">{rule.priority}</span>
-                    </TableCell>
-                    <TableCell className="font-medium text-sm">{rule.name}</TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground">
-                        {rule.match_target === "tool_name" ? "Tool name" : "Input content"}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground">
-                        {rule.match_type === "regex" ? "Regex" : rule.match_type === "argv" ? "Argv prefix" : "String"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="max-w-[220px]">
-                      <code className="block truncate rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
-                        {rule.match_type === "argv" ? argvLabel(rule.pattern) : rule.pattern}
-                      </code>
-                    </TableCell>
-                    <TableCell>
-                      <ActionBadge action={rule.action} />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Switch
-                        checked={rule.enabled}
-                        onCheckedChange={() => handleToggle(rule)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-0.5">
-                        <Button
-                          size="icon" variant="ghost" className="h-7 w-7"
-                          onClick={() => openEdit(rule)}
-                        >
-                          <PencilIcon className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="icon" variant="ghost"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(rule.id)}
-                        >
-                          <Trash2Icon className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+              {loading ? (
+                <p className="p-6 text-sm text-muted-foreground">{t("page.common.loading")}</p>
+              ) : rules.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+                  <ShieldAlertIcon className="h-8 w-8 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">{t("page.rules.empty")}</p>
+                  <Button size="sm" variant="outline" onClick={openNew}>
+                    <PlusIcon className="h-4 w-4" />
+                    {t("page.rules.createFirst")}
+                  </Button>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-[72px]">{t("page.table.priority")}</TableHead>
+                      <TableHead>{t("page.table.name")}</TableHead>
+                      <TableHead className="w-[90px]">{t("page.table.target")}</TableHead>
+                      <TableHead className="w-[80px]">{t("page.table.type")}</TableHead>
+                      <TableHead>{t("page.table.pattern")}</TableHead>
+                      <TableHead className="w-[72px]">{t("page.table.policy")}</TableHead>
+                      <TableHead className="w-[64px] text-center">{t("page.table.enabled")}</TableHead>
+                      <TableHead className="w-[80px]" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rules.map((rule) => (
+                      <TableRow key={rule.id} className={!rule.enabled ? "opacity-40" : ""}>
+                        <TableCell>
+                          <span className="font-mono text-xs tabular-nums">{rule.priority}</span>
+                        </TableCell>
+                        <TableCell className="font-medium text-sm">{rule.name}</TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">
+                            {rule.match_target === "tool_name"
+                              ? t("page.table.targetToolName")
+                              : t("page.table.targetInput")}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">
+                            {rule.match_type === "regex"
+                              ? t("page.table.typeRegex")
+                              : rule.match_type === "argv"
+                                ? t("page.table.typeArgv")
+                                : t("page.table.typeString")}
+                          </span>
+                        </TableCell>
+                        <TableCell className="max-w-[220px]">
+                          <code className="block truncate rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
+                            {rule.match_type === "argv" ? argvLabel(rule.pattern) : rule.pattern}
+                          </code>
+                        </TableCell>
+                        <TableCell>
+                          <ActionBadge action={rule.action} />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Switch checked={rule.enabled} onCheckedChange={() => handleToggle(rule)} />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-0.5">
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
+                              <PencilIcon className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => handleDelete(rule.id)}
+                            >
+                              <Trash2Icon className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -784,22 +802,20 @@ export default function InterceptPage() {
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="right" className="flex flex-col gap-0 p-0 sm:max-w-md">
           <SheetHeader className="border-b px-6 py-4">
-            <SheetTitle>{editing ? "Edit rule" : "Create rule"}</SheetTitle>
-            <SheetDescription className="text-xs">
-              Higher priority matches first; the first matching rule wins and the rest are skipped
-            </SheetDescription>
+            <SheetTitle>{editing ? t("page.editor.editTitle") : t("page.editor.createTitle")}</SheetTitle>
+            <SheetDescription className="text-xs">{t("page.editor.description")}</SheetDescription>
           </SheetHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
-            <Field label="Name">
+            <Field label={t("page.editor.nameLabel")}>
               <Input
-                placeholder="Give the rule a name"
+                placeholder={t("page.editor.namePlaceholder")}
                 value={form.name}
                 onChange={(e) => set({ name: e.target.value })}
               />
             </Field>
 
-            <Field label="Priority (higher numbers match first)">
+            <Field label={t("page.editor.priorityLabel")}>
               <Input
                 type="number"
                 value={form.priority}
@@ -809,20 +825,22 @@ export default function InterceptPage() {
 
             <Separator />
 
-            <Field label="Match target">
+            <Field label={t("page.editor.matchTargetLabel")}>
               <Select
                 value={form.match_target}
                 onValueChange={(v) => set({ match_target: v as RuleForm["match_target"] })}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="tool_name">Tool name (tool_name)</SelectItem>
-                  <SelectItem value="tool_input">Input content (tool_input JSON)</SelectItem>
+                  <SelectItem value="tool_name">{t("page.editor.targetToolName")}</SelectItem>
+                  <SelectItem value="tool_input">{t("page.editor.targetToolInput")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
 
-            <Field label="Match type">
+            <Field label={t("page.editor.matchTypeLabel")}>
               <Select
                 value={form.match_type}
                 onValueChange={(v) => {
@@ -831,57 +849,61 @@ export default function InterceptPage() {
                   set(match_type === "argv" ? { match_type, match_target: "tool_input" } : { match_type });
                 }}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="string">String contains</SelectItem>
-                  <SelectItem value="regex">Regular expression</SelectItem>
-                  <SelectItem value="argv">Argv prefix (Bash only)</SelectItem>
+                  <SelectItem value="string">{t("page.editor.typeString")}</SelectItem>
+                  <SelectItem value="regex">{t("page.editor.typeRegex")}</SelectItem>
+                  <SelectItem value="argv">{t("page.editor.typeArgv")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
 
-            <Field label="Pattern">
+            <Field label={t("page.editor.patternLabel")}>
               <Input
-                placeholder={form.match_type === "regex" ? "^Bash$" : form.match_type === "argv" ? '["git","push"]' : "rm -rf"}
+                placeholder={
+                  form.match_type === "regex" ? "^Bash$" : form.match_type === "argv" ? '["git","push"]' : "rm -rf"
+                }
                 value={form.pattern}
                 onChange={(e) => set({ pattern: e.target.value })}
                 className={regexErr ? "border-destructive focus-visible:ring-destructive" : ""}
               />
-              {regexErr && (
-                <p className="text-xs text-destructive mt-1">{regexErr}</p>
-              )}
+              {regexErr && <p className="text-xs text-destructive mt-1">{regexErr}</p>}
               {regexWarn && (
-                <p className="text-xs text-amber-600 mt-1">Contains Go RE2 extended syntax (e.g. <code className="font-mono">(?i)</code>); the browser cannot preview it, and the server validates on submission</p>
+                <p className="text-xs text-amber-600 mt-1">
+                  {t.rich("page.editor.regexWarn", { code: (c) => <code className="font-mono">{c}</code> })}
+                </p>
               )}
               {form.match_type === "argv" && (
                 <p className="text-xs text-amber-600 mt-1">
-                  JSON array of 1 to 8 tokens: the program and its subcommands, no flags. Matches a single simple Bash command
-                  whose prefix is exactly <code className="font-mono">{argvLabel(form.pattern)}</code>. Flags are not constrained:
-                  <code className="font-mono"> [&quot;git&quot;,&quot;push&quot;]</code> also covers <code className="font-mono">git push --force</code>.
+                  {t.rich("page.editor.argvHelp", {
+                    prefix: argvLabel(form.pattern),
+                    code: (c) => <code className="font-mono">{c}</code>,
+                  })}
                 </p>
               )}
             </Field>
 
             <Separator />
 
-            <Field label="Interception policy">
-              <Select
-                value={form.action}
-                onValueChange={(v) => set({ action: v as InterceptAction })}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+            <Field label={t("page.editor.policyLabel")}>
+              <Select value={form.action} onValueChange={(v) => set({ action: v as InterceptAction })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="allow">Allow — pass through directly, skipping the remaining rules</SelectItem>
-                  <SelectItem value="deny">Block — cut it off and return a denial message to the model</SelectItem>
-                  <SelectItem value="ask">Ask the user — wait for approval</SelectItem>
+                  <SelectItem value="allow">{t("page.editor.policyAllow")}</SelectItem>
+                  <SelectItem value="deny">{t("page.editor.policyDeny")}</SelectItem>
+                  <SelectItem value="ask">{t("page.editor.policyAsk")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
 
             {form.action !== "allow" && (
-              <Field label={form.action === "deny" ? "Denial message (returned to the model)" : "Approval note (optional)"}>
+              <Field label={form.action === "deny" ? t("page.editor.denialLabel") : t("page.editor.approvalNoteLabel")}>
                 <Textarea
-                  placeholder={form.action === "deny" ? "Blocked by the security policy" : ""}
+                  placeholder={form.action === "deny" ? t("page.editor.denialPlaceholder") : ""}
                   value={form.message}
                   onChange={(e) => set({ message: e.target.value })}
                   rows={2}
@@ -895,17 +917,14 @@ export default function InterceptPage() {
                 <Separator />
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium">Enable approval timeout</p>
-                    <p className="text-xs text-muted-foreground">Handle automatically after the timeout instead of waiting</p>
+                    <p className="text-sm font-medium">{t("page.editor.timeoutEnableLabel")}</p>
+                    <p className="text-xs text-muted-foreground">{t("page.editor.timeoutEnableHint")}</p>
                   </div>
-                  <Switch
-                    checked={form.timeout_enabled}
-                    onCheckedChange={(v) => set({ timeout_enabled: v })}
-                  />
+                  <Switch checked={form.timeout_enabled} onCheckedChange={(v) => set({ timeout_enabled: v })} />
                 </div>
                 {form.timeout_enabled && (
                   <div className="flex items-end gap-3">
-                    <Field label="Timeout (seconds)">
+                    <Field label={t("page.editor.timeoutSecondsLabel")}>
                       <Input
                         type="number"
                         min={5}
@@ -917,15 +936,17 @@ export default function InterceptPage() {
                         }}
                       />
                     </Field>
-                    <Field label="Timeout action">
+                    <Field label={t("page.editor.timeoutActionLabel")}>
                       <Select
                         value={form.timeout_action}
                         onValueChange={(v) => set({ timeout_action: v as "deny" | "allow" })}
                       >
-                        <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="deny">Auto-deny</SelectItem>
-                          <SelectItem value="allow">Auto-allow</SelectItem>
+                          <SelectItem value="deny">{t("page.editor.autoDeny")}</SelectItem>
+                          <SelectItem value="allow">{t("page.editor.autoAllow")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </Field>
@@ -937,19 +958,19 @@ export default function InterceptPage() {
             <Separator />
 
             <div className="flex items-center gap-3">
-              <Switch
-                id="rule-enabled"
-                checked={form.enabled}
-                onCheckedChange={(v) => set({ enabled: v })}
-              />
-              <Label htmlFor="rule-enabled" className="cursor-pointer">Enable this rule</Label>
+              <Switch id="rule-enabled" checked={form.enabled} onCheckedChange={(v) => set({ enabled: v })} />
+              <Label htmlFor="rule-enabled" className="cursor-pointer">
+                {t("page.editor.enableRule")}
+              </Label>
             </div>
           </div>
 
           <SheetFooter className="border-t px-6 py-4 flex-row justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              {t("page.common.cancel")}
+            </Button>
             <Button onClick={handleSave} disabled={saving || !!regexErr}>
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("page.common.saving") : t("page.common.save")}
             </Button>
           </SheetFooter>
         </SheetContent>
@@ -957,26 +978,27 @@ export default function InterceptPage() {
 
       {/* ---- scope dialog ---- */}
       <Dialog open={scopeOpen} onOpenChange={setScopeOpen}>
-        <DialogContent className="sm:max-w-lg flex flex-col overflow-hidden p-0 gap-0" style={{ maxHeight: "min(80vh, 560px)" }}>
+        <DialogContent
+          className="sm:max-w-lg flex flex-col overflow-hidden p-0 gap-0"
+          style={{ maxHeight: "min(80vh, 560px)" }}
+        >
           <DialogHeader className="shrink-0 border-b px-6 py-4">
             <DialogTitle className="flex items-center gap-2">
               <ListFilterIcon className="h-4 w-4" />
-              Interception scope
+              {t("page.scope.label")}
             </DialogTitle>
-            <DialogDescription className="text-xs">
-              Only tools with interception enabled go through rule matching; all other tools pass through directly
-            </DialogDescription>
+            <DialogDescription className="text-xs">{t("page.scope.dialogDescription")}</DialogDescription>
           </DialogHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-5">
             {scopeLoading ? (
-              <p className="text-sm text-muted-foreground py-4">Loading…</p>
+              <p className="text-sm text-muted-foreground py-4">{t("page.common.loading")}</p>
             ) : (
               toolGroups.map((group, gi) => (
                 <div key={group.label}>
                   {gi > 0 && <Separator className="mb-5" />}
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                    {group.label}
+                    {t(`page.scope.groups.${group.label}`)}
                   </p>
                   <div className="space-y-0.5">
                     {group.tools.map((t) => (
@@ -989,8 +1011,10 @@ export default function InterceptPage() {
                         <label htmlFor={`scope-${t.key}`} className="flex-1 min-w-0 cursor-pointer">
                           <div className="flex items-center gap-1.5">
                             <span className="font-mono text-sm">{t.key}</span>
-                            {(t.kind && t.kind !== "builtin") && (
-                              <Badge variant="outline" className="px-1 py-0 text-[10px]">{t.kind}</Badge>
+                            {t.kind && t.kind !== "builtin" && (
+                              <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                                {t.kind}
+                              </Badge>
                             )}
                           </div>
                           {t.description && (
@@ -1006,9 +1030,11 @@ export default function InterceptPage() {
           </div>
 
           <div className="shrink-0 border-t px-6 py-3 flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setScopeOpen(false)}>Cancel</Button>
+            <Button variant="outline" size="sm" onClick={() => setScopeOpen(false)}>
+              {t("page.common.cancel")}
+            </Button>
             <Button size="sm" onClick={saveScope} disabled={scopeSaving || scopeLoading}>
-              {scopeSaving ? "Saving…" : "Save"}
+              {scopeSaving ? t("page.common.saving") : t("page.common.save")}
             </Button>
           </div>
         </DialogContent>

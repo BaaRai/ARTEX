@@ -1,0 +1,54 @@
+{
+  "findings": {
+    "sourceReadonly": "출처 #{id} · 읽기 전용",
+    "trafficEvidence": "트래픽 증거 {count}",
+    "viewDetailsTitle": "취약점 세부 정보 보기",
+    "details": "세부 정보",
+    "evidencePoc": "증거 / PoC",
+    "markedAs": "\"{status}\"(으)로 표시함",
+    "updateFailed": "업데이트 실패: {message}",
+    "vulnerabilities": "취약점",
+    "discoveryTime": "발견 시간",
+    "ascending": "오름차순",
+    "descending": "내림차순",
+    "sortToggleAria": "발견 시간 정렬 현재 {direction}, 클릭하여 정렬 방향을 전환합니다",
+    "empty": "이 작업 또는 직접 연결된 작업에 대해 아직 확정된 발견 사항이 없습니다."
+  },
+  "retests": {
+    "loadFailed": "작업 취약점을 불러오지 못했습니다: {error}",
+    "retry": "재시도",
+    "selectVulnerability": "취약점 선택",
+    "description": "이 작업의 취약점에 대한 재검증 이력을 보거나 새 재검증을 시작합니다.",
+    "selectAria": "취약점 선택: {name}",
+    "emptyTitle": "재검증할 취약점 없음",
+    "emptyDescription": "이 작업이 취약점을 발견하면 여기서 수동으로 재검증을 시작할 수 있습니다.",
+    "previousPage": "이전 취약점 페이지",
+    "pageIndicator": "{page} / {total} 페이지",
+    "nextPage": "다음 취약점 페이지",
+    "vulnerabilityDetails": "취약점 세부 정보"
+  },
+  "credentials": {
+    "title": "테스트 계정",
+    "description": "이 작업의 테스트 계정입니다. 비밀번호가 비어 있는 항목은 에이전트가 해당 계정을 등록하고 기록함을 의미합니다. 에이전트가 기록한 계정은 여기에 자동으로 표시됩니다.",
+    "emptyTitle": "테스트 계정 없음",
+    "emptyDescription": "아래에서 추가하거나 작업을 생성할 때 선언하세요. 에이전트가 인증된 테스트에 재사용합니다.",
+    "sourceAgent": "에이전트 기록",
+    "sourceDeclared": "선언됨",
+    "passwordAgentGenerates": "— 에이전트 생성 —",
+    "passwordStored": "저장됨, 숨김",
+    "deleteAria": "자격 증명 삭제",
+    "add": "추가",
+    "domainPlaceholder": "도메인 (예: target.example.com)",
+    "usernamePlaceholder": "이메일 또는 사용자 이름",
+    "passwordPlaceholder": "비밀번호 (비어 있으면 에이전트가 생성)",
+    "notePlaceholder": "메모 (선택 사항, 예: 프로그램 별칭 계정)"
+  },
+  "report": {
+    "copied": "Markdown 복사됨",
+    "copyFailed": "복사 실패. 텍스트를 선택하여 직접 복사하세요.",
+    "loading": "불러오는 중…",
+    "empty": "아직 보고서가 없습니다",
+    "title": "침투 테스트 보고서 (Markdown)",
+    "copy": "복사"
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "header": {
+    "title": "발견 사항",
+    "subtitle": "작업 전반의 취약점 개요"
+  },
+  "tabs": {
+    "all": "전체 발견 사항",
+    "byTask": "작업별",
+    "byAsset": "자산별"
+  },
+  "stats": {
+    "totalFindings": "전체 발견 사항",
+    "pending": "대기 중",
+    "submitted": "제출됨",
+    "accepted": "수락됨",
+    "critical": "심각",
+    "high": "높음",
+    "medium": "보통",
+    "low": "낮음"
+  },
+  "search": {
+    "placeholder": "발견 사항 검색"
+  },
+  "severity": {
+    "all": "전체",
+    "critical": "심각",
+    "high": "높음",
+    "medium": "보통",
+    "low": "낮음",
+    "filterBy": "{label} 심각도로 필터링"
+  },
+  "filters": {
+    "statusPlaceholder": "상태",
+    "allStatuses": "전체 상태",
+    "reportStagePlaceholder": "보고 단계",
+    "allReportStages": "전체 보고 단계",
+    "verificationPlaceholder": "검증",
+    "allVerificationStates": "전체 검증 상태",
+    "vulnTypePlaceholder": "취약점 유형",
+    "allTypes": "전체 유형",
+    "taskPlaceholder": "작업",
+    "allTasks": "전체 작업",
+    "unassignedTask": "연결 안 됨 / 작업 삭제됨",
+    "taskDeleted": "작업 #{id} (삭제됨)",
+    "sortBySeverity": "심각도순",
+    "sortByTime": "시간순"
+  },
+  "bulk": {
+    "selected": "{count}개 선택됨",
+    "setStatusAria": "선택한 발견 사항의 상태 설정",
+    "setReportStateAria": "선택한 발견 사항의 보고 단계 설정",
+    "updating": "업데이트 중…",
+    "setStatus": "상태 설정",
+    "setReportState": "보고 단계 설정"
+  },
+  "actions": {
+    "export": "내보내기",
+    "cancel": "취소"
+  },
+  "asset": {
+    "allAssets": "전체 자산",
+    "inTotal": "총 {count}개"
+  },
+  "groups": {
+    "unlinked": "연결 안 됨 / 작업 삭제됨",
+    "taskWithName": "{name} (작업 #{id})",
+    "taskNumber": "작업 #{id}",
+    "noSourceTask": "원본 작업을 사용할 수 없음",
+    "viewTask": "작업 #{id} 보기"
+  },
+  "table": {
+    "selectAll": "현재 페이지 전체 선택",
+    "selectAllGroup": "이 그룹의 현재 페이지 전체 선택"
+  },
+  "empty": "일치하는 발견 사항이 없습니다.",
+  "deepen": {
+    "title": "공격 심화",
+    "description": "이 취약점을 기반으로 2차 검증을 실행하기 위해 원본 작업 #{id}에 우선순위 10 워커 인텐트가 생성됩니다:",
+    "descriptionLabel": "공격 설명",
+    "descriptionPlaceholder": "검증할 공격 경로, 경계 조건, 대상 또는 예상 증거를 설명하세요",
+    "inheritAnchors": "새 인텐트는 이 취약점의 자산 앵커를 상속합니다.",
+    "submit": "심화 인텐트 생성"
+  },
+  "export": {
+    "title": "발견 사항 내보내기",
+    "description": "내보낼 범위와 형식을 선택하세요. 생성되면 브라우저가 파일을 자동으로 다운로드합니다.",
+    "scopeLabel": "내보내기 범위",
+    "scopeFiltered": "현재 필터 결과 내보내기 ({count}개)",
+    "scopeAll": "전체 내보내기",
+    "scopeSelected": "선택한 {count}개 내보내기",
+    "formatLabel": "내보내기 형식",
+    "formatMdSingle": "Markdown 요약 보고서 (단일 .md 파일)",
+    "formatMdZip": "발견 사항별 Markdown (취약점당 .md 1개, .zip으로 패키징)",
+    "formatCsv": "CSV 표 (.csv)",
+    "formatJson": "JSON (.json)",
+    "exporting": "내보내는 중…"
+  },
+  "toasts": {
+    "exportStarted": "내보내기 다운로드를 시작했습니다",
+    "exportFailed": "내보내기에 실패했습니다: {message}",
+    "retestStatusFailed": "재검증 상태를 불러오지 못했습니다: {message}",
+    "assetTreeFailed": "자산 트리를 불러오지 못했습니다: {message}",
+    "markedAs": "\"{label}\"(으)로 표시했습니다",
+    "updateFailed": "업데이트에 실패했습니다: {message}",
+    "reportStageSet": "보고 단계를 \"{label}\"(으)로 설정했습니다",
+    "bulkStatus": "발견 사항 {count}개를 \"{label}\"(으)로 표시했습니다",
+    "bulkReportState": "발견 사항 {count}개의 보고 단계를 \"{label}\"(으)로 설정했습니다",
+    "bulkFailed": "일괄 업데이트에 실패했습니다: {message}",
+    "saved": "저장되었습니다",
+    "deleted": "취약점을 삭제했습니다",
+    "deleteFailed": "삭제에 실패했습니다: {message}",
+    "saveFailed": "저장에 실패했습니다: {message}",
+    "deepenQueued": "심화 인텐트 #{id}이(가) 작업 대기열에 추가되었습니다",
+    "deepenCreated": "높은 우선순위 워커 인텐트 #{id}을(를) 생성했습니다",
+    "submitFailed": "제출에 실패했습니다: {message}"
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "header": {
+    "title": "개요",
+    "subtitle": "시스템 전체 상태 · 실시간 새로 고침"
+  },
+  "stats": {
+    "activeTasks": {
+      "label": "활성 작업",
+      "exploring": "탐색 중 {count}",
+      "paused": "일시 중지됨 {count}",
+      "completed": "완료 {count}",
+      "none": "작업 없음"
+    },
+    "confirmedFindings": {
+      "label": "확인된 발견 사항",
+      "critical": "심각 {count}",
+      "high": "높음 {count}",
+      "medium": "보통 {count}",
+      "low": "낮음 {count}"
+    },
+    "assetNodes": {
+      "label": "자산 노드",
+      "sub": "작업 간 공유됨"
+    },
+    "trafficExchanges": {
+      "label": "트래픽 교환",
+      "recording": "기록 중",
+      "captureOff": "캡처가 꺼져 있음"
+    },
+    "tokenUsage": {
+      "label": "토큰 사용량",
+      "breakdown": "입력 {input} (캐시 {cache} 포함) · 출력 {output}"
+    }
+  },
+  "llmUsage": {
+    "title": "LLM 토큰 사용량",
+    "source": {
+      "old": "이전",
+      "new": "신규",
+      "tooltipOld": "이전: 활동 통계 기반입니다(과거 작업 포함). 중단된 실행은 집계되지 않으며 모델별로 분류할 수 없습니다",
+      "tooltipNew": "신규: llm_usage 계측 원장 기반으로 호출별로 정확하며 중단된 실행도 포함합니다. 활성화된 이후의 데이터만 포함합니다"
+    },
+    "profiles": {
+      "all": "전체",
+      "default": "기본값"
+    },
+    "metrics": {
+      "total": "합계 (입력+출력)",
+      "taskCount": "작업 {count}개",
+      "inputUncached": "입력 (캐시 미적용)",
+      "cacheHits": "캐시 적중",
+      "output": "출력",
+      "cacheHitRate": "캐시 적중률"
+    },
+    "series": {
+      "input": "입력",
+      "output": "출력",
+      "cacheRead": "캐시 읽기"
+    },
+    "range": {
+      "7d": "7일",
+      "30d": "30일",
+      "3mo": "3개월",
+      "6mo": "6개월",
+      "1y": "1년"
+    },
+    "noData": "데이터 없음"
+  },
+  "activity": {
+    "title": "활동 피드",
+    "events": "이벤트 {count}개",
+    "viewTasks": "작업 보기",
+    "empty": "활동 기록 없음"
+  },
+  "findings": {
+    "title": "발견 사항",
+    "all": "전체",
+    "empty": "발견 사항 없음"
+  },
+  "tasksTable": {
+    "title": "작업",
+    "count": "작업 {count}개",
+    "all": "전체",
+    "columns": {
+      "task": "작업",
+      "status": "상태",
+      "engine": "엔진",
+      "goalProgress": "목표 진행률",
+      "inFlight": "진행 중",
+      "lastActivity": "마지막 활동"
+    },
+    "empty": "작업 없음"
+  },
+  "assets": {
+    "title": "자산 분포",
+    "byType": "유형별",
+    "empty": "자산 데이터 없음",
+    "totalNodes": "총 {count}개 노드",
+    "types": {
+      "root_domain": "루트 도메인",
+      "ip": "IP",
+      "subdomain": "서브도메인",
+      "app": "앱",
+      "service": "서비스",
+      "endpoint": "엔드포인트"
+    }
+  },
+  "traffic": {
+    "title": "트래픽 상태 코드",
+    "requests": "요청 {count}개",
+    "empty": "트래픽 데이터 없음",
+    "recentRequests": "최근 요청"
+  },
+  "system": {
+    "title": "시스템 상태",
+    "llmConfig": "LLM 설정",
+    "configured": "설정됨",
+    "notConfigured": "설정 안 됨",
+    "trafficCapture": "트래픽 캡처",
+    "on": "켜짐",
+    "off": "꺼짐",
+    "activeModel": "활성 모델",
+    "pendingApprovals": "대기 중인 승인 ({count})",
+    "more": "외 {count}개…",
+    "noPending": "대기 중인 가로채기 승인 없음"
+  }
+}

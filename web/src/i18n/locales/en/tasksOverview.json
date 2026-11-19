@@ -1,0 +1,156 @@
+{
+  "descGoal": {
+    "title": "Task description & goal",
+    "description": "Description",
+    "goal": "Goal"
+  },
+  "goals": {
+    "title": "Goal management",
+    "subtitle": "(final verifiable goals, {count} in total; adds/edits notify the planner and revive the task)",
+    "addPlaceholder": "Add a goal, e.g. 'gain unauthorized access with an admin account'",
+    "vulnPlaceholder": "Vulnerability class (optional)",
+    "add": "Add",
+    "addFailed": "Failed to add",
+    "saveFailed": "Failed to save",
+    "empty": "No goals yet. Once added, the planner dispatches exploration intents from them and judges completion."
+  },
+  "constraints": {
+    "title": "Operation constraints",
+    "subtitle": "(bounds planner/worker exploration, {count} in total; changes take effect at the next planning round)",
+    "deny": "Deny",
+    "allow": "Allow",
+    "addPlaceholder": "One operation constraint, e.g. 'test only the current port, do not scan other ports'",
+    "add": "Add",
+    "addFailed": "Failed to add",
+    "saveFailed": "Failed to save",
+    "empty": "No operation constraints yet. They are extracted automatically from the description/goal at task creation; you can also add, edit, or delete them here to bound which operations are allowed/denied."
+  },
+  "coverage": {
+    "title": "Asset test coverage",
+    "subtitle": "(rough estimate, for reference only)",
+    "testedInScope": "Tested {tested} / in scope {denominator}",
+    "gaps": "Coverage gaps: {count}"
+  },
+  "tokens": {
+    "title": "LLM token usage",
+    "perModel": "per model",
+    "callsSuffix": ", {count} calls in total",
+    "input": "Input",
+    "output": "Output",
+    "cacheRead": "Cache read",
+    "cacheHitRate": "Cache hit rate",
+    "table": {
+      "model": "Model",
+      "calls": "Calls",
+      "input": "Input",
+      "output": "Output",
+      "cacheRead": "Cache read",
+      "hitRate": "Hit rate"
+    },
+    "empty": "No LLM usage yet (the task has made no calls, or records are still being written)."
+  },
+  "scope": {
+    "title": "Test scope",
+    "subtitle": "(coverage scope, not enforced, {count} in total)",
+    "placeholder": {
+      "company": "Company name or id",
+      "ipCidr": "e.g. 10.0.0.1 or 10.0.0.0/24",
+      "icp": "e.g. Beijing ICP No.12345678-1",
+      "keyword": "e.g. a company-name keyword",
+      "default": "e.g. example.com"
+    },
+    "add": "Add",
+    "addFailed": "Failed to add",
+    "inherited": "Inherited",
+    "empty": "No test scope yet; once added it serves as the asset coverage denominator."
+  },
+  "scopeKind": {
+    "company": "Company",
+    "root_domain": "Root domain",
+    "subdomain": "Subdomain",
+    "ip": "IP",
+    "cidr": "CIDR",
+    "icp": "ICP",
+    "keyword": "Keyword"
+  },
+  "scopeSource": {
+    "auto": "Auto",
+    "agent": "Agent",
+    "manual": "Manual"
+  },
+  "scopeValue": {
+    "companyFallback": "Company #{id}"
+  },
+  "heartbeat": {
+    "title": "Heartbeat",
+    "engineState": "Engine state",
+    "runningWorkers": "Running workers",
+    "lastActivity": "Last activity",
+    "goals": "Goals {met}/{total}",
+    "completedAt": "Completed at"
+  },
+  "workset": {
+    "runningIntents": "Running intents",
+    "noRunningIntents": "No running intents",
+    "needsAttention": "Needs attention",
+    "confirmedVulns": "Confirmed vulnerabilities",
+    "running": "Running",
+    "frontierOpen": "frontier open",
+    "blockedIntents": "Blocked intents",
+    "recentFindings": "Recent findings",
+    "noFindings": "No findings yet"
+  },
+  "blocked": {
+    "title": "Blocked/errored intents",
+    "subtitle": "({count} in total, re-runnable)",
+    "rerunAll": "Re-run all",
+    "rerun": "Re-run",
+    "truncated": "Only the first 20 are shown; click \"Re-run all\" to handle the remaining {count}."
+  },
+  "stats": {
+    "openIntents": "Open intents",
+    "confirmedFindings": "Confirmed findings",
+    "totalIntents": "Total intents",
+    "thisTask": "this task",
+    "allIntents": "all intents of this task"
+  },
+  "intercept": {
+    "title": "Task-level asset intercept / allow",
+    "subtitle": "(this task only, never global; block rules evaluate before allow rules, {count} in total)",
+    "block": "Block",
+    "allow": "Allow",
+    "notePlaceholder": "Note (optional)",
+    "add": "Add",
+    "empty": "No task-level rules. A \"Block\" hit forbids testing; \"Allow\" is a whitelist — once configured, this task only permits assets that match an allow rule (no whitelist when unconfigured)."
+  },
+  "ruleKind": {
+    "exact_domain": {
+      "label": "Domain (exact)",
+      "placeholder": "example.gov.cn"
+    },
+    "exact_ip": {
+      "label": "IP (exact)",
+      "placeholder": "203.0.113.10"
+    },
+    "exact_url": {
+      "label": "URL (exact)",
+      "placeholder": "https://example.com/login"
+    },
+    "fuzzy_domain": {
+      "label": "Domain (fuzzy)",
+      "placeholder": ".gov.cn"
+    },
+    "fuzzy_ip": {
+      "label": "IP (fuzzy)",
+      "placeholder": "203.0.113."
+    },
+    "fuzzy_url": {
+      "label": "URL (fuzzy)",
+      "placeholder": "/admin"
+    },
+    "cidr": {
+      "label": "CIDR",
+      "placeholder": "192.168.0.0/16"
+    }
+  }
+}

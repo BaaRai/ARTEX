@@ -1,0 +1,211 @@
+{
+  "page": {
+    "common": {
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…",
+      "loading": "Loading…"
+    },
+    "badge": {
+      "allow": "Allow",
+      "block": "Block",
+      "ask": "Ask"
+    },
+    "header": {
+      "title": "Command interception",
+      "subtitle": "Tools are matched against interception rules before execution; unmatched commands can be judged by the model fallback"
+    },
+    "scope": {
+      "label": "Interception scope",
+      "empty": "No tools enabled — neither interception rules nor the model fallback take effect",
+      "toolCount": "{count} tools",
+      "adjust": "Adjust scope",
+      "dialogDescription": "Only tools with interception enabled go through rule matching; all other tools pass through directly",
+      "groups": {
+        "execution": "Execution",
+        "writeEdit": "Write/Edit",
+        "system": "System tools",
+        "custom": "Custom tools"
+      }
+    },
+    "tabs": {
+      "rules": "Interception rules",
+      "judge": "Model config"
+    },
+    "rules": {
+      "hint": "Rules are matched one by one in priority order (higher numbers first); the first match wins",
+      "create": "Create rule",
+      "empty": "No rules yet",
+      "createFirst": "Create the first rule"
+    },
+    "table": {
+      "priority": "Priority",
+      "name": "Name",
+      "target": "Target",
+      "type": "Type",
+      "pattern": "Pattern",
+      "policy": "Policy",
+      "enabled": "Enabled",
+      "targetToolName": "Tool name",
+      "targetInput": "Input content",
+      "typeRegex": "Regex",
+      "typeArgv": "Argv prefix",
+      "typeString": "String"
+    },
+    "editor": {
+      "editTitle": "Edit rule",
+      "createTitle": "Create rule",
+      "description": "Higher priority matches first; the first matching rule wins and the rest are skipped",
+      "nameLabel": "Name",
+      "namePlaceholder": "Give the rule a name",
+      "priorityLabel": "Priority (higher numbers match first)",
+      "matchTargetLabel": "Match target",
+      "targetToolName": "Tool name (tool_name)",
+      "targetToolInput": "Input content (tool_input JSON)",
+      "matchTypeLabel": "Match type",
+      "typeString": "String contains",
+      "typeRegex": "Regular expression",
+      "typeArgv": "Argv prefix (Bash only)",
+      "patternLabel": "Pattern",
+      "regexWarn": "Contains Go RE2 extended syntax (e.g. <code>(?i)</code>); the browser cannot preview it, and the server validates on submission",
+      "argvHelp": "JSON array of 1 to 8 tokens: the program and its subcommands, no flags. Matches a single simple Bash command whose prefix is exactly <code>{prefix}</code>. Flags are not constrained: <code>[\"git\",\"push\"]</code> also covers <code>git push --force</code>.",
+      "policyLabel": "Interception policy",
+      "policyAllow": "Allow — pass through directly, skipping the remaining rules",
+      "policyDeny": "Block — cut it off and return a denial message to the model",
+      "policyAsk": "Ask the user — wait for approval",
+      "denialLabel": "Denial message (returned to the model)",
+      "approvalNoteLabel": "Approval note (optional)",
+      "denialPlaceholder": "Blocked by the security policy",
+      "timeoutEnableLabel": "Enable approval timeout",
+      "timeoutEnableHint": "Handle automatically after the timeout instead of waiting",
+      "timeoutSecondsLabel": "Timeout (seconds)",
+      "timeoutActionLabel": "Timeout action",
+      "autoDeny": "Auto-deny",
+      "autoAllow": "Auto-allow",
+      "enableRule": "Enable this rule"
+    },
+    "toasts": {
+      "loadRulesFailed": "Failed to load interception rules",
+      "nameRequired": "Name cannot be empty",
+      "patternRequired": "Pattern cannot be empty",
+      "invalidRegex": "Invalid regex syntax",
+      "ruleUpdated": "Rule updated",
+      "ruleCreated": "Rule created",
+      "ruleDeleted": "Rule deleted",
+      "loadFailed": "Load failed: {message}",
+      "scopeSaved": "Interception scope saved",
+      "saveFailed": "Save failed: {message}"
+    },
+    "judge": {
+      "title": "Model fallback approval",
+      "description": "Only commands inside the <scope>interception scope</scope> that <rule>match no interception rule</rule> are semantically judged by the model (allow / escalate to human / block)",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "saveConfig": "Save config",
+      "toasts": {
+        "loadFailed": "Failed to load model fallback config: {message}",
+        "saved": "Model fallback config saved",
+        "templateRestored": "Built-in default template restored",
+        "restoreFailed": "Restore failed: {message}"
+      },
+      "usage": {
+        "title": "Approval token consumption",
+        "subtitle": "Cumulative model fallback approval usage, metered separately (worker=judge), not mixed with per-model config stats",
+        "refresh": "Refresh",
+        "calls": "Approval calls",
+        "inputTokens": "Input tokens",
+        "outputTokens": "Output tokens",
+        "cacheRead": "Cache read",
+        "cacheWrite": "Cache write",
+        "dailyLabel": "Daily consumption over the last 30 days (input + output)"
+      },
+      "sparkbarTooltip": "{date} · {calls} calls · {tokens} tokens",
+      "promptSection": {
+        "title": "Approval prompt",
+        "subtitle": "The model decides ALLOW / ASK / DENY based on this; directly editable",
+        "restore": "Restore default template",
+        "placeholder": "Leave empty to use the built-in template",
+        "chars": "{count} chars"
+      },
+      "policy": {
+        "heading": "Judge model and policy",
+        "modelLabel": "Approval model",
+        "followActive": "Follow active profile",
+        "modeLabel": "Judge mode",
+        "modeClosed": "Closed questions (code decides; prompt is the operator policy; failure asks)",
+        "modeFreeform": "Free-form prompt (model decides)",
+        "timeoutLabel": "Model judge timeout (seconds)",
+        "failLabel": "When the model fails (error / timeout / unparsable)",
+        "failAllow": "Allow",
+        "failEscalate": "Escalate to human approval",
+        "failBlock": "Block"
+      },
+      "human": {
+        "heading": "Human approval (when the model decides \"ask\")",
+        "timeoutLabel": "Approval wait timeout (seconds)",
+        "timeoutActionLabel": "Default action after timeout",
+        "deny": "Block",
+        "allow": "Allow"
+      }
+    }
+  },
+  "assets": {
+    "header": {
+      "title": "Asset interception",
+      "subtitle": "Global asset blocklist: matching domains / IPs / URLs / networks are intercepted; no operations run against them"
+    },
+    "intro": "Supports exact and fuzzy matching for domains / IPs / URLs, plus CIDR networks; ships with built-in fuzzy blocks for government (.gov / .gov.cn) and education (.edu / .edu.cn) sites",
+    "create": "Create rule",
+    "loading": "Loading…",
+    "empty": "No asset interception rules yet",
+    "createFirst": "Create the first rule",
+    "builtin": "Built-in",
+    "confirmDelete": "Are you sure you want to delete asset interception rule \"{pattern}\"?",
+    "group": {
+      "exact": "Exact match",
+      "fuzzy": "Fuzzy match",
+      "cidr": "CIDR"
+    },
+    "validate": {
+      "empty": "Match content cannot be empty",
+      "cidr": "Invalid CIDR format, e.g. 192.168.0.0/16"
+    },
+    "table": {
+      "type": "Type",
+      "matchContent": "Match content",
+      "note": "Note",
+      "enabled": "Enabled"
+    },
+    "kind": {
+      "exact_domain": "Domain (exact)",
+      "exact_ip": "IP (exact)",
+      "exact_url": "URL (exact)",
+      "fuzzy_domain": "Domain (fuzzy)",
+      "fuzzy_ip": "IP (fuzzy)",
+      "fuzzy_url": "URL (fuzzy)",
+      "cidr": "CIDR network"
+    },
+    "toasts": {
+      "loadFailed": "Failed to load asset interception rules",
+      "ruleUpdated": "Rule updated",
+      "ruleCreated": "Rule created",
+      "ruleDeleted": "Rule deleted"
+    },
+    "editor": {
+      "editTitle": "Edit asset interception rule",
+      "createTitle": "Create asset interception rule",
+      "description": "Target assets matching this rule are intercepted globally",
+      "matchTypeLabel": "Match type",
+      "matchContentLabel": "Match content",
+      "hintCidr": "CIDR network, e.g. 192.168.0.0/16",
+      "hintFuzzy": "Fuzzy match: hits when the target contains this content",
+      "hintExact": "Exact match: the target must equal this content exactly",
+      "noteLabel": "Note (optional)",
+      "notePlaceholder": "Describe what this rule is for",
+      "enableRule": "Enable this rule",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…"
+    }
+  }
+}

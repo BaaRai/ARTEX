@@ -43,6 +43,7 @@ import {
   Undo2Icon,
   XIcon,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { AssetInterceptRulesEditor } from "@/components/asset-intercept-rules-editor";
@@ -206,20 +207,24 @@ function taskDuration(task: Task, nowSec: number): number {
 // aggregate accumulated over a bulk delete.
 type DeleteCounts = Omit<DeleteTaskResult, "deleted" | "cleanup_warning">;
 
-function deleteDetails(result: DeleteCounts): string[] {
+function deleteDetails(result: DeleteCounts, t: ReturnType<typeof useTranslations<"tasks">>): string[] {
   const details: string[] = [];
-  if (result.assets_deleted > 0) details.push(`Deleted ${result.assets_deleted} assets`);
-  if (result.assets_detached > 0) details.push(`Detached ${result.assets_detached} shared assets`);
-  if (result.traffic_deleted > 0) details.push(`Deleted ${result.traffic_deleted} traffic records`);
-  if (result.files_deleted) details.push("Deleted task files");
-  if (result.findings_deleted > 0) details.push(`Deleted ${result.findings_deleted} findings`);
-  if (result.llm_records_deleted > 0) details.push(`Deleted ${result.llm_records_deleted} LLM request/response records`);
+  if (result.assets_deleted > 0) details.push(t("deleteDetail.assets", { count: result.assets_deleted }));
+  if (result.assets_detached > 0) details.push(t("deleteDetail.assetsDetached", { count: result.assets_detached }));
+  if (result.traffic_deleted > 0) details.push(t("deleteDetail.traffic", { count: result.traffic_deleted }));
+  if (result.files_deleted) details.push(t("deleteDetail.files"));
+  if (result.findings_deleted > 0) details.push(t("deleteDetail.findings", { count: result.findings_deleted }));
+  if (result.llm_records_deleted > 0) {
+    details.push(t("deleteDetail.llmRecords", { count: result.llm_records_deleted }));
+  }
   return details;
 }
 
-function deleteSummary(result: DeleteTaskResult): string {
-  const details = deleteDetails(result);
-  return details.length > 0 ? `Task deleted (${details.join(", ")})` : "Task deleted";
+function deleteSummary(result: DeleteTaskResult, t: ReturnType<typeof useTranslations<"tasks">>): string {
+  const details = deleteDetails(result, t);
+  return details.length > 0
+    ? t("deleteSummary.withDetails", { details: details.join(", ") })
+    : t("deleteSummary.plain");
 }
 
 // fmtDateTime renders a unix-seconds timestamp as a compact local date-time
@@ -306,6 +311,7 @@ function compareTasks(left: Task, right: Task, field: TaskSortField, direction: 
 }
 
 export default function TasksPage() {
+  const t = useTranslations("tasks");
   const [activeTab, setActiveTab] = React.useState("current");
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [categories, setCategories] = React.useState<TaskCategory[]>([]);
@@ -533,17 +539,19 @@ export default function TasksPage() {
       try {
         const result = await api.deleteTask(id, options);
         if (result.cleanup_warning) {
-          toast.warning(`${deleteSummary(result)}; some external data cleanup did not finish: ${result.cleanup_warning}`);
+          toast.warning(
+            t("toasts.deleteCleanupWarning", { summary: deleteSummary(result, t), warning: result.cleanup_warning }),
+          );
         } else {
-          toast.success(deleteSummary(result));
+          toast.success(deleteSummary(result, t));
         }
         load();
       } catch (e) {
-        toast.error("Delete failed: " + (e as Error).message);
+        toast.error(t("toasts.deleteFailed", { message: (e as Error).message }));
         throw e;
       }
     },
-    [load],
+    [load, t],
   );
 
   // controlTask is the inline pause/resume: bulk goes through controlTasksBatch, a single row uses the single-task endpoint, saving the
@@ -554,32 +562,38 @@ export default function TasksPage() {
       try {
         const result = await api.controlTask(id, action);
         toast.success(
-          action === "pause" ? `Task #${id} paused` : `Task #${id} resumed${result.queued ? ", queued" : ""}`,
+          action === "pause"
+            ? t("toasts.taskPaused", { id })
+            : `${t("toasts.taskResumed", { id })}${result.queued ? t("toasts.queuedSuffix") : ""}`,
         );
       } catch (e) {
-        toast.error(`${action === "pause" ? "Pause" : "Resume"} failed: ${(e as Error).message}`);
+        toast.error(
+          action === "pause"
+            ? t("toasts.pauseFailed", { message: (e as Error).message })
+            : t("toasts.resumeFailed", { message: (e as Error).message }),
+        );
       } finally {
         // Refresh regardless of outcome: failures usually mean the state changed, and re-fetching restores the right button shape.
         lastRef.current = "";
         load();
       }
     },
-    [load],
+    [load, t],
   );
 
   const renameTask = React.useCallback(
     async (task: Task, name: string) => {
       try {
         await api.renameTask(task.id, name);
-        toast.success(`Task #${task.id} renamed`);
+        toast.success(t("toasts.taskRenamed", { id: task.id }));
         lastRef.current = "";
         load();
       } catch (error) {
-        toast.error(`Rename failed: ${(error as Error).message}`);
+        toast.error(t("toasts.renameFailed", { message: (error as Error).message }));
         throw error;
       }
     },
-    [load],
+    [load, t],
   );
 
   const toggleTaskPinned = React.useCallback(
@@ -587,31 +601,35 @@ export default function TasksPage() {
       const pinned = taskIsPinned(task);
       try {
         await api.pinTask(task.id, !pinned);
-        toast.success(pinned ? `Task #${task.id} unpinned` : `Task #${task.id} pinned`);
+        toast.success(pinned ? t("toasts.taskUnpinned", { id: task.id }) : t("toasts.taskPinned", { id: task.id }));
         lastRef.current = "";
         load();
       } catch (error) {
-        toast.error(`${pinned ? "Unpin" : "Pin"} failed: ${(error as Error).message}`);
+        toast.error(
+          pinned
+            ? t("toasts.unpinFailed", { message: (error as Error).message })
+            : t("toasts.pinFailed", { message: (error as Error).message }),
+        );
         throw error;
       }
     },
-    [load],
+    [load, t],
   );
 
   const queueTaskArchive = React.useCallback(
     async (task: Task) => {
       try {
         await api.archiveTask(task.id);
-        toast.success(`Task #${task.id} queued for archiving`);
+        toast.success(t("toasts.taskArchiveQueued", { id: task.id }));
         setActiveTab("archived");
         lastRef.current = "";
         load();
       } catch (error) {
-        toast.error(`Archive failed: ${(error as Error).message}`);
+        toast.error(t("toasts.archiveFailed", { message: (error as Error).message }));
         throw error;
       }
     },
-    [load],
+    [load, t],
   );
 
   // deleteTasks deletes the selected tasks one by one: the backend has no batch endpoint, and each delete cascades into cleaning assets/traffic/files,
@@ -653,10 +671,10 @@ export default function TasksPage() {
           for (const id of deleted) next.delete(id);
           return next;
         });
-        const details = deleteDetails(total);
-        const summary = `Deleted ${deleted.length} tasks` + (details.length > 0 ? ` (${details.join(", ")})` : "");
+        const details = deleteDetails(total, t);
+        const summary = t("toasts.deletedCount", { count: deleted.length }) + (details.length > 0 ? ` (${details.join(", ")})` : "");
         if (warnings.length > 0) {
-          toast.warning(`${summary}; some external data cleanup did not finish: ${warnings.join("; ")}`);
+          toast.warning(t("toasts.deleteCleanupWarning", { summary, warning: warnings.join("; ") }));
         } else {
           toast.success(summary);
         }
@@ -666,11 +684,16 @@ export default function TasksPage() {
           .slice(0, 3)
           .map((f) => `#${f.id} (${f.message})`)
           .join("; ");
-        toast.error(`${failed.length} tasks failed to delete: ${head}${failed.length > 3 ? " and more" : ""}`);
+        toast.error(
+          t("toasts.deleteFailedCount", {
+            count: failed.length,
+            details: `${head}${failed.length > 3 ? t("toasts.andMore") : ""}`,
+          }),
+        );
       }
       load();
     },
-    [load],
+    [load, t],
   );
 
   const selectedTasks = React.useMemo(() => tasks.filter((task) => selectedIds.has(task.id)), [tasks, selectedIds]);
@@ -692,26 +715,29 @@ export default function TasksPage() {
     const result = await api.archiveTasks(archivableTaskIDs);
     const succeeded = result.items.filter((item) => item.ok);
     const failed = result.items.filter((item) => !item.ok);
-    if (succeeded.length > 0) toast.success(`Queued ${succeeded.length} tasks for archiving`);
+    if (succeeded.length > 0) toast.success(t("toasts.archiveQueuedCount", { count: succeeded.length }));
     if (failed.length > 0) {
       toast.error(
-        `${failed.length} tasks could not be archived: ${failed
-          .slice(0, 3)
-          .map((item) => `#${item.id} (${item.error || "state changed"})`)
-          .join("; ")}`,
+        t("toasts.archiveFailedCount", {
+          count: failed.length,
+          details: failed
+            .slice(0, 3)
+            .map((item) => `#${item.id} (${item.error || t("toasts.stateChanged")})`)
+            .join("; "),
+        }),
       );
     }
     setSelectedIds(new Set());
     setActiveTab("archived");
     lastRef.current = "";
     load();
-  }, [archivableTaskIDs, load]);
+  }, [archivableTaskIDs, load, t]);
 
   const controlSelectedTasks = React.useCallback(
     async (action: "pause" | "resume", ids: string[]) => {
       if (ids.length === 0 || batchControlling) return;
       if (ids.length > 100) {
-        toast.error("You can control at most 100 tasks at once");
+        toast.error(t("toasts.controlLimit"));
         return;
       }
       setBatchControlling(action);
@@ -722,26 +748,35 @@ export default function TasksPage() {
         if (succeeded.length > 0) {
           toast.success(
             action === "pause"
-              ? `Paused ${succeeded.length} tasks`
-              : `Resumed ${succeeded.length} tasks${succeeded.some((item) => item.queued) ? ", some tasks were queued" : ""}`,
+              ? t("toasts.pausedCount", { count: succeeded.length })
+              : `${t("toasts.resumedCount", { count: succeeded.length })}${succeeded.some((item) => item.queued) ? t("toasts.someQueued") : ""}`,
           );
         }
         if (failed.length > 0) {
           const details = failed
             .slice(0, 3)
-            .map((item) => `#${item.id} (${item.error || "state changed"})`)
+            .map((item) => `#${item.id} (${item.error || t("toasts.stateChanged")})`)
             .join("; ");
-          toast.error(`${failed.length} tasks failed: ${details}${failed.length > 3 ? " and more" : ""}`);
+          toast.error(
+            t("toasts.controlFailedCount", {
+              count: failed.length,
+              details: `${details}${failed.length > 3 ? t("toasts.andMore") : ""}`,
+            }),
+          );
         }
         lastRef.current = "";
         load();
       } catch (error) {
-        toast.error(`${action === "pause" ? "Bulk pause" : "Bulk resume"} failed: ${(error as Error).message}`);
+        toast.error(
+          action === "pause"
+            ? t("toasts.bulkPauseFailed", { message: (error as Error).message })
+            : t("toasts.bulkResumeFailed", { message: (error as Error).message }),
+        );
       } finally {
         setBatchControlling(null);
       }
     },
-    [batchControlling, load],
+    [batchControlling, load, t],
   );
 
   // The backend writes the whole batch's category changes in one transaction, so the only failures can be tasks deleted after being checked.
@@ -750,7 +785,7 @@ export default function TasksPage() {
       const ids = [...selectedIds];
       if (ids.length === 0 || movingCategory) return;
       if (ids.length > 100) {
-        toast.error("You can change the category of at most 100 tasks at once");
+        toast.error(t("toasts.moveCategoryLimit"));
         return;
       }
       setMovingCategory(true);
@@ -758,33 +793,38 @@ export default function TasksPage() {
         const result = await api.updateTasksCategory(ids, categoryID);
         const succeeded = result.items.filter((item) => item.ok);
         const failed = result.items.filter((item) => !item.ok);
-        const target = result.category?.name ?? "Uncategorized";
+        const target = result.category?.name ?? t("common.uncategorized");
         if (succeeded.length > 0) {
-          toast.success(`Moved ${succeeded.length} tasks to "${target}"`);
+          toast.success(t("toasts.movedCount", { count: succeeded.length, target }));
           setSelectedIds(new Set());
         }
         if (failed.length > 0) {
           const details = failed
             .slice(0, 3)
-            .map((item) => `#${item.id} (${item.error || "task no longer exists"})`)
+            .map((item) => `#${item.id} (${item.error || t("toasts.taskGone")})`)
             .join("; ");
-          toast.error(`${failed.length} tasks could not be moved: ${details}${failed.length > 3 ? " and more" : ""}`);
+          toast.error(
+            t("toasts.moveFailedCount", {
+              count: failed.length,
+              details: `${details}${failed.length > 3 ? t("toasts.andMore") : ""}`,
+            }),
+          );
         }
         refreshCategoriesAndTasks();
       } catch (error) {
-        toast.error(`Failed to change category: ${(error as Error).message}`);
+        toast.error(t("toasts.moveCategoryFailed", { message: (error as Error).message }));
       } finally {
         setMovingCategory(false);
       }
     },
-    [movingCategory, refreshCategoriesAndTasks, selectedIds],
+    [movingCategory, refreshCategoriesAndTasks, selectedIds, t],
   );
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-4">
       <TabsList className="mx-4 lg:mx-6">
-        <TabsTrigger value="current">Current tasks</TabsTrigger>
-        <TabsTrigger value="archived">Archived</TabsTrigger>
+        <TabsTrigger value="current">{t("tabs.current")}</TabsTrigger>
+        <TabsTrigger value="archived">{t("tabs.archived")}</TabsTrigger>
       </TabsList>
       <TabsContent value="current">
         <Card>
@@ -793,7 +833,7 @@ export default function TasksPage() {
               <div className="relative w-full sm:max-w-xs">
                 <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
                 <Input
-                  placeholder="Search description / goal / ID"
+                  placeholder={t("filters.searchPlaceholder")}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   className="pl-8"
@@ -802,7 +842,7 @@ export default function TasksPage() {
                   <button
                     type="button"
                     onClick={() => setQuery("")}
-                    aria-label="Clear search"
+                    aria-label={t("filters.clearSearchAria")}
                     className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
                   >
                     <XIcon className="size-4" />
@@ -811,14 +851,14 @@ export default function TasksPage() {
               </div>
               <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as TaskStatus | "all")}>
                 <SelectTrigger className="w-36">
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder={t("filters.statusPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="all">{t("filters.allStatuses")}</SelectItem>
                     {STATUS_OPTIONS.map((s) => (
                       <SelectItem key={s.value} value={s.value}>
-                        {s.label}
+                        {t.has(`statusOption.${s.value}`) ? t(`statusOption.${s.value}`) : s.label}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -826,12 +866,12 @@ export default function TasksPage() {
               </Select>
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Task category" />
+                  <SelectValue placeholder={t("filters.categoryPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="all">All categories</SelectItem>
-                    <SelectItem value={UNCATEGORIZED_VALUE}>Uncategorized</SelectItem>
+                    <SelectItem value="all">{t("filters.allCategories")}</SelectItem>
+                    <SelectItem value={UNCATEGORIZED_VALUE}>{t("common.uncategorized")}</SelectItem>
                     {categories.map((category) => (
                       <SelectItem key={category.id} value={String(category.id)}>
                         {category.name}
@@ -841,13 +881,13 @@ export default function TasksPage() {
                 </SelectContent>
               </Select>
               <span className="text-muted-foreground text-xs tabular-nums">
-                {filtered.length}/{tasks.length} tasks
+                {t("filters.taskCount", { filtered: filtered.length, total: tasks.length })}
               </span>
               {selectedIds.size > 0 && (
                 <>
-                  <span className="text-xs tabular-nums">{selectedIds.size} selected</span>
+                  <span className="text-xs tabular-nums">{t("selection.selectedCount", { count: selectedIds.size })}</span>
                   <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
-                    Clear selection
+                    {t("selection.clear")}
                   </Button>
                   {pausableTaskIDs.length > 0 && (
                     <Button
@@ -861,7 +901,7 @@ export default function TasksPage() {
                       ) : (
                         <PauseIcon data-icon="inline-start" />
                       )}
-                      Pause {pausableTaskIDs.length}
+                      {t("selection.pauseCount", { count: pausableTaskIDs.length })}
                     </Button>
                   )}
                   {resumableTaskIDs.length > 0 && (
@@ -876,7 +916,7 @@ export default function TasksPage() {
                       ) : (
                         <PlayIcon data-icon="inline-start" />
                       )}
-                      Resume {resumableTaskIDs.length}
+                      {t("selection.resumeCount", { count: resumableTaskIDs.length })}
                     </Button>
                   )}
                   {archivableTaskIDs.length > 0 && (
@@ -886,7 +926,7 @@ export default function TasksPage() {
                       trigger={
                         <Button size="sm" variant="outline">
                           <ArchiveIcon data-icon="inline-start" />
-                          Archive {archivableTaskIDs.length}
+                          {t("selection.archiveCount", { count: archivableTaskIDs.length })}
                         </Button>
                       }
                     />
@@ -917,11 +957,11 @@ export default function TasksPage() {
 
             {tasks.length === 0 ? (
               <div className="text-muted-foreground mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-sm lg:mx-6">
-                No tasks yet. Click "New task" at the top right to start.
+                {t("empty.noTasks")}
               </div>
             ) : filtered.length === 0 ? (
               <div className="text-muted-foreground mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-sm lg:mx-6">
-                No matching tasks.
+                {t("empty.noMatch")}
               </div>
             ) : (
               <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
@@ -931,35 +971,36 @@ export default function TasksPage() {
                       <Checkbox
                         checked={headerChecked}
                         onCheckedChange={(checked) => toggleSelectedPage(checked === true)}
-                        aria-label="Select all tasks on this page"
+                        aria-label={t("table.selectAllPage")}
                       />
                     </TableHead>
                     <SortableTaskHead
                       field="id"
-                      label="ID"
+                      label={t("table.columns.id")}
                       activeField={sortField}
                       direction={sortDirection}
                       className="font-mono"
                       onSort={sortTasksBy}
                     />
-                    <TableHead>Name</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Goal</TableHead>
+                    <TableHead>{t("table.columns.name")}</TableHead>
+                    <TableHead>{t("table.columns.description")}</TableHead>
+                    <TableHead>{t("table.columns.goal")}</TableHead>
                     <SortableTaskHead
                       field="status"
-                      label="Status"
+                      label={t("table.columns.status")}
                       activeField={sortField}
                       direction={sortDirection}
                       onSort={sortTasksBy}
                     />
-                    <TableHead className="text-center">Goal progress</TableHead>
-                    <TableHead className="text-center" title="Critical / High / Medium / Low">
-                      Findings <span className="text-muted-foreground font-normal">C/H/M/L</span>
+                    <TableHead className="text-center">{t("table.columns.goalProgress")}</TableHead>
+                    <TableHead className="text-center" title={t("table.severityTitle")}>
+                      {t("table.columns.findings")}{" "}
+                      <span className="text-muted-foreground font-normal">{t("table.severityLegend")}</span>
                     </TableHead>
-                    <TableHead className="text-center">Running workers</TableHead>
+                    <TableHead className="text-center">{t("table.columns.runningWorkers")}</TableHead>
                     <SortableTaskHead
                       field="created"
-                      label="Created at"
+                      label={t("table.columns.createdAt")}
                       activeField={sortField}
                       direction={sortDirection}
                       align="right"
@@ -967,15 +1008,15 @@ export default function TasksPage() {
                     />
                     <SortableTaskHead
                       field="duration"
-                      label="Duration"
+                      label={t("table.columns.duration")}
                       activeField={sortField}
                       direction={sortDirection}
                       align="right"
                       onSort={sortTasksBy}
                     />
-                    <TableHead className="text-right">Token</TableHead>
+                    <TableHead className="text-right">{t("table.columns.token")}</TableHead>
                     <TableHead className="sticky right-0 z-10 bg-card text-right shadow-[-1px_0_0_0_hsl(var(--border))]">
-                      Actions
+                      {t("table.columns.actions")}
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1044,12 +1085,17 @@ function SortableTaskHead({
   className?: string;
   onSort: (field: TaskSortField) => void;
 }) {
+  const t = useTranslations("tasks");
   const active = activeField === field;
   let ariaSort: React.AriaAttributes["aria-sort"] = "none";
   if (active) ariaSort = direction === "asc" ? "ascending" : "descending";
 
-  let actionLabel = `Sort by ${label} descending`;
-  if (active) actionLabel = `${label} is currently ${direction === "asc" ? "ascending" : "descending"}; click to toggle sort direction`;
+  let actionLabel = t("sort.action", { label });
+  if (active)
+    actionLabel = t("sort.activeAction", {
+      label,
+      direction: direction === "asc" ? t("sort.ascending") : t("sort.descending"),
+    });
 
   return (
     <TableHead className={className} aria-sort={ariaSort}>
@@ -1070,6 +1116,7 @@ function SortableTaskHead({
 }
 
 function ConcurrencySettingsDialog() {
+  const t = useTranslations("tasks");
   const [open, setOpen] = React.useState(false);
   const [enabled, setEnabled] = React.useState(false);
   const [limit, setLimit] = React.useState("5");
@@ -1096,10 +1143,12 @@ function ConcurrencySettingsDialog() {
     setSaving(true);
     try {
       await api.setSettings({ task_concurrency_enabled: enabled, task_concurrency_limit: nextLimit });
-      toast.success(enabled ? `Concurrency limit enabled: at most ${nextLimit} tasks can run simultaneously` : "Task concurrency limit disabled");
+      toast.success(
+        enabled ? t("concurrency.toastEnabled", { count: nextLimit }) : t("concurrency.toastDisabled"),
+      );
       setOpen(false);
     } catch (error) {
-      toast.error(`Save failed: ${(error as Error).message}`);
+      toast.error(t("toasts.saveFailed", { message: (error as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -1108,28 +1157,28 @@ function ConcurrencySettingsDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="ml-auto" aria-label="Task concurrency settings">
-          <SlidersHorizontalIcon /> Concurrency
+        <Button size="sm" variant="outline" className="ml-auto" aria-label={t("concurrency.triggerAria")}>
+          <SlidersHorizontalIcon /> {t("concurrency.trigger")}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Task concurrency limit</DialogTitle>
+          <DialogTitle>{t("concurrency.title")}</DialogTitle>
           <DialogDescription>
-            Limit how many tasks can run simultaneously. Once the limit is reached, new tasks queue in creation order and start automatically as slots free up.
+            {t("concurrency.description")}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-5 py-2">
           <div className="flex items-center justify-between gap-4">
             <div className="grid gap-1">
-              <Label htmlFor="task-concurrency-enabled">Enable task concurrency limit</Label>
-              <span className="text-muted-foreground text-xs">Off by default</span>
+              <Label htmlFor="task-concurrency-enabled">{t("concurrency.enableLabel")}</Label>
+              <span className="text-muted-foreground text-xs">{t("concurrency.offByDefault")}</span>
             </div>
             <Switch id="task-concurrency-enabled" checked={enabled} onCheckedChange={setEnabled} disabled={loading} />
           </div>
           {enabled && (
             <div className="grid gap-2">
-              <Label htmlFor="task-concurrency-limit">Max concurrent tasks</Label>
+              <Label htmlFor="task-concurrency-limit">{t("concurrency.maxLabel")}</Label>
               <Input
                 id="task-concurrency-limit"
                 type="number"
@@ -1144,10 +1193,10 @@ function ConcurrencySettingsDialog() {
         </div>
         <DialogFooter>
           <DialogClose asChild>
-            <Button variant="outline">Cancel</Button>
+            <Button variant="outline">{t("common.cancel")}</Button>
           </DialogClose>
           <Button onClick={save} disabled={loading || saving}>
-            {saving && <Loader2Icon className="animate-spin" />} Save
+            {saving && <Loader2Icon className="animate-spin" />} {t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1180,13 +1229,14 @@ const TaskRow = React.memo(function TaskRow({
   selected: boolean;
   onSelectedChange: (id: string, checked: boolean) => void;
 }) {
+  const t = useTranslations("tasks");
   return (
     <TableRow className="group border-border/60" data-state={selected ? "selected" : undefined}>
       <TableCell>
         <Checkbox
           checked={selected}
           onCheckedChange={(checked) => onSelectedChange(task.id, checked === true)}
-          aria-label={`Select task ${task.id}`}
+          aria-label={t("row.selectAria", { id: task.id })}
         />
       </TableCell>
       <TableCell>
@@ -1196,7 +1246,7 @@ const TaskRow = React.memo(function TaskRow({
         <div className="flex max-w-xs items-center gap-2">
           <TaskNameEditor task={task} onRename={onRename} />
           {task.active && <StarIcon className="size-4 shrink-0 fill-amber-400 text-amber-400" />}
-          {taskIsPinned(task) && <PinIcon className="text-primary size-4 shrink-0" aria-label="Pinned" />}
+          {taskIsPinned(task) && <PinIcon className="text-primary size-4 shrink-0" aria-label={t("row.pinned")} />}
         </div>
       </TableCell>
       <TableCell className="text-muted-foreground max-w-40">
@@ -1230,7 +1280,7 @@ const TaskRow = React.memo(function TaskRow({
             <span className={n > 0 ? cls : "text-muted-foreground"}>{n}</span>
           );
           return (
-            <span className="font-medium whitespace-nowrap" title="Critical / High / Medium / Low">
+            <span className="font-medium whitespace-nowrap" title={t("table.severityTitle")}>
               {seg(f.critical, "text-rose-600 dark:text-rose-400")}
               <span className="text-muted-foreground">/</span>
               {seg(f.high, "text-red-600 dark:text-red-400")}
@@ -1267,16 +1317,20 @@ const TaskRow = React.memo(function TaskRow({
         className="text-right text-xs whitespace-nowrap tabular-nums"
         title={
           task.tokens
-            ? `Input ${task.tokens.input_tokens} · Cache ${task.tokens.cache_read_tokens} · Output ${task.tokens.output_tokens}`
+            ? t("row.tokensTitle", {
+                input: task.tokens.input_tokens,
+                cache: task.tokens.cache_read_tokens,
+                output: task.tokens.output_tokens,
+              })
             : undefined
         }
       >
         {task.tokens ? (
           <span className="text-muted-foreground">
-            In <span className="text-foreground">{fmtTokens(task.tokens.input_tokens)}</span>
-            {" · Cache "}
+            {t("row.tokensIn")} <span className="text-foreground">{fmtTokens(task.tokens.input_tokens)}</span>
+            {t("row.tokensCacheSep")}
             <span className="text-foreground">{fmtTokens(task.tokens.cache_read_tokens)}</span>
-            {" · Out "}
+            {t("row.tokensOutSep")}
             <span className="text-foreground">{fmtTokens(task.tokens.output_tokens)}</span>
           </span>
         ) : (
@@ -1285,7 +1339,7 @@ const TaskRow = React.memo(function TaskRow({
       </TableCell>
       <TableCell className="sticky right-0 z-10 bg-card text-right shadow-[-1px_0_0_0_hsl(var(--border))] group-hover:bg-muted/50">
         <div className="flex items-center justify-end gap-0.5">
-          <Button size="icon" variant="ghost" asChild aria-label="View task details" title="View task details">
+          <Button size="icon" variant="ghost" asChild aria-label={t("row.viewDetails")} title={t("row.viewDetails")}>
             <Link href={`/function/tasks/detail?id=${encodeURIComponent(task.id)}`}>
               <EyeIcon />
             </Link>
@@ -1301,6 +1355,7 @@ const TaskRow = React.memo(function TaskRow({
 });
 
 function TaskNameEditor({ task, onRename }: { task: Task; onRename: (task: Task, name: string) => Promise<void> }) {
+  const t = useTranslations("tasks");
   const [editing, setEditing] = React.useState(false);
   const [name, setName] = React.useState(task.name ?? "");
   const [saving, setSaving] = React.useState(false);
@@ -1346,7 +1401,7 @@ function TaskNameEditor({ task, onRename }: { task: Task; onRename: (task: Task,
           maxLength={200}
           autoFocus
           disabled={saving}
-          aria-label={`Task #${task.id} name`}
+          aria-label={t("nameEditor.inputAria", { id: task.id })}
           className="h-7 min-w-28 max-w-48 px-2 font-medium"
           onFocus={(event) => event.currentTarget.select()}
           onChange={(event) => setName(event.target.value)}
@@ -1374,15 +1429,15 @@ function TaskNameEditor({ task, onRename }: { task: Task; onRename: (task: Task,
         className="min-w-0 truncate rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         title={task.name?.trim() ? task.name : task.description}
       >
-        {task.name?.trim() ? task.name : <span className="text-muted-foreground">Unnamed</span>}
+        {task.name?.trim() ? task.name : <span className="text-muted-foreground">{t("nameEditor.unnamed")}</span>}
       </Link>
       <Button
         type="button"
         variant="ghost"
         size="icon-xs"
         className="shrink-0 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
-        aria-label={`Rename task #${task.id}`}
-        title="Rename"
+        aria-label={t("nameEditor.renameAria", { id: task.id })}
+        title={t("nameEditor.renameTitle")}
         onClick={() => {
           setName(task.name ?? "");
           setEditing(true);
@@ -1401,6 +1456,7 @@ function taskPinIcon(pinning: boolean, pinned: boolean) {
 }
 
 function TaskPinAction({ task, onTogglePinned }: { task: Task; onTogglePinned: (task: Task) => Promise<void> }) {
+  const t = useTranslations("tasks");
   const [pinning, setPinning] = React.useState(false);
   const pinned = taskIsPinned(task);
 
@@ -1410,8 +1466,8 @@ function TaskPinAction({ task, onTogglePinned }: { task: Task; onTogglePinned: (
       variant="ghost"
       size="icon"
       disabled={pinning}
-      aria-label={pinned ? `Unpin task #${task.id}` : `Pin task #${task.id}`}
-      title={pinned ? "Unpin" : "Pin"}
+      aria-label={pinned ? t("pin.unpinAria", { id: task.id }) : t("pin.pinAria", { id: task.id })}
+      title={pinned ? t("pin.unpin") : t("pin.pin")}
       onClick={async () => {
         setPinning(true);
         try {
@@ -1442,15 +1498,16 @@ function TaskControlButton({
   task: Task;
   onControl: (id: string, action: "pause" | "resume") => Promise<void>;
 }) {
+  const t = useTranslations("tasks");
   const [pending, setPending] = React.useState(false);
   const action = taskControlAction(task.status);
-  const label = action === "resume" ? "Resume task" : "Pause task";
+  const label = action === "resume" ? t("control.resume") : t("control.pause");
   return (
     <Button
       size="icon"
       variant="ghost"
       aria-label={label}
-      title={action ? label : "Cannot pause or resume in this state"}
+      title={action ? label : t("control.unavailable")}
       disabled={!action || pending}
       onClick={async () => {
         if (!action) return;
@@ -1467,11 +1524,11 @@ function TaskControlButton({
   );
 }
 
-function archiveBlockReason(task: Task): string {
-  if (task.queued) return "Queued tasks must be paused first";
-  if (!ARCHIVABLE_STATUSES.has(task.status)) return "Running or unfinished tasks must be paused first";
+function archiveBlockReason(task: Task, t: ReturnType<typeof useTranslations<"tasks">>): string {
+  if (task.queued) return t("archiveBlock.queued");
+  if (!ARCHIVABLE_STATUSES.has(task.status)) return t("archiveBlock.notArchivable");
   if (task.archive_blocked_by_task_id) {
-    return `The task is directly inherited by unarchived task #${task.archive_blocked_by_task_id}; archive the dependent task first`;
+    return t("archiveBlock.inherited", { id: task.archive_blocked_by_task_id });
   }
   return "";
 }
@@ -1485,6 +1542,7 @@ function ArchiveConfirmDialog({
   trigger: React.ReactNode;
   onConfirm: () => Promise<void>;
 }) {
+  const t = useTranslations("tasks");
   const [open, setOpen] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   return (
@@ -1492,13 +1550,13 @@ function ArchiveConfirmDialog({
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{count === 1 ? "Archive task" : `Archive ${count} tasks`}</AlertDialogTitle>
+          <AlertDialogTitle>{count === 1 ? t("archiveConfirm.titleOne") : t("archiveConfirm.titleMany", { count })}</AlertDialogTitle>
           <AlertDialogDescription className="[overflow-wrap:anywhere]">
-            Archiving stops task scheduling and compresses the graph, LLM history, files, and exclusive assets and traffic into local cold storage. Once archived, a task can be restored from "Archived".
+            {t("archiveConfirm.description")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             disabled={pending}
             onClick={async (event) => {
@@ -1513,7 +1571,7 @@ function ArchiveConfirmDialog({
             }}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            Confirm archive
+            {t("archiveConfirm.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -1522,9 +1580,10 @@ function ArchiveConfirmDialog({
 }
 
 function TaskArchiveAction({ task, onArchive }: { task: Task; onArchive: (task: Task) => Promise<void> }) {
-  const reason = archiveBlockReason(task);
+  const t = useTranslations("tasks");
+  const reason = archiveBlockReason(task, t);
   const trigger = (
-    <Button size="icon" variant="ghost" disabled={Boolean(reason)} aria-label={`Archive task #${task.id}`}>
+    <Button size="icon" variant="ghost" disabled={Boolean(reason)} aria-label={t("archiveAction.aria", { id: task.id })}>
       <ArchiveIcon />
     </Button>
   );
@@ -1569,11 +1628,13 @@ function archiveStateLabel(state: TaskArchiveState): string {
 }
 
 function ArchiveStateBadge({ state }: { state: TaskArchiveState }) {
+  const t = useTranslations("tasks");
   let variant: "default" | "secondary" | "destructive" | "outline" = "outline";
   if (state === "ready") variant = "secondary";
   if (ARCHIVE_PROCESSING_STATES.has(state)) variant = "default";
   if (ARCHIVE_FAILED_STATES.has(state)) variant = "destructive";
-  return <Badge variant={variant}>{archiveStateLabel(state)}</Badge>;
+  const label = t.has(`archiveState.${state}`) ? t(`archiveState.${state}`) : archiveStateLabel(state);
+  return <Badge variant={variant}>{label}</Badge>;
 }
 
 function formatArchiveBytes(bytes: number): string {
@@ -1584,10 +1645,11 @@ function formatArchiveBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
-function archiveCompressionLabel(archive: TaskArchive): string {
+function archiveCompressionLabel(archive: TaskArchive, t: ReturnType<typeof useTranslations<"tasks">>): string {
   if (archive.original_size <= 0 || archive.compressed_size <= 0) return "—";
   const saved = Math.max(0, 100 - (archive.compressed_size / archive.original_size) * 100);
-  return `${formatArchiveBytes(archive.compressed_size)} · saves ${saved.toFixed(0)}%`;
+  const size = formatArchiveBytes(archive.compressed_size);
+  return t("archiveCompression.label", { size, pct: saved.toFixed(0) });
 }
 
 function archiveDataTotal(archive: TaskArchive): number {
@@ -1610,6 +1672,7 @@ function ArchiveDeleteDialog({
   onConfirm: () => Promise<void>;
   trigger: React.ReactNode;
 }) {
+  const t = useTranslations("tasks");
   const [open, setOpen] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const rows = archives.reduce((sum, archive) => sum + archiveDataTotal(archive), 0);
@@ -1619,13 +1682,13 @@ function ArchiveDeleteDialog({
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Permanently delete {archives.length} task archives?</AlertDialogTitle>
+          <AlertDialogTitle>{t("archiveDelete.title", { count: archives.length })}</AlertDialogTitle>
           <AlertDialogDescription className="[overflow-wrap:anywhere]">
-            About {formatArchiveBytes(bytes)} of archive packages and {rows.toLocaleString()} related data snapshots will be permanently deleted. This action cannot be undone.
+            {t("archiveDelete.description", { size: formatArchiveBytes(bytes), rows: rows.toLocaleString() })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             disabled={pending}
@@ -1641,7 +1704,7 @@ function ArchiveDeleteDialog({
             }}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            Delete permanently
+            {t("archiveDelete.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -1650,6 +1713,7 @@ function ArchiveDeleteDialog({
 }
 
 function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
+  const t = useTranslations("tasks");
   const [archives, setArchives] = React.useState<TaskArchive[]>([]);
   const [query, setQuery] = React.useState("");
   const [stateFilter, setStateFilter] = React.useState("all");
@@ -1687,11 +1751,11 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
         if (restored) onChanged();
       }
     } catch (error) {
-      toast.error(`Failed to load the archive list: ${(error as Error).message}`);
+      toast.error(t("toasts.archiveListLoadFailed", { message: (error as Error).message }));
     } finally {
       setLoading(false);
     }
-  }, [onChanged, page, pageSize, query, stateFilter]);
+  }, [onChanged, page, pageSize, query, stateFilter, t]);
 
   React.useEffect(() => {
     void load();
@@ -1743,11 +1807,11 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
         const archiveID = Number(item.archive_id ?? item.id);
         if (item.ok && Number.isSafeInteger(archiveID) && archiveID > 0) pendingRestoreIDs.current.add(archiveID);
       }
-      if (succeeded > 0) toast.success(`Queued ${succeeded} tasks for restore`);
-      if (failed > 0) toast.error(`${failed} tasks could not be restored`);
+      if (succeeded > 0) toast.success(t("toasts.restoreQueuedCount", { count: succeeded }));
+      if (failed > 0) toast.error(t("toasts.restoreFailedCount", { count: failed }));
       afterAction();
     } catch (error) {
-      toast.error(`Restore failed: ${(error as Error).message}`);
+      toast.error(t("toasts.restoreFailed", { message: (error as Error).message }));
     }
   }
 
@@ -1768,11 +1832,11 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
           : await api.deleteTaskArchives(items.map((archive) => archive.id));
       const succeeded = result.items.filter((item) => item.ok).length;
       const failed = result.items.length - succeeded;
-      if (succeeded > 0) toast.success(`Queued ${succeeded} archives for permanent deletion`);
-      if (failed > 0) toast.error(`${failed} archives could not be deleted`);
+      if (succeeded > 0) toast.success(t("toasts.archiveDeleteQueuedCount", { count: succeeded }));
+      if (failed > 0) toast.error(t("toasts.archiveDeleteFailedCount", { count: failed }));
       afterAction();
     } catch (error) {
-      toast.error(`Permanent delete failed: ${(error as Error).message}`);
+      toast.error(t("toasts.permanentDeleteFailed", { message: (error as Error).message }));
       throw error;
     }
   }
@@ -1782,10 +1846,10 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
       if (archive.state === "archive_failed") await api.archiveTask(String(archive.task_id));
       if (archive.state === "restore_failed") await api.restoreTaskArchive(archive.id);
       if (archive.state === "delete_failed") await api.deleteTaskArchive(archive.id);
-      toast.success("Re-queued for processing");
+      toast.success(t("toasts.requeued"));
       afterAction();
     } catch (error) {
-      toast.error(`Retry failed: ${(error as Error).message}`);
+      toast.error(t("toasts.retryFailed", { message: (error as Error).message }));
     }
   }
 
@@ -1801,7 +1865,7 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                 setQuery(event.target.value);
                 setPage(1);
               }}
-              placeholder="Search task name / description / ID"
+              placeholder={t("archives.searchPlaceholder")}
               className="pl-8"
             />
           </div>
@@ -1813,32 +1877,32 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
             }}
           >
             <SelectTrigger className="w-36">
-              <SelectValue placeholder="State" />
+              <SelectValue placeholder={t("archives.statePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="archive_queued">Archive queued</SelectItem>
-                <SelectItem value="archiving">Archiving</SelectItem>
-                <SelectItem value="ready">Restorable</SelectItem>
-                <SelectItem value="restore_queued">Restore queued</SelectItem>
-                <SelectItem value="restoring">Restoring</SelectItem>
-                <SelectItem value="delete_queued">Delete queued</SelectItem>
-                <SelectItem value="deleting">Deleting</SelectItem>
-                <SelectItem value="archive_failed">Archive failed</SelectItem>
-                <SelectItem value="restore_failed">Restore failed</SelectItem>
-                <SelectItem value="delete_failed">Delete failed</SelectItem>
+                <SelectItem value="all">{t("archives.allStatuses")}</SelectItem>
+                <SelectItem value="archive_queued">{t("archiveState.archive_queued")}</SelectItem>
+                <SelectItem value="archiving">{t("archiveState.archiving")}</SelectItem>
+                <SelectItem value="ready">{t("archiveState.ready")}</SelectItem>
+                <SelectItem value="restore_queued">{t("archiveState.restore_queued")}</SelectItem>
+                <SelectItem value="restoring">{t("archiveState.restoring")}</SelectItem>
+                <SelectItem value="delete_queued">{t("archiveState.delete_queued")}</SelectItem>
+                <SelectItem value="deleting">{t("archiveState.deleting")}</SelectItem>
+                <SelectItem value="archive_failed">{t("archiveState.archive_failed")}</SelectItem>
+                <SelectItem value="restore_failed">{t("archiveState.restore_failed")}</SelectItem>
+                <SelectItem value="delete_failed">{t("archiveState.delete_failed")}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
-          <span className="text-muted-foreground text-xs tabular-nums">{total} archives</span>
+          <span className="text-muted-foreground text-xs tabular-nums">{t("archives.totalCount", { count: total })}</span>
           {selectedArchives.length > 0 && (
             <>
-              <span className="text-xs tabular-nums">{selectedArchives.length} selected</span>
+              <span className="text-xs tabular-nums">{t("selection.selectedCount", { count: selectedArchives.length })}</span>
               {restorable.length > 0 && (
                 <Button size="sm" variant="outline" onClick={() => void restoreMany(restorable)}>
                   <Undo2Icon data-icon="inline-start" />
-                  Restore {restorable.length}
+                  {t("archives.restoreCount", { count: restorable.length })}
                 </Button>
               )}
               {deletable.length > 0 && (
@@ -1848,7 +1912,7 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                   trigger={
                     <Button size="sm" variant="destructive">
                       <Trash2Icon data-icon="inline-start" />
-                      Permanently delete {deletable.length}
+                      {t("archives.deleteCount", { count: deletable.length })}
                     </Button>
                   }
                 />
@@ -1863,8 +1927,8 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
         ) : archives.length === 0 ? (
           <Empty className="mx-4 border border-dashed lg:mx-6">
             <EmptyHeader>
-              <EmptyTitle>No task archives</EmptyTitle>
-              <EmptyDescription>Paused or terminal tasks can be archived from the current task list.</EmptyDescription>
+              <EmptyTitle>{t("archives.emptyTitle")}</EmptyTitle>
+              <EmptyDescription>{t("archives.emptyDescription")}</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -1877,17 +1941,17 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                     onCheckedChange={(checked) =>
                       setSelected(checked === true ? new Set(selectable.map((archive) => archive.id)) : new Set())
                     }
-                    aria-label="Select the archives on this page"
+                    aria-label={t("archives.selectAllAria")}
                   />
                 </TableHead>
-                <TableHead>Task</TableHead>
-                <TableHead>Original status</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Archived at</TableHead>
-                <TableHead>Compressed size</TableHead>
-                <TableHead>Data records</TableHead>
-                <TableHead className="min-w-44">State</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t("archives.columns.task")}</TableHead>
+                <TableHead>{t("archives.columns.originalStatus")}</TableHead>
+                <TableHead>{t("archives.columns.category")}</TableHead>
+                <TableHead>{t("archives.columns.archivedAt")}</TableHead>
+                <TableHead>{t("archives.columns.compressedSize")}</TableHead>
+                <TableHead>{t("archives.columns.dataRecords")}</TableHead>
+                <TableHead className="min-w-44">{t("archives.columns.state")}</TableHead>
+                <TableHead className="text-right">{t("archives.columns.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1909,13 +1973,13 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                             return next;
                           })
                         }
-                        aria-label={`Select task archive #${archive.task_id}`}
+                        aria-label={t("archives.selectRowAria", { id: archive.task_id })}
                       />
                     </TableCell>
                     <TableCell className="max-w-sm">
                       <div className="flex min-w-0 flex-col gap-0.5">
                         <span className="truncate font-medium">
-                          {archive.task_name || archive.task_description || `Task #${archive.task_id}`}
+                          {archive.task_name || archive.task_description || t("common.taskFallback", { id: archive.task_id })}
                         </span>
                         <span className="text-muted-foreground truncate text-xs">
                           #{archive.task_id} · {archive.task_description}
@@ -1925,15 +1989,15 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                     <TableCell>
                       <StatusBadge domain="task" value={archive.original_status} dot />
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{archive.category_name || "Uncategorized"}</TableCell>
+                    <TableCell className="text-muted-foreground">{archive.category_name || t("common.uncategorized")}</TableCell>
                     <TableCell className="text-muted-foreground whitespace-nowrap text-xs">
                       {archiveDate(archive.archived_at || archive.requested_at)}
                     </TableCell>
                     <TableCell
                       className="whitespace-nowrap text-xs"
-                      title={`Before compression: ${formatArchiveBytes(archive.original_size)}`}
+                      title={t("archives.beforeCompression", { size: formatArchiveBytes(archive.original_size) })}
                     >
-                      {archiveCompressionLabel(archive)}
+                      {archiveCompressionLabel(archive, t)}
                     </TableCell>
                     <TableCell className="text-xs tabular-nums">{archiveDataTotal(archive).toLocaleString()}</TableCell>
                     <TableCell>
@@ -1963,8 +2027,8 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                             size="icon"
                             variant="ghost"
                             onClick={() => void retry(archive)}
-                            aria-label="Retry archive operation"
-                            title="Retry"
+                            aria-label={t("archives.retryAria")}
+                            title={t("common.retry")}
                           >
                             <Undo2Icon />
                           </Button>
@@ -1974,8 +2038,8 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                             size="icon"
                             variant="ghost"
                             onClick={() => void restoreMany([archive])}
-                            aria-label="Restore task"
-                            title="Restore task"
+                            aria-label={t("archives.restoreAria")}
+                            title={t("archives.restoreTitle")}
                           >
                             <Undo2Icon />
                           </Button>
@@ -1985,7 +2049,7 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                             archives={[archive]}
                             onConfirm={() => deleteMany([archive])}
                             trigger={
-                              <Button size="icon" variant="ghost" aria-label="Permanently delete archive" title="Permanently delete">
+                              <Button size="icon" variant="ghost" aria-label={t("archives.deleteAria")} title={t("archives.deleteTitle")}>
                                 <Trash2Icon />
                               </Button>
                             }
@@ -2044,6 +2108,7 @@ function DeleteOptionFields({
   onOptionsChange: React.Dispatch<React.SetStateAction<DeleteTaskOptions>>;
   disabled: boolean;
 }) {
+  const t = useTranslations("tasks");
   const selectedCount = deleteOptionKeys.filter((key) => options[key]).length;
   let allChecked: boolean | "indeterminate" = false;
   if (selectedCount === deleteOptionKeys.length) {
@@ -2068,7 +2133,7 @@ function DeleteOptionFields({
 
   return (
     <FieldSet disabled={disabled}>
-      <FieldLegend variant="label">Also clean up related data</FieldLegend>
+      <FieldLegend variant="label">{t("deleteOptions.legend")}</FieldLegend>
       <FieldGroup className="gap-3">
         <Field orientation="horizontal">
           <Checkbox
@@ -2077,8 +2142,8 @@ function DeleteOptionFields({
             onCheckedChange={(checked) => updateAllOptions(checked === true)}
           />
           <FieldContent>
-            <FieldLabel htmlFor={`delete-all-${idPrefix}`}>Delete all</FieldLabel>
-            <FieldDescription>Check every related data type below, including assets, traffic, files, findings, and LLM request/response records.</FieldDescription>
+            <FieldLabel htmlFor={`delete-all-${idPrefix}`}>{t("deleteOptions.allLabel")}</FieldLabel>
+            <FieldDescription>{t("deleteOptions.allDescription")}</FieldDescription>
           </FieldContent>
         </Field>
         <Field orientation="horizontal">
@@ -2088,8 +2153,8 @@ function DeleteOptionFields({
             onCheckedChange={(checked) => updateOption("delete_assets", checked === true)}
           />
           <FieldContent>
-            <FieldLabel htmlFor={`delete-assets-${idPrefix}`}>Related assets</FieldLabel>
-            <FieldDescription>Delete assets that belong only to this task; shared assets are only detached from the current task.</FieldDescription>
+            <FieldLabel htmlFor={`delete-assets-${idPrefix}`}>{t("deleteOptions.assetsLabel")}</FieldLabel>
+            <FieldDescription>{t("deleteOptions.assetsDescription")}</FieldDescription>
           </FieldContent>
         </Field>
         <Field orientation="horizontal">
@@ -2099,8 +2164,8 @@ function DeleteOptionFields({
             onCheckedChange={(checked) => updateOption("delete_traffic", checked === true)}
           />
           <FieldContent>
-            <FieldLabel htmlFor={`delete-traffic-${idPrefix}`}>Related traffic</FieldLabel>
-            <FieldDescription>Deleted by the related assets' exact hostnames; traffic of shared hosts still referenced by other tasks is kept.</FieldDescription>
+            <FieldLabel htmlFor={`delete-traffic-${idPrefix}`}>{t("deleteOptions.trafficLabel")}</FieldLabel>
+            <FieldDescription>{t("deleteOptions.trafficDescription")}</FieldDescription>
           </FieldContent>
         </Field>
         <Field orientation="horizontal">
@@ -2110,8 +2175,8 @@ function DeleteOptionFields({
             onCheckedChange={(checked) => updateOption("delete_files", checked === true)}
           />
           <FieldContent>
-            <FieldLabel htmlFor={`delete-files-${idPrefix}`}>Task files</FieldLabel>
-            <FieldDescription>Delete uploaded files, command output, and other artifacts in the task's working directory.</FieldDescription>
+            <FieldLabel htmlFor={`delete-files-${idPrefix}`}>{t("deleteOptions.filesLabel")}</FieldLabel>
+            <FieldDescription>{t("deleteOptions.filesDescription")}</FieldDescription>
           </FieldContent>
         </Field>
         <Field orientation="horizontal">
@@ -2121,8 +2186,8 @@ function DeleteOptionFields({
             onCheckedChange={(checked) => updateOption("delete_findings", checked === true)}
           />
           <FieldContent>
-            <FieldLabel htmlFor={`delete-findings-${idPrefix}`}>Related findings</FieldLabel>
-            <FieldDescription>Permanently delete the standalone finding records and finding reports produced by this task.</FieldDescription>
+            <FieldLabel htmlFor={`delete-findings-${idPrefix}`}>{t("deleteOptions.findingsLabel")}</FieldLabel>
+            <FieldDescription>{t("deleteOptions.findingsDescription")}</FieldDescription>
           </FieldContent>
         </Field>
         <Field orientation="horizontal">
@@ -2132,8 +2197,8 @@ function DeleteOptionFields({
             onCheckedChange={(checked) => updateOption("delete_llm_records", checked === true)}
           />
           <FieldContent>
-            <FieldLabel htmlFor={`delete-llm-records-${idPrefix}`}>LLM request/response records</FieldLabel>
-            <FieldDescription>Permanently delete the LLM requests, responses, tokens, and error details recorded for this task.</FieldDescription>
+            <FieldLabel htmlFor={`delete-llm-records-${idPrefix}`}>{t("deleteOptions.llmLabel")}</FieldLabel>
+            <FieldDescription>{t("deleteOptions.llmDescription")}</FieldDescription>
           </FieldContent>
         </Field>
       </FieldGroup>
@@ -2148,6 +2213,7 @@ function DeleteTaskDialog({
   task: Task;
   onDelete: (id: string, options: DeleteTaskOptions) => Promise<void>;
 }) {
+  const t = useTranslations("tasks");
   const [open, setOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [options, setOptions] = React.useState<DeleteTaskOptions>(emptyDeleteOptions);
@@ -2171,13 +2237,13 @@ function DeleteTaskDialog({
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
       <AlertDialogTrigger asChild>
-        <Button size="icon" variant="outline" aria-label="Delete task">
+        <Button size="icon" variant="outline" aria-label={t("deleteTask.triggerAria")}>
           <Trash2Icon className="text-destructive" />
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete task #{task.id}?</AlertDialogTitle>
+          <AlertDialogTitle>{t("deleteTask.title", { id: task.id })}</AlertDialogTitle>
           <AlertDialogDescription className="break-words">
             {task.description ? (
               <>
@@ -2188,14 +2254,14 @@ function DeleteTaskDialog({
                 ”
               </>
             ) : (
-              "This task"
+              t("deleteTask.thisTask")
             )}
-            will be permanently deleted together with its execution records and exploration graph.
+            {t("deleteTask.descriptionSuffix")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <DeleteOptionFields idPrefix={task.id} options={options} onOptionsChange={setOptions} disabled={deleting} />
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={deleting}>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             disabled={deleting}
@@ -2205,7 +2271,7 @@ function DeleteTaskDialog({
             }}
           >
             {deleting && <Spinner data-icon="inline-start" />}
-            {deleting ? "Deleting" : "Delete"}
+            {deleting ? t("common.deleting") : t("common.delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -2230,6 +2296,7 @@ function MoveTasksCategoryDialog({
   moving: boolean;
   onMove: (categoryID?: number) => Promise<void>;
 }) {
+  const t = useTranslations("tasks");
   const [open, setOpen] = React.useState(false);
   const [target, setTarget] = React.useState(UNCATEGORIZED_VALUE);
 
@@ -2243,23 +2310,23 @@ function MoveTasksCategoryDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
-          <FolderInputIcon data-icon="inline-start" /> Change category
+          <FolderInputIcon data-icon="inline-start" /> {t("moveCategory.trigger")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Change the category of {count} selected tasks</DialogTitle>
-          <DialogDescription>The target category applies to all selected tasks; choosing "Uncategorized" moves them out of their current category.</DialogDescription>
+          <DialogTitle>{t("moveCategory.title", { count })}</DialogTitle>
+          <DialogDescription>{t("moveCategory.description")}</DialogDescription>
         </DialogHeader>
         <Field>
-          <FieldLabel htmlFor="bulk-category">Target category</FieldLabel>
+          <FieldLabel htmlFor="bulk-category">{t("moveCategory.targetLabel")}</FieldLabel>
           <Select value={target} onValueChange={setTarget} disabled={moving}>
             <SelectTrigger id="bulk-category" className="w-full">
-              <SelectValue placeholder="Select a category" />
+              <SelectValue placeholder={t("moveCategory.selectPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value={UNCATEGORIZED_VALUE}>Uncategorized</SelectItem>
+                <SelectItem value={UNCATEGORIZED_VALUE}>{t("common.uncategorized")}</SelectItem>
                 {categories.map((category) => (
                   <SelectItem key={category.id} value={String(category.id)}>
                     {category.name}
@@ -2268,12 +2335,12 @@ function MoveTasksCategoryDialog({
               </SelectGroup>
             </SelectContent>
           </Select>
-          {categories.length === 0 && <FieldDescription>No categories yet; create one in "Category management" first.</FieldDescription>}
+          {categories.length === 0 && <FieldDescription>{t("moveCategory.noCategories")}</FieldDescription>}
         </Field>
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={moving}>
-              Cancel
+              {t("common.cancel")}
             </Button>
           </DialogClose>
           <Button
@@ -2283,7 +2350,7 @@ function MoveTasksCategoryDialog({
             }}
           >
             {moving && <Spinner data-icon="inline-start" />}
-            Move
+            {t("common.move")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2298,6 +2365,7 @@ function BulkDeleteTasksDialog({
   ids: string[];
   onDelete: (ids: string[], options: DeleteTaskOptions, onProgress: (done: number) => void) => Promise<void>;
 }) {
+  const t = useTranslations("tasks");
   const [open, setOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [done, setDone] = React.useState(0);
@@ -2327,14 +2395,14 @@ function BulkDeleteTasksDialog({
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
       <AlertDialogTrigger asChild>
         <Button size="sm" variant="outline">
-          <Trash2Icon className="text-destructive" /> Delete selected {ids.length}
+          <Trash2Icon className="text-destructive" /> {t("bulkDelete.trigger", { count: ids.length })}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent className="max-h-[85vh] overflow-y-auto">
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete {ids.length} selected tasks?</AlertDialogTitle>
+          <AlertDialogTitle>{t("bulkDelete.title", { count: ids.length })}</AlertDialogTitle>
           <AlertDialogDescription>
-            The execution records and exploration graphs of these tasks will be permanently deleted; the cleanup options below apply to all selected tasks.
+            {t("bulkDelete.description")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="text-muted-foreground flex flex-wrap gap-1 text-xs">
@@ -2343,11 +2411,11 @@ function BulkDeleteTasksDialog({
               #{id}
             </code>
           ))}
-          {ids.length > 30 && <span className="self-center">…{ids.length} in total</span>}
+          {ids.length > 30 && <span className="self-center">{t("bulkDelete.more", { count: ids.length })}</span>}
         </div>
         <DeleteOptionFields idPrefix="bulk" options={options} onOptionsChange={setOptions} disabled={deleting} />
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={deleting}>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             disabled={deleting}
@@ -2357,7 +2425,7 @@ function BulkDeleteTasksDialog({
             }}
           >
             {deleting && <Spinner data-icon="inline-start" />}
-            {deleting ? `Deleting ${done}/${ids.length}` : `Delete ${ids.length} tasks`}
+            {deleting ? t("bulkDelete.deletingProgress", { done, total: ids.length }) : t("bulkDelete.confirm", { count: ids.length })}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -2380,6 +2448,7 @@ function SourceTaskPicker({
   onValueChange: (value: string[]) => void;
   portalContainer?: React.RefObject<HTMLElement | null>;
 }) {
+  const t = useTranslations("tasks");
   const tasksByID = React.useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const taskIDs = React.useMemo(() => tasks.map((task) => task.id), [tasks]);
   const atLimit = value.length >= MAX_SOURCE_TASKS;
@@ -2407,12 +2476,12 @@ function SourceTaskPicker({
         </ComboboxValue>
         <ComboboxChipsInput
           id="source-tasks"
-          placeholder={atLimit ? `Link up to ${MAX_SOURCE_TASKS} tasks` : "Search task ID, description, or goal"}
+          placeholder={atLimit ? t("sourceTasks.limitPlaceholder", { count: MAX_SOURCE_TASKS }) : t("sourceTasks.searchPlaceholder")}
           disabled={atLimit}
         />
       </ComboboxChips>
       <ComboboxContent portalContainer={portalContainer}>
-        <ComboboxEmpty>No matching tasks</ComboboxEmpty>
+        <ComboboxEmpty>{t("sourceTasks.empty")}</ComboboxEmpty>
         <ComboboxList>
           {(taskID) => {
             const task = tasksByID.get(taskID);
@@ -2421,7 +2490,7 @@ function SourceTaskPicker({
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">
-                      #{taskID} · {task?.description ?? "Unknown task"}
+                      #{taskID} · {task?.description ?? t("common.unknownTask")}
                     </p>
                     {task?.goal && <p className="text-muted-foreground truncate text-xs">{task.goal}</p>}
                   </div>
@@ -2452,6 +2521,7 @@ function CategoryPicker({
   onCategoryCreated: () => void;
   portalContainer?: React.RefObject<HTMLElement | null>;
 }) {
+  const t = useTranslations("tasks");
   const [inputValue, setInputValue] = React.useState("");
   const [creating, setCreating] = React.useState(false);
   // A newly created category only flows back into categories after the parent re-fetches, so keep a local copy to avoid the selected chip and
@@ -2492,9 +2562,9 @@ function CategoryPicker({
       onValueChange(created.id);
       setInputValue("");
       onCategoryCreated();
-      toast.success(`Category "${created.name}" created`);
+      toast.success(t("categoryPicker.created", { name: created.name }));
     } catch (e) {
-      toast.error(`Failed to create category: ${(e as Error).message}`);
+      toast.error(t("categoryPicker.createFailed", { message: (e as Error).message }));
     } finally {
       setCreating(false);
     }
@@ -2518,12 +2588,12 @@ function CategoryPicker({
       <ComboboxChips>
         <ComboboxValue>
           {selectedIDs.map((id) => (
-            <ComboboxChip key={id}>{byID.get(id)?.name ?? "Unknown category"}</ComboboxChip>
+            <ComboboxChip key={id}>{byID.get(id)?.name ?? t("common.unknownCategory")}</ComboboxChip>
           ))}
         </ComboboxValue>
         <ComboboxChipsInput
           id="task-category"
-          placeholder={selectedIDs.length ? "" : "Search categories, or type a new name and press Enter to create"}
+          placeholder={selectedIDs.length ? "" : t("categoryPicker.searchPlaceholder")}
           onKeyDown={(e) => {
             // Enter with zero matches = create; with matches, keep base-ui's "Enter selects the highlighted item".
             if (e.key === "Enter" && matchCount === 0 && trimmed) {
@@ -2550,10 +2620,10 @@ function CategoryPicker({
               className="flex w-full items-center gap-2 px-2 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
             >
               {creating ? <Spinner className="size-4" /> : <PlusIcon className="size-4" />}
-              Create category "{trimmed}"
+              {t("categoryPicker.createOption", { name: trimmed })}
             </button>
           ) : (
-            <div className="px-2 py-2 text-sm text-muted-foreground">Type a name to search or create a category</div>
+            <div className="px-2 py-2 text-sm text-muted-foreground">{t("categoryPicker.hint")}</div>
           ))}
       </ComboboxContent>
     </Combobox>
@@ -2568,14 +2638,18 @@ const COMPANY_SCOPE_LABELS: Record<string, string> = {
   keyword: "Keyword",
 };
 
-function companyScopeSummary(company: Company): string {
+function companyScopeSummary(company: Company, t: ReturnType<typeof useTranslations<"tasks">>): string {
   const rows = company.scope ?? [];
-  if (rows.length === 0) return "No asset scope configured";
+  if (rows.length === 0) return t("companyScope.empty");
   const preview = rows.slice(0, 3).map((row) => {
     const value = row.raw || row.value || row.domain || row.net || "";
-    return `${COMPANY_SCOPE_LABELS[row.kind] ?? row.kind}: ${value}`;
+    const fallback = COMPANY_SCOPE_LABELS[row.kind] ?? row.kind;
+    const label = t.has(`companyScope.kind.${row.kind}`) ? t(`companyScope.kind.${row.kind}`) : fallback;
+    return `${label}: ${value}`;
   });
-  return `${preview.join(" · ")}${rows.length > preview.length ? ` · ${rows.length - preview.length} more` : ""}`;
+  const extra = rows.length - preview.length;
+  const more = extra > 0 ? ` · ${t("companyScope.more", { count: extra })}` : "";
+  return `${preview.join(" · ")}${more}`;
 }
 
 function CompanyPicker({
@@ -2589,6 +2663,7 @@ function CompanyPicker({
   onValueChange: (value: number[]) => void;
   portalContainer?: React.RefObject<HTMLElement | null>;
 }) {
+  const t = useTranslations("tasks");
   const companiesByID = React.useMemo(
     () => new Map(companies.map((company) => [String(company.id), company])),
     [companies],
@@ -2601,7 +2676,7 @@ function CompanyPicker({
       items={companyIDs}
       itemToStringValue={(companyID) => {
         const company = companiesByID.get(companyID);
-        return company ? `${company.name} ${companyScopeSummary(company)}` : companyID;
+        return company ? `${company.name} ${companyScopeSummary(company, t)}` : companyID;
       }}
       multiple
       value={selectedIDs}
@@ -2610,13 +2685,13 @@ function CompanyPicker({
       <ComboboxChips>
         <ComboboxValue>
           {selectedIDs.map((companyID) => (
-            <ComboboxChip key={companyID}>{companiesByID.get(companyID)?.name ?? `Company #${companyID}`}</ComboboxChip>
+            <ComboboxChip key={companyID}>{companiesByID.get(companyID)?.name ?? t("common.companyFallback", { id: companyID })}</ComboboxChip>
           ))}
         </ComboboxValue>
-        <ComboboxChipsInput id="task-companies" placeholder="Search company name or asset scope" />
+        <ComboboxChipsInput id="task-companies" placeholder={t("companyPicker.searchPlaceholder")} />
       </ComboboxChips>
       <ComboboxContent portalContainer={portalContainer}>
-        <ComboboxEmpty>No matching companies</ComboboxEmpty>
+        <ComboboxEmpty>{t("companyPicker.empty")}</ComboboxEmpty>
         <ComboboxList>
           {(companyID) => {
             const company = companiesByID.get(companyID);
@@ -2624,14 +2699,14 @@ function CompanyPicker({
               <ComboboxItem key={companyID} value={companyID}>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate font-medium">{company?.name ?? `Company #${companyID}`}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium">{company?.name ?? t("common.companyFallback", { id: companyID })}</span>
                     <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                      {company?.asset_count ?? 0} assets
+                      {t("companyPicker.assetCount", { count: company?.asset_count ?? 0 })}
                     </span>
                   </div>
                   {company && (
-                    <span className="text-muted-foreground truncate text-xs" title={companyScopeSummary(company)}>
-                      {companyScopeSummary(company)}
+                    <span className="text-muted-foreground truncate text-xs" title={companyScopeSummary(company, t)}>
+                      {companyScopeSummary(company, t)}
                     </span>
                   )}
                 </div>
@@ -2661,6 +2736,7 @@ function CategoryDropTarget({
   disabled: boolean;
   onSelect: () => void;
 }) {
+  const t = useTranslations("tasks");
   const { isOver, setNodeRef } = useDroppable({ id: `category:${value}`, disabled });
 
   return (
@@ -2675,12 +2751,13 @@ function CategoryDropTarget({
       onClick={onSelect}
     >
       <span className="block truncate font-medium text-sm">{name}</span>
-      <span className="block truncate text-muted-foreground text-xs">{isOver ? "Release to move" : `${count} tasks`}</span>
+      <span className="block truncate text-muted-foreground text-xs">{isOver ? t("categoryDrop.release") : t("categoryDrop.taskCount", { count })}</span>
     </button>
   );
 }
 
 function DraggableCategoryTask({ task, disabled, moving }: { task: Task; disabled: boolean; moving: boolean }) {
+  const t = useTranslations("tasks");
   const { attributes, isDragging, listeners, setNodeRef } = useDraggable({
     id: `task:${task.id}`,
     disabled,
@@ -2700,8 +2777,8 @@ function DraggableCategoryTask({ task, disabled, moving }: { task: Task; disable
             disabled={disabled}
             {...listeners}
             {...attributes}
-            aria-label={`Drag task #${task.id}`}
-            title="Drag task"
+            aria-label={t("categoryTask.dragAria", { id: task.id })}
+            title={t("categoryTask.dragTitle")}
           >
             <GripVerticalIcon />
           </Button>
@@ -2710,7 +2787,7 @@ function DraggableCategoryTask({ task, disabled, moving }: { task: Task; disable
       <ItemContent className="min-w-0">
         <ItemTitle className="w-full min-w-0">
           <Link href={`/function/tasks/detail?id=${encodeURIComponent(task.id)}`} className="truncate hover:underline">
-            {task.name?.trim() || task.description || `Task #${task.id}`}
+            {task.name?.trim() || task.description || t("common.taskFallback", { id: task.id })}
           </Link>
         </ItemTitle>
         <ItemDescription className="line-clamp-1">
@@ -2725,6 +2802,7 @@ function DraggableCategoryTask({ task, disabled, moving }: { task: Task; disable
 }
 
 function CategoryTaskDragPreview({ task }: { task: Task }) {
+  const t = useTranslations("tasks");
   return (
     <Item variant="outline" size="sm" className="w-80 bg-background shadow-lg">
       <ItemMedia className="group-has-data-[slot=item-description]/item:self-center group-has-data-[slot=item-description]/item:translate-y-0">
@@ -2732,7 +2810,7 @@ function CategoryTaskDragPreview({ task }: { task: Task }) {
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle className="w-full min-w-0 truncate">
-          {task.name?.trim() || task.description || `Task #${task.id}`}
+          {task.name?.trim() || task.description || t("common.taskFallback", { id: task.id })}
         </ItemTitle>
         <ItemDescription className="line-clamp-1">#{task.id}</ItemDescription>
       </ItemContent>
@@ -2751,6 +2829,7 @@ function CategoryManagementSheet({
   onChanged: () => void;
   onTaskMoved: (taskID: string, category: TaskCategory | null) => void;
 }) {
+  const t = useTranslations("tasks");
   const [open, setOpen] = React.useState(false);
   const [selectedView, setSelectedView] = React.useState<CategoryManagementView>("new");
   const [draftName, setDraftName] = React.useState("");
@@ -2822,15 +2901,19 @@ function CategoryManagementSheet({
         const created = await api.createTaskCategory(name);
         setSelectedView(created.id);
         setDraftName(created.name);
-        toast.success("Category created");
+        toast.success(t("categoryMgmt.created"));
       } else {
         const updated = await api.renameTaskCategory(selectedView, name);
         setDraftName(updated.name);
-        toast.success("Category updated");
+        toast.success(t("categoryMgmt.updated"));
       }
       onChanged();
     } catch (error) {
-      toast.error(`Failed to ${selectedView === "new" ? "create" : "update"} category: ${(error as Error).message}`);
+      toast.error(
+        selectedView === "new"
+          ? t("categoryMgmt.createFailed", { message: (error as Error).message })
+          : t("categoryMgmt.updateFailed", { message: (error as Error).message }),
+      );
     } finally {
       setSaving(false);
     }
@@ -2845,11 +2928,11 @@ function CategoryManagementSheet({
       const next = categories.find((category) => category.id !== deletedID);
       if (next) selectCategory(next);
       else selectUncategorized();
-      toast.success("Category deleted; its tasks moved to Uncategorized");
+      toast.success(t("categoryMgmt.deleted"));
       setDeleteOpen(false);
       onChanged();
     } catch (error) {
-      toast.error(`Failed to delete category: ${(error as Error).message}`);
+      toast.error(t("categoryMgmt.deleteFailed", { message: (error as Error).message }));
     } finally {
       setDeleting(false);
     }
@@ -2860,7 +2943,7 @@ function CategoryManagementSheet({
     const category =
       destination === "uncategorized" ? null : (categories.find((item) => item.id === Number(destination)) ?? null);
     if (destination !== "uncategorized" && !category) {
-      toast.error("Target category does not exist; refresh and try again");
+      toast.error(t("categoryMgmt.moveTargetMissing"));
       return;
     }
     if (task.category_id === category?.id || (task.category_id == null && category == null)) return;
@@ -2869,9 +2952,9 @@ function CategoryManagementSheet({
     try {
       await api.updateTaskCategory(task.id, category?.id);
       onTaskMoved(task.id, category);
-      toast.success(`Task #${task.id} moved to "${category?.name ?? "Uncategorized"}"`);
+      toast.success(t("categoryMgmt.taskMoved", { id: task.id, target: category?.name ?? t("common.uncategorized") }));
     } catch (error) {
-      toast.error(`Failed to move task: ${(error as Error).message}`);
+      toast.error(t("categoryMgmt.moveFailed", { message: (error as Error).message }));
     } finally {
       setMovingTaskID(null);
     }
@@ -2894,7 +2977,7 @@ function CategoryManagementSheet({
     void moveTask(task, destination.slice("category:".length));
   }
 
-  const saveLabel = saving ? "Saving" : selectedView === "new" ? "Create category" : "Save changes";
+  const saveLabel = saving ? t("common.saving") : selectedView === "new" ? t("categoryMgmt.createCategory") : t("categoryMgmt.saveChanges");
 
   return (
     <>
@@ -2902,13 +2985,13 @@ function CategoryManagementSheet({
         <SheetTrigger asChild>
           <Button size="sm" variant="outline">
             <TagsIcon data-icon="inline-start" />
-            Category management
+            {t("categoryMgmt.trigger")}
           </Button>
         </SheetTrigger>
         <SheetContent className="grid h-full w-full! max-w-none! grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:w-[48rem]! sm:max-w-[48rem]!">
           <SheetHeader className="border-b px-6 py-5">
-            <SheetTitle>Task category management</SheetTitle>
-            <SheetDescription>Categories are used for task filtering and archiving; edits never affect task execution, and deletion moves tasks to Uncategorized.</SheetDescription>
+            <SheetTitle>{t("categoryMgmt.title")}</SheetTitle>
+            <SheetDescription>{t("categoryMgmt.description")}</SheetDescription>
           </SheetHeader>
           <DndContext
             sensors={sensors}
@@ -2920,13 +3003,13 @@ function CategoryManagementSheet({
               <div className="flex min-h-0 flex-col border-b p-3 lg:border-r lg:border-b-0">
                 <Button type="button" variant="outline" className="w-full" onClick={startNew}>
                   <PlusIcon data-icon="inline-start" />
-                  New category
+                  {t("categoryMgmt.newCategory")}
                 </Button>
                 <ScrollArea className="mt-2 max-h-44 lg:max-h-none lg:flex-1">
                   <div className="flex flex-col gap-1 pr-2">
                     <CategoryDropTarget
                       value="uncategorized"
-                      name="Uncategorized"
+                      name={t("common.uncategorized")}
                       count={uncategorizedCount}
                       selected={selectedView === "uncategorized"}
                       disabled={movingTaskID != null}
@@ -2950,12 +3033,12 @@ function CategoryManagementSheet({
                 <FieldGroup className="p-6">
                   {selectedView !== "uncategorized" && (
                     <Field>
-                      <FieldLabel htmlFor="task-category-name">Category name</FieldLabel>
+                      <FieldLabel htmlFor="task-category-name">{t("categoryMgmt.nameLabel")}</FieldLabel>
                       <Input
                         id="task-category-name"
                         value={draftName}
                         onChange={(event) => setDraftName(event.target.value)}
-                        placeholder="e.g. External assessment"
+                        placeholder={t("categoryMgmt.namePlaceholder")}
                         maxLength={80}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") void saveCategory();
@@ -2963,8 +3046,8 @@ function CategoryManagementSheet({
                       />
                       <FieldDescription>
                         {selectedCategory
-                          ? `${selectedCategory.task_count} tasks currently use this category. Renaming updates the task list accordingly.`
-                          : "Once created, it is usable in the create-task form and task list filters."}
+                          ? t("categoryMgmt.nameDescriptionExisting", { count: selectedCategory.task_count })
+                          : t("categoryMgmt.nameDescriptionNew")}
                       </FieldDescription>
                     </Field>
                   )}
@@ -2972,19 +3055,19 @@ function CategoryManagementSheet({
                     <Field>
                       <div className="flex flex-wrap items-end justify-between gap-2">
                         <div className="flex min-w-0 flex-col gap-1">
-                          <FieldLabel>{selectedCategory ? "Category tasks" : "Uncategorized tasks"}</FieldLabel>
+                          <FieldLabel>{selectedCategory ? t("categoryMgmt.categoryTasks") : t("categoryMgmt.uncategorizedTasks")}</FieldLabel>
                           <FieldDescription>
                             {selectedCategory
-                              ? `This category contains ${visibleTasks.length} tasks.`
-                              : `${visibleTasks.length} tasks are not yet categorized.`}
+                              ? t("categoryMgmt.categoryTaskCount", { count: visibleTasks.length })
+                              : t("categoryMgmt.uncategorizedTaskCount", { count: visibleTasks.length })}
                           </FieldDescription>
                         </div>
                       </div>
                       {visibleTasks.length === 0 ? (
                         <Empty className="min-h-36 border">
                           <EmptyHeader>
-                            <EmptyTitle>{selectedCategory ? "No tasks in this category" : "No uncategorized tasks"}</EmptyTitle>
-                            <EmptyDescription>Content appears here once tasks are assigned.</EmptyDescription>
+                            <EmptyTitle>{selectedCategory ? t("categoryMgmt.emptyCategoryTitle") : t("categoryMgmt.emptyUncategorizedTitle")}</EmptyTitle>
+                            <EmptyDescription>{t("categoryMgmt.emptyDescription")}</EmptyDescription>
                           </EmptyHeader>
                         </Empty>
                       ) : (
@@ -3016,11 +3099,11 @@ function CategoryManagementSheet({
                 onClick={() => setDeleteOpen(true)}
               >
                 <Trash2Icon data-icon="inline-start" />
-                Delete category
+                {t("categoryMgmt.deleteCategory")}
               </Button>
             )}
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Close
+              {t("common.close")}
             </Button>
             {selectedView !== "uncategorized" && (
               <Button
@@ -3038,13 +3121,13 @@ function CategoryManagementSheet({
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete category "{selectedCategory?.name || "Unnamed category"}"?</AlertDialogTitle>
+            <AlertDialogTitle>{t("categoryMgmt.deleteConfirmTitle", { name: selectedCategory?.name || t("categoryMgmt.unnamedCategory") })}</AlertDialogTitle>
             <AlertDialogDescription>
-              After the category is deleted, its {selectedCategory?.task_count ?? 0} tasks move to "Uncategorized" automatically; task data is not deleted.
+              {t("categoryMgmt.deleteConfirmDescription", { count: selectedCategory?.task_count ?? 0 })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               disabled={deleting}
@@ -3054,7 +3137,7 @@ function CategoryManagementSheet({
               }}
             >
               {deleting && <Spinner data-icon="inline-start" />}
-              {deleting ? "Deleting" : "Delete"}
+              {deleting ? t("common.deleting") : t("common.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -3074,6 +3157,7 @@ function CreateTaskSheet({
   onCreated: () => void;
   onCategoriesChanged: () => void;
 }) {
+  const t = useTranslations("tasks");
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [categoryID, setCategoryID] = React.useState<number | undefined>(undefined);
@@ -3127,7 +3211,7 @@ function CreateTaskSheet({
       setDescription((prev) => appendUploads(prev, r.attachments));
       setUploadCount((n) => n + r.attachments.length);
     } catch (e) {
-      toast.error("Upload failed: " + (e as Error).message);
+      toast.error(t("createTask.uploadFailed", { message: (e as Error).message }));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = ""; // allow re-picking the same file
@@ -3136,11 +3220,11 @@ function CreateTaskSheet({
 
   async function createTask() {
     if (!description.trim() || !goal.trim()) {
-      toast.error("Please fill in the description and goal");
+      toast.error(t("createTask.fillRequired"));
       return;
     }
     if (sourceTaskIDs.length > MAX_SOURCE_TASKS) {
-      toast.error(`Link up to ${MAX_SOURCE_TASKS} source tasks`);
+      toast.error(t("createTask.sourceLimit", { count: MAX_SOURCE_TASKS }));
       return;
     }
     setCreating(true);
@@ -3167,7 +3251,7 @@ function CreateTaskSheet({
           .map((c) => ({ domain: c.domain.trim(), username: c.username.trim(), password: c.password, note: c.note?.trim() ?? "" }))
           .filter((c) => c.domain !== "" && c.username !== ""),
       });
-      toast.success("Task created");
+      toast.success(t("createTask.created"));
       setName("");
       setCategoryID(undefined);
       setDescription("");
@@ -3187,7 +3271,7 @@ function CreateTaskSheet({
       setOpen(false);
       onCreated();
     } catch (e) {
-      toast.error("Create failed: " + (e as Error).message);
+      toast.error(t("createTask.createFailed", { message: (e as Error).message }));
     } finally {
       setCreating(false);
     }
@@ -3197,7 +3281,7 @@ function CreateTaskSheet({
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <Button size="sm">
-          <PlusIcon /> New task
+          <PlusIcon /> {t("createTask.trigger")}
         </Button>
       </SheetTrigger>
       {/* A 45vw-wide right drawer: full-height and scrollable, so long forms are no longer bound by dialog height. Narrow screens fall back to full width.
@@ -3208,8 +3292,8 @@ function CreateTaskSheet({
         className="w-full! max-w-none! gap-0 p-0 sm:w-[45vw]! sm:max-w-[45vw]!"
       >
         <SheetHeader className="border-b p-6">
-          <SheetTitle>New task</SheetTitle>
-          <SheetDescription>Fill in the test target and goal; advanced parameters can be expanded as needed.</SheetDescription>
+          <SheetTitle>{t("createTask.title")}</SheetTitle>
+          <SheetDescription>{t("createTask.description")}</SheetDescription>
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -3231,16 +3315,16 @@ function CreateTaskSheet({
               portalContainer={sheetContentRef}
             />
             <div className="grid gap-2">
-              <Label htmlFor="name">Name (optional)</Label>
+              <Label htmlFor="name">{t("createTask.nameLabel")}</Label>
               <Input
                 id="name"
-                placeholder="A recognizable name for the task, e.g. Acme website penetration test"
+                placeholder={t("createTask.namePlaceholder")}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
             <Field>
-              <FieldLabel htmlFor="task-category">Task category</FieldLabel>
+              <FieldLabel htmlFor="task-category">{t("createTask.categoryLabel")}</FieldLabel>
               <CategoryPicker
                 categories={categories}
                 value={categoryID}
@@ -3248,14 +3332,14 @@ function CreateTaskSheet({
                 onCategoryCreated={onCategoriesChanged}
                 portalContainer={sheetContentRef}
               />
-              <FieldDescription>Optional, single category; used for task list filtering and archiving, never affecting agent execution.</FieldDescription>
+              <FieldDescription>{t("createTask.categoryDescription")}</FieldDescription>
             </Field>
             <div className="grid gap-2">
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">{t("common.description")}</Label>
               <Textarea
                 id="description"
                 className="min-h-32"
-                placeholder="Test target and background, e.g. test the example.com site"
+                placeholder={t("createTask.descriptionPlaceholder")}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
@@ -3276,27 +3360,27 @@ function CreateTaskSheet({
                   disabled={uploading}
                 >
                   {uploading ? <Loader2Icon className="animate-spin" /> : <PaperclipIcon />}
-                  Upload files
+                  {t("createTask.uploadFiles")}
                 </Button>
                 <span className="text-muted-foreground text-xs">
                   {uploadCount > 0
-                    ? `${uploadCount} files uploaded; their absolute paths were appended to the end of the description (editable)`
-                    : "Multi-select; after upload, absolute file paths are appended to the description for the worker to open with Read/Bash"}
+                    ? t("createTask.uploadedCount", { count: uploadCount })
+                    : t("createTask.uploadHint")}
                 </span>
               </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="goal">Goal</Label>
+              <Label htmlFor="goal">{t("createTask.goalLabel")}</Label>
               <Textarea
                 id="goal"
                 className="min-h-32"
-                placeholder="What to achieve, e.g. gain admin panel access or server privileges"
+                placeholder={t("createTask.goalPlaceholder")}
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
               />
             </div>
             <Field>
-              <FieldLabel htmlFor="source-tasks">Linked tasks</FieldLabel>
+              <FieldLabel htmlFor="source-tasks">{t("createTask.linkedTasksLabel")}</FieldLabel>
               <SourceTaskPicker
                 tasks={tasks}
                 value={sourceTaskIDs}
@@ -3304,12 +3388,11 @@ function CreateTaskSheet({
                 portalContainer={sheetContentRef}
               />
               <FieldDescription>
-                Link up to {MAX_SOURCE_TASKS}{" "}
-                tasks. Live, read-only inheritance of the selected tasks' persistent blackboards, asset scope, and related traffic; the new task writes to its own blackboard.
+                {t("createTask.linkedTasksDescription", { count: MAX_SOURCE_TASKS })}
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="task-companies">Linked company asset scope</FieldLabel>
+              <FieldLabel htmlFor="task-companies">{t("createTask.companyScopeLabel")}</FieldLabel>
               <CompanyPicker
                 companies={companies}
                 value={companyIDs}
@@ -3317,19 +3400,18 @@ function CreateTaskSheet({
                 portalContainer={sheetContentRef}
               />
               <FieldDescription>
-                On task creation, the selected companies' current assets are added to "Test assets", and their domains, IPs, CIDRs, ICPs, and company keywords are provided to the agent
-                as scope context; no intents are generated automatically and execution goals are not forced to change.
+                {t("createTask.companyScopeDescription")}
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="task-intercept-rules">Task-level asset intercept / allow rules (optional)</FieldLabel>
+              <FieldLabel htmlFor="task-intercept-rules">{t("createTask.interceptRulesLabel")}</FieldLabel>
               <AssetInterceptRulesEditor value={interceptRules} onChange={setInterceptRules} />
               <FieldDescription>
-                Applies to this task only and is not written to global rules. Evaluation order: "Block" rules (including global ones) match first, and a hit forbids testing; with no hit and "Allow" rules configured for this task, an asset must match an allow rule to be permitted, otherwise testing is likewise forbidden; with no allow rules configured, no whitelist is active.
+                {t("createTask.interceptRulesDescription")}
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="llm-profiles">LLM config chain</FieldLabel>
+              <FieldLabel htmlFor="llm-profiles">{t("createTask.llmChainLabel")}</FieldLabel>
               <TaskLLMProfileChain
                 profiles={profiles}
                 value={llmProfileIDs}
@@ -3339,25 +3421,25 @@ function CreateTaskSheet({
                 inputId="llm-profiles"
                 portalContainer={sheetContentRef}
               />
-              <FieldDescription>Reorder profiles to choose worker rotation order or failover priority. Saving the chain resets exhausted profiles.</FieldDescription>
+              <FieldDescription>{t("createTask.llmChainDescription")}</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="task-credentials">Test accounts (optional)</FieldLabel>
+              <FieldLabel htmlFor="task-credentials">{t("createTask.credentialsLabel")}</FieldLabel>
               <div className="grid gap-2">
                 {credentials.map((c, i) => (
                   <div key={i} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
                     <Input
-                      placeholder="domain (e.g. target.example.com)"
+                      placeholder={t("createTask.credentialDomainPlaceholder")}
                       value={c.domain}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, domain: e.target.value } : x)))}
                     />
                     <Input
-                      placeholder="email or username"
+                      placeholder={t("createTask.credentialUsernamePlaceholder")}
                       value={c.username}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, username: e.target.value } : x)))}
                     />
                     <Input
-                      placeholder="password (empty = agent generates)"
+                      placeholder={t("createTask.credentialPasswordPlaceholder")}
                       value={c.password}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, password: e.target.value } : x)))}
                     />
@@ -3365,14 +3447,14 @@ function CreateTaskSheet({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label="Remove account"
+                      aria-label={t("createTask.removeAccount")}
                       onClick={() => setCredentials((prev) => prev.filter((_, j) => j !== i))}
                     >
                       <TrashIcon />
                     </Button>
                     <Input
                       className="sm:col-span-4"
-                      placeholder="note (optional, e.g. program alias account)"
+                      placeholder={t("createTask.credentialNotePlaceholder")}
                       value={c.note ?? ""}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))}
                     />
@@ -3385,13 +3467,11 @@ function CreateTaskSheet({
                   className="w-fit"
                   onClick={() => setCredentials((prev) => [...prev, { domain: "", username: "", password: "", note: "" }])}
                 >
-                  <PlusIcon className="size-4" /> Add account
+                  <PlusIcon className="size-4" /> {t("createTask.addAccount")}
                 </Button>
               </div>
               <FieldDescription>
-                Test accounts reused by the agent for authenticated testing. Leave the password empty to have the agent register that
-                account itself and record the password it chose. Use dedicated test accounts only — anything declared here is sent to
-                the configured LLM provider during the task.
+                {t("createTask.credentialsDescription")}
               </FieldDescription>
             </Field>
 
@@ -3399,39 +3479,38 @@ function CreateTaskSheet({
             <Collapsible>
               <CollapsibleTrigger className="group flex w-full items-center gap-2 border-t pt-4 text-sm font-medium">
                 <ChevronRightIcon className="text-muted-foreground size-4 transition-transform group-data-[state=open]:rotate-90" />
-                Advanced settings
-                <span className="text-muted-foreground ml-auto text-xs font-normal">Timeout · Heartbeat · First intent</span>
+                {t("createTask.advancedSettings")}
+                <span className="text-muted-foreground ml-auto text-xs font-normal">{t("createTask.advancedSummary")}</span>
               </CollapsibleTrigger>
               <CollapsibleContent className="grid gap-5 pt-5">
                 <div className="grid gap-2">
-                  <Label htmlFor="timeout-min">Task timeout (minutes, optional)</Label>
+                  <Label htmlFor="timeout-min">{t("createTask.timeoutLabel")}</Label>
                   <Input
                     id="timeout-min"
                     type="number"
                     min={0}
                     className="w-40"
-                    placeholder="Empty = no limit"
+                    placeholder={t("createTask.timeoutPlaceholder")}
                     value={timeoutMin}
                     onChange={(e) => setTimeoutMin(e.target.value)}
                   />
                   <p className="text-muted-foreground text-xs">
-                    When the time is up, a graceful wind-down is triggered (each agent writes back + the planner makes the final verdict) and the task enters the timeout terminal state.
+                    {t("createTask.timeoutHint")}
                   </p>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="heartbeat-min">planner heartbeat (minutes)</Label>
+                  <Label htmlFor="heartbeat-min">{t("createTask.heartbeatLabel")}</Label>
                   <Input
                     id="heartbeat-min"
                     type="number"
                     min={10}
                     className="w-40"
-                    placeholder="Default 10"
+                    placeholder={t("createTask.heartbeatPlaceholder")}
                     value={heartbeatMin}
                     onChange={(e) => setHeartbeatMin(e.target.value)}
                   />
                   <p className="text-muted-foreground text-xs">
-                    When this much time has passed since the last planning round ended or the task started, with no
-                    triggers in between, a planning round fires automatically (deadlock backstop + wakes supervision of running workers). Minimum 10 minutes.
+                    {t("createTask.heartbeatHint")}
                   </p>
                 </div>
                 <div className="grid gap-2">
@@ -3441,11 +3520,10 @@ function CreateTaskSheet({
                       checked={seedFirstIntent}
                       onCheckedChange={(v) => setSeedFirstIntent(!!v)}
                     />
-                    Dispatch the first intent directly (description + goal)
+                    {t("createTask.seedFirstIntentLabel")}
                   </label>
                   <p className="text-muted-foreground text-xs">
-                    When enabled, the "description + goal" is dispatched as one intent right at creation; the worker starts without waiting for the first planning round and the planner
-                    takes over afterwards to judge/follow up. Recommended for settings like CTF where one run usually solves it directly; disabled follows the standard plan-then-execute flow.
+                    {t("createTask.seedFirstIntentHint")}
                   </p>
                 </div>
                 <div className="grid gap-2">
@@ -3455,11 +3533,10 @@ function CreateTaskSheet({
                       checked={coverageEnabled}
                       onCheckedChange={(v) => setCoverageEnabled(!!v)}
                     />
-                    Asset coverage feature
+                    {t("createTask.coverageLabel")}
                   </label>
                   <p className="text-muted-foreground text-xs">
-                    On by default: computes and displays test coverage, shows testing progress on the situational graph, and automatically accumulates the test scope. When off, coverage is no longer computed or displayed,
-                    the situational graph shows assets without progress, and agents no longer receive scope-related tools. Disabling does not affect "Linked company asset scope".
+                    {t("createTask.coverageHint")}
                   </p>
                 </div>
               </CollapsibleContent>
@@ -3469,11 +3546,11 @@ function CreateTaskSheet({
 
         <SheetFooter className="flex-row justify-end gap-2 border-t p-4">
           <SheetClose asChild>
-            <Button variant="outline">Cancel</Button>
+            <Button variant="outline">{t("common.cancel")}</Button>
           </SheetClose>
           <Button onClick={createTask} disabled={creating || uploading}>
             {creating && <Spinner data-icon="inline-start" />}
-            {creating ? "Creating" : "Create"}
+            {creating ? t("common.creating") : t("common.create")}
           </Button>
         </SheetFooter>
       </SheetContent>

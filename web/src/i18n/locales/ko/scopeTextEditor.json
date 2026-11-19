@@ -1,0 +1,7 @@
+{
+  "label": "자산 범위",
+  "description": "한 줄에 하나씩 입력하세요. 도메인, IP, CIDR, ICP 등록번호, 회사 키워드가 자동으로 인식됩니다.",
+  "recognized": "{count}개 인식됨",
+  "errorLine": "줄 {line}: {error}",
+  "moreErrors": "오류 {count}개 더 있음"
+}

@@ -1,0 +1,18 @@
+{
+  "empty": "(비어 있음)",
+  "wrap": {
+    "enable": "줄 바꿈 활성화",
+    "disable": "줄 바꿈 비활성화"
+  },
+  "copy": {
+    "action": "메시지 복사",
+    "copiedLabel": "메시지 복사됨",
+    "copiedTooltip": "복사됨"
+  },
+  "ariaLabel": {
+    "codeBlock": "HTTP 메시지 코드"
+  },
+  "toasts": {
+    "copyFailed": "복사 실패. Ctrl/Cmd+A로 전체 선택 후 복사하세요"
+  }
+}

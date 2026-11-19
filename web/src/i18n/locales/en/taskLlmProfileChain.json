@@ -1,0 +1,36 @@
+{
+  "rotation": {
+    "toggleLabel": "Enable multi-LLM worker rotation",
+    "descriptionOn": "New worker intents use the selected profiles in round-robin order. Independent workers can run on different providers simultaneously. Other roles keep the current profile.",
+    "descriptionOff": "Ordered failover: workers share the current profile and switch after quota exhaustion or repeated provider failures.",
+    "warnMinProfiles": "Select at least two profiles to distribute work across providers.",
+    "warnBinding": "Worker has a fixed model binding, which overrides rotation. Set Worker’s model to follow the task in Agent settings to use these profiles.",
+    "warnBindingUnchecked": "Worker binding could not be checked. A fixed Worker model overrides rotation; verify Agent settings.",
+    "hint": "Set concurrent worker count to at least 2 in System settings before starting the task. In-flight calls keep their provider. Exhausted profiles are skipped until the chain is reset.",
+    "badge": "Rotation {n}"
+  },
+  "combobox": {
+    "searchPlaceholder": "Search and add LLM profiles",
+    "noProfilesPlaceholder": "No LLM profiles available",
+    "empty": "No matching LLM profiles"
+  },
+  "profileFallback": "Profile #{id}",
+  "activeSuffix": " (active)",
+  "profileUnavailable": "Profile unavailable",
+  "emptyState": "When no profile is set, the task follows the agent or the global active profile.",
+  "role": {
+    "current": "Current",
+    "skipped": "Skipped",
+    "skippedTooltip": "Profiles before the current cursor are not picked by automatic failover",
+    "fallback": "Fallback {n}"
+  },
+  "actions": {
+    "moveUp": "Move profile up",
+    "moveDown": "Move profile down",
+    "remove": "Remove profile"
+  },
+  "activeProfile": {
+    "rotateLabel": "Planner / failover profile",
+    "defaultLabel": "Current profile"
+  }
+}

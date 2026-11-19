@@ -1,0 +1,171 @@
+{
+  "notFound": "Agent not found: {key}",
+  "tabs": {
+    "configPrompt": "Config & Prompt",
+    "wrapup": "Wrap-up Prompt",
+    "mcp": "MCP",
+    "skill": "Skill",
+    "tools": "Tools",
+    "triggers": "Triggers"
+  },
+  "config": {
+    "llmProfileLabel": "Default model (LLM profile)",
+    "followProfile": "Follow task / globally active profile",
+    "defaultSuffix": " · default",
+    "llmProfileHelp": "Bind a fixed LLM profile to this Agent (click \"Save config\" to apply). Priority: Agent binding > task/session override > global active.",
+    "maxTurnsLabel": "Max loop turns (0 = unlimited)",
+    "runSecondsLabel": "Run duration (seconds, 0 = unlimited)",
+    "saveButton": "Save config",
+    "webSearchLabel": "Web search",
+    "webSearchHelpOn": "Once enabled for this Agent (click Save above to apply), web_search can search the internet",
+    "webSearchHelpOff": "Enable web search in System settings and configure a backend before enabling it here",
+    "interactiveShellLabel": "Interactive shell",
+    "interactiveShellHelp": "Once enabled for this Agent (click Save above to apply), persistent PTY session tools (shell_open/send/read/close/list) can drive interactive programs such as msfconsole/ssh/REPL"
+  },
+  "variables": {
+    "label": "Variables (click to insert a placeholder; replaced with runtime data when rendered)",
+    "example": "Example: {example}",
+    "empty": "(no variables)"
+  },
+  "prompt": {
+    "placeholder": "Leave empty to use the built-in default prompt",
+    "renderPreview": "Render preview",
+    "previewDescription": "All {token} have been replaced by the backend with sample values.",
+    "renderError": "Render error: {error}",
+    "previewFailed": "Preview failed: {message}",
+    "saveVersion": "Save as new version"
+  },
+  "actions": {
+    "save": "Save",
+    "restoreDefault": "Restore default"
+  },
+  "versions": {
+    "label": "Version history",
+    "current": "Current",
+    "empty": "(no saved versions; using the built-in default)",
+    "noNote": "(no note)",
+    "emptyText": "(empty)",
+    "compareWithCurrent": "Compare with current",
+    "loadIntoEditor": "Load into editor",
+    "diffTitle": "Version diff: v{from} → v{to} (current)",
+    "removed": "- removed",
+    "added": "+ added"
+  },
+  "wrapup": {
+    "intro": "When this Agent is terminated due to <b>timeout</b> or <b>exhausted turns</b>, the system injects this \"wrap-up prompt\" for one wrap-up round: It first writes back anything identified but not yet stored, then outputs a one-line summary (to avoid an abrupt ending). Leave empty to use the built-in default.",
+    "bodyLabel": "Wrap-up prompt body",
+    "custom": "Custom",
+    "usingDefault": "Using built-in default",
+    "bodyPlaceholder": "Leave empty to use the built-in default wrap-up prompt",
+    "turnsLabel": "Wrap-up turns (max turns for the wrap-up phase itself; 0 = built-in default of {n} turns)",
+    "defaultRef": "Built-in default (read-only, for reference)",
+    "ttIntro": "<b>Task timeout wrap-up</b> (<b>separate</b> from the per-run wrap-up above): injected when the <b>entire task</b> hits its timeout cap and is about to end. Its semantics are often the opposite of per-run (e.g. planner: per-run says \"don't stop, keep planning\", task timeout says \"time's up, stop and make the final call\"). Leave empty to use the built-in default.",
+    "ttBodyLabel": "Task timeout wrap-up prompt body",
+    "ttBodyPlaceholder": "Leave empty to use the built-in default task timeout wrap-up prompt",
+    "ttTurnsLabel": "Wrap-up turns (0 = built-in default of {n} turns)"
+  },
+  "mcp": {
+    "intro": "Check the MCP servers visible to this Agent.",
+    "empty": "(no MCP servers)"
+  },
+  "skill": {
+    "intro": "Check the Skills visible to this Agent.",
+    "empty": "(no Skills)"
+  },
+  "tools": {
+    "intro": "Check the built-in tools bound to this Agent.",
+    "trafficBadge": "Traffic",
+    "requiresCapture": "Requires traffic capture",
+    "empty": "(no tools)"
+  },
+  "common": {
+    "disabled": "Disabled"
+  },
+  "toasts": {
+    "savedVersion": "Saved as version v{version}",
+    "saveFailed": "Save failed: {message}",
+    "restoredDefaultVersion": "Restored to built-in default (v{version})",
+    "restoreFailed": "Restore failed: {message}",
+    "wrapupSaved": "Wrap-up config saved (takes effect on the next run)",
+    "wrapupCleared": "Cleared; the built-in default will be used",
+    "restoredDefault": "Restored to built-in default",
+    "ttWrapupSaved": "Task timeout wrap-up config saved (takes effect on the next run)",
+    "configSaved": "Run config saved (effective immediately)",
+    "mcpGranted": "Granted MCP \"{name}\" visibility",
+    "mcpRevoked": "Revoked MCP \"{name}\" visibility",
+    "skillGranted": "Granted Skill \"{name}\" visibility",
+    "skillRevoked": "Revoked Skill \"{name}\" visibility",
+    "toolBound": "Bound tool \"{key}\"",
+    "toolUnbound": "Unbound tool \"{key}\"",
+    "toolBindFailed": "Failed to save tool bindings: {message}",
+    "loadedVersion": "Loaded v{version} into the editor; click \"Save as new version\" to confirm"
+  },
+  "triggers": {
+    "intro": "Triggers make this custom Agent run automatically: each trigger <b>starts a new conversation</b> (visible on the Chat page). Multiple trigger conditions can be selected; the system automatically appends \"why this fired + related task/finding/goal\" to the base message you write.",
+    "policyLabel": "Post-trigger handling policy (how triggers are queued/merged to run)",
+    "runMode": "Run mode",
+    "runModeSerial": "Serial (queued, one at a time)",
+    "runModeParallel": "Parallel (independent concurrent sessions)",
+    "mergeMode": "Merge mode",
+    "mergeByTask": "Merge by task",
+    "mergeAll": "Merge all into one",
+    "mergeNone": "No merge",
+    "maxConcurrency": "Max concurrency (0 = unlimited)",
+    "policyDescParallel": "Parallel: each trigger immediately starts its own concurrent session, no merging; triggers beyond the max concurrency queue for a free slot.",
+    "policyDescByTask": "Serial · merge by task: one run at a time per agent; queued events for the same task merge into one conversation.",
+    "policyDescAll": "Serial · merge all: one run at a time per agent; when dequeuing, all currently queued triggers merge into one conversation.",
+    "policyDescNone": "Serial · no merge: one run at a time per agent; each trigger gets its own conversation.",
+    "editLabel": "Edit trigger #{id} (click \"Save changes\" when done)",
+    "newLabel": "New trigger (each condition can have its own user message)",
+    "scheduled": "Scheduled trigger",
+    "every": "Every",
+    "seconds": "seconds",
+    "schedulePlaceholder": "Message sent to the agent when the schedule fires, e.g. inspect all tasks",
+    "onFinding": "Trigger on finding",
+    "findingPlaceholder": "Message sent to the agent when a finding is found (the system attaches task and finding details)",
+    "onGoalMet": "Trigger on goal met",
+    "goalPlaceholder": "Message sent to the agent when a goal is met (the system attaches the task and the met goal)",
+    "onTaskTimeout": "Trigger on task timeout",
+    "taskTimeoutPlaceholder": "Message sent to the agent on task timeout (the system attaches the task id and goals)",
+    "onToolCall": "Trigger on tool call",
+    "toolWatchHelp": "Select the tools to watch (at least one); each time these tools finish a <b>call</b> during task execution, a trigger fires. {n} selected.",
+    "toolListEmpty": "(tool list is empty)",
+    "toolCallPlaceholder": "Message sent to the agent when a tool is called (the system attaches task info, tool input and output)",
+    "onTaskCreate": "Trigger on task created",
+    "taskCreatePlaceholder": "Message sent to the agent when a task is created (the system attaches the task id and goals)",
+    "saveChanges": "Save changes",
+    "addTrigger": "Add trigger",
+    "cancelEdit": "Cancel edit",
+    "existing": "Existing triggers",
+    "existingEmpty": "(none)",
+    "rowSchedule": "Schedule: {msg}",
+    "rowFinding": "Finding: {msg}",
+    "rowGoal": "Goal: {msg}",
+    "rowTimeout": "Timeout: {msg}",
+    "rowTaskCreated": "Task created: {msg}",
+    "rowTools": "Tools: {tools}",
+    "noneSelected": "(none selected)",
+    "rowMessage": "Message: {msg}",
+    "editTitle": "Edit",
+    "deleteTitle": "Delete",
+    "cond": {
+      "every": "every {n}s",
+      "finding": "finding found",
+      "goal": "goal met",
+      "taskTimeout": "task timeout",
+      "toolCall": "tool call ({n})",
+      "taskCreated": "task created",
+      "none": "(no conditions)"
+    },
+    "toasts": {
+      "savePolicyFailed": "Failed to save policy: {message}",
+      "selectCondition": "Select at least one trigger condition",
+      "toolRequired": "Tool-call triggers require at least one tool",
+      "changesSaved": "Changes saved",
+      "added": "Trigger added",
+      "saveFailed": "Save failed: {message}",
+      "addFailed": "Add failed: {message}",
+      "deleteFailed": "Delete failed: {message}"
+    }
+  }
+}

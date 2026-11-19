@@ -13,6 +13,7 @@ import {
   ShieldAlertIcon,
   XIcon,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { TablePagination } from "@/components/table-pagination";
@@ -37,6 +38,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import { setVisibleInterval } from "@/lib/polling";
 import type {
   InterceptApprovalFilter,
   InterceptApprovalRow,
@@ -47,11 +49,10 @@ import type {
   InterceptRisk,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { setVisibleInterval } from "@/lib/polling";
 
 function fmtTime(value?: string) {
   if (!value) return "—";
-  return new Date(value).toLocaleString("zh-CN", {
+  return new Date(value).toLocaleString("ko-KR", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -66,15 +67,16 @@ function source(row: InterceptApprovalRow) {
   return row.reason?.startsWith("[model]") ? "model" : "unknown";
 }
 
-function originLabel(row: InterceptApprovalRow) {
+function originLabel(row: InterceptApprovalRow, t: ReturnType<typeof useTranslations<"approvalRecords">>) {
   if (row.task_id) return row.task_id;
-  if (row.conversation_id) return `Conversation #${row.conversation_id}`;
+  if (row.conversation_id) return t("origin.conversation", { id: row.conversation_id });
   return "—";
 }
 
 function ApprovalOrigin({ row, detail = false }: { row: InterceptApprovalRow; detail?: boolean }) {
+  const t = useTranslations("approvalRecords");
   const [locating, setLocating] = React.useState(false);
-  const label = detail && row.task_id ? `Task ${row.task_id}` : originLabel(row);
+  const label = detail && row.task_id ? t("origin.task", { id: row.task_id }) : originLabel(row, t);
   const query = new URLSearchParams({ approval: String(row.id) });
   let href: string | undefined;
   if (row.conversation_id) {
@@ -88,7 +90,7 @@ function ApprovalOrigin({ row, detail = false }: { row: InterceptApprovalRow; de
     <a
       href={href}
       className="text-primary underline-offset-4 hover:underline"
-      aria-label={`Locate the source of approval #${row.id}: ${label}`}
+      aria-label={t("origin.locateAria", { id: row.id, label })}
       aria-busy={locating}
       onClick={async (e) => {
         e.stopPropagation();
@@ -100,7 +102,7 @@ function ApprovalOrigin({ row, detail = false }: { row: InterceptApprovalRow; de
           await api.interceptExecution(row.id, row.conversation_id ?? undefined);
           window.location.assign(href);
         } catch (error) {
-          toast.error((error as Error).message || "Unable to locate the corresponding execution");
+          toast.error((error as Error).message || t("origin.locateError"));
           setLocating(false);
         }
       }}
@@ -113,7 +115,13 @@ function ApprovalOrigin({ row, detail = false }: { row: InterceptApprovalRow; de
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const labels: Record<string, string> = { pending: "Pending approval", allowed: "Allowed", denied: "Denied", timeout: "Timed out" };
+  const t = useTranslations("approvalRecords");
+  const labels: Record<string, string> = {
+    pending: t("status.pending"),
+    allowed: t("status.allowed"),
+    denied: t("status.denied"),
+    timeout: t("status.timeout"),
+  };
   let variant: "default" | "destructive" | "secondary" | "outline" = "outline";
   if (status === "allowed") variant = "default";
   if (status === "denied") variant = "destructive";
@@ -127,47 +135,51 @@ const decidedByLabels: Record<string, string> = { human: "Human", rule: "Rule", 
 // "Decided by" filter option matching its badge. A decided row without an actor
 // predates the column: it reads "Legacy" and matches no option.
 function DecidedByBadge({ row }: { row: InterceptApprovalRow }) {
+  const t = useTranslations("approvalRecords");
   if (row.status === "pending") return <span className="text-muted-foreground">—</span>;
   if (!row.decided_by) {
     return (
       <Badge variant="outline" className="text-muted-foreground">
-        Legacy
+        {t("decidedByBadge.legacy")}
       </Badge>
     );
   }
-  return <Badge variant="outline">{decidedByLabels[row.decided_by] ?? row.decided_by}</Badge>;
+  const k = row.decided_by;
+  return <Badge variant="outline">{t.has(`decidedBy.${k}`) ? t(`decidedBy.${k}`) : (decidedByLabels[k] ?? k)}</Badge>;
 }
 
 const riskLabels: Record<InterceptRisk["level"], string> = { low: "Low", medium: "Medium", high: "High" };
 
 // RiskBadge shows the server's deterministic risk level of a pending request.
 function RiskBadge({ risk }: { risk?: InterceptRisk }) {
+  const t = useTranslations("approvalRecords");
   if (!risk) return null;
   let variant: "destructive" | "secondary" | "outline" = "outline";
   if (risk.level === "high") variant = "destructive";
   if (risk.level === "medium") variant = "secondary";
   return (
-    <Badge variant={variant} title={`Risk score ${risk.score}/100`}>
-      {riskLabels[risk.level] ?? risk.level}
+    <Badge variant={variant} title={t("risk.scoreTitle", { score: risk.score })}>
+      {t.has(`risk.${risk.level}`) ? t(`risk.${risk.level}`) : (riskLabels[risk.level] ?? risk.level)}
     </Badge>
   );
 }
 
 function MatchCell({ row, showReason = true }: { row: InterceptApprovalRow; showReason?: boolean }) {
+  const t = useTranslations("approvalRecords");
   const reason = row.reason?.replace(/^\[model\]\s*/, "");
   return (
     <div className="flex min-w-0 flex-col gap-1">
       {source(row) === "model" ? (
         <Badge variant="outline">
           <BotIcon />
-          Model decision
+          {t("match.modelDecision")}
         </Badge>
       ) : (
-        <span className="truncate">{row.rule_name || "Rule not recorded or deleted"}</span>
+        <span className="truncate">{row.rule_name || t("match.ruleMissing")}</span>
       )}
       {showReason ? (
         <p className="truncate text-muted-foreground text-xs" title={reason}>
-          {reason || "No reason recorded"}
+          {reason || t("match.noReason")}
         </p>
       ) : null}
     </div>
@@ -175,12 +187,13 @@ function MatchCell({ row, showReason = true }: { row: InterceptApprovalRow; show
 }
 
 function CodeBlock({ label, text, truncated = false }: { label: string; text: string; truncated?: boolean }) {
+  const t = useTranslations("approvalRecords");
   async function copy() {
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("Copied");
+      toast.success(t("codeBlock.copied"));
     } catch {
-      toast.error("Copy failed; select the content manually to copy");
+      toast.error(t("codeBlock.copyFailed"));
     }
   }
   return (
@@ -188,15 +201,20 @@ function CodeBlock({ label, text, truncated = false }: { label: string; text: st
       <div className="flex items-center justify-between gap-2">
         <h3 className="font-medium text-muted-foreground text-xs">{label}</h3>
         {text ? (
-          <Button variant="ghost" size="icon-xs" aria-label={`Copy ${label}`} onClick={() => void copy()}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("codeBlock.copyAria", { label })}
+            onClick={() => void copy()}
+          >
             <CopyIcon />
           </Button>
         ) : null}
       </div>
       <pre className="max-h-80 min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 font-mono text-xs leading-6 [overflow-wrap:anywhere]">
-        {text || "Not recorded"}
+        {text || t("common.notRecorded")}
       </pre>
-      {truncated ? <p className="text-muted-foreground text-xs">Content truncated; the above is the saved excerpt.</p> : null}
+      {truncated ? <p className="text-muted-foreground text-xs">{t("codeBlock.truncated")}</p> : null}
     </section>
   );
 }
@@ -219,75 +237,106 @@ const executionLabels: Record<InterceptAudit["execution_status"], string> = {
   unknown: "Execution result unknown",
 };
 
+function actionLabel(action: string, t: ReturnType<typeof useTranslations<"approvalRecords">>) {
+  return t.has(`action.${action}`) ? t(`action.${action}`) : (actionLabels[action] ?? action);
+}
+
 function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
+  const t = useTranslations("approvalRecords");
   return (
-    <section className="flex min-w-0 flex-col gap-4" aria-label="Model review context">
+    <section className="flex min-w-0 flex-col gap-4" aria-label={t("modelContext.title")}>
       <div className="flex flex-col gap-2">
-        <h3 className="font-medium text-sm">Model review context</h3>
+        <h3 className="font-medium text-sm">{t("modelContext.title")}</h3>
         <p className="text-muted-foreground text-xs">
-          Below is the snapshot of the input actually sent to the review model for this decision. The background only helps it understand the current action; the verdict follows the review policy.
-          {input.version < 4 ? "This record used the legacy input format; the content actually sent at the time is preserved." : null}
+          {t("modelContext.intro")}
+          {input.version < 4 ? t("modelContext.legacyFormat") : null}
         </p>
       </div>
       <CodeBlock
-        label="Call under review"
+        label={t("modelContext.callUnderReview")}
         text={JSON.stringify({ tool_name: input.tool_name, arguments: input.arguments }, null, 2)}
       />
       {input.version >= 2 ? (
         input.background ? (
           <div className="flex min-w-0 flex-col gap-2">
             <CodeBlock
-              label={input.background.source === "user_message" ? "Background · user message" : "Background · Worker intent summary (legacy)"}
+              label={
+                input.background.source === "user_message"
+                  ? t("modelContext.backgroundUserMessage")
+                  : t("modelContext.backgroundWorkerIntent")
+              }
               text={input.background.text}
               truncated={input.background.truncated}
             />
             <p className="text-muted-foreground text-xs">
               {input.background.source === "user_message"
-                ? "Taken from the current user message."
-                : "This is the legacy Worker intent summary that used to be sent; the new Worker review no longer sends it."}
+                ? t("modelContext.fromUserMessage")
+                : t("modelContext.legacyWorkerIntent")}
             </p>
           </div>
         ) : (
-          <p className="text-muted-foreground text-xs">No background message was attached to this review.</p>
+          <p className="text-muted-foreground text-xs">{t("modelContext.noBackground")}</p>
         )
       ) : (
         <>
           {input.turn_input ? (
-            <CodeBlock label="Current turn input (legacy)" text={input.turn_input} truncated={input.background_truncated} />
+            <CodeBlock
+              label={t("modelContext.currentTurnInput")}
+              text={input.turn_input}
+              truncated={input.background_truncated}
+            />
           ) : null}
           {input.task ? (
             <>
-              <CodeBlock label="Task description (legacy)" text={input.task.description} truncated={input.task.truncated} />
-              <CodeBlock label="Task goals (legacy)" text={input.task.goal} truncated={input.task.truncated} />
-              <CodeBlock label="Task operation constraints (legacy)" text={JSON.stringify(input.task.constraints, null, 2)} />
+              <CodeBlock
+                label={t("modelContext.taskDescription")}
+                text={input.task.description}
+                truncated={input.task.truncated}
+              />
+              <CodeBlock label={t("modelContext.taskGoals")} text={input.task.goal} truncated={input.task.truncated} />
+              <CodeBlock
+                label={t("modelContext.taskConstraints")}
+                text={JSON.stringify(input.task.constraints, null, 2)}
+              />
             </>
           ) : null}
           {input.worker_intent ? (
-            <CodeBlock label="Worker intent (legacy)" text={input.worker_intent} truncated={input.background_truncated} />
+            <CodeBlock
+              label={t("modelContext.workerIntent")}
+              text={input.worker_intent}
+              truncated={input.background_truncated}
+            />
           ) : null}
         </>
       )}
-      {input.working_directory ? <CodeBlock label="Working directory" text={input.working_directory} /> : null}
+      {input.working_directory ? (
+        <CodeBlock label={t("modelContext.workingDirectory")} text={input.working_directory} />
+      ) : null}
       {input.version >= 3 ? (
-        <p className="text-muted-foreground text-xs">No past calls or execution results were sent for this review.</p>
+        <p className="text-muted-foreground text-xs">{t("modelContext.noHistorySent")}</p>
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
-          <h4 className="font-medium text-muted-foreground text-xs">Past calls provided to the model at the time (legacy)</h4>
+          <h4 className="font-medium text-muted-foreground text-xs">{t("modelContext.pastCallsHeading")}</h4>
           {input.history?.length ? (
             input.history.map((entry) => (
               <div key={entry.tool_use_id} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
                 <p className="break-words font-medium text-xs">
-                  {entry.tool} · {entry.status === "succeeded" ? "Succeeded" : "Failed (may have partial side effects)"}
+                  {entry.tool} ·{" "}
+                  {entry.status === "succeeded" ? t("modelContext.historySucceeded") : t("modelContext.historyFailed")}
                 </p>
-                <CodeBlock label="Past call arguments" text={entry.arguments_preview} truncated={entry.truncated} />
-                <CodeBlock label="Past execution result" text={entry.result} truncated={entry.truncated} />
+                <CodeBlock
+                  label={t("modelContext.pastCallArgs")}
+                  text={entry.arguments_preview}
+                  truncated={entry.truncated}
+                />
+                <CodeBlock label={t("modelContext.pastExecResult")} text={entry.result} truncated={entry.truncated} />
               </div>
             ))
           ) : (
-            <p className="text-muted-foreground text-xs">No paired past tool executions were provided.</p>
+            <p className="text-muted-foreground text-xs">{t("modelContext.noPairedHistory")}</p>
           )}
           {input.history_truncated ? (
-            <p className="text-muted-foreground text-xs">History is a limited window; some content is truncated.</p>
+            <p className="text-muted-foreground text-xs">{t("modelContext.historyTruncated")}</p>
           ) : null}
         </div>
       )}
@@ -296,11 +345,11 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
         <CollapsibleTrigger asChild>
           <Button variant="outline" size="sm" className="self-start">
             <ChevronDownIcon data-icon="inline-start" />
-            View full model review input JSON
+            {t("modelContext.viewFullJson")}
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="pt-3">
-          <CodeBlock label="Model review input" text={JSON.stringify(input, null, 2)} />
+          <CodeBlock label={t("modelContext.reviewInput")} text={JSON.stringify(input, null, 2)} />
         </CollapsibleContent>
       </Collapsible>
     </section>
@@ -310,16 +359,17 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
 type Decide = (id: number, decision: "allowed" | "denied") => Promise<void>;
 
 function DecisionActions({ row, busy, decide }: { row: InterceptApprovalRow; busy: boolean; decide: Decide }) {
+  const t = useTranslations("approvalRecords");
   if (row.status !== "pending") return null;
   return (
     <div className="flex flex-wrap gap-2">
       <Button size="sm" disabled={busy} onClick={() => void decide(row.id, "allowed")}>
         <CheckIcon data-icon="inline-start" />
-        Allow
+        {t("actions.allow")}
       </Button>
       <Button size="sm" variant="destructive" disabled={busy} onClick={() => void decide(row.id, "denied")}>
         <XIcon data-icon="inline-start" />
-        Deny
+        {t("actions.deny")}
       </Button>
     </div>
   );
@@ -328,16 +378,13 @@ function DecisionActions({ row, busy, decide }: { row: InterceptApprovalRow; bus
 // AlwaysAllowAction creates an argv allow rule from a pending Bash request.
 // The prefix comes from the server; the request itself stays pending.
 function AlwaysAllowAction({ id, prefix }: { id: number; prefix?: string }) {
+  const t = useTranslations("approvalRecords");
   const [busy, setBusy] = React.useState(false);
   async function create() {
     setBusy(true);
     try {
       const res = await api.interceptAlwaysAllow(id);
-      toast.success(
-        res.created
-          ? "Rule created, the request is still pending approval"
-          : "Rule already exists, the request is still pending approval",
-      );
+      toast.success(res.created ? t("alwaysAllow.created") : t("alwaysAllow.exists"));
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -347,12 +394,9 @@ function AlwaysAllowAction({ id, prefix }: { id: number; prefix?: string }) {
   return (
     <div className="flex flex-col gap-1">
       <Button size="sm" variant="outline" className="self-start" disabled={busy} onClick={() => void create()}>
-        {prefix ? `Toujours autoriser "${prefix} *"` : "Toujours autoriser"}
+        {prefix ? t("alwaysAllow.buttonPrefix", { prefix }) : t("alwaysAllow.button")}
       </Button>
-      <p className="text-muted-foreground text-xs">
-        The prefix does not constrain flags, and it does not cover what the program does next (git hooks, npm
-        scripts, docker images).
-      </p>
+      <p className="text-muted-foreground text-xs">{t("alwaysAllow.hint")}</p>
     </div>
   );
 }
@@ -374,6 +418,7 @@ export function ApprovalDetail({
   defaultExpanded?: boolean;
   onResolved?: (status: "allowed" | "denied" | "timeout") => void;
 }) {
+  const t = useTranslations("approvalRecords");
   const [detail, setDetail] = React.useState<InterceptDetail | null>(null);
   const [error, setError] = React.useState("");
   const [retry, setRetry] = React.useState(0);
@@ -393,7 +438,7 @@ export function ApprovalDetail({
         if (next.status === "pending" || next.audit?.execution_status === "awaiting_result")
           timer = setTimeout(() => void load(), 5000);
       } catch (e) {
-        if (!cancelled) setError((e as Error).message || "Failed to load details");
+        if (!cancelled) setError((e as Error).message || t("detail.loadErrorFallback"));
       }
     }
     void load();
@@ -401,24 +446,31 @@ export function ApprovalDetail({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [row.id, row.status, revision, retry, onResolved]);
+  }, [row.id, row.status, revision, retry, onResolved, t]);
 
   // Row updates are authoritative until the lazy detail has caught up.
   const current = detail?.status === row.status ? detail : row;
   const audit = detail?.audit;
-  let execution = audit ? executionLabels[audit.execution_status] : "Not recorded";
-  if (row.status === "pending") execution = "Not started";
-  if (audit && audit.correlation !== "exact" && audit.effective_action === "allow") execution = "No linked execution result";
+  let execution = t("common.notRecorded");
+  if (audit) {
+    const status = audit.execution_status;
+    execution = t.has(`execution.${status}`) ? t(`execution.${status}`) : executionLabels[status];
+  }
+  if (row.status === "pending") execution = t("detail.executionNotStarted");
+  if (audit && audit.correlation !== "exact" && audit.effective_action === "allow")
+    execution = t("detail.noLinkedResult");
   const command = typeof row.tool_input?.command === "string" ? row.tool_input.command : undefined;
-  let initialLabel = source(row) === "model" ? "Model initial decision" : "Rule initial decision";
-  if (audit?.model_fallback) initialLabel = "Model error fallback";
+  let initialLabel = source(row) === "model" ? t("detail.initialModel") : t("detail.initialRule");
+  if (audit?.model_fallback) initialLabel = t("detail.initialFallback");
 
   return (
     <div className="flex min-w-0 flex-col gap-4 p-3 sm:p-5">
       <div className="grid min-w-0 gap-5 rounded-xl border bg-muted/20 p-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-3">
           <CodeBlock
-            label={`${current.agent_name || current.conv_agent_key || "Agent"} · tool request`}
+            label={t("detail.toolRequestLabel", {
+              name: current.agent_name || current.conv_agent_key || t("detail.agentFallback"),
+            })}
             text={JSON.stringify(row.tool_input ?? {}, null, 2)}
           />
           {command ? (
@@ -426,47 +478,50 @@ export function ApprovalDetail({
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm">
                   <ChevronDownIcon data-icon="inline-start" />
-                  View command content
+                  {t("detail.viewCommand")}
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent className="pt-2">
-                <CodeBlock label="Command content" text={command} />
+                <CodeBlock label={t("detail.commandContent")} text={command} />
               </CollapsibleContent>
             </Collapsible>
           ) : null}
           <p className="text-muted-foreground text-xs">
-            Execution result: <span className="text-foreground">{detail ? execution : "Loading…"}</span>
+            {t("detail.executionResultLabel")}{" "}
+            <span className="text-foreground">{detail ? execution : t("detail.loading")}</span>
           </p>
         </div>
         <div className="flex min-w-0 flex-col gap-4 lg:border-l lg:pl-5">
           <h3 className="font-medium text-muted-foreground text-xs">
-            {current.status === "pending" ? "Review status" : "Approval decision"}
+            {current.status === "pending" ? t("detail.reviewStatus") : t("detail.approvalDecision")}
           </h3>
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={current.status} />
             <MatchCell row={current} showReason={false} />
           </div>
           <p className="whitespace-pre-wrap break-words text-sm leading-7 [overflow-wrap:anywhere]">
-            {current.reason?.replace(/^\[model\]\s*/, "") || "No approval reason recorded"}
+            {current.reason?.replace(/^\[model\]\s*/, "") || t("detail.noReason")}
           </p>
           {audit?.decision_reason ? <p className="text-sm">{audit.decision_reason}</p> : null}
-          {audit?.effective_action ? <p className="text-sm">Final action: {actionLabels[audit.effective_action]}</p> : null}
+          {audit?.effective_action ? (
+            <p className="text-sm">{t("detail.finalAction", { action: actionLabel(audit.effective_action, t) })}</p>
+          ) : null}
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
-            <dt className="text-muted-foreground">Source</dt>
+            <dt className="text-muted-foreground">{t("common.source")}</dt>
             <dd className="break-words">
               <ApprovalOrigin row={current} detail />
             </dd>
-            <dt className="text-muted-foreground">Requested at</dt>
+            <dt className="text-muted-foreground">{t("common.requestedAt")}</dt>
             <dd>{fmtTime(row.created_at)}</dd>
-            <dt className="text-muted-foreground">Decided at</dt>
+            <dt className="text-muted-foreground">{t("common.decidedAt")}</dt>
             <dd>{fmtTime(current.decided_at)}</dd>
-            <dt className="text-muted-foreground">Decided by</dt>
+            <dt className="text-muted-foreground">{t("common.decidedBy")}</dt>
             <dd>
               <DecidedByBadge row={current} />
             </dd>
             {row.risk ? (
               <>
-                <dt className="text-muted-foreground">Risk</dt>
+                <dt className="text-muted-foreground">{t("detail.risk")}</dt>
                 <dd className="flex flex-col gap-1">
                   <span className="flex items-center gap-2">
                     <RiskBadge risk={row.risk} />
@@ -484,13 +539,13 @@ export function ApprovalDetail({
             ) : null}
             {audit?.rule_name ? (
               <>
-                <dt className="text-muted-foreground">Rule snapshot</dt>
+                <dt className="text-muted-foreground">{t("detail.ruleSnapshot")}</dt>
                 <dd>{audit.rule_name}</dd>
               </>
             ) : null}
             {audit?.profile_id ? (
               <>
-                <dt className="text-muted-foreground">Approval model profile</dt>
+                <dt className="text-muted-foreground">{t("detail.modelProfile")}</dt>
                 <dd>#{audit.profile_id}</dd>
               </>
             ) : null}
@@ -505,9 +560,9 @@ export function ApprovalDetail({
         <Alert variant="destructive">
           <AlertDescription>
             <div className="flex flex-wrap items-center gap-2">
-              <span>Failed to load details: {error}</span>
+              <span>{t("detail.loadDetailFailed", { error })}</span>
               <Button variant="outline" size="sm" onClick={() => setRetry((v) => v + 1)}>
-                Retry
+                {t("common.retry")}
               </Button>
             </div>
           </AlertDescription>
@@ -516,7 +571,7 @@ export function ApprovalDetail({
       {!detail && !error ? <Skeleton className="h-8 w-60" /> : null}
       {detail && !audit ? (
         <Alert>
-          <AlertDescription>This record has no saved approval detail snapshot, so the context, model initial decision, and execution output at the time cannot be restored.</AlertDescription>
+          <AlertDescription>{t("detail.noSnapshot")}</AlertDescription>
         </Alert>
       ) : null}
       {audit ? (
@@ -524,7 +579,7 @@ export function ApprovalDetail({
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm">
               <ChevronDownIcon data-icon="inline-start" className={cn(more && "rotate-180")} />
-              {more ? "Collapse context" : "View context and execution result"}
+              {more ? t("detail.collapseContext") : t("detail.viewContext")}
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-4">
@@ -534,9 +589,7 @@ export function ApprovalDetail({
               ) : (
                 <Alert>
                   <AlertDescription>
-                    {audit.model_input_digest
-                      ? "This legacy record saved only the review input fingerprint, not the input itself, so the context sent to the model at the time cannot be restored. This does not mean the review had no context; newly produced model decisions keep an input snapshot."
-                      : "This record has no saved model review input; it may have been decided directly by a rule, failed before the model call, or come from an old version."}
+                    {audit.model_input_digest ? t("detail.digestOnly") : t("detail.noModelInput")}
                   </AlertDescription>
                 </Alert>
               )}
@@ -546,38 +599,38 @@ export function ApprovalDetail({
                     <Button variant="ghost" size="sm">
                       <ChevronDownIcon data-icon="inline-start" />
                       {audit.model_input && audit.model_input.version >= 3
-                        ? "View conversation audit excerpt (not sent to model)"
-                        : "View conversation audit excerpt"}
+                        ? t("detail.viewAuditExcerptNotSent")
+                        : t("detail.viewAuditExcerpt")}
                     </Button>
                   </CollapsibleTrigger>
                   <CollapsibleContent className="pt-3">
                     <div className="flex min-w-0 flex-col gap-3">
                       {audit.user_message ? (
                         <CodeBlock
-                          label="Conversation current-turn input (audit excerpt)"
+                          label={t("detail.conversationTurnInput")}
                           text={audit.user_message}
                           truncated={audit.user_truncated}
                         />
                       ) : null}
                       <section className="flex min-w-0 flex-col gap-3">
-                        <h3 className="font-medium text-muted-foreground text-xs">Visible conversation context</h3>
+                        <h3 className="font-medium text-muted-foreground text-xs">{t("detail.visibleContext")}</h3>
                         <p className="text-muted-foreground text-xs">
-                          Conversation record excerpt saved at {fmtTime(audit.captured_at)}. What the model actually used follows "Model review input".
+                          {t("detail.contextExcerptNote", { time: fmtTime(audit.captured_at) })}
                         </p>
                         {audit.context_truncated ? (
-                          <p className="text-muted-foreground text-xs">Only the most recent context is saved; some content is truncated.</p>
+                          <p className="text-muted-foreground text-xs">{t("detail.contextTruncated")}</p>
                         ) : null}
                         {audit.context?.length ? (
                           audit.context.map((entry, index) => (
                             <CodeBlock
                               key={`${entry.kind}-${entry.tool_use_id || index}`}
-                              label={`${contextLabels[entry.kind] ?? entry.kind}${entry.tool ? ` · ${entry.tool}` : ""}${entry.is_error ? " · error" : ""}`}
+                              label={`${t.has(`context.${entry.kind}`) ? t(`context.${entry.kind}`) : (contextLabels[entry.kind] ?? entry.kind)}${entry.tool ? ` · ${entry.tool}` : ""}${entry.is_error ? ` · ${t("context.error")}` : ""}`}
                               text={entry.text}
                               truncated={entry.truncated}
                             />
                           ))
                         ) : (
-                          <p className="text-muted-foreground text-sm">No linkable context recorded</p>
+                          <p className="text-muted-foreground text-sm">{t("detail.noLinkableContext")}</p>
                         )}
                       </section>
                     </div>
@@ -585,35 +638,42 @@ export function ApprovalDetail({
                 </Collapsible>
               ) : null}
               <CodeBlock
-                label={`${initialLabel}: ${actionLabels[audit.initial_action] ?? audit.initial_action}`}
+                label={`${initialLabel}: ${actionLabel(audit.initial_action, t)}`}
                 text={audit.initial_reason.replace(/^\[model\]\s*/, "")}
               />
               {audit.judge_answers?.length ? (
                 <CodeBlock
-                  label="Judge answers"
-                  text={audit.judge_answers.map((a) => `${a.id}: ${a.answer}${a.evidence ? ` - ${a.evidence}` : ""}`).join("\n")}
+                  label={t("detail.judgeAnswers")}
+                  text={audit.judge_answers
+                    .map((a) => `${a.id}: ${a.answer}${a.evidence ? ` - ${a.evidence}` : ""}`)
+                    .join("\n")}
                 />
               ) : null}
               <CodeBlock
-                label="Execution output"
-                text={audit.output ?? (audit.execution_status === "not_executed" ? "Tool not executed." : "No execution output yet")}
+                label={t("detail.executionOutput")}
+                text={
+                  audit.output ??
+                  (audit.execution_status === "not_executed" ? t("detail.toolNotExecuted") : t("detail.noOutputYet"))
+                }
                 truncated={audit.output_truncated}
               />
               {audit.correlation !== "exact" ? (
                 <Alert>
                   <AlertDescription>
-                    {audit.correlation === "ambiguous"
-                      ? "Concurrent calls with identical arguments exist, so the tool call cannot be uniquely linked; this record does not show a guessed execution result."
-                      : "No uniquely linkable tool call ID recorded."}
+                    {audit.correlation === "ambiguous" ? t("detail.correlationAmbiguous") : t("detail.correlationNone")}
                   </AlertDescription>
                 </Alert>
               ) : null}
               <dl className="grid gap-2 text-muted-foreground text-xs [overflow-wrap:anywhere]">
-                <div>Tool call ID: {audit.tool_use_id || "Not recorded"}</div>
-                <div>Arguments digest SHA-256: {audit.input_digest}</div>
-                <div>Review config fingerprint SHA-256: {audit.config_digest || "Not recorded"}</div>
-                {audit.model_input_digest ? <div>Model review input SHA-256: {audit.model_input_digest}</div> : null}
-                {audit.execution_ended_at ? <div>Result recorded at: {fmtTime(audit.execution_ended_at)}</div> : null}
+                <div>{t("detail.toolCallId", { id: audit.tool_use_id || t("common.notRecorded") })}</div>
+                <div>{t("detail.argsDigest", { digest: audit.input_digest })}</div>
+                <div>{t("detail.configDigest", { digest: audit.config_digest || t("common.notRecorded") })}</div>
+                {audit.model_input_digest ? (
+                  <div>{t("detail.modelInputDigest", { digest: audit.model_input_digest })}</div>
+                ) : null}
+                {audit.execution_ended_at ? (
+                  <div>{t("detail.resultRecordedAt", { time: fmtTime(audit.execution_ended_at) })}</div>
+                ) : null}
               </dl>
             </div>
           </CollapsibleContent>
@@ -661,6 +721,7 @@ function ApprovalTable({
   label: string;
   selection?: Selection;
 }) {
+  const t = useTranslations("approvalRecords");
   const [expanded, setExpanded] = React.useState<Set<number>>(() => new Set());
   const columns =
     React.useSyncExternalStore(subscribeColumns, visibleColumnCount, serverColumnCount) + (selection ? 1 : 0);
@@ -683,7 +744,7 @@ function ApprovalTable({
           {selection ? (
             <TableHead className="w-10">
               <Checkbox
-                aria-label="Select all pending approvals on this page"
+                aria-label={t("table.selectAllAria")}
                 checked={allChecked}
                 disabled={busy || !rows.length}
                 onCheckedChange={() => selection.toggleAll()}
@@ -691,17 +752,17 @@ function ApprovalTable({
             </TableHead>
           ) : null}
           <TableHead className="w-10">
-            <span className="sr-only">Expand details</span>
+            <span className="sr-only">{t("table.expandDetails")}</span>
           </TableHead>
           <TableHead className="hidden w-14 sm:table-cell">#</TableHead>
-          <TableHead className="w-28">Tool</TableHead>
-          <TableHead className="hidden md:table-cell">Source</TableHead>
-          <TableHead className="hidden lg:table-cell">Matched rule</TableHead>
-          <TableHead className="hidden xl:table-cell">Arguments</TableHead>
-          <TableHead className="w-24">Status</TableHead>
-          <TableHead className="hidden w-24 lg:table-cell">Decided by</TableHead>
-          <TableHead className="hidden w-36 lg:table-cell">Requested at</TableHead>
-          <TableHead className="hidden w-36 xl:table-cell">Decided at</TableHead>
+          <TableHead className="w-28">{t("table.tool")}</TableHead>
+          <TableHead className="hidden md:table-cell">{t("common.source")}</TableHead>
+          <TableHead className="hidden lg:table-cell">{t("table.matchedRule")}</TableHead>
+          <TableHead className="hidden xl:table-cell">{t("table.arguments")}</TableHead>
+          <TableHead className="w-24">{t("table.status")}</TableHead>
+          <TableHead className="hidden w-24 lg:table-cell">{t("common.decidedBy")}</TableHead>
+          <TableHead className="hidden w-36 lg:table-cell">{t("common.requestedAt")}</TableHead>
+          <TableHead className="hidden w-36 xl:table-cell">{t("common.decidedAt")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -718,7 +779,7 @@ function ApprovalTable({
                 {selection ? (
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <Checkbox
-                      aria-label={`Select approval #${row.id}`}
+                      aria-label={t("table.selectRowAria", { id: row.id })}
                       checked={selection.selected.has(row.id)}
                       disabled={busy || row.status !== "pending"}
                       onCheckedChange={() => selection.toggle(row.id)}
@@ -729,7 +790,9 @@ function ApprovalTable({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`${open ? "Collapse" : "Expand"} approval #${row.id}`}
+                    aria-label={
+                      open ? t("table.collapseRowAria", { id: row.id }) : t("table.expandRowAria", { id: row.id })
+                    }
                     aria-expanded={open}
                     aria-controls={open ? panelID : undefined}
                     onClick={(e) => {
@@ -749,7 +812,7 @@ function ApprovalTable({
                 </TableCell>
                 <TableCell className="hidden md:table-cell">
                   <div className="flex flex-col gap-1">
-                    <span className="truncate" title={originLabel(row)}>
+                    <span className="truncate" title={originLabel(row, t)}>
                       <ApprovalOrigin row={row} />
                     </span>
                     <span className="truncate text-muted-foreground text-xs">
@@ -779,7 +842,7 @@ function ApprovalTable({
               {open ? (
                 <TableRow className="hover:bg-transparent has-aria-expanded:bg-transparent">
                   <TableCell colSpan={columns} className="whitespace-normal p-0">
-                    <section id={panelID} aria-label={`Approval details #${row.id}`}>
+                    <section id={panelID} aria-label={t("table.detailsAria", { id: row.id })}>
                       <ApprovalDetail row={row} busy={busy} decide={decide} revision={revision} />
                     </section>
                   </TableCell>
@@ -812,6 +875,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
   const request = React.useRef(0);
   const decisionLock = React.useRef(false);
   const filterID = React.useId();
+  const t = useTranslations("approvalRecords");
   const filtered = Boolean(filter.status || filter.decision_source || filter.decided_by);
 
   // A task can stay mounted while the user switches between task details.
@@ -830,7 +894,9 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         // filter. Older requests must remain actionable even when newer decisions
         // fill the page or a filter would hide them.
         const [history, pending] = await Promise.allSettled([
-          taskId ? api.interceptTaskPage(taskId, page, pageSize, filter) : api.interceptHistoryPage(page, pageSize, filter),
+          taskId
+            ? api.interceptTaskPage(taskId, page, pageSize, filter)
+            : api.interceptHistoryPage(page, pageSize, filter),
           api.interceptPending(),
         ]);
         if (id !== request.current) return;
@@ -839,17 +905,17 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
           setTotal(history.value.total);
           setError("");
         } else {
-          setError((history.reason as Error).message || "Failed to load");
+          setError((history.reason as Error).message || t("errors.loadFallback"));
         }
         if (pending.status === "fulfilled") {
           setPendingRows(pending.value);
           setPendingError("");
         } else {
-          setPendingError((pending.reason as Error).message || "Failed to load");
+          setPendingError((pending.reason as Error).message || t("errors.loadFallback"));
         }
         if (manual) setRevision((v) => v + 1);
       } catch (e) {
-        if (id === request.current) setError((e as Error).message || "Failed to load");
+        if (id === request.current) setError((e as Error).message || t("errors.loadFallback"));
       } finally {
         if (id === request.current) {
           setLoading(false);
@@ -857,7 +923,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         }
       }
     },
-    [taskId, page, pageSize, filter],
+    [taskId, page, pageSize, filter, t],
   );
   const latestLoad = React.useRef(load);
   latestLoad.current = load;
@@ -904,7 +970,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       );
       setPendingRows((prev) => prev.filter((row) => row.id !== id));
       setRevision((v) => v + 1);
-      toast.success(decision === "allowed" ? "Execution allowed" : "Execution denied");
+      toast.success(decision === "allowed" ? t("toasts.allowed") : t("toasts.denied"));
       // Re-fetch counts and rows: a decided item may no longer match the filter.
       await latestLoad.current(true);
     } catch (e) {
@@ -922,7 +988,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
     .map((row) => ({
       conv_title: "",
       conv_agent_key: "",
-      rule_name: row.rule_id ? `Rule #${row.rule_id}` : "",
+      rule_name: row.rule_id ? t("ruleRef", { id: row.rule_id }) : "",
       ...historyById.get(row.id),
       ...row,
     }));
@@ -961,9 +1027,9 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         try {
           const res = await api.interceptBatchDecide(ids.slice(start, start + batchDecideMax), decision);
           decided += res.decided;
-          for (const r of res.results) if (!r.ok) failed.push({ id: r.id, error: r.error || "Not decided" });
+          for (const r of res.results) if (!r.ok) failed.push({ id: r.id, error: r.error || t("batch.notDecided") });
         } catch (e) {
-          const error = `Not sent: ${(e as Error).message || "request failed"}`;
+          const error = t("batch.notSent", { message: (e as Error).message || t("batch.requestFailed") });
           for (const id of ids.slice(start)) failed.push({ id, error });
           break;
         }
@@ -972,9 +1038,9 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       setBatchErrors(failed);
       setSelected(new Set(failed.map((f) => f.id)));
       setRevision((v) => v + 1);
-      const verb = decision === "allowed" ? "allowed" : "denied";
-      if (failed.length) toast.error(`${decided} ${verb}, ${failed.length} not decided (see the errors listed above)`);
-      else toast.success(`${decided} ${verb}`);
+      const verb = decision === "allowed" ? t("batch.verbAllowed") : t("batch.verbDenied");
+      if (failed.length) toast.error(t("batch.toastPartial", { decided, verb, failed: failed.length }));
+      else toast.success(t("batch.toastAll", { decided, verb }));
     } finally {
       decisionLock.current = false;
       setDeciding(false);
@@ -982,24 +1048,24 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       await latestLoad.current(true);
     }
   };
-  const title = taskId ? "Interception approval" : "Approval records";
+  const title = taskId ? t("title.task") : t("title.records");
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <ClipboardListIcon className="size-5 text-muted-foreground" />
           <h1 className="font-semibold text-xl">{title}</h1>
-          {pending.length ? <Badge variant="secondary">{pending.length} pending</Badge> : null}
+          {pending.length ? <Badge variant="secondary">{t("pendingBadge", { count: pending.length })}</Badge> : null}
         </div>
         <Button variant="outline" size="sm" onClick={() => void load(true)} disabled={loading || refreshing}>
           <RefreshCwIcon data-icon="inline-start" className={cn(refreshing && "animate-spin")} />
-          Refresh
+          {t("common.refresh")}
         </Button>
       </div>
-      <p className="text-muted-foreground text-sm">Expand a record to view the tool request and approval decision, along with the context and execution result at the time.</p>
-      <FieldGroup className="flex-row flex-wrap items-end gap-3" aria-label="Approval record filters">
+      <p className="text-muted-foreground text-sm">{t("description")}</p>
+      <FieldGroup className="flex-row flex-wrap items-end gap-3" aria-label={t("filters.aria")}>
         <Field className="w-full sm:w-40">
-          <FieldLabel htmlFor={`${filterID}-status`}>Approval status</FieldLabel>
+          <FieldLabel htmlFor={`${filterID}-status`}>{t("filters.statusLabel")}</FieldLabel>
           <Select
             value={filter.status ?? "all"}
             onValueChange={(value) =>
@@ -1014,17 +1080,17 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="denied">Denied</SelectItem>
-                <SelectItem value="pending">Pending approval</SelectItem>
-                <SelectItem value="allowed">Allowed</SelectItem>
-                <SelectItem value="timeout">Timed out</SelectItem>
+                <SelectItem value="all">{t("filters.statusAll")}</SelectItem>
+                <SelectItem value="denied">{t("status.denied")}</SelectItem>
+                <SelectItem value="pending">{t("status.pending")}</SelectItem>
+                <SelectItem value="allowed">{t("status.allowed")}</SelectItem>
+                <SelectItem value="timeout">{t("status.timeout")}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
         </Field>
         <Field className="w-full sm:w-40">
-          <FieldLabel htmlFor={`${filterID}-source`}>Decision source</FieldLabel>
+          <FieldLabel htmlFor={`${filterID}-source`}>{t("filters.sourceLabel")}</FieldLabel>
           <Select
             value={filter.decision_source ?? "all"}
             onValueChange={(value) =>
@@ -1039,16 +1105,16 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="all">All sources</SelectItem>
-                <SelectItem value="model">Model decision</SelectItem>
-                <SelectItem value="rule">Rule decision</SelectItem>
-                <SelectItem value="unknown">Unknown source</SelectItem>
+                <SelectItem value="all">{t("filters.sourceAll")}</SelectItem>
+                <SelectItem value="model">{t("match.modelDecision")}</SelectItem>
+                <SelectItem value="rule">{t("filters.sourceRule")}</SelectItem>
+                <SelectItem value="unknown">{t("filters.sourceUnknown")}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
         </Field>
         <Field className="w-full sm:w-40">
-          <FieldLabel htmlFor={`${filterID}-decided-by`}>Decided by</FieldLabel>
+          <FieldLabel htmlFor={`${filterID}-decided-by`}>{t("common.decidedBy")}</FieldLabel>
           <Select
             value={filter.decided_by ?? "all"}
             onValueChange={(value) =>
@@ -1063,35 +1129,35 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="all">All actors</SelectItem>
-                <SelectItem value="model">AI-decided</SelectItem>
-                <SelectItem value="human">Human</SelectItem>
-                <SelectItem value="rule">Rule</SelectItem>
-                <SelectItem value="system">System</SelectItem>
+                <SelectItem value="all">{t("filters.decidedByAll")}</SelectItem>
+                <SelectItem value="model">{t("filters.decidedByModel")}</SelectItem>
+                <SelectItem value="human">{t("filters.decidedByHuman")}</SelectItem>
+                <SelectItem value="rule">{t("filters.decidedByRule")}</SelectItem>
+                <SelectItem value="system">{t("filters.decidedBySystem")}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
         </Field>
         {filtered ? (
           <Button variant="ghost" size="sm" onClick={() => changeFilter({})}>
-            Clear filters
+            {t("filters.clear")}
           </Button>
         ) : null}
       </FieldGroup>
       {error ? (
         <Alert variant="destructive">
-          <AlertDescription>Failed to load records: {error}. Click Refresh to retry.</AlertDescription>
+          <AlertDescription>{t("errors.loadRecords", { error })}</AlertDescription>
         </Alert>
       ) : null}
       {pendingError ? (
         <Alert variant="destructive">
-          <AlertDescription>Failed to load pending approvals: {pendingError}. Click Refresh to retry.</AlertDescription>
+          <AlertDescription>{t("errors.loadPending", { error: pendingError })}</AlertDescription>
         </Alert>
       ) : null}
       {batchErrors.length ? (
         <Alert variant="destructive">
           <AlertDescription>
-            <p>{batchErrors.length} selected request(s) were not decided and stay pending:</p>
+            <p>{t("batch.errorsHeading", { count: batchErrors.length })}</p>
             <ul className="list-disc pl-4">
               {batchErrors.map((f) => (
                 <li key={f.id}>
@@ -1106,22 +1172,23 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         <section className="overflow-hidden rounded-xl border">
           <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-3 font-medium text-sm">
             <ShieldAlertIcon className="size-4" />
-            Pending ({pending.length})<span className="text-muted-foreground text-xs">expand to allow or deny</span>
+            {t("pending.heading", { count: pending.length })}
+            <span className="text-muted-foreground text-xs">{t("pending.hint")}</span>
           </div>
           <ApprovalTable
             rows={pending}
             busy={deciding}
             decide={decide}
             revision={revision}
-            label="Pending approvals"
+            label={t("table.pendingLabel")}
             selection={selection}
           />
           <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm">
-            <span className="text-muted-foreground">{selectedRows.length} selected</span>
+            <span className="text-muted-foreground">{t("batch.selectedCount", { count: selectedRows.length })}</span>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" disabled={deciding || !selectedRows.length} onClick={() => setBatchDecision("allowed")}>
                 <CheckIcon data-icon="inline-start" />
-                Approve selected
+                {t("batch.approveSelected")}
               </Button>
               <Button
                 size="sm"
@@ -1130,7 +1197,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
                 onClick={() => setBatchDecision("denied")}
               >
                 <XIcon data-icon="inline-start" />
-                Deny selected
+                {t("batch.denySelected")}
               </Button>
             </div>
           </div>
@@ -1145,15 +1212,17 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {batchDecision === "denied" ? "Deny" : "Approve"} {selectedRows.length} request(s)?
+              {batchDecision === "denied"
+                ? t("batch.confirmTitleDeny", { count: selectedRows.length })
+                : t("batch.confirmTitleApprove", { count: selectedRows.length })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {selectedHigh ? `${selectedHigh} of them are high risk.` : "None of them is high risk."} Each request is
-              decided on its own; one that cannot be decided stays pending and is listed.
+              {selectedHigh ? t("batch.highRiskSome", { count: selectedHigh }) : t("batch.highRiskNone")}{" "}
+              {t("batch.confirmBody")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deciding}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deciding}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant={batchDecision === "denied" ? "destructive" : "default"}
               disabled={deciding || !selectedRows.length}
@@ -1162,14 +1231,14 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
                 if (batchDecision) void batchDecide(batchDecision);
               }}
             >
-              {batchDecision === "denied" ? "Deny selected" : "Approve selected"}
+              {batchDecision === "denied" ? t("batch.denySelected") : t("batch.approveSelected")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
       <section className="overflow-hidden rounded-xl border">
         <div className="border-b px-4 py-3 font-medium text-sm">
-          {filtered ? "Filtered results" : "All records"} ({total})
+          {filtered ? t("results.filtered") : t("results.all")} ({total})
         </div>
         {loading ? (
           <div className="flex flex-col gap-3 p-4">
@@ -1184,17 +1253,19 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
               <EmptyMedia variant="icon">
                 <ClipboardListIcon />
               </EmptyMedia>
-              <EmptyTitle>{filtered ? "No approval records match the filters" : "No approval records"}</EmptyTitle>
-              <EmptyDescription>
-                {filtered
-                  ? "Adjust the approval status, decision source or deciding actor, or clear the filters to see all records."
-                  : "Records will appear here once a rule or model makes an approval decision."}
-              </EmptyDescription>
+              <EmptyTitle>{filtered ? t("empty.filteredTitle") : t("empty.title")}</EmptyTitle>
+              <EmptyDescription>{filtered ? t("empty.filteredDescription") : t("empty.description")}</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}
         {rows.length ? (
-          <ApprovalTable rows={rows} busy={deciding} decide={decide} revision={revision} label="Approval record list" />
+          <ApprovalTable
+            rows={rows}
+            busy={deciding}
+            decide={decide}
+            revision={revision}
+            label={t("table.recordListLabel")}
+          />
         ) : null}
         {!loading && !error ? (
           <TablePagination

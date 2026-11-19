@@ -1,0 +1,59 @@
+{
+  "version": "Version",
+  "banner": {
+    "updateAvailable": "ARTEX {version} is available. See the release notes.",
+    "dismiss": "Dismiss update notice"
+  },
+  "search": {
+    "button": "Search",
+    "placeholder": "Search dashboards, users, and more…",
+    "empty": "No results found."
+  },
+  "account": {
+    "changePassword": "Change password",
+    "signOut": "Sign out"
+  },
+  "changePassword": {
+    "title": "Change password",
+    "description": "The username is fixed as <b>ARTEX</b>. Enter the current password to verify; login tokens issued before the change stay valid until they expire.",
+    "current": "Current password",
+    "new": "New password",
+    "confirm": "Confirm new password",
+    "cancel": "Cancel",
+    "submit": "Confirm change",
+    "saving": "Changing…",
+    "errorFillRequired": "Fill in the current password and the new password",
+    "errorMismatch": "The two new passwords do not match",
+    "success": "Password changed",
+    "errorFailed": "Change failed: {message}"
+  },
+  "preferences": {
+    "title": "Preferences",
+    "description": "Customize your dashboard layout preferences.",
+    "themePreset": "Theme Preset",
+    "presetPlaceholder": "Preset",
+    "fonts": "Fonts",
+    "fontPlaceholder": "Select font",
+    "themeMode": "Theme Mode",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "pageLayout": "Page Layout",
+    "centered": "Centered",
+    "fullWidth": "Full Width",
+    "navbarBehavior": "Navbar Behavior",
+    "sticky": "Sticky",
+    "scroll": "Scroll",
+    "sidebarStyle": "Sidebar Style",
+    "inset": "Inset",
+    "sidebar": "Sidebar",
+    "floating": "Floating",
+    "sidebarCollapseMode": "Sidebar Collapse Mode",
+    "icon": "Icon",
+    "offcanvas": "OffCanvas",
+    "restoreDefaults": "Restore Defaults"
+  },
+  "theme": {
+    "ariaLabel": "Current theme: {mode}. Click to cycle themes"
+  }
+}

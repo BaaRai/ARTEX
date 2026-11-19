@@ -1,0 +1,129 @@
+{
+  "header": {
+    "title": "스킬",
+    "subtitle": "스킬 라이브러리 · agentskills.io 사양 · 에이전트별 표시 권한 부여",
+    "missedCalls": "놓친 호출 {count}개",
+    "missingDescription": "라이브러리에 존재하지 않지만 에이전트가 이름으로 호출하는 스킬입니다. 호출 횟수 순으로 정렬됩니다."
+  },
+  "sidebar": {
+    "createSkill": "스킬 생성",
+    "uploadArchive": "아카이브 업로드",
+    "uploading": "업로드 중…",
+    "uploadTitle": "SKILL.md가 포함된 .zip 아카이브 업로드",
+    "emptyNoSkills": "아직 스킬이 없습니다 — 시작하려면 \"생성\"을 클릭하세요"
+  },
+  "tree": {
+    "newFile": "새 파일",
+    "newFolder": "새 폴더",
+    "deleteFolder": "폴더 삭제",
+    "deleteFile": "파일 삭제",
+    "deleteSkill": "스킬 삭제",
+    "callTooltip": "{count}회 호출됨 · 마지막 {time}",
+    "newFilePlaceholder": "파일명.py",
+    "newFolderPlaceholder": "폴더명"
+  },
+  "common": {
+    "callsCount": "{count}회 호출",
+    "noCallRecords": "아직 호출 기록이 없습니다.",
+    "cancel": "취소",
+    "noAgents": "(에이전트 없음)"
+  },
+  "overview": {
+    "emptyNoSkills": "아직 스킬이 없습니다 — 시작하려면 왼쪽에서 \"생성\" 또는 \"아카이브 업로드\"를 클릭하세요",
+    "title": "스킬 라이브러리 개요",
+    "subtitle": "왼쪽에서 스킬을 선택하여 세부 정보와 호출 기록을 확인하거나, 여기에서 전체 사용 현황을 한눈에 파악하세요.",
+    "stats": {
+      "totalSkills": "전체 스킬",
+      "totalSkillsHint": "{count}개 호출됨",
+      "totalCalls": "전체 호출",
+      "unused": "미사용",
+      "unusedHintSome": "어떤 에이전트도 로드하지 않음",
+      "unusedHintNone": "모두 사용됨",
+      "missedCalls": "놓친 호출",
+      "missedCallsHintSome": "누락된 스킬 {count}개",
+      "missedCallsHintNone": "없음"
+    },
+    "callRanking": "호출 순위",
+    "noCallRecordsRanking": "아직 스킬 호출 기록이 없습니다.",
+    "recentCalls": "최근 호출",
+    "noRecords": "아직 기록이 없습니다.",
+    "unusedSkills": "미사용 스킬",
+    "allCalled": "모든 스킬이 호출되었습니다."
+  },
+  "detail": {
+    "licenseLabel": "라이선스: {license}",
+    "callStats": "호출 통계",
+    "totalCalls": "전체 호출",
+    "tasksCovered": "커버된 작업",
+    "lastCalled": "마지막 호출",
+    "calledBy": "호출 주체:",
+    "loadingCallDetails": "호출 세부 정보를 불러오는 중…",
+    "lastNCalls": "최근 {count}회 호출",
+    "taskRef": "작업 #{id}",
+    "chatSession": "채팅 세션",
+    "linkedMcp": "연결된 MCP",
+    "linkedMcpHint": "(도구는 스킬이 로드될 때만 공개/잠금 해제됩니다)",
+    "visibility": "표시 권한 (에이전트별 부여)"
+  },
+  "mcp": {
+    "noServers": "아직 MCP 서버가 없습니다. \"MCP\" 페이지에서 추가하세요."
+  },
+  "editor": {
+    "saving": "저장 중…",
+    "save": "저장",
+    "loading": "불러오는 중…"
+  },
+  "delete": {
+    "titleSkill": "스킬 \"{name}\"을(를) 삭제하시겠습니까?",
+    "titleFolder": "폴더 \"{path}\"을(를) 삭제하시겠습니까?",
+    "titleFile": "파일 \"{path}\"을(를) 삭제하시겠습니까?",
+    "descSkill": "스킬의 모든 파일, MCP 연결, 표시 권한 설정이 삭제됩니다. 이 작업은 취소할 수 없습니다.",
+    "descFolder": "폴더 아래의 모든 파일도 함께 삭제됩니다. 이 작업은 취소할 수 없습니다.",
+    "descDefault": "이 작업은 취소할 수 없습니다.",
+    "deleting": "삭제 중…",
+    "confirm": "삭제"
+  },
+  "create": {
+    "title": "스킬 생성",
+    "tabBasics": "기본 정보",
+    "tabLinkedMcp": "연결된 MCP",
+    "tabVisibility": "표시 권한",
+    "nameLabel": "이름",
+    "nameHint": "소문자 / 숫자 / 하이픈, 1~64자",
+    "descLabel": "설명",
+    "descPlaceholder": "이 스킬이 무엇을 하고 언제 사용하는지.",
+    "licenseLabel": "라이선스",
+    "licensePlaceholder": "MIT / 독점",
+    "compatibilityLabel": "호환성",
+    "compatibilityPlaceholder": "sqlmap, python3 필요",
+    "bodyLabel": "본문",
+    "bodyHint": "(비워두면 스켈레톤이 자동 생성됩니다)",
+    "bodyPlaceholder": "## 실행 방법\n\n1. 먼저 오류를 탐색합니다\n2. 블라인드 인젝션 유형을 구분합니다\n\n스크립트는 scripts/ 디렉터리에 넣습니다.",
+    "mcpHint": "선택한 MCP의 도구는 스킬이 로드될 때만 공개되고 잠금 해제됩니다.",
+    "visibilityHint": "선택한 에이전트는 스킬이 생성되면 이 스킬을 볼 수 있습니다.",
+    "creating": "생성 중…",
+    "submit": "생성"
+  },
+  "toasts": {
+    "installed": "스킬 설치됨: {name} (파일 {files}개)",
+    "overwriteConfirm": "{message}\n\n같은 이름의 스킬을 덮어쓰시겠습니까?",
+    "uploadFailed": "업로드 실패: {message}",
+    "readFileFailed": "파일을 읽지 못했습니다",
+    "folderCreated": "폴더 생성됨: {path}",
+    "fileCreated": "파일 생성됨: {path}",
+    "createFailed": "생성 실패: {message}",
+    "deleted": "삭제됨: {path}",
+    "deleteFailed": "삭제 실패: {message}",
+    "skillDeleted": "스킬 삭제됨: {name}",
+    "saved": "저장됨",
+    "saveFailed": "저장 실패: {message}",
+    "mcpLinked": "\"{name}\" 연결됨",
+    "mcpUnlinked": "\"{name}\" 연결 해제됨",
+    "operationFailed": "작업 실패: {message}",
+    "visibilityGranted": "\"{name}\"에게 표시 권한을 부여함",
+    "visibilityRevoked": "\"{name}\"의 표시 권한을 취소함",
+    "nameRequired": "이름을 입력하세요",
+    "descRequired": "설명은 필수입니다",
+    "skillCreated": "스킬이 생성되었습니다"
+  }
+}

@@ -17,6 +17,7 @@ import {
   ShieldAlertIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { FindingRetestDialog } from "@/components/finding-retest-dialog";
@@ -42,7 +43,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
-import { statusMeta } from "@/lib/status";
+import { useStatusMeta } from "@/lib/use-status-meta";
 import type {
   ActiveFindingRetest,
   Finding,
@@ -66,10 +67,10 @@ import {
   findingRowKey,
   fmtTime,
   isSameFinding,
-  REPORT_STATE_META,
   SEVERITIES,
   UNASSIGNED_TASK,
-  VERIFICATION_META,
+  useReportStateMeta,
+  useVerificationMeta,
   VERIFICATION_STATUSES,
 } from "./_components/findings-table";
 import { setVisibleInterval } from "@/lib/polling";
@@ -140,6 +141,10 @@ const EMPTY_STATS: FindingStats = {
 };
 
 export default function FindingsPage() {
+  const t = useTranslations("findings");
+  const statusMeta = useStatusMeta();
+  const reportStateMeta = useReportStateMeta();
+  const verificationMeta = useVerificationMeta();
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
@@ -201,7 +206,7 @@ export default function FindingsPage() {
         setActiveRetests(Object.fromEntries(rows.map((item) => [item.finding_id, item])));
         failed = false;
       } catch (error) {
-        if (!disposed && !failed) toast.error(`Failed to load retest status: ${(error as Error).message}`);
+        if (!disposed && !failed) toast.error(t("toasts.retestStatusFailed", { message: (error as Error).message }));
         failed = true;
       } finally {
         if (!disposed) timer = setTimeout(() => void refreshRetests(), 3000);
@@ -212,7 +217,7 @@ export default function FindingsPage() {
       disposed = true;
       clearTimeout(timer);
     };
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     const raw = getLocalStorageValue(FINDING_LIST_PREFERENCE_KEY);
@@ -324,9 +329,9 @@ export default function FindingsPage() {
         ids: [...selectedIds],
       });
       setExportOpen(false);
-      toast.success("Export download started");
+      toast.success(t("toasts.exportStarted"));
     } catch (e) {
-      toast.error(`Export failed: ${(e as Error).message}`);
+      toast.error(t("toasts.exportFailed", { message: (e as Error).message }));
     } finally {
       setExporting(false);
     }
@@ -420,9 +425,9 @@ export default function FindingsPage() {
     } catch (e) {
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree((current) => ({ ...current, loading: false }));
-      toast.error(`Failed to load the asset tree: ${(e as Error).message}`);
+      toast.error(t("toasts.assetTreeFailed", { message: (e as Error).message }));
     }
-  }, [filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, task, query, sort]);
+  }, [filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, task, query, sort, t]);
 
   const refreshGroups = React.useCallback(async () => {
     const requestFilter = filterFingerprint;
@@ -669,7 +674,7 @@ export default function FindingsPage() {
       setFindings((cur) => cur.map((x) => (isSameFinding(x, f) ? { ...x, status: next } : x)));
       try {
         await api.setFindingStatus(f.finding_id, next);
-        toast.success(`Marked as "${statusMeta("finding", next).label}"`);
+        toast.success(t("toasts.markedAs", { label: statusMeta("finding", next).label }));
         // refresh stat cards (pending count) and drop the row if it no longer matches the status filter
         api
           .findingStats()
@@ -685,10 +690,10 @@ export default function FindingsPage() {
         refreshAfterMutation(f);
       } catch (e) {
         setFindings((cur) => cur.map((x) => (isSameFinding(x, f) ? { ...x, status: prev } : x)));
-        toast.error(`Update failed: ${(e as Error).message}`);
+        toast.error(t("toasts.updateFailed", { message: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, setFindings, status],
+    [refreshAfterMutation, setFindings, status, statusMeta, t],
   );
 
   const updateReportState = React.useCallback(
@@ -698,7 +703,7 @@ export default function FindingsPage() {
       setFindings((cur) => cur.map((x) => (isSameFinding(x, f) ? { ...x, report_state: next } : x)));
       try {
         await api.setFindingReportState(f.finding_id, next);
-        toast.success(`Report stage set to "${REPORT_STATE_META[next].label}"`);
+        toast.success(t("toasts.reportStageSet", { label: reportStateMeta(next).label }));
         api
           .findingStats()
           .then(setStats)
@@ -713,10 +718,10 @@ export default function FindingsPage() {
         refreshAfterMutation(f);
       } catch (e) {
         setFindings((cur) => cur.map((x) => (isSameFinding(x, f) ? { ...x, report_state: prev } : x)));
-        toast.error(`Update failed: ${(e as Error).message}`);
+        toast.error(t("toasts.updateFailed", { message: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, reportState, setFindings],
+    [refreshAfterMutation, reportState, reportStateMeta, setFindings, t],
   );
 
   // applyBulkStatus sets the same triage status on every selected finding, then
@@ -729,9 +734,7 @@ export default function FindingsPage() {
         const r = await api.bulkSetFindingStatus([...selectedIds], next);
         setSelectedIds(new Set());
         const label = statusMeta("finding", next).label;
-        toast.success(
-          r.updated === 1 ? `Marked 1 finding as "${label}"` : `Marked ${r.updated} findings as "${label}"`,
-        );
+        toast.success(t("toasts.bulkStatus", { count: r.updated, label }));
         void loadFlat();
         if (view === "asset") void loadAssetTree();
         api
@@ -741,12 +744,12 @@ export default function FindingsPage() {
             // The list reload remains valid even if the aggregate refresh fails.
           });
       } catch (e) {
-        toast.error(`Bulk update failed: ${(e as Error).message}`);
+        toast.error(t("toasts.bulkFailed", { message: (e as Error).message }));
       } finally {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view],
+    [bulkBusy, loadAssetTree, loadFlat, selectedIds, statusMeta, view, t],
   );
 
   const applyBulkReportState = React.useCallback(
@@ -756,12 +759,8 @@ export default function FindingsPage() {
       try {
         const r = await api.bulkSetFindingReportState([...selectedIds], next);
         setSelectedIds(new Set());
-        const label = REPORT_STATE_META[next].label;
-        toast.success(
-          r.updated === 1
-            ? `Set report stage of 1 finding to "${label}"`
-            : `Set report stage of ${r.updated} findings to "${label}"`,
-        );
+        const label = reportStateMeta(next).label;
+        toast.success(t("toasts.bulkReportState", { count: r.updated, label }));
         void loadFlat();
         if (view === "asset") void loadAssetTree();
         api
@@ -771,12 +770,12 @@ export default function FindingsPage() {
             // The list reload remains valid even if the aggregate refresh fails.
           });
       } catch (e) {
-        toast.error(`Bulk update failed: ${(e as Error).message}`);
+        toast.error(t("toasts.bulkFailed", { message: (e as Error).message }));
       } finally {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view],
+    [bulkBusy, loadAssetTree, loadFlat, reportStateMeta, selectedIds, view, t],
   );
 
   // The inline expanded detailed-report cache is keyed by the globally stable row key. report is long-form
@@ -828,7 +827,7 @@ export default function FindingsPage() {
               : x,
           ),
         );
-        toast.success("Saved");
+        toast.success(t("toasts.saved"));
         api
           .findingStats()
           .then(setStats)
@@ -837,12 +836,12 @@ export default function FindingsPage() {
           });
         refreshAfterMutation(f);
       } catch (e) {
-        toast.error(`Save failed: ${(e as Error).message}`);
+        toast.error(t("toasts.saveFailed", { message: (e as Error).message }));
       } finally {
         setSaving(false);
       }
     },
-    [edit, refreshAfterMutation, setFindings],
+    [edit, refreshAfterMutation, setFindings, t],
   );
 
   // deleteFinding deletes one vulnerability (with confirmation): on success it removes it from the list, collapses the row, and refreshes stats.
@@ -861,7 +860,7 @@ export default function FindingsPage() {
         setFlat((cur) => ({ ...cur, total: Math.max(0, cur.total - 1) }));
         const rowKey = findingRowKey(f);
         setExpanded((cur) => (cur === rowKey ? null : cur));
-        toast.success("Vulnerability deleted");
+        toast.success(t("toasts.deleted"));
         api
           .findingStats()
           .then(setStats)
@@ -870,10 +869,10 @@ export default function FindingsPage() {
           });
         refreshAfterMutation(f, true);
       } catch (e) {
-        toast.error(`Delete failed: ${(e as Error).message}`);
+        toast.error(t("toasts.deleteFailed", { message: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, setFindings],
+    [refreshAfterMutation, setFindings, t],
   );
 
   const openDeepen = React.useCallback((f: Finding) => {
@@ -888,28 +887,28 @@ export default function FindingsPage() {
       const result = await api.deepenFinding(deepenFinding.finding_id, deepenDescription.trim());
       toast.success(
         result.queued
-          ? `Deepen intent #${result.intent_id} has entered the task queue`
-          : `Created high-priority worker intent #${result.intent_id}`,
+          ? t("toasts.deepenQueued", { id: result.intent_id })
+          : t("toasts.deepenCreated", { id: result.intent_id }),
       );
       refreshAfterMutation(deepenFinding);
       setDeepenFinding(null);
       setDeepenDescription("");
     } catch (error) {
-      toast.error(`Submit failed: ${(error as Error).message}`);
+      toast.error(t("toasts.submitFailed", { message: (error as Error).message }));
     } finally {
       setDeepening(false);
     }
   }
 
   const statCards = [
-    { label: "Total findings", value: stats.total, icon: BugIcon },
-    { label: "Pending", value: stats.pending, tone: "text-amber-500", icon: ClockIcon },
-    { label: "Submitted", value: stats.submitted, tone: "text-amber-500", icon: FileUpIcon },
-    { label: "Accepted", value: stats.accepted, tone: "text-emerald-500", icon: CircleCheckIcon },
-    { label: "Critical", value: stats.critical, tone: "text-rose-600", icon: ShieldAlertIcon },
-    { label: "High", value: stats.high, tone: "text-red-500", icon: TriangleAlertIcon },
-    { label: "Medium", value: stats.medium, tone: "text-amber-500", icon: TriangleAlertIcon },
-    { label: "Low", value: stats.low, tone: "text-slate-500", icon: InfoIcon },
+    { label: t("stats.totalFindings"), value: stats.total, icon: BugIcon },
+    { label: t("stats.pending"), value: stats.pending, tone: "text-amber-500", icon: ClockIcon },
+    { label: t("stats.submitted"), value: stats.submitted, tone: "text-amber-500", icon: FileUpIcon },
+    { label: t("stats.accepted"), value: stats.accepted, tone: "text-emerald-500", icon: CircleCheckIcon },
+    { label: t("stats.critical"), value: stats.critical, tone: "text-rose-600", icon: ShieldAlertIcon },
+    { label: t("stats.high"), value: stats.high, tone: "text-red-500", icon: TriangleAlertIcon },
+    { label: t("stats.medium"), value: stats.medium, tone: "text-amber-500", icon: TriangleAlertIcon },
+    { label: t("stats.low"), value: stats.low, tone: "text-slate-500", icon: InfoIcon },
   ];
 
   // The "current filter" count in the export dialog: both views share the same filters, only the counting source differs.
@@ -949,7 +948,7 @@ export default function FindingsPage() {
           </div>
         ) : (
           <>
-            <FindingsTable items={flat.items} selectAllLabel="Select all on this page" {...rowProps} />
+            <FindingsTable items={flat.items} selectAllLabel={t("table.selectAll")} {...rowProps} />
             <TablePagination
               page={flatPage}
               pageSize={flatPageSize}
@@ -971,14 +970,14 @@ export default function FindingsPage() {
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Findings</h1>
-          <p className="text-muted-foreground text-sm">Cross-task vulnerability overview</p>
+          <h1 className="text-xl font-semibold tracking-tight">{t("header.title")}</h1>
+          <p className="text-muted-foreground text-sm">{t("header.subtitle")}</p>
         </div>
         <Tabs value={view} onValueChange={(v) => setView(v as FindingView)}>
           <TabsList>
-            <TabsTrigger value="flat">All findings</TabsTrigger>
-            <TabsTrigger value="grouped">By task</TabsTrigger>
-            <TabsTrigger value="asset">By asset</TabsTrigger>
+            <TabsTrigger value="flat">{t("tabs.all")}</TabsTrigger>
+            <TabsTrigger value="grouped">{t("tabs.byTask")}</TabsTrigger>
+            <TabsTrigger value="asset">{t("tabs.byAsset")}</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
@@ -1006,8 +1005,8 @@ export default function FindingsPage() {
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search findings"
-              aria-label="Search findings"
+              placeholder={t("search.placeholder")}
+              aria-label={t("search.placeholder")}
             />
             <InputGroupAddon>
               <SearchIcon aria-hidden="true" />
@@ -1024,14 +1023,14 @@ export default function FindingsPage() {
           >
             {(
               [
-                ["all", "All"],
-                ["critical", "Critical"],
-                ["high", "High"],
-                ["medium", "Medium"],
-                ["low", "Low"],
+                ["all", t("severity.all")],
+                ["critical", t("severity.critical")],
+                ["high", t("severity.high")],
+                ["medium", t("severity.medium")],
+                ["low", t("severity.low")],
               ] as const
             ).map(([val, label]) => (
-              <ToggleGroupItem key={val} value={val} aria-label={`Filter by ${label} severity`}>
+              <ToggleGroupItem key={val} value={val} aria-label={t("severity.filterBy", { label })}>
                 {label}
               </ToggleGroupItem>
             ))}
@@ -1039,10 +1038,10 @@ export default function FindingsPage() {
 
           <Select value={status} onValueChange={(v) => setStatus(v as "all" | FindingStatus)}>
             <SelectTrigger size="sm" className="w-32">
-              <SelectValue placeholder="Status" />
+              <SelectValue placeholder={t("filters.statusPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="all">{t("filters.allStatuses")}</SelectItem>
               {FINDING_STATUSES.map((st) => (
                 <SelectItem key={st} value={st}>
                   {statusMeta("finding", st).label}
@@ -1053,13 +1052,13 @@ export default function FindingsPage() {
 
           <Select value={reportState} onValueChange={(v) => setReportState(v as "all" | FindingReportState)}>
             <SelectTrigger size="sm" className="w-40">
-              <SelectValue placeholder="Report stage" />
+              <SelectValue placeholder={t("filters.reportStagePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All report stages</SelectItem>
+              <SelectItem value="all">{t("filters.allReportStages")}</SelectItem>
               {FINDING_REPORT_STATES.map((st) => (
                 <SelectItem key={st} value={st}>
-                  {REPORT_STATE_META[st].label}
+                  {reportStateMeta(st).label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1070,13 +1069,13 @@ export default function FindingsPage() {
             onValueChange={(v) => setVerificationStatus(v as "all" | VerificationStatus)}
           >
             <SelectTrigger size="sm" className="w-48">
-              <SelectValue placeholder="Verification" />
+              <SelectValue placeholder={t("filters.verificationPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All verification states</SelectItem>
+              <SelectItem value="all">{t("filters.allVerificationStates")}</SelectItem>
               {VERIFICATION_STATUSES.map((st) => (
                 <SelectItem key={st} value={st}>
-                  {VERIFICATION_META[st].label}
+                  {verificationMeta(st).label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1084,10 +1083,10 @@ export default function FindingsPage() {
 
           <Select value={vulnclass} onValueChange={setVulnclass}>
             <SelectTrigger size="sm" className="w-40">
-              <SelectValue placeholder="Vulnerability type" />
+              <SelectValue placeholder={t("filters.vulnTypePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="all">{t("filters.allTypes")}</SelectItem>
               {stats.vulnclasses.map((vc) => (
                 <SelectItem key={vc} value={vc}>
                   {vc}
@@ -1098,14 +1097,14 @@ export default function FindingsPage() {
 
           <Select value={task} onValueChange={setTask}>
             <SelectTrigger size="sm" className="w-48">
-              <SelectValue placeholder="Task" />
+              <SelectValue placeholder={t("filters.taskPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All tasks</SelectItem>
-              <SelectItem value={UNASSIGNED_TASK}>Unlinked / task deleted</SelectItem>
-              {(stats.tasks ?? []).map((t) => {
-                const id = String(t.id);
-                const label = t.name || t.description || `Task #${id} (deleted)`;
+              <SelectItem value="all">{t("filters.allTasks")}</SelectItem>
+              <SelectItem value={UNASSIGNED_TASK}>{t("filters.unassignedTask")}</SelectItem>
+              {(stats.tasks ?? []).map((taskOption) => {
+                const id = String(taskOption.id);
+                const label = taskOption.name || taskOption.description || t("filters.taskDeleted", { id });
                 return (
                   <SelectItem key={id} value={id}>
                     <span className="flex w-full items-center gap-2">
@@ -1114,7 +1113,7 @@ export default function FindingsPage() {
                       </span>
                       <span className="inline-flex items-center gap-1 text-muted-foreground tabular-nums">
                         <BugIcon className="size-3.5" aria-hidden="true" />
-                        {t.count}
+                        {taskOption.count}
                       </span>
                     </span>
                   </SelectItem>
@@ -1128,15 +1127,15 @@ export default function FindingsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="severity">By severity</SelectItem>
-              <SelectItem value="time">By time</SelectItem>
+              <SelectItem value="severity">{t("filters.sortBySeverity")}</SelectItem>
+              <SelectItem value="time">{t("filters.sortByTime")}</SelectItem>
             </SelectContent>
           </Select>
 
           <div className="ml-auto flex items-center gap-3">
             {selectedIds.size > 0 && (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground tabular-nums">{selectedIds.size} selected</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{t("bulk.selected", { count: selectedIds.size })}</span>
                 <Select
                   value=""
                   onValueChange={(v) => {
@@ -1144,8 +1143,8 @@ export default function FindingsPage() {
                   }}
                   disabled={bulkBusy}
                 >
-                  <SelectTrigger size="sm" className="w-40" aria-label="Set the status of the selected findings">
-                    <SelectValue placeholder={bulkBusy ? "Updating…" : "Set status"} />
+                  <SelectTrigger size="sm" className="w-40" aria-label={t("bulk.setStatusAria")}>
+                    <SelectValue placeholder={bulkBusy ? t("bulk.updating") : t("bulk.setStatus")} />
                   </SelectTrigger>
                   <SelectContent>
                     {FINDING_STATUSES.map((st) => (
@@ -1162,13 +1161,13 @@ export default function FindingsPage() {
                   }}
                   disabled={bulkBusy}
                 >
-                  <SelectTrigger size="sm" className="w-44" aria-label="Set the report stage of the selected findings">
-                    <SelectValue placeholder={bulkBusy ? "Updating…" : "Set report stage"} />
+                  <SelectTrigger size="sm" className="w-44" aria-label={t("bulk.setReportStateAria")}>
+                    <SelectValue placeholder={bulkBusy ? t("bulk.updating") : t("bulk.setReportState")} />
                   </SelectTrigger>
                   <SelectContent>
                     {FINDING_REPORT_STATES.map((st) => (
                       <SelectItem key={st} value={st}>
-                        {REPORT_STATE_META[st].label}
+                        {reportStateMeta(st).label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1176,7 +1175,7 @@ export default function FindingsPage() {
               </div>
             )}
             <Button size="sm" variant="outline" onClick={openExport}>
-              <DownloadIcon /> Export
+              <DownloadIcon /> {t("actions.export")}
             </Button>
           </div>
         </div>
@@ -1212,7 +1211,7 @@ export default function FindingsPage() {
                   className={cn("hover:text-foreground", assetScope === null && "font-medium text-foreground")}
                   onClick={() => setAssetScope(null)}
                 >
-                  All assets
+                  {t("asset.allAssets")}
                 </button>
                 {assetPath.map((node) => (
                   <React.Fragment key={node.key}>
@@ -1230,7 +1229,7 @@ export default function FindingsPage() {
                     </button>
                   </React.Fragment>
                 ))}
-                <span className="ml-auto shrink-0 text-xs tabular-nums">{flat.total} in total</span>
+                <span className="ml-auto shrink-0 text-xs tabular-nums">{t("asset.inTotal", { count: flat.total })}</span>
               </div>
               {flatListCard}
             </div>
@@ -1269,13 +1268,13 @@ export default function FindingsPage() {
                         <div className="flex min-w-0 flex-col gap-1">
                           <CardTitle className="truncate text-sm">
                             {group.task_id === null
-                              ? "Unlinked / task deleted"
+                              ? t("groups.unlinked")
                               : group.task_name
-                                ? `${group.task_name} (task #${group.task_id})`
-                                : `Task #${group.task_id}`}
+                                ? t("groups.taskWithName", { name: group.task_name, id: group.task_id })
+                                : t("groups.taskNumber", { id: group.task_id })}
                           </CardTitle>
                           <CardDescription className="truncate" title={group.task_description}>
-                            {group.task_description || "Source task unavailable"}
+                            {group.task_description || t("groups.noSourceTask")}
                           </CardDescription>
                         </div>
                       </button>
@@ -1298,7 +1297,7 @@ export default function FindingsPage() {
                           <Button size="icon-sm" variant="ghost" asChild>
                             <Link
                               href={`/function/tasks/detail?id=${group.task_id}`}
-                              aria-label={`View task #${group.task_id}`}
+                              aria-label={t("groups.viewTask", { id: group.task_id })}
                             >
                               <ArrowUpRightIcon />
                             </Link>
@@ -1315,7 +1314,7 @@ export default function FindingsPage() {
                         </div>
                       ) : (
                         <>
-                          <FindingsTable items={state.items} selectAllLabel="Select all on this page in this group" {...rowProps} />
+                          <FindingsTable items={state.items} selectAllLabel={t("table.selectAllGroup")} {...rowProps} />
                           <TablePagination
                             page={state.page}
                             pageSize={state.pageSize}
@@ -1332,7 +1331,7 @@ export default function FindingsPage() {
             })}
             {groups.length === 0 && (
               <Card>
-                <CardContent className="py-12 text-center text-sm text-muted-foreground">No matching findings.</CardContent>
+                <CardContent className="py-12 text-center text-sm text-muted-foreground">{t("empty")}</CardContent>
               </Card>
             )}
             <TablePagination
@@ -1381,25 +1380,25 @@ export default function FindingsPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Deepen exploitation</DialogTitle>
+            <DialogTitle>{t("deepen.title")}</DialogTitle>
             <DialogDescription className="break-words">
-              A priority-10 worker intent will be created in the original task #{deepenFinding?.task_id} to run secondary verification based on this vulnerability:
+              {t("deepen.description", { id: deepenFinding?.task_id ?? "" })}
               {deepenFinding?.name || deepenFinding?.vulnclass || deepenFinding?.summary}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="finding-deepen-description">Exploitation description</FieldLabel>
+              <FieldLabel htmlFor="finding-deepen-description">{t("deepen.descriptionLabel")}</FieldLabel>
               <Textarea
                 id="finding-deepen-description"
                 value={deepenDescription}
                 onChange={(event) => setDeepenDescription(event.target.value)}
                 maxLength={4000}
-                placeholder="Describe the exploitation path to verify, boundary conditions, targets, or expected evidence"
+                placeholder={t("deepen.descriptionPlaceholder")}
                 disabled={deepening}
               />
               <FieldDescription className="flex justify-between gap-3">
-                <span>The new intent inherits this vulnerability's asset anchors.</span>
+                <span>{t("deepen.inheritAnchors")}</span>
                 <span className="shrink-0 tabular-nums">{deepenDescription.length} / 4000</span>
               </FieldDescription>
             </Field>
@@ -1413,11 +1412,11 @@ export default function FindingsPage() {
               }}
               disabled={deepening}
             >
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button onClick={submitDeepen} disabled={deepening || !deepenDescription.trim()}>
               {deepening && <Spinner data-icon="inline-start" />}
-              Create deepen intent
+              {t("deepen.submit")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1426,45 +1425,44 @@ export default function FindingsPage() {
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Export findings</DialogTitle>
-            <DialogDescription>Choose the export scope and format; the browser downloads the file automatically once generated.</DialogDescription>
+            <DialogTitle>{t("export.title")}</DialogTitle>
+            <DialogDescription>{t("export.description")}</DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-col gap-5 py-1">
             <div className="flex flex-col gap-2">
-              <span className="text-xs text-muted-foreground">Export scope</span>
+              <span className="text-xs text-muted-foreground">{t("export.scopeLabel")}</span>
               <RadioGroup value={exportScope} onValueChange={(v) => setExportScope(v as typeof exportScope)}>
                 <label htmlFor="export-scope-filtered" className="flex items-center gap-2 text-sm">
-                  <RadioGroupItem id="export-scope-filtered" value="filtered" /> Export the current filter results ({filteredTotal}{" "}
-                  items)
+                  <RadioGroupItem id="export-scope-filtered" value="filtered" /> {t("export.scopeFiltered", { count: filteredTotal })}
                 </label>
                 <label htmlFor="export-scope-all" className="flex items-center gap-2 text-sm">
-                  <RadioGroupItem id="export-scope-all" value="all" /> Export all
+                  <RadioGroupItem id="export-scope-all" value="all" /> {t("export.scopeAll")}
                 </label>
                 <label
                   htmlFor="export-scope-selected"
                   className={cn("flex items-center gap-2 text-sm", selectedIds.size === 0 && "text-muted-foreground")}
                 >
                   <RadioGroupItem id="export-scope-selected" value="selected" disabled={selectedIds.size === 0} />
-                  Export the {selectedIds.size} selected items
+                  {t("export.scopeSelected", { count: selectedIds.size })}
                 </label>
               </RadioGroup>
             </div>
 
             <div className="flex flex-col gap-2">
-              <span className="text-xs text-muted-foreground">Export format</span>
+              <span className="text-xs text-muted-foreground">{t("export.formatLabel")}</span>
               <RadioGroup value={exportFormat} onValueChange={(v) => setExportFormat(v as typeof exportFormat)}>
                 <label htmlFor="export-format-md-single" className="flex items-center gap-2 text-sm">
-                  <RadioGroupItem id="export-format-md-single" value="md-single" /> Markdown summary report (a single .md file)
+                  <RadioGroupItem id="export-format-md-single" value="md-single" /> {t("export.formatMdSingle")}
                 </label>
                 <label htmlFor="export-format-md-zip" className="flex items-center gap-2 text-sm">
-                  <RadioGroupItem id="export-format-md-zip" value="md-zip" /> Markdown per finding (one .md per vulnerability, packaged as .zip)
+                  <RadioGroupItem id="export-format-md-zip" value="md-zip" /> {t("export.formatMdZip")}
                 </label>
                 <label htmlFor="export-format-csv" className="flex items-center gap-2 text-sm">
-                  <RadioGroupItem id="export-format-csv" value="csv" /> CSV table (.csv)
+                  <RadioGroupItem id="export-format-csv" value="csv" /> {t("export.formatCsv")}
                 </label>
                 <label htmlFor="export-format-json" className="flex items-center gap-2 text-sm">
-                  <RadioGroupItem id="export-format-json" value="json" /> JSON (.json)
+                  <RadioGroupItem id="export-format-json" value="json" /> {t("export.formatJson")}
                 </label>
               </RadioGroup>
             </div>
@@ -1472,10 +1470,10 @@ export default function FindingsPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button onClick={doExport} disabled={exporting || (exportScope === "selected" && selectedIds.size === 0)}>
-              <DownloadIcon /> {exporting ? "Exporting…" : "Export"}
+              <DownloadIcon /> {exporting ? t("export.exporting") : t("actions.export")}
             </Button>
           </DialogFooter>
         </DialogContent>

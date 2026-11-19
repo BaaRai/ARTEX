@@ -1,0 +1,210 @@
+{
+  "page": {
+    "title": "알림",
+    "subtitle": "발견 사항을 DingTalk / Feishu / WeCom 등의 채널로 푸시합니다 · 채널마다 고유한 전송 타이밍과 필터 규칙을 가집니다",
+    "masterSwitch": "마스터 스위치",
+    "masterSwitchAria": "푸시 마스터 스위치",
+    "stats": {
+      "channels": "채널",
+      "channelsHint": "활성 / 전체",
+      "sentToday": "오늘 전송",
+      "pending": "대기 중",
+      "failed": "실패",
+      "oldestBacklog": "가장 오래된 백로그",
+      "backlogStuckHint": "푸시가 멈췄을 수 있습니다"
+    },
+    "global": {
+      "title": "전역 설정",
+      "linkBackUrl": "링크백 URL",
+      "linkBackHelp": "메시지의 \"세부 정보 보기\" 버튼이 가리키는 주소입니다. 비워 두면 버튼이 표시되지 않습니다.",
+      "digestInterval": "다이제스트 간격(분)",
+      "digestHelp": "\"다이제스트\" 모드 채널에만 적용됩니다.",
+      "summaryLength": "요약 길이(자)",
+      "summaryHelp": "메시지에 표시되는 발견 사항 요약의 최대 길이, 0–{max}. 0 = 자르지 않음.",
+      "assetsListed": "발견 사항당 표시할 자산 수",
+      "assetsHelp": "발견 사항 하나에 나열되는 최대 자산 이름 수, 0–{max}. 0 = 자르지 않음(모든 자산 표시).",
+      "save": "전역 설정 저장"
+    },
+    "tabs": {
+      "channels": "채널",
+      "deliveryLog": "전송 로그"
+    },
+    "channels": {
+      "add": "채널 추가",
+      "disabled": "비활성화됨",
+      "enableAria": "활성화",
+      "deleteAria": "삭제"
+    },
+    "mode": {
+      "digest": "다이제스트",
+      "realtime": "실시간"
+    },
+    "form": {
+      "addTitle": "알림 채널 추가",
+      "defaultRateLimit": " · 기본 속도 제한 {rate}/분",
+      "noRateLimit": " · 속도 제한 없음",
+      "channelType": "채널 유형",
+      "typeLocked": "채널 유형은 변경할 수 없습니다 — 유형이 다르면 자격 증명도 달라지므로, 새 채널을 만드세요.",
+      "channelName": "채널 이름",
+      "namePlaceholder": "사고 대응 그룹 / 일일 브로드캐스트 그룹",
+      "noFieldsDefined": "이 채널 유형의 폼이 아직 정의되지 않았습니다(프런트엔드에 CHANNEL_FIELDS 항목이 없습니다). 항목을 추가한 후 다시 시도하세요.",
+      "deliveryTiming": "전송 타이밍",
+      "modeRealtime": "실시간 · 발견 사항당 메시지 한 개",
+      "modeDigest": "다이제스트 · 간격마다 하나의 메시지로 병합",
+      "modeHelp": "\"높음은 실시간, 나머지는 다이제스트\"로 보내려면 채널을 두 개 만드세요. 하나는 '높음' 임계값의 실시간 채널, 다른 하나는 심각도 제한이 없는 다이제스트 채널입니다.",
+      "rateLimit": "속도 제한(메시지/분)",
+      "rateUnlimited": "0 = 무제한",
+      "rateHelp": "비워 두면 채널 기본값을 사용합니다. 0은 제한 없음을 의미합니다. 제한을 초과해도 메시지를 버리지 않고 지연시킬 뿐입니다.",
+      "filterRules": "필터 규칙(비워 두면 필터링 없음)",
+      "minSeverity": "최소 심각도",
+      "includeLabel": "다음 취약점 유형만",
+      "includePlaceholder": "SQL 인젝션\n명령 실행",
+      "includeHelp": "한 줄에 키워드 하나씩, 대소문자를 구분하지 않고 부분 문자열로 일치시킵니다. 모든 유형을 포함하려면 비워 두세요.",
+      "excludeLabel": "다음 취약점 유형 제외",
+      "excludePlaceholder": "정보 노출",
+      "excludeHelp": "제외가 포함보다 우선합니다. 둘 다 일치하는 항목은 제외됩니다.",
+      "taskIds": "작업 ID로 제한",
+      "assetIds": "자산 ID로 제한",
+      "idsHelp": "작업/자산을 비워 두면 제한이 없습니다. 입력하면 발견 사항이 해당 항목과 교집합이어야 합니다.",
+      "statusChangeAria": "상태 변경 포함",
+      "statusChangeLabel": "발견 사항의 상태가 변경될 때도 푸시합니다(실시간 모드 전용)",
+      "enableAria": "활성화",
+      "enableChannel": "이 채널 활성화",
+      "save": "저장",
+      "add": "추가",
+      "sendTest": "테스트 메시지 전송"
+    },
+    "toasts": {
+      "loadMetaFailed": "알림 설정을 불러오지 못했습니다: {message}",
+      "loadLimitsFailed": "메시지 제한을 불러오지 못했습니다: {message}",
+      "loadChannelsFailed": "채널을 불러오지 못했습니다: {message}",
+      "nameRequired": "채널 이름을 입력하세요",
+      "saved": "저장되었습니다",
+      "channelAdded": "채널이 추가되었습니다",
+      "saveFailed": "저장 실패: {message}",
+      "testSent": "테스트 메시지를 전송했습니다({ms} ms). 그룹에서 확인하세요",
+      "testFailed": "테스트 실패: {message}",
+      "deleted": "삭제됨: {name}",
+      "deleteFailed": "삭제 실패: {message}",
+      "operationFailed": "작업 실패: {message}",
+      "pushEnabled": "푸시가 활성화되었습니다",
+      "pushPaused": "푸시가 일시 중지되었습니다",
+      "summaryRangeError": "요약 길이는 0에서 {max} 사이의 정수여야 합니다",
+      "assetsRangeError": "표시할 자산 수는 0에서 {max} 사이의 정수여야 합니다"
+    }
+  },
+  "channelForm": {
+    "saved": "저장됨 · 새 값을 입력하면 덮어쓰고, 비우면 제거됩니다",
+    "savedWithTail": "저장됨(끝자리 {tail}) · 새 값을 입력하면 덮어쓰고, 비우면 제거됩니다",
+    "filterSummary": {
+      "typeKeywords": "유형 키워드 {count}개",
+      "excludeKeywords": "키워드 {count}개 제외",
+      "tasks": "작업 {count}개",
+      "assets": "자산 {count}개",
+      "statusChanges": "상태 변경 포함",
+      "allVulns": "모든 취약점"
+    }
+  },
+  "channelFields": {
+    "dingtalk": {
+      "webhook": { "label": "Webhook URL" },
+      "secret": {
+        "label": "서명 비밀키",
+        "help": "로봇의 보안 설정에서 '서명'을 사용할 때 입력하세요. '사용자 지정 키워드'를 사용하거나 보안 설정이 없으면 비워 두세요"
+      }
+    },
+    "feishu": {
+      "webhook": { "label": "Webhook URL" },
+      "secret": {
+        "label": "서명 검증 비밀키",
+        "help": "로봇이 '서명 검증'을 활성화한 경우 입력하고, 그렇지 않으면 비워 두세요"
+      }
+    },
+    "wecom": {
+      "webhook": { "label": "Webhook URL" }
+    },
+    "webhook": {
+      "url": { "label": "대상 URL" },
+      "method": {
+        "label": "HTTP 메서드",
+        "options": {
+          "POST": "POST (본문 포함)",
+          "PUT": "PUT (본문 포함)",
+          "PATCH": "PATCH (본문 포함)",
+          "GET": "GET (본문 없음)"
+        }
+      },
+      "headers": {
+        "label": "사용자 지정 헤더",
+        "help": "한 줄에 KEY=VALUE 하나씩, 예: Authorization=Bearer xxx"
+      },
+      "body_template": {
+        "label": "본문 템플릿",
+        "help": "비워 두면 기본 제공 템플릿을 사용합니다. 변수: '{{.Title}}' '{{.Batch}}' '{{.Count}}' '{{.HomeURL}}' '{{.SentAt}}', 그리고 range .Items 내부에서 .Name/.VulnClass/.Severity/.Summary/.Assets/.DetailURL/.StatusLabel. 제목에 따옴표가 있으면 JSON이 깨지므로, 문자열을 삽입할 때는 '{{.Xxx}}' 대신 '{{json .Xxx}}'를 사용하세요."
+      }
+    },
+    "telegram": {
+      "bot_token": { "label": "봇 토큰" },
+      "chat_id": { "label": "채팅 ID" },
+      "base_url": {
+        "label": "API URL",
+        "help": "공식 URL을 사용하려면 비워 두고, 자체 호스팅 Bot API를 프록시할 때 입력하세요"
+      }
+    },
+    "email": {
+      "host": { "label": "SMTP 서버" },
+      "port": {
+        "label": "포트",
+        "help": "587은 STARTTLS를 사용합니다. 465의 경우 '암시적 TLS'를 켜세요"
+      },
+      "username": { "label": "계정" },
+      "password": { "label": "비밀번호 / 인증 코드" },
+      "from": { "label": "보내는 사람" },
+      "to": {
+        "label": "받는 사람",
+        "help": "여러 주소는 쉼표로 구분하세요"
+      },
+      "tls": {
+        "label": "암시적 TLS",
+        "help": "포트 465에서는 켜고, 587에서는 꺼 두세요(STARTTLS가 자동입니다)"
+      }
+    }
+  },
+  "kindLabel": {
+    "dingtalk": "DingTalk",
+    "feishu": "Feishu",
+    "wecom": "WeCom",
+    "webhook": "일반 Webhook",
+    "telegram": "Telegram",
+    "email": "이메일"
+  },
+  "severityOption": {
+    "all": "모든 심각도",
+    "low": "낮음 이상",
+    "medium": "보통 이상",
+    "high": "높음 이상",
+    "critical": "심각만"
+  },
+  "deliveryList": {
+    "allChannels": "모든 채널",
+    "allStatuses": "모든 상태",
+    "refresh": "새로 고침",
+    "total": "총 {count}개",
+    "colTime": "시간",
+    "colVulnerability": "취약점",
+    "colChannel": "채널",
+    "colStatus": "상태",
+    "colAttempts": "시도",
+    "colError": "오류",
+    "loading": "불러오는 중…",
+    "empty": "전송 기록 없음",
+    "untitled": "(제목 없음)",
+    "statusChange": "상태 변경",
+    "retry": "재시도",
+    "previous": "이전",
+    "next": "다음",
+    "loadFailed": "전송 기록을 불러오지 못했습니다: {message}",
+    "requeued": "다시 대기열에 추가되었습니다",
+    "retryFailed": "재시도 실패: {message}"
+  }
+}

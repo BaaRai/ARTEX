@@ -1,0 +1,18 @@
+{
+  "empty": "(empty)",
+  "wrap": {
+    "enable": "Enable word wrap",
+    "disable": "Disable word wrap"
+  },
+  "copy": {
+    "action": "Copy message",
+    "copiedLabel": "Message copied",
+    "copiedTooltip": "Copied"
+  },
+  "ariaLabel": {
+    "codeBlock": "HTTP message code"
+  },
+  "toasts": {
+    "copyFailed": "Copy failed; use Ctrl/Cmd+A then copy"
+  }
+}

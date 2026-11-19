@@ -1,0 +1,117 @@
+{
+  "header": {
+    "title": "Findings",
+    "subtitle": "Cross-task vulnerability overview"
+  },
+  "tabs": {
+    "all": "All findings",
+    "byTask": "By task",
+    "byAsset": "By asset"
+  },
+  "stats": {
+    "totalFindings": "Total findings",
+    "pending": "Pending",
+    "submitted": "Submitted",
+    "accepted": "Accepted",
+    "critical": "Critical",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low"
+  },
+  "search": {
+    "placeholder": "Search findings"
+  },
+  "severity": {
+    "all": "All",
+    "critical": "Critical",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "filterBy": "Filter by {label} severity"
+  },
+  "filters": {
+    "statusPlaceholder": "Status",
+    "allStatuses": "All statuses",
+    "reportStagePlaceholder": "Report stage",
+    "allReportStages": "All report stages",
+    "verificationPlaceholder": "Verification",
+    "allVerificationStates": "All verification states",
+    "vulnTypePlaceholder": "Vulnerability type",
+    "allTypes": "All types",
+    "taskPlaceholder": "Task",
+    "allTasks": "All tasks",
+    "unassignedTask": "Unlinked / task deleted",
+    "taskDeleted": "Task #{id} (deleted)",
+    "sortBySeverity": "By severity",
+    "sortByTime": "By time"
+  },
+  "bulk": {
+    "selected": "{count} selected",
+    "setStatusAria": "Set the status of the selected findings",
+    "setReportStateAria": "Set the report stage of the selected findings",
+    "updating": "Updating…",
+    "setStatus": "Set status",
+    "setReportState": "Set report stage"
+  },
+  "actions": {
+    "export": "Export",
+    "cancel": "Cancel"
+  },
+  "asset": {
+    "allAssets": "All assets",
+    "inTotal": "{count} in total"
+  },
+  "groups": {
+    "unlinked": "Unlinked / task deleted",
+    "taskWithName": "{name} (task #{id})",
+    "taskNumber": "Task #{id}",
+    "noSourceTask": "Source task unavailable",
+    "viewTask": "View task #{id}"
+  },
+  "table": {
+    "selectAll": "Select all on this page",
+    "selectAllGroup": "Select all on this page in this group"
+  },
+  "empty": "No matching findings.",
+  "deepen": {
+    "title": "Deepen exploitation",
+    "description": "A priority-10 worker intent will be created in the original task #{id} to run secondary verification based on this vulnerability:",
+    "descriptionLabel": "Exploitation description",
+    "descriptionPlaceholder": "Describe the exploitation path to verify, boundary conditions, targets, or expected evidence",
+    "inheritAnchors": "The new intent inherits this vulnerability's asset anchors.",
+    "submit": "Create deepen intent"
+  },
+  "export": {
+    "title": "Export findings",
+    "description": "Choose the export scope and format; the browser downloads the file automatically once generated.",
+    "scopeLabel": "Export scope",
+    "scopeFiltered": "Export the current filter results ({count} items)",
+    "scopeAll": "Export all",
+    "scopeSelected": "Export the {count} selected items",
+    "formatLabel": "Export format",
+    "formatMdSingle": "Markdown summary report (a single .md file)",
+    "formatMdZip": "Markdown per finding (one .md per vulnerability, packaged as .zip)",
+    "formatCsv": "CSV table (.csv)",
+    "formatJson": "JSON (.json)",
+    "exporting": "Exporting…"
+  },
+  "toasts": {
+    "exportStarted": "Export download started",
+    "exportFailed": "Export failed: {message}",
+    "retestStatusFailed": "Failed to load retest status: {message}",
+    "assetTreeFailed": "Failed to load the asset tree: {message}",
+    "markedAs": "Marked as \"{label}\"",
+    "updateFailed": "Update failed: {message}",
+    "reportStageSet": "Report stage set to \"{label}\"",
+    "bulkStatus": "Marked {count} findings as \"{label}\"",
+    "bulkReportState": "Set report stage of {count} findings to \"{label}\"",
+    "bulkFailed": "Bulk update failed: {message}",
+    "saved": "Saved",
+    "deleted": "Vulnerability deleted",
+    "deleteFailed": "Delete failed: {message}",
+    "saveFailed": "Save failed: {message}",
+    "deepenQueued": "Deepen intent #{id} has entered the task queue",
+    "deepenCreated": "Created high-priority worker intent #{id}",
+    "submitFailed": "Submit failed: {message}"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "rotation": {
+    "toggleLabel": "다중 LLM 워커 로테이션 활성화",
+    "descriptionOn": "새 워커 인텐트는 선택된 프로파일을 라운드 로빈 순서로 사용합니다. 독립 워커는 서로 다른 공급자에서 동시에 실행될 수 있습니다. 다른 역할은 현재 프로파일을 유지합니다.",
+    "descriptionOff": "순차 장애 조치: 워커는 현재 프로파일을 공유하며, 할당량 소진 또는 반복적인 공급자 실패 후 전환합니다.",
+    "warnMinProfiles": "공급자 간에 작업을 분산하려면 프로파일을 두 개 이상 선택하세요.",
+    "warnBinding": "워커에 고정된 모델 바인딩이 있어 로테이션을 재정의합니다. 이 프로파일을 사용하려면 에이전트 설정에서 워커 모델이 작업을 따르도록 설정하세요.",
+    "warnBindingUnchecked": "워커 바인딩을 확인할 수 없습니다. 고정된 워커 모델은 로테이션을 재정의합니다. 에이전트 설정을 확인하세요.",
+    "hint": "작업을 시작하기 전에 시스템 설정에서 동시 워커 수를 2개 이상으로 설정하세요. 진행 중인 호출은 해당 공급자를 유지합니다. 소진된 프로파일은 체인이 초기화될 때까지 건너뜁니다.",
+    "badge": "로테이션 {n}"
+  },
+  "combobox": {
+    "searchPlaceholder": "LLM 프로파일 검색 및 추가",
+    "noProfilesPlaceholder": "사용 가능한 LLM 프로파일 없음",
+    "empty": "일치하는 LLM 프로파일 없음"
+  },
+  "profileFallback": "프로파일 #{id}",
+  "activeSuffix": " (활성)",
+  "profileUnavailable": "프로파일을 사용할 수 없음",
+  "emptyState": "프로파일이 설정되지 않으면 작업은 에이전트 또는 전역 활성 프로파일을 따릅니다.",
+  "role": {
+    "current": "현재",
+    "skipped": "건너뜀",
+    "skippedTooltip": "현재 커서 이전의 프로파일은 자동 장애 조치에서 선택되지 않습니다",
+    "fallback": "폴백 {n}"
+  },
+  "actions": {
+    "moveUp": "프로파일 위로 이동",
+    "moveDown": "프로파일 아래로 이동",
+    "remove": "프로파일 제거"
+  },
+  "activeProfile": {
+    "rotateLabel": "플래너 / 장애 조치 프로파일",
+    "defaultLabel": "현재 프로파일"
+  }
+}

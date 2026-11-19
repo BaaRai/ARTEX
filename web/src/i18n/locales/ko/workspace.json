@@ -1,0 +1,52 @@
+{
+  "breadcrumbRoot": "작업 공간",
+  "actions": {
+    "newFolder": "새 폴더",
+    "upload": "업로드",
+    "refresh": "새로 고침",
+    "download": "다운로드",
+    "delete": "삭제",
+    "save": "저장",
+    "saving": "저장 중…",
+    "create": "생성",
+    "cancel": "취소"
+  },
+  "columns": {
+    "name": "이름",
+    "size": "크기",
+    "modified": "수정일",
+    "actions": "동작"
+  },
+  "loading": "불러오는 중…",
+  "empty": "빈 디렉터리",
+  "deleteConfirm": {
+    "dir": "\"{name}\" 디렉터리를 삭제하시겠습니까? (내부의 모든 항목 포함)",
+    "file": "\"{name}\" 파일을 삭제하시겠습니까?"
+  },
+  "preview": {
+    "tooLarge": "온라인 미리 보기/편집을 하기에 파일이 너무 큽니다.",
+    "binary": "바이너리 파일입니다. 온라인 미리 보기/편집은 지원되지 않습니다.",
+    "downloadFile": "파일 다운로드"
+  },
+  "editor": {
+    "unsaved": "저장되지 않은 변경 사항",
+    "inSync": "동기화됨"
+  },
+  "mkdir": {
+    "title": "새 폴더",
+    "placeholder": "폴더 이름"
+  },
+  "toasts": {
+    "readDirFailed": "디렉터리 읽기 실패: {message}",
+    "openFileFailed": "파일 열기 실패: {message}",
+    "saved": "저장했습니다",
+    "saveFailed": "저장 실패: {message}",
+    "deleted": "삭제했습니다",
+    "deleteFailed": "삭제 실패: {message}",
+    "uploaded": "파일 {count}개를 업로드했습니다",
+    "uploadFailed": "업로드 실패: {message}",
+    "dirCreated": "디렉터리를 생성했습니다",
+    "createFailed": "생성 실패: {message}",
+    "downloadFailed": "다운로드 실패: {message}"
+  }
+}

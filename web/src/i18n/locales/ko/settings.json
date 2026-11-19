@@ -1,0 +1,171 @@
+{
+  "page": {
+    "title": "시스템 설정",
+    "subtitle": "전역 런타임 스위치",
+    "actions": {
+      "save": "저장"
+    },
+    "onSuffix": " · 켜짐",
+    "offSuffix": " · 꺼짐",
+    "toasts": {
+      "saveFailed": "저장 실패: {message}",
+      "concurrencyInvalid": "동시 실행 수는 0보다 큰 정수여야 합니다",
+      "workersSaved": "동시 실행 워커 에이전트 수를 저장했습니다 (이후 시작되는 작업에 적용됩니다)",
+      "pythonSaved": "Python 인터프리터 설정을 저장했습니다",
+      "agentBindingEnabled": "자동 에이전트 트래픽 연결을 활성화했습니다",
+      "agentBindingDisabled": "자동 에이전트 트래픽 연결을 비활성화했습니다",
+      "noaEnabled": "noa 컨텍스트 압축을 활성화했습니다 (이후 시작되는 실행에 적용됩니다)",
+      "noaDisabled": "noa 컨텍스트 압축을 비활성화했습니다 (내장 압축으로 복원됨)",
+      "webSearchSaved": "웹 검색 설정을 저장했습니다",
+      "braveKeySaved": "Brave API Key를 저장했습니다",
+      "tavilyKeySaved": "Tavily API Key를 저장했습니다",
+      "keenableKeySaved": "Keenable API Key를 저장했습니다",
+      "proxySaved": "아웃바운드 프록시를 저장했습니다",
+      "proxyCleared": "아웃바운드 프록시를 지웠습니다 (직접 연결)",
+      "globalProxySaved": "전역 프록시를 저장했습니다",
+      "globalProxyCleared": "전역 프록시를 지웠습니다 (직접 연결)",
+      "testSucceeded": "검색 테스트 성공 · {backend}에서 결과 {count}개를 반환했습니다",
+      "testFailed": "검색 테스트 실패: {error}",
+      "unknownError": "알 수 없는 오류"
+    },
+    "trafficCapture": {
+      "title": "트래픽 캡처",
+      "description": "활성화하면 모든 에이전트의 HTTP 트래픽이 기록 프록시를 통해 전체 저장되고, 에이전트에 traffic_search / traffic_get 도구와 프록시 구성이 주입됩니다 (프롬프트에 프록시 안내가 포함됩니다).<br></br>꺼져 있으면 (기본값) 트래픽이 기록되지 않습니다. 에이전트는 프록시 구성이나 트래픽 도구를 받지 <b>않으며</b>, 프롬프트에 프록시 관련 내용이 <b>전혀</b> 포함되지 않습니다. 전환 직후 에이전트가 다시 빌드됩니다.",
+      "labelOn": "켜짐 · 트래픽 기록 및 프록시 주입",
+      "labelOff": "꺼짐 · 기록 없음, 프록시 주입 없음"
+    },
+    "agentBinding": {
+      "title": "자동 에이전트 트래픽 연결",
+      "description": "기본값은 꺼짐입니다. 활성화하면 취약점 생성 시 트리거되는 보고서 에이전트가 기존 HTTP 요청/응답을 검토하고 보고서를 작성하기 전에 일치하는 트래픽을 연결합니다. <b>패킷을 읽고 추가 도구를 호출하면 토큰 소비가 늘어납니다.</b><br></br>TCP, 캡처되지 않은 트래픽, 또는 일치하는 트래픽이 없는 경우에도 보고서 작성은 계속 동작합니다. 이 스위치는 트래픽 캡처, 수동 연결, 저장된 증거 보기에는 영향을 주지 않습니다. 다음 라운드의 에이전트부터 적용되며, 비활성화하면 새 자동 연결이 즉시 거부됩니다.",
+      "labelOn": "켜짐 · 토큰 소비 증가",
+      "labelOff": "꺼짐 · 수동 연결은 계속 사용 가능"
+    },
+    "globalProxy": {
+      "title": "전역 프록시",
+      "description": "모든 에이전트의 <b>대상 트래픽</b>이 이 프록시를 통해 외부로 나갑니다 (출발지 IP 숨기기 / 점프 호스트 사용). <b>http / https / socks5</b>를 지원하며, 선택적으로 <code>user:pass</code> 인증을 사용할 수 있습니다. 비어 있으면 직접 연결입니다.<br></br><b>트래픽 캡처</b>가 켜져 있으면 기록 프록시의 <b>업스트림</b>으로 동작하고 (트래픽은 여전히 전체 저장된 뒤 이 프록시를 통해 외부로 나갑니다), 캡처가 꺼져 있으면 에이전트의 bash / WebFetch 아웃바운드에 직접 주입됩니다. 웹 검색 프록시 및 LLM 프록시와는 독립적입니다.<br></br><b>참고</b>: <b>캡처가 꺼져</b> 있으면 socks5는 각 CLI 도구가 <code>ALL_PROXY</code>를 따르는지에 의존합니다 (curl은 동작하지만 일부 도구는 무시할 수 있습니다). 주로 socks5를 사용한다면 트래픽 캡처를 활성화하세요. 그 경로에서는 MITM이 직접 연결을 수행하므로 도구에 보이지 않으면서 안정적으로 적용됩니다.",
+      "addressLabel": "프록시 주소",
+      "placeholder": "socks5://user:pass@host:1080 또는 http://host:port (비어 있으면 직접 연결)",
+      "statusConfigured": "설정됨 · 모든 대상 트래픽이 이 프록시를 통해 외부로 나갑니다",
+      "statusNotConfigured": "설정되지 않음 · 대상 트래픽이 직접 외부로 나갑니다"
+    },
+    "constraints": {
+      "title": "작전 제약 주입",
+      "description": "활성화하면 각 작업의 <b>작전 제약</b> (작업 개요의 \"작전 제약\"에서 관리하는 허용/거부 항목)이 해당 에이전트의 시스템 프롬프트에 결합되어 탐색 범위를 제한합니다 (예: \"현재 포트만 테스트\", \"무차별 대입 금지\").<br></br><b>planner</b>와 <b>worker</b>에 대한 주입을 각각 제어할 수 있으며, 둘 다 기본값은 켜짐입니다. 전환은 에이전트를 다시 빌드하지 않고 즉시 적용됩니다 (다음 턴에 읽힘). 꺼지면 에이전트가 더 이상 제약을 보지 못합니다.",
+      "planner": "planner에 주입",
+      "worker": "worker에 주입"
+    },
+    "experimental": {
+      "title": "실험적 기능",
+      "description": "아직 검증 중인 메커니즘으로 기본값은 꺼짐입니다. 에이전트 동작을 바꾸거나 안정성에 영향을 줄 수 있으니 영향을 이해한 뒤에만 활성화하세요.<br></br><b>noa 컨텍스트 압축</b>: 모델이 긴 대화 기록을 능동적으로 압축합니다 (norma v0.4.0). 활성화하면 플랫폼에 통합된 네 가지 에이전트 유형 (<b>planner / worker / main agent / chat</b>)이 내장 압축 대신 noa가 관리하는 컨텍스트로 전환되고, 압축 전 원본은 나중에 검토할 수 있도록 해당 작업의 작업 디렉터리에 보관됩니다. 전환은 에이전트를 다시 빌드하지 않고 즉시 적용됩니다 (이후 시작되는 실행에). 비활성화하면 내장 압축으로 즉시 복원됩니다.",
+      "noaLabel": "noa 컨텍스트 압축"
+    },
+    "webSearch": {
+      "title": "웹 검색",
+      "description": "웹 검색의 <b>마스터 스위치 + 소스 설정</b>입니다. 이 스위치가 켜져 있을 때에만 <b>각 에이전트의 설정</b>에서 <b>web_search</b> 활성화 여부를 개별적으로 선택할 수 있습니다 (본문을 가져오지 않고 제목/링크/스니펫만 반환하며, 본문 가져오기는 WebFetch가 처리합니다). 웹 검색은 기록 프록시를 거치지 <b>않으며</b> 트래픽 캡처와 독립적입니다.<br></br>소스: <b>DuckDuckGo (ddgs)</b> (키 불필요), <b>Brave (무료 등급)</b> (Brave API Key 필요), <b>Tavily</b> (Tavily API Key 필요), 또는 <b>DeepSeek</b> (현재 LLM 설정 재사용). 마스터 스위치가 꺼져 있으면 에이전트별 웹 검색 스위치를 사용할 수 없습니다.",
+      "labelOn": "마스터 스위치 켜짐 · 에이전트 설정별로 활성화 가능",
+      "labelOff": "꺼짐 · 에이전트가 웹 검색을 활성화할 수 없음",
+      "sourceLabel": "검색 소스",
+      "sourcePlaceholder": "소스를 선택하세요",
+      "sourceDdgs": "DuckDuckGo (ddgs · 무료, 키 불필요)",
+      "sourceBrave": "Brave (무료 등급 · 키 필요)",
+      "sourceTavily": "Tavily (키 필요)",
+      "sourceKeenable": "Keenable (키 없이 사용, 키 선택)",
+      "sourceDeepseek": "DeepSeek (공식)",
+      "configured": "설정됨",
+      "keyPlaceholderSet": "설정됨 (비워 두면 유지)",
+      "deepseek": {
+        "heading": "DeepSeek 공식 웹 검색",
+        "note1": "이 소스는 <b>현재 활성 LLM 설정</b>을 그대로 재사용합니다. 따라서 <b>공식 DeepSeek 모델만</b> 지원하며, 해당 설정은 <b>anthropic 프로토콜을 사용해야 합니다</b> — DeepSeek의 OpenAI 프로토콜 엔드포인트는 서버 측 검색을 지원하지 않습니다. LLM 설정을 전환하면 이 소스가 동작을 멈출 수 있습니다.",
+        "note2": "다른 소스와 달리 검색이 <b>DeepSeek 서버 측에서</b> 실행됩니다. 검색마다 모델 호출이 추가로 소비되고 (토큰 비용 발생), 검색 요청은 <b>위의 아웃바운드 프록시를 거치지 않으며</b> <b>트래픽으로 기록되지 않습니다</b>. 결과에는 <b>제목과 링크만</b> 포함됩니다 (스니펫 없음). 페이지 본문이 필요하면 WebFetch를 사용하세요.",
+        "note3": "이 조건들은 직접 확인하세요. 시스템이 이를 차단하지는 않습니다. 아래 \"검색 테스트\" 버튼으로 실제 검색을 실행해 확인할 수 있습니다."
+      },
+      "brave": {
+        "keyLabel": "Brave Search API Key",
+        "placeholder": "Brave API Key를 입력하세요",
+        "needsKey": "Brave가 선택되었지만 키가 설정되지 않았습니다 — 키를 저장할 때까지 검색 도구는 비활성화된 상태로 유지됩니다.",
+        "help": "무료 등급은 월 약 2,000회 쿼리를 허용합니다. https://brave.com/search/api/ 에서 키를 발급받으세요."
+      },
+      "tavily": {
+        "keyLabel": "Tavily Search API Key",
+        "placeholder": "Tavily API Key를 입력하세요 (tvly-…)",
+        "needsKey": "Tavily가 선택되었지만 키가 설정되지 않았습니다 — 키를 저장할 때까지 검색 도구는 비활성화된 상태로 유지됩니다.",
+        "help": "https://tavily.com 에서 등록하고 API 키를 발급받으세요."
+      },
+      "keenable": {
+        "keyLabel": "Keenable Search API Key (선택 사항)",
+        "placeholder": "선택 사항: 키 없는 엔드포인트를 사용하려면 비워 두세요",
+        "help": "쿼리는 이 인스턴스를 떠나 api.keenable.ai로 전송됩니다. 요청에는 공급자가 호출자를 식별할 수 있도록 <b>X-Keenable-Title: ARTEX</b>가 포함됩니다. 키가 없으면 공개 엔드포인트는 IP별로 요청 수가 제한됩니다. 키가 있으면 제한이 완화되지만, 키 없이도 백엔드는 동작합니다."
+      },
+      "egressProxy": {
+        "label": "아웃바운드 프록시 (선택 사항)",
+        "placeholder": "http://host:port 또는 socks5://host:port (비어 있으면 직접 연결)",
+        "help": "검색 엔드포인트에 접근할 때만 사용하는 전용 아웃바운드 프록시입니다 (VPN/SOCKS 등). 트래픽을 기록하는 MITM 프록시와는 무관하며, 네트워크가 차단된 경우 엔드포인트에 접근하는 데 사용하세요."
+      },
+      "test": {
+        "hint": "현재 설정 (소스 + 프록시 + 키)으로 실제 \"테스트\" 검색을 실행해 정상 동작하는지 확인하세요.",
+        "button": "검색 테스트",
+        "testing": "테스트 중…"
+      }
+    },
+    "python": {
+      "title": "사용자 지정 스크립트 · Python 인터프리터",
+      "description": "사용자 지정 <b>스크립트</b> 도구가 이것으로 Python을 실행합니다. 시작 시 자동 감지됩니다 (python3 우선). 여기에 venv / 특정 버전의 절대 경로를 입력할 수 있으며, 비워 두면 런타임에 자동 감지합니다.",
+      "placeholder": "/usr/bin/python3 (비어 있으면 자동 감지)",
+      "redetect": "다시 감지"
+    },
+    "concurrency": {
+      "title": "작업 동시 실행 · 워커 에이전트 수",
+      "description": "작업당 동시에 실행되는 워커 에이전트 수입니다 (기본값 3). 값이 클수록 병렬 탐지가 늘어나고 소비도 커집니다. 변경 사항은 <b>이후 시작되는 작업에 적용</b>되며, 실행 중인 작업에는 영향을 주지 않습니다."
+    },
+    "chatSend": {
+      "title": "채팅 입력 전송 키 바인딩",
+      "description": "채팅 페이지와 작업 세부 정보의 main agent 채팅 입력에서 공유되며, 선택 즉시 적용되고 저장할 필요가 없습니다.<br></br>이 환경설정은 <b>이 브라우저에만 저장되며</b>, 계정과 동기화되지 않고, 브라우저를 바꾸거나 사이트 데이터를 지운 뒤에는 다시 설정해야 합니다.",
+      "label": "전송 모드",
+      "options": {
+        "enter": "Enter로 전송, Shift+Enter로 줄바꿈",
+        "ctrl-enter": "Ctrl+Enter로 전송, Enter로 줄바꿈"
+      }
+    }
+  },
+  "noiseProfile": {
+    "title": "대상 노이즈",
+    "description": "ARTEX가 대상에 직접 보내는 요청 (WebFetch, http 사용자 지정 도구, enrich 프로브)의 속도를 조절하고 에이전트 프롬프트에 low-and-slow 지침을 설정합니다. 트래픽 캡처가 켜져 있으면 프록시를 사용하는 Bash 명령 (curl, wget, python-requests…)도 속도와 지터만 조절됩니다. 진행 중, 캐시, 재시도 제한은 ARTEX 자체 요청에 적용됩니다. nmap 같은 원시 스캐너와 프록시를 우회하는 명령은 조절되지 않습니다. 이는 최선의 노력일 뿐 보안 경계가 아닙니다. 이 설정은 ARTEX_NOISE_PROFILE보다 우선하며 다음 요청부터 적용됩니다.",
+    "profiles": {
+      "off": {
+        "label": "꺼짐",
+        "limits": "꺼짐: 요청과 그 타이밍이 변경되지 않으며, 아무것도 집계되지 않습니다."
+      },
+      "quiet": {
+        "label": "조용함",
+        "limits": "호스트당 2 req/s (버스트 4), 호스트당 진행 중 1개, 전체 8개, 지터 최대 250 ms, 작업 내 동일한 GET을 60 s 캐시, 429/503에서 최대 3회 재시도."
+      },
+      "balanced": {
+        "label": "균형",
+        "limits": "호스트당 5 req/s (버스트 10), 호스트당 진행 중 2개, 전체 16개, 지터 최대 40 ms, 작업 내 동일한 GET을 30 s 캐시, 429/503에서 최대 3회 재시도."
+      },
+      "aggressive": {
+        "label": "공격적",
+        "limits": "호스트당 20 req/s (버스트 40), 호스트당 진행 중 4개, 전체 32개, 지터 최대 5 ms, 작업 내 동일한 GET을 10 s 캐시, 429/503에서 최대 2회 재시도."
+      }
+    },
+    "profileLabel": "프로파일",
+    "loadingPlaceholder": "불러오는 중…",
+    "hostsCurrentMinute": "호스트, 현재 분",
+    "refresh": "새로 고침",
+    "tableAria": "호스트별 노이즈 카운터",
+    "columns": {
+      "host": "호스트",
+      "rpm": "RPM",
+      "peakRpm": "최대 RPM",
+      "inFlight": "진행 중 (최대)",
+      "duplicates": "중복"
+    },
+    "emptyOff": "꺼짐은 요청을 집계하지 않습니다.",
+    "emptyNone": "아직 속도 조절된 요청이 없습니다.",
+    "toasts": {
+      "loadFailed": "노이즈 카운터를 불러오지 못했습니다: {message}",
+      "saved": "노이즈 프로파일을 {value}(으)로 설정했습니다",
+      "saveFailed": "저장 실패: {message}"
+    }
+  }
+}

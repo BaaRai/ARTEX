@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { TrafficEvidenceViewer } from "@/components/traffic-evidence-viewer";
@@ -45,6 +46,7 @@ export function FindingTrafficPanel({
   readOnly?: boolean;
   onChanged: () => void;
 }) {
+  const t = useTranslations("findingTrafficPanel");
   const [data, setData] = React.useState<FindingTraffic | null>(null);
   const [error, setError] = React.useState("");
   const [adding, setAdding] = React.useState(false);
@@ -78,7 +80,7 @@ export function FindingTrafficPanel({
       setData(await action());
       setEditing(null);
       onChanged();
-      toast.success("Traffic evidence updated");
+      toast.success(t("toasts.updated"));
     } catch (e) {
       toast.error((e as Error).message);
       setReload((n) => n + 1);
@@ -99,17 +101,19 @@ export function FindingTrafficPanel({
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle>Linked traffic {data ? `(${data.bindings.length})` : ""}</CardTitle>
+            <CardTitle>
+              {t("header.title")} {data ? `(${data.bindings.length})` : ""}
+            </CardTitle>
             {!readOnly ? (
               <Button variant="outline" size="sm" disabled={!data || busy} onClick={() => setAdding(true)}>
                 <PlusIcon data-icon="inline-start" />
-                Link traffic
+                {t("actions.linkTraffic")}
               </Button>
             ) : (
-              <Badge variant="outline">Inherited evidence · read-only</Badge>
+              <Badge variant="outline">{t("readOnlyBadge")}</Badge>
             )}
           </div>
-          <CardDescription>Requests and responses organized in reproduction order. Bound evidence is kept even after raw traffic is purged.</CardDescription>
+          <CardDescription>{t("header.description")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {error ? (
@@ -117,7 +121,7 @@ export function FindingTrafficPanel({
               <AlertDescription>
                 {error}
                 <Button variant="link" onClick={() => setReload((n) => n + 1)}>
-                  Retry
+                  {t("actions.retry")}
                 </Button>
               </AlertDescription>
             </Alert>
@@ -127,8 +131,8 @@ export function FindingTrafficPanel({
           ) : data.bindings.length === 0 ? (
             <Empty>
               <EmptyHeader>
-                <EmptyTitle>No linked traffic</EmptyTitle>
-                <EmptyDescription>Link baseline, vulnerability proof, and supplementary verification requests.</EmptyDescription>
+                <EmptyTitle>{t("empty.title")}</EmptyTitle>
+                <EmptyDescription>{t("empty.description")}</EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
@@ -136,12 +140,12 @@ export function FindingTrafficPanel({
               <div key={b.id} className="flex min-w-0 flex-col gap-2 rounded-md border p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="outline">
-                    {index + 1}. {ROLES[b.role]}
+                    {index + 1}. {t.has(`roles.${b.role}`) ? t(`roles.${b.role}`) : ROLES[b.role]}
                   </Badge>
                   <Badge variant="secondary">
                     {b.snapshot.method} · {b.snapshot.status}
                   </Badge>
-                  <span className="text-xs text-muted-foreground">Evidence #{b.id}</span>
+                  <span className="text-xs text-muted-foreground">{t("evidenceTag", { id: b.id })}</span>
                 </div>
                 <Button
                   variant="link"
@@ -153,11 +157,11 @@ export function FindingTrafficPanel({
                 {b.note ? <p className="text-sm whitespace-pre-wrap">{b.note}</p> : null}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs text-muted-foreground">
-                    {new Date(b.snapshot.captured_at * 1000).toLocaleString("zh-CN")}
+                    {new Date(b.snapshot.captured_at * 1000).toLocaleString("ko-KR")}
                   </span>
                   <div className="flex flex-wrap gap-1">
                     <Button variant="outline" size="sm" onClick={() => setPreview(b.id)}>
-                      View message
+                      {t("actions.viewMessage")}
                     </Button>
                     {!readOnly ? (
                       <>
@@ -171,12 +175,12 @@ export function FindingTrafficPanel({
                             setNote(b.note);
                           }}
                         >
-                          Edit note
+                          {t("actions.editNote")}
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Move evidence ${b.id} up`}
+                          aria-label={t("actions.moveUp", { id: b.id })}
                           disabled={busy || index === 0}
                           onClick={() => move(index, -1)}
                         >
@@ -185,7 +189,7 @@ export function FindingTrafficPanel({
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Move evidence ${b.id} down`}
+                          aria-label={t("actions.moveDown", { id: b.id })}
                           disabled={busy || index === data.bindings.length - 1}
                           onClick={() => move(index, 1)}
                         >
@@ -199,7 +203,7 @@ export function FindingTrafficPanel({
                             void mutate(() => api.removeFindingTraffic(findingId, b.id, data.version, contextTask))
                           }
                         >
-                          Unlink
+                          {t("actions.unlink")}
                         </Button>
                       </>
                     ) : null}
@@ -236,12 +240,12 @@ export function FindingTrafficPanel({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit traffic evidence</DialogTitle>
-            <DialogDescription>Explain how this set of requests/responses supports the vulnerability conclusion.</DialogDescription>
+            <DialogTitle>{t("editDialog.title")}</DialogTitle>
+            <DialogDescription>{t("editDialog.description")}</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="evidence-role">Role</FieldLabel>
+              <FieldLabel htmlFor="evidence-role">{t("editDialog.roleLabel")}</FieldLabel>
               <Select value={role} onValueChange={(v) => setRole(v as TrafficEvidenceRole)}>
                 <SelectTrigger id="evidence-role">
                   <SelectValue />
@@ -250,7 +254,7 @@ export function FindingTrafficPanel({
                   <SelectGroup>
                     {Object.entries(ROLES).map(([value, label]) => (
                       <SelectItem key={value} value={value}>
-                        {label}
+                        {t.has(`roles.${value}`) ? t(`roles.${value}`) : label}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -258,13 +262,13 @@ export function FindingTrafficPanel({
               </Select>
             </Field>
             <Field>
-              <FieldLabel htmlFor="evidence-note">Evidence note</FieldLabel>
+              <FieldLabel htmlFor="evidence-note">{t("editDialog.noteLabel")}</FieldLabel>
               <Textarea id="evidence-note" value={note} onChange={(e) => setNote(e.target.value)} />
             </Field>
           </FieldGroup>
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={() => setEditing(null)}>
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button
               disabled={busy || !editing || !data}
@@ -275,7 +279,7 @@ export function FindingTrafficPanel({
                   );
               }}
             >
-              Save note
+              {t("actions.saveNote")}
             </Button>
           </DialogFooter>
         </DialogContent>

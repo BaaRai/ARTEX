@@ -1,0 +1,77 @@
+{
+  "header": {
+    "title": "Test assets",
+    "totalLinked": "This task is linked to {count} assets in total",
+    "add": "Add test assets"
+  },
+  "tabs": {
+    "root_domain": "Root domain",
+    "ip": "IP",
+    "subdomain": "Subdomain",
+    "app": "App",
+    "service": "Service",
+    "endpoint": "Endpoint"
+  },
+  "columns": {
+    "domain": "Domain",
+    "icpRecord": "ICP record",
+    "source": "Source",
+    "actions": "Actions",
+    "ip": "IP",
+    "cSegment": "C segment",
+    "boundDomains": "Bound domains",
+    "openPorts": "Open ports",
+    "rootDomain": "Root domain",
+    "recordType": "Record type",
+    "recordValue": "Record value",
+    "app": "App",
+    "address": "Address",
+    "category": "Category",
+    "title": "Title",
+    "fingerprints": "Fingerprints",
+    "addressService": "Address / service",
+    "statusCode": "Status code",
+    "responseSize": "Response size",
+    "auth": "Auth",
+    "method": "Method",
+    "fullUrl": "Full URL",
+    "params": "Params"
+  },
+  "card": {
+    "empty": "No test assets in this category yet",
+    "perPage": "{count} / page",
+    "prevPage": "Previous page",
+    "nextPage": "Next page"
+  },
+  "source": {
+    "summaryFallback": "Migrated from a historical task's asset association; no more detailed source information",
+    "node": "Source node #{id}"
+  },
+  "add": {
+    "title": "Add test assets",
+    "description": "Enter the test scope directly. Domains and IPs create or reuse global assets; CIDRs, ICP records, and keywords act as agent scope context.",
+    "editorLabel": "Test assets and scope",
+    "editorDescription": "One entry per line; domains, IPs, CIDRs, ICP records, and keywords are recognized automatically.",
+    "cancel": "Cancel",
+    "registerEntries": "Register {count} entries",
+    "registered": "Registered {requested} scopes, linked {linked} domain/IP assets",
+    "failed": "Failed to add: {message}"
+  },
+  "actions": {
+    "removeAssetAria": "Remove asset {name} from the task",
+    "removeFromTask": "Remove from task"
+  },
+  "remove": {
+    "title": "Remove from this task?",
+    "description": "Remove \"{name}\" from this task's test assets.",
+    "keepNote": "Global assets, linked traffic, and historical blackboard anchors are kept.",
+    "cancel": "Cancel",
+    "confirm": "Remove",
+    "removing": "Removing"
+  },
+  "toasts": {
+    "removed": "Removed {name} from the current task",
+    "removeFailed": "Failed to remove: {message}",
+    "loadFailed": "Failed to load task assets: {message}"
+  }
+}

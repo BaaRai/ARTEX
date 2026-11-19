@@ -1,0 +1,37 @@
+{
+  "header": {
+    "title": "Vulnerability retest",
+    "description": "Verifies the current state in a separate session, keeping each retest's verdict and evidence."
+  },
+  "running": {
+    "linkTitle": "View the running retest session",
+    "label": "Retesting"
+  },
+  "actions": {
+    "startRetest": "Start retest",
+    "retry": "Retry",
+    "viewSession": "View session"
+  },
+  "errors": {
+    "loadFailed": "Failed to load retest records: {message}"
+  },
+  "empty": {
+    "title": "No retest records",
+    "description": "Once the fix is deployed, start a retest to compare new and old evidence."
+  },
+  "conversationDeleted": "Conversation deleted",
+  "notesLabel": "Notes: {notes}",
+  "evidenceSummary": "Retest evidence",
+  "status": {
+    "pending": "Waiting to start",
+    "running": "Retesting",
+    "completed": "Completed",
+    "failed": "Retest failed",
+    "stopped": "Stopped"
+  },
+  "verdict": {
+    "reproduced": "Still reproducible",
+    "fixed": "Fixed",
+    "inconclusive": "Inconclusive"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "page": {
+    "title": "Agent",
+    "subtitle": "Prompts/configs for built-in agents, plus creating and managing custom conversational agents"
+  },
+  "createButton": "Create agent",
+  "list": {
+    "title": "Agent list",
+    "total": "{count} total",
+    "empty": "(no agents)"
+  },
+  "badges": {
+    "builtin": "Built-in",
+    "custom": "Custom",
+    "disabled": "Disabled"
+  },
+  "noDescription": "(no description)",
+  "stats": {
+    "mcp": "MCP {count}",
+    "skill": "Skill {count}",
+    "tools": "Tools {count}"
+  },
+  "deleteDialog": {
+    "title": "Delete agent \"{name}\"?",
+    "description": "This also deletes its prompt, variables, visibility and tool bindings. This action cannot be undone.",
+    "cancel": "Cancel",
+    "confirm": "Delete"
+  },
+  "createDialog": {
+    "title": "Create custom agent",
+    "description": "Create a conversational assistant. The key is the internal identifier and cannot change after creation; the name and description are for identification.",
+    "keyLabel": "Key",
+    "keyPlaceholder": "e.g. research_helper",
+    "keyError": "Must start with a lowercase letter; only lowercase letters/digits/underscores",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. Research assistant",
+    "descLabel": "Description",
+    "descPlaceholder": "One line on what this agent does",
+    "submit": "Create"
+  },
+  "sheet": {
+    "descriptionFallback": "Prompt, config, visible resources and tool bindings"
+  },
+  "toasts": {
+    "created": "Agent \"{name}\" created",
+    "createFailed": "Create failed: {message}",
+    "deleted": "Agent \"{name}\" deleted",
+    "deleteFailed": "Delete failed: {message}"
+  }
+}

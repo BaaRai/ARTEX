@@ -1,0 +1,387 @@
+{
+  "tabs": {
+    "current": "Current tasks",
+    "archived": "Archived"
+  },
+  "filters": {
+    "searchPlaceholder": "Search description / goal / ID",
+    "clearSearchAria": "Clear search",
+    "statusPlaceholder": "Status",
+    "allStatuses": "All statuses",
+    "categoryPlaceholder": "Task category",
+    "allCategories": "All categories",
+    "taskCount": "{filtered}/{total} tasks"
+  },
+  "selection": {
+    "selectedCount": "{count} selected",
+    "clear": "Clear selection",
+    "pauseCount": "Pause {count}",
+    "resumeCount": "Resume {count}",
+    "archiveCount": "Archive {count}"
+  },
+  "empty": {
+    "noTasks": "No tasks yet. Click \"New task\" at the top right to start.",
+    "noMatch": "No matching tasks."
+  },
+  "table": {
+    "selectAllPage": "Select all tasks on this page",
+    "severityTitle": "Critical / High / Medium / Low",
+    "severityLegend": "C/H/M/L",
+    "columns": {
+      "id": "ID",
+      "name": "Name",
+      "description": "Description",
+      "goal": "Goal",
+      "status": "Status",
+      "goalProgress": "Goal progress",
+      "findings": "Findings",
+      "runningWorkers": "Running workers",
+      "createdAt": "Created at",
+      "duration": "Duration",
+      "token": "Token",
+      "actions": "Actions"
+    }
+  },
+  "sort": {
+    "action": "Sort by {label} descending",
+    "activeAction": "{label} is currently {direction}; click to toggle sort direction",
+    "ascending": "ascending",
+    "descending": "descending"
+  },
+  "row": {
+    "selectAria": "Select task {id}",
+    "pinned": "Pinned",
+    "tokensTitle": "Input {input} · Cache {cache} · Output {output}",
+    "tokensIn": "In",
+    "tokensCacheSep": " · Cache ",
+    "tokensOutSep": " · Out ",
+    "viewDetails": "View task details"
+  },
+  "nameEditor": {
+    "inputAria": "Task #{id} name",
+    "unnamed": "Unnamed",
+    "renameAria": "Rename task #{id}",
+    "renameTitle": "Rename"
+  },
+  "pin": {
+    "unpinAria": "Unpin task #{id}",
+    "pinAria": "Pin task #{id}",
+    "unpin": "Unpin",
+    "pin": "Pin"
+  },
+  "control": {
+    "resume": "Resume task",
+    "pause": "Pause task",
+    "unavailable": "Cannot pause or resume in this state"
+  },
+  "archiveConfirm": {
+    "titleOne": "Archive task",
+    "titleMany": "Archive {count} tasks",
+    "description": "Archiving stops task scheduling and compresses the graph, LLM history, files, and exclusive assets and traffic into local cold storage. Once archived, a task can be restored from \"Archived\".",
+    "confirm": "Confirm archive"
+  },
+  "archiveAction": {
+    "aria": "Archive task #{id}"
+  },
+  "archiveDelete": {
+    "title": "Permanently delete {count} task archives?",
+    "description": "About {size} of archive packages and {rows} related data snapshots will be permanently deleted. This action cannot be undone.",
+    "confirm": "Delete permanently"
+  },
+  "archives": {
+    "searchPlaceholder": "Search task name / description / ID",
+    "statePlaceholder": "State",
+    "allStatuses": "All statuses",
+    "totalCount": "{count} archives",
+    "restoreCount": "Restore {count}",
+    "deleteCount": "Permanently delete {count}",
+    "emptyTitle": "No task archives",
+    "emptyDescription": "Paused or terminal tasks can be archived from the current task list.",
+    "selectAllAria": "Select the archives on this page",
+    "selectRowAria": "Select task archive #{id}",
+    "beforeCompression": "Before compression: {size}",
+    "retryAria": "Retry archive operation",
+    "restoreAria": "Restore task",
+    "restoreTitle": "Restore task",
+    "deleteAria": "Permanently delete archive",
+    "deleteTitle": "Permanently delete",
+    "columns": {
+      "task": "Task",
+      "originalStatus": "Original status",
+      "category": "Category",
+      "archivedAt": "Archived at",
+      "compressedSize": "Compressed size",
+      "dataRecords": "Data records",
+      "state": "State",
+      "actions": "Actions"
+    }
+  },
+  "deleteOptions": {
+    "legend": "Also clean up related data",
+    "allLabel": "Delete all",
+    "allDescription": "Check every related data type below, including assets, traffic, files, findings, and LLM request/response records.",
+    "assetsLabel": "Related assets",
+    "assetsDescription": "Delete assets that belong only to this task; shared assets are only detached from the current task.",
+    "trafficLabel": "Related traffic",
+    "trafficDescription": "Deleted by the related assets' exact hostnames; traffic of shared hosts still referenced by other tasks is kept.",
+    "filesLabel": "Task files",
+    "filesDescription": "Delete uploaded files, command output, and other artifacts in the task's working directory.",
+    "findingsLabel": "Related findings",
+    "findingsDescription": "Permanently delete the standalone finding records and finding reports produced by this task.",
+    "llmLabel": "LLM request/response records",
+    "llmDescription": "Permanently delete the LLM requests, responses, tokens, and error details recorded for this task."
+  },
+  "deleteTask": {
+    "triggerAria": "Delete task",
+    "title": "Delete task #{id}?",
+    "thisTask": "This task",
+    "descriptionSuffix": "will be permanently deleted together with its execution records and exploration graph."
+  },
+  "moveCategory": {
+    "trigger": "Change category",
+    "title": "Change the category of {count} selected tasks",
+    "description": "The target category applies to all selected tasks; choosing \"Uncategorized\" moves them out of their current category.",
+    "targetLabel": "Target category",
+    "selectPlaceholder": "Select a category",
+    "noCategories": "No categories yet; create one in \"Category management\" first."
+  },
+  "bulkDelete": {
+    "trigger": "Delete selected {count}",
+    "title": "Delete {count} selected tasks?",
+    "description": "The execution records and exploration graphs of these tasks will be permanently deleted; the cleanup options below apply to all selected tasks.",
+    "more": "…{count} in total",
+    "deletingProgress": "Deleting {done}/{total}",
+    "confirm": "Delete {count} tasks"
+  },
+  "sourceTasks": {
+    "limitPlaceholder": "Link up to {count} tasks",
+    "searchPlaceholder": "Search task ID, description, or goal",
+    "empty": "No matching tasks"
+  },
+  "categoryPicker": {
+    "created": "Category \"{name}\" created",
+    "createFailed": "Failed to create category: {message}",
+    "searchPlaceholder": "Search categories, or type a new name and press Enter to create",
+    "createOption": "Create category \"{name}\"",
+    "hint": "Type a name to search or create a category"
+  },
+  "companyPicker": {
+    "searchPlaceholder": "Search company name or asset scope",
+    "empty": "No matching companies",
+    "assetCount": "{count} assets"
+  },
+  "categoryDrop": {
+    "release": "Release to move",
+    "taskCount": "{count} tasks"
+  },
+  "categoryTask": {
+    "dragAria": "Drag task #{id}",
+    "dragTitle": "Drag task"
+  },
+  "categoryMgmt": {
+    "created": "Category created",
+    "updated": "Category updated",
+    "createFailed": "Failed to create category: {message}",
+    "updateFailed": "Failed to update category: {message}",
+    "deleted": "Category deleted; its tasks moved to Uncategorized",
+    "deleteFailed": "Failed to delete category: {message}",
+    "moveTargetMissing": "Target category does not exist; refresh and try again",
+    "taskMoved": "Task #{id} moved to \"{target}\"",
+    "moveFailed": "Failed to move task: {message}",
+    "createCategory": "Create category",
+    "saveChanges": "Save changes",
+    "trigger": "Category management",
+    "title": "Task category management",
+    "description": "Categories are used for task filtering and archiving; edits never affect task execution, and deletion moves tasks to Uncategorized.",
+    "newCategory": "New category",
+    "nameLabel": "Category name",
+    "namePlaceholder": "e.g. External assessment",
+    "nameDescriptionExisting": "{count} tasks currently use this category. Renaming updates the task list accordingly.",
+    "nameDescriptionNew": "Once created, it is usable in the create-task form and task list filters.",
+    "categoryTasks": "Category tasks",
+    "uncategorizedTasks": "Uncategorized tasks",
+    "categoryTaskCount": "This category contains {count} tasks.",
+    "uncategorizedTaskCount": "{count} tasks are not yet categorized.",
+    "emptyCategoryTitle": "No tasks in this category",
+    "emptyUncategorizedTitle": "No uncategorized tasks",
+    "emptyDescription": "Content appears here once tasks are assigned.",
+    "deleteCategory": "Delete category",
+    "deleteConfirmTitle": "Delete category \"{name}\"?",
+    "deleteConfirmDescription": "After the category is deleted, its {count} tasks move to \"Uncategorized\" automatically; task data is not deleted.",
+    "unnamedCategory": "Unnamed category"
+  },
+  "concurrency": {
+    "toastEnabled": "Concurrency limit enabled: at most {count} tasks can run simultaneously",
+    "toastDisabled": "Task concurrency limit disabled",
+    "triggerAria": "Task concurrency settings",
+    "trigger": "Concurrency",
+    "title": "Task concurrency limit",
+    "description": "Limit how many tasks can run simultaneously. Once the limit is reached, new tasks queue in creation order and start automatically as slots free up.",
+    "enableLabel": "Enable task concurrency limit",
+    "offByDefault": "Off by default",
+    "maxLabel": "Max concurrent tasks"
+  },
+  "createTask": {
+    "uploadFailed": "Upload failed: {message}",
+    "fillRequired": "Please fill in the description and goal",
+    "sourceLimit": "Link up to {count} source tasks",
+    "created": "Task created",
+    "createFailed": "Create failed: {message}",
+    "trigger": "New task",
+    "title": "New task",
+    "description": "Fill in the test target and goal; advanced parameters can be expanded as needed.",
+    "nameLabel": "Name (optional)",
+    "namePlaceholder": "A recognizable name for the task, e.g. Acme website penetration test",
+    "categoryLabel": "Task category",
+    "categoryDescription": "Optional, single category; used for task list filtering and archiving, never affecting agent execution.",
+    "descriptionPlaceholder": "Test target and background, e.g. test the example.com site",
+    "uploadFiles": "Upload files",
+    "uploadedCount": "{count} files uploaded; their absolute paths were appended to the end of the description (editable)",
+    "uploadHint": "Multi-select; after upload, absolute file paths are appended to the description for the worker to open with Read/Bash",
+    "goalLabel": "Goal",
+    "goalPlaceholder": "What to achieve, e.g. gain admin panel access or server privileges",
+    "linkedTasksLabel": "Linked tasks",
+    "linkedTasksDescription": "Link up to {count} tasks. Live, read-only inheritance of the selected tasks' persistent blackboards, asset scope, and related traffic; the new task writes to its own blackboard.",
+    "companyScopeLabel": "Linked company asset scope",
+    "companyScopeDescription": "On task creation, the selected companies' current assets are added to \"Test assets\", and their domains, IPs, CIDRs, ICPs, and company keywords are provided to the agent as scope context; no intents are generated automatically and execution goals are not forced to change.",
+    "interceptRulesLabel": "Task-level asset intercept / allow rules (optional)",
+    "interceptRulesDescription": "Applies to this task only and is not written to global rules. Evaluation order: \"Block\" rules (including global ones) match first, and a hit forbids testing; with no hit and \"Allow\" rules configured for this task, an asset must match an allow rule to be permitted, otherwise testing is likewise forbidden; with no allow rules configured, no whitelist is active.",
+    "llmChainLabel": "LLM config chain",
+    "llmChainDescription": "Reorder profiles to choose worker rotation order or failover priority. Saving the chain resets exhausted profiles.",
+    "credentialsLabel": "Test accounts (optional)",
+    "credentialDomainPlaceholder": "domain (e.g. target.example.com)",
+    "credentialUsernamePlaceholder": "email or username",
+    "credentialPasswordPlaceholder": "password (empty = agent generates)",
+    "removeAccount": "Remove account",
+    "credentialNotePlaceholder": "note (optional, e.g. program alias account)",
+    "addAccount": "Add account",
+    "credentialsDescription": "Test accounts reused by the agent for authenticated testing. Leave the password empty to have the agent register that account itself and record the password it chose. Use dedicated test accounts only — anything declared here is sent to the configured LLM provider during the task.",
+    "advancedSettings": "Advanced settings",
+    "advancedSummary": "Timeout · Heartbeat · First intent",
+    "timeoutLabel": "Task timeout (minutes, optional)",
+    "timeoutPlaceholder": "Empty = no limit",
+    "timeoutHint": "When the time is up, a graceful wind-down is triggered (each agent writes back + the planner makes the final verdict) and the task enters the timeout terminal state.",
+    "heartbeatLabel": "planner heartbeat (minutes)",
+    "heartbeatPlaceholder": "Default 10",
+    "heartbeatHint": "When this much time has passed since the last planning round ended or the task started, with no triggers in between, a planning round fires automatically (deadlock backstop + wakes supervision of running workers). Minimum 10 minutes.",
+    "seedFirstIntentLabel": "Dispatch the first intent directly (description + goal)",
+    "seedFirstIntentHint": "When enabled, the \"description + goal\" is dispatched as one intent right at creation; the worker starts without waiting for the first planning round and the planner takes over afterwards to judge/follow up. Recommended for settings like CTF where one run usually solves it directly; disabled follows the standard plan-then-execute flow.",
+    "coverageLabel": "Asset coverage feature",
+    "coverageHint": "On by default: computes and displays test coverage, shows testing progress on the situational graph, and automatically accumulates the test scope. When off, coverage is no longer computed or displayed, the situational graph shows assets without progress, and agents no longer receive scope-related tools. Disabling does not affect \"Linked company asset scope\"."
+  },
+  "toasts": {
+    "deleteCleanupWarning": "{summary}; some external data cleanup did not finish: {warning}",
+    "deleteFailed": "Delete failed: {message}",
+    "taskPaused": "Task #{id} paused",
+    "taskResumed": "Task #{id} resumed",
+    "queuedSuffix": ", queued",
+    "pauseFailed": "Pause failed: {message}",
+    "resumeFailed": "Resume failed: {message}",
+    "taskRenamed": "Task #{id} renamed",
+    "renameFailed": "Rename failed: {message}",
+    "taskUnpinned": "Task #{id} unpinned",
+    "taskPinned": "Task #{id} pinned",
+    "unpinFailed": "Unpin failed: {message}",
+    "pinFailed": "Pin failed: {message}",
+    "taskArchiveQueued": "Task #{id} queued for archiving",
+    "archiveFailed": "Archive failed: {message}",
+    "deletedCount": "Deleted {count} tasks",
+    "deleteFailedCount": "{count} tasks failed to delete: {details}",
+    "andMore": " and more",
+    "archiveQueuedCount": "Queued {count} tasks for archiving",
+    "archiveFailedCount": "{count} tasks could not be archived: {details}",
+    "stateChanged": "state changed",
+    "controlLimit": "You can control at most 100 tasks at once",
+    "pausedCount": "Paused {count} tasks",
+    "resumedCount": "Resumed {count} tasks",
+    "someQueued": ", some tasks were queued",
+    "controlFailedCount": "{count} tasks failed: {details}",
+    "bulkPauseFailed": "Bulk pause failed: {message}",
+    "bulkResumeFailed": "Bulk resume failed: {message}",
+    "moveCategoryLimit": "You can change the category of at most 100 tasks at once",
+    "movedCount": "Moved {count} tasks to \"{target}\"",
+    "taskGone": "task no longer exists",
+    "moveFailedCount": "{count} tasks could not be moved: {details}",
+    "moveCategoryFailed": "Failed to change category: {message}",
+    "saveFailed": "Save failed: {message}",
+    "archiveListLoadFailed": "Failed to load the archive list: {message}",
+    "restoreQueuedCount": "Queued {count} tasks for restore",
+    "restoreFailedCount": "{count} tasks could not be restored",
+    "restoreFailed": "Restore failed: {message}",
+    "archiveDeleteQueuedCount": "Queued {count} archives for permanent deletion",
+    "archiveDeleteFailedCount": "{count} archives could not be deleted",
+    "permanentDeleteFailed": "Permanent delete failed: {message}",
+    "requeued": "Re-queued for processing",
+    "retryFailed": "Retry failed: {message}"
+  },
+  "common": {
+    "uncategorized": "Uncategorized",
+    "taskFallback": "Task #{id}",
+    "unknownTask": "Unknown task",
+    "unknownCategory": "Unknown category",
+    "companyFallback": "Company #{id}",
+    "cancel": "Cancel",
+    "close": "Close",
+    "save": "Save",
+    "saving": "Saving",
+    "create": "Create",
+    "creating": "Creating",
+    "delete": "Delete",
+    "deleting": "Deleting",
+    "retry": "Retry",
+    "move": "Move",
+    "description": "Description"
+  },
+  "statusOption": {
+    "created": "Created",
+    "queued": "Queued",
+    "running": "Running",
+    "paused": "Paused",
+    "done": "Completed",
+    "failed": "Failed",
+    "timeout": "Timed out"
+  },
+  "archiveState": {
+    "archive_queued": "Archive queued",
+    "archiving": "Archiving",
+    "archive_failed": "Archive failed",
+    "ready": "Restorable",
+    "restore_queued": "Restore queued",
+    "restoring": "Restoring",
+    "restore_failed": "Restore failed",
+    "delete_queued": "Delete queued",
+    "deleting": "Deleting",
+    "delete_failed": "Delete failed"
+  },
+  "archiveCompression": {
+    "label": "{size} · saves {pct}%"
+  },
+  "archiveBlock": {
+    "queued": "Queued tasks must be paused first",
+    "notArchivable": "Running or unfinished tasks must be paused first",
+    "inherited": "The task is directly inherited by unarchived task #{id}; archive the dependent task first"
+  },
+  "companyScope": {
+    "empty": "No asset scope configured",
+    "more": "{count} more",
+    "kind": {
+      "domain": "Domain",
+      "ip": "IP",
+      "cidr": "CIDR",
+      "icp": "ICP",
+      "keyword": "Keyword"
+    }
+  },
+  "deleteDetail": {
+    "assets": "Deleted {count} assets",
+    "assetsDetached": "Detached {count} shared assets",
+    "traffic": "Deleted {count} traffic records",
+    "files": "Deleted task files",
+    "findings": "Deleted {count} findings",
+    "llmRecords": "Deleted {count} LLM request/response records"
+  },
+  "deleteSummary": {
+    "withDetails": "Task deleted ({details})",
+    "plain": "Task deleted"
+  }
+}

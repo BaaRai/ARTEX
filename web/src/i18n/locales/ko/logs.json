@@ -1,0 +1,23 @@
+{
+  "title": "시스템 로그",
+  "subtitle": "실시간 백엔드 로그 스트림 (planner / worker / database / traffic …)",
+  "filterPlaceholder": "필터 (텍스트 / 태그)…",
+  "filter": {
+    "all": "전체"
+  },
+  "buttons": {
+    "pause": "일시 중지",
+    "paused": "일시 중지됨",
+    "clear": "지우기"
+  },
+  "stats": {
+    "lines": "{count}줄",
+    "warnings": "경고 {count}개",
+    "errors": "오류 {count}개"
+  },
+  "history": {
+    "loading": "불러오는 중…",
+    "loadOlder": "이전 로그 불러오기"
+  },
+  "empty": "아직 로그가 없습니다."
+}

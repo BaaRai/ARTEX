@@ -1,0 +1,150 @@
+{
+  "page": {
+    "title": "트래픽",
+    "subtitle": "전역 기록 프록시 · 모든 HTTP 트래픽",
+    "status": {
+      "recording": "기록 중",
+      "disabled": "비활성화됨"
+    },
+    "records": "기록 <num>{count}</num>개",
+    "toolbar": {
+      "selectTargets": "대상 선택…",
+      "selectTargetsCount": "대상 선택 ({count})",
+      "hostPlaceholder": "호스트…",
+      "deleteThisTarget": "이 대상 삭제",
+      "deleteHostDisabledHint": "먼저 왼쪽에서 대상을 선택하거나 호스트를 입력하세요",
+      "purgeAll": "전체 삭제",
+      "purgeAllHint": "모든 트래픽을 삭제하고 저장 공간을 압축합니다",
+      "purgeAllHintEmpty": "아직 트래픽 기록이 없습니다",
+      "searchPlaceholder": "모두 검색 (URL / 메서드 / 유형 / 상태…)",
+      "allMethods": "모든 메서드",
+      "perPage": "{n} / 페이지"
+    },
+    "picker": {
+      "title": "대상별 일괄 삭제",
+      "sortDescToAsc": "패킷 개수가 현재 내림차순입니다. 클릭하면 오름차순으로 전환합니다",
+      "sortAscToDesc": "패킷 개수가 현재 오름차순입니다. 클릭하면 내림차순으로 전환합니다",
+      "sortTooltip": "패킷 개수순, {direction}",
+      "descending": "내림차순",
+      "ascending": "오름차순",
+      "selectAll": "모두 선택",
+      "clearAll": "모두 지우기",
+      "empty": "트래픽 기록 없음",
+      "deleteSelected": "선택 항목 삭제 ({count})"
+    },
+    "filters": {
+      "title": "고급 필터",
+      "bodyPlaceholder": "응답 내용 (본문 키워드, 3자 이상)",
+      "pathPlaceholder": "경로 (예: /api/user/…)",
+      "statusPlaceholder": "상태",
+      "allStatuses": "모든 상태",
+      "responseSize": "응답 크기",
+      "minPlaceholder": "최소 (B)",
+      "maxPlaceholder": "최대 (B)",
+      "clear": "필터 지우기"
+    },
+    "selection": {
+      "flowsSelected": "플로우 {count}개 선택됨",
+      "linkToFinding": "발견 사항에 연결",
+      "clearSelection": "선택 지우기"
+    },
+    "table": {
+      "selectPage": "이 페이지의 트래픽 선택",
+      "selectRow": "트래픽 {id} 선택",
+      "columns": {
+        "time": "시간",
+        "host": "호스트",
+        "method": "메서드",
+        "status": "상태",
+        "responseSize": "응답 크기"
+      },
+      "loading": "불러오는 중…",
+      "noMatch": "일치하는 트래픽이 없습니다."
+    },
+    "detail": {
+      "tabs": {
+        "request": "요청",
+        "response": "응답",
+        "stream": "스트림",
+        "replay": "재전송"
+      },
+      "replayUnsupported": "스트림 재전송은 지원되지 않습니다",
+      "loadingMessages": "메시지 불러오는 중…",
+      "loading": "불러오는 중…",
+      "loadFailed": "(메시지를 불러오지 못했습니다)"
+    },
+    "delete": {
+      "verb": {
+        "purge": "전체 삭제",
+        "delete": "삭제"
+      },
+      "title": {
+        "all": "모든 트래픽 기록을 전체 삭제하시겠습니까?",
+        "selected": "선택한 대상 {count}개의 모든 트래픽을 삭제하시겠습니까?",
+        "filter": "이 대상의 모든 트래픽을 삭제하시겠습니까?"
+      },
+      "desc": {
+        "all": "현재 필터를 무시하고 모든 트래픽 기록 <num>{count}</num>개(원본 요청/응답 포함)를 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다. 이미 발견 사항에 연결된 트래픽 증거는 별도의 증거 저장소에 있으며 영향을 받지 않습니다.<br></br><muted>전체 삭제는 저장 공간도 압축하여 인덱스의 디스크 공간을 시스템에 반환합니다. 이 동안 트래픽 기록이 잠시 중지됩니다.</muted>",
+        "selected": "대상 <num>{count}</num>개(<mono>{hosts}</mono>)의 모든 트래픽 기록(원본 요청/응답 포함)을 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
+        "filter": "<mono>{host}</mono>을(를) 포함하는 호스트의 모든 트래픽 기록(원본 요청/응답 포함)을 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다."
+      },
+      "cancel": "취소",
+      "button": {
+        "inProgress": "{verb} 중…",
+        "confirm": "{verb} 확인"
+      },
+      "toast": {
+        "purged": "트래픽 기록 {count}개를 전체 삭제했습니다{freed}",
+        "freed": ", 저장 공간 {size} 확보",
+        "purgeFailed": "전체 삭제 실패: {message}"
+      }
+    }
+  },
+  "replayPanel": {
+    "methodLabel": "메서드",
+    "headers": "헤더",
+    "addHeader": "헤더 추가",
+    "hostFromUrl": "호스트는 URL에서 가져옵니다.",
+    "notSent": "전송 안 됨(홉 간 헤더 또는 서버가 재계산함): {headers}",
+    "headerNameLabel": "헤더 이름",
+    "namePlaceholder": "이름",
+    "headerValueLabel": "헤더 값",
+    "valuePlaceholder": "값",
+    "removeHeader": "헤더 제거",
+    "struckThrough": "취소선이 그어진 헤더는 서버가 전송하지 않습니다.",
+    "body": "본문",
+    "binaryBody": "기록된 본문이 바이너리입니다(NUL 바이트 포함). 바이너리 본문 재전송은 지원되지 않습니다.",
+    "bodyPreviewOnly": "기록된 본문이 너무 커서 인라인으로 보관할 수 없습니다. 미리 보기만 불러와서 이 교환에 대해 재전송이 비활성화되었습니다.",
+    "send": "전송",
+    "truncated": "잘림",
+    "passthrough": "패스스루 호스트: 응답이 여기 표시되지만 기록되지 않았습니다.",
+    "resultHeaderCol": "헤더",
+    "resultValueCol": "값",
+    "errorTitles": {
+      "invalidRequest": "잘못된 요청",
+      "bodyTooLarge": "요청 본문이 너무 큼",
+      "proxyError": "프록시 또는 업스트림 오류",
+      "captureDisabled": "트래픽 캡처가 비활성화됨",
+      "timedOut": "시간 초과"
+    },
+    "describeError": {
+      "failed": "재전송 실패",
+      "failedWithStatus": "재전송 실패 ({status})"
+    }
+  },
+  "streamMessages": {
+    "direction": {
+      "c2s": "클라이언트 -> 서버",
+      "s2c": "서버 -> 클라이언트"
+    },
+    "truncated": "잘림",
+    "limitReached": "기록 한도에 도달했습니다. 이후 메시지는 저장되지 않았습니다",
+    "loadFull": "전체 페이로드 불러오기",
+    "messageCount": "메시지 {total}개 중 {count}개",
+    "refresh": "새로 고침",
+    "loadingMessages": "메시지 불러오는 중…",
+    "loadError": "메시지 불러오기 실패: {error}",
+    "empty": "이 스트림에 기록된 메시지가 없습니다.",
+    "loadMore": "더 보기"
+  }
+}

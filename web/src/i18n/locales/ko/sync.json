@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "자산 동기화",
+    "subtitle": "외부 데이터 소스에서 자산을 저장소로 동기화합니다"
+  },
+  "panel": {
+    "notReady": "데이터 소스가 준비되면 동기화할 프로젝트 / 작업을 선택할 수 있습니다."
+  },
+  "dataSource": {
+    "title": "데이터 소스 상태",
+    "refresh": "새로 고침",
+    "noneYet": "아직 ScopeSentry 데이터 소스가 없습니다. 생성하면 플레이스홀더 MCP가 추가됩니다(URL/키 비어 있음, 비활성화됨).",
+    "create": "데이터 소스 생성",
+    "notConfigured": "데이터 소스가 생성되었지만 구성되지 않았습니다. MCP URL과 API 키를 입력한 후 활성화하세요.",
+    "notEnabled": "데이터 소스가 구성되었지만 활성화되지 않았습니다. 저장 시 자동으로 활성화됩니다.",
+    "apiKeyLabel": "API 키 (X-API-Key, 비워 두면 현재 값 유지)",
+    "save": "저장 및 활성화",
+    "toolsDiscovered": "도구 {count}개 발견됨"
+  },
+  "status": {
+    "checking": "확인 중…",
+    "notCreated": "생성되지 않음",
+    "notConfigured": "구성되지 않음",
+    "notEnabled": "활성화되지 않음",
+    "connected": "연결됨",
+    "unreachable": "연결할 수 없음"
+  },
+  "workbench": {
+    "title": "동기화할 데이터 선택",
+    "byProject": "프로젝트별",
+    "byTask": "작업별",
+    "assetsToSync": "동기화할 자산:",
+    "createCompany": "프로젝트마다 회사를 생성하고 자산 범위를 기록",
+    "searchProject": "프로젝트 이름 검색",
+    "searchTask": "작업 이름 검색",
+    "selectedCount": "{count}개 선택됨",
+    "syncSelected": "선택 항목 동기화",
+    "assetType": {
+      "subdomain": "서브도메인",
+      "service": "서비스",
+      "app": "앱"
+    }
+  },
+  "table": {
+    "projectName": "프로젝트 이름",
+    "taskName": "작업 이름",
+    "tag": "태그",
+    "assets": "자산",
+    "status": "상태",
+    "time": "시간",
+    "loading": "불러오는 중…",
+    "noData": "데이터 없음"
+  },
+  "pagination": {
+    "previous": "이전",
+    "page": "{page} 페이지",
+    "next": "다음"
+  },
+  "result": {
+    "companies": "생성/수정된 회사: {companies}",
+    "errorsTotal": "… 총 {count}개 오류"
+  },
+  "toasts": {
+    "statusReadFailed": "데이터 소스 상태를 읽지 못했습니다: {message}",
+    "created": "ScopeSentry 데이터 소스가 생성되었습니다. URL과 키를 입력하세요",
+    "createFailed": "생성 실패: {message}",
+    "enterUrl": "MCP URL을 입력하세요",
+    "savedEnabled": "데이터 소스가 저장되고 활성화되었습니다",
+    "savedNotEnabled": "저장됨 (활성화 조건이 아직 충족되지 않음)",
+    "saveFailed": "저장 실패: {message}",
+    "selectProject": "프로젝트를 하나 이상 선택하세요",
+    "selectTask": "작업을 하나 이상 선택하세요",
+    "selectAssetType": "자산 유형을 하나 이상 선택하세요",
+    "syncFinished": "동기화 완료. 총 자산 {count}개가 수집되었습니다",
+    "syncFailed": "동기화 실패: {message}",
+    "loadListFailed": "목록을 불러오지 못했습니다: {message}"
+  }
+}

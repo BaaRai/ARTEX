@@ -1,0 +1,54 @@
+{
+  "loading": "불러오는 중…",
+  "empty": "범위 내 자산이 아직 없습니다 (먼저 작업 범위를 고정하세요)",
+  "refresh": "새로 고침",
+  "legend": {
+    "inScope": "범위 내",
+    "tested": "테스트됨",
+    "testedHighlighted": "테스트됨 (강조 표시)",
+    "untested": "테스트 안 됨",
+    "outOfScope": "범위 밖",
+    "help": "힘 기반 레이아웃입니다. 노드를 드래그하고 스크롤하여 확대/축소하세요. 회색 \"⋯\"는 접힌 노드이며, 클릭하면 더 펼칠 수 있습니다."
+  },
+  "asset": {
+    "properties": "속성",
+    "type": "유형",
+    "testStatus": "테스트 상태",
+    "tested": "테스트됨",
+    "untested": "테스트 안 됨",
+    "outOfScopeNode": "범위 밖 (연결 노드)",
+    "domain": "도메인",
+    "rootDomain": "루트 도메인",
+    "ip": "IP",
+    "port": "포트",
+    "url": "URL",
+    "title": "제목",
+    "statusCode": "상태 코드",
+    "app": "앱",
+    "assetId": "자산 ID",
+    "relatedIntents": "관련 인텐트",
+    "relatedFacts": "관련 사실",
+    "relatedFindings": "관련 발견 사항",
+    "rawData": "원시 데이터"
+  },
+  "ref": {
+    "inheritedBadge": "출처 #{id} · 읽기 전용"
+  },
+  "fold": {
+    "hiddenTitle": "숨겨진 {type} {count}개",
+    "help": "테스트된 항목이 먼저 표시됩니다. \"더 보기\"를 클릭하면 다음 묶음을 그래프에 추가합니다.",
+    "showMore": "더 보기 (+{step})"
+  },
+  "canvas": {
+    "foldMore": "{label} {count}개 더보기"
+  },
+  "kind": {
+    "company": "회사",
+    "root_domain": "루트 도메인",
+    "subdomain": "서브도메인",
+    "ip": "IP",
+    "service": "서비스",
+    "app": "앱",
+    "endpoint": "엔드포인트"
+  }
+}

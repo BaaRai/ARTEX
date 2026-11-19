@@ -1,0 +1,17 @@
+{
+  "action": {
+    "block": "Block",
+    "allow": "Allow"
+  },
+  "kind": {
+    "exact_domain": "Domain (exact)",
+    "exact_ip": "IP (exact)",
+    "exact_url": "URL (exact)",
+    "fuzzy_domain": "Domain (fuzzy)",
+    "fuzzy_ip": "IP (fuzzy)",
+    "fuzzy_url": "URL (fuzzy)",
+    "cidr": "CIDR range"
+  },
+  "notePlaceholder": "Note (optional)",
+  "addRow": "Add row"
+}

@@ -1,0 +1,127 @@
+{
+  "header": {
+    "title": "Overview",
+    "subtitle": "System-wide status · live refresh"
+  },
+  "stats": {
+    "activeTasks": {
+      "label": "Active tasks",
+      "exploring": "Exploring {count}",
+      "paused": "Paused {count}",
+      "completed": "Completed {count}",
+      "none": "No tasks"
+    },
+    "confirmedFindings": {
+      "label": "Confirmed findings",
+      "critical": "Critical {count}",
+      "high": "High {count}",
+      "medium": "Medium {count}",
+      "low": "Low {count}"
+    },
+    "assetNodes": {
+      "label": "Asset nodes",
+      "sub": "Shared across tasks"
+    },
+    "trafficExchanges": {
+      "label": "Traffic exchanges",
+      "recording": "Recording",
+      "captureOff": "Capture is off"
+    },
+    "tokenUsage": {
+      "label": "Token usage",
+      "breakdown": "In {input} (incl. cache {cache}) · Out {output}"
+    }
+  },
+  "llmUsage": {
+    "title": "LLM token usage",
+    "source": {
+      "old": "Old",
+      "new": "New",
+      "tooltipOld": "Old: from activity stats (includes historical tasks); aborted runs are not counted and it cannot break down by model",
+      "tooltipNew": "New: from the llm_usage metering ledger, exact per call and including aborted runs; only covers data since it was enabled"
+    },
+    "profiles": {
+      "all": "All",
+      "default": "Default"
+    },
+    "metrics": {
+      "total": "Total (input+output)",
+      "taskCount": "{count} tasks",
+      "inputUncached": "Input (uncached)",
+      "cacheHits": "Cache hits",
+      "output": "Output",
+      "cacheHitRate": "Cache hit rate"
+    },
+    "series": {
+      "input": "Input",
+      "output": "Output",
+      "cacheRead": "Cache read"
+    },
+    "range": {
+      "7d": "7d",
+      "30d": "30d",
+      "3mo": "3mo",
+      "6mo": "6mo",
+      "1y": "1y"
+    },
+    "noData": "No data"
+  },
+  "activity": {
+    "title": "Activity feed",
+    "events": "{count} events",
+    "viewTasks": "View tasks",
+    "empty": "No activity records"
+  },
+  "findings": {
+    "title": "Findings",
+    "all": "All",
+    "empty": "No findings"
+  },
+  "tasksTable": {
+    "title": "Tasks",
+    "count": "{count} tasks",
+    "all": "All",
+    "columns": {
+      "task": "Task",
+      "status": "Status",
+      "engine": "Engine",
+      "goalProgress": "Goal progress",
+      "inFlight": "In flight",
+      "lastActivity": "Last activity"
+    },
+    "empty": "No tasks"
+  },
+  "assets": {
+    "title": "Asset distribution",
+    "byType": "By type",
+    "empty": "No asset data",
+    "totalNodes": "{count} nodes in total",
+    "types": {
+      "root_domain": "Root domain",
+      "ip": "IP",
+      "subdomain": "Subdomain",
+      "app": "App",
+      "service": "Service",
+      "endpoint": "Endpoint"
+    }
+  },
+  "traffic": {
+    "title": "Traffic status codes",
+    "requests": "{count} requests",
+    "empty": "No traffic data",
+    "recentRequests": "Recent requests"
+  },
+  "system": {
+    "title": "System status",
+    "llmConfig": "LLM config",
+    "configured": "Configured",
+    "notConfigured": "Not configured",
+    "trafficCapture": "Traffic capture",
+    "on": "On",
+    "off": "Off",
+    "activeModel": "Active model",
+    "pendingApprovals": "Pending approvals ({count})",
+    "more": "{count} more…",
+    "noPending": "No pending interception approvals"
+  }
+}

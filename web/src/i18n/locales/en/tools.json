@@ -1,0 +1,125 @@
+{
+  "page": {
+    "title": "Tools",
+    "subtitle": "Descriptions/bindings for system tools, plus custom tools (command/script/http)",
+    "searchPlaceholder": "Search tool name, description, agent…"
+  },
+  "tabs": {
+    "system": "System tools",
+    "custom": "Custom tools"
+  },
+  "system": {
+    "title": "System tools",
+    "descMatching": "{matched} / {total} matching; click a card to edit the description, parameter defaults and agent bindings",
+    "descTotal": "{total} total; click a card to edit the description, parameter defaults and agent bindings",
+    "emptyNoMatch": "No matching system tools",
+    "empty": "(no system tools yet, waiting for the backend seed)"
+  },
+  "custom": {
+    "title": "Custom tools",
+    "descMatching": "shell/command/script/http, {matched} / {total} matching; click a card to edit",
+    "descTotal": "shell (bash declaration) / command (command template) / script (Python) / http (API), {total} total; click a card to edit",
+    "create": "Create custom tool",
+    "emptyNoMatch": "No matching custom tools",
+    "empty": "(no custom tools yet; click 'Create custom tool' in the top right)"
+  },
+  "card": {
+    "system": "System",
+    "custom": "Custom · {kind}",
+    "disabled": "Disabled",
+    "calls": "{count} calls",
+    "callsTooltip": "{count} calls in total",
+    "noDescription": "(no description)",
+    "noAgentsBound": "(no agents bound)"
+  },
+  "editor": {
+    "sheetDescription": "Edit the description, parameter defaults and agent bindings",
+    "trafficGated": "This tool depends on <b>traffic capture</b>. Enable traffic capture under \"System settings\" first before binding it to agents and enabling it.",
+    "bindAgents": "Bind agents (controls which agents get this tool)",
+    "noAgents": "(no agents)",
+    "enable": "Enable",
+    "description": "Tool description (sent to the model)",
+    "paramsLabel": "Parameters (name / type / required are read-only; description and default are editable)",
+    "noParams": "(no parameters)",
+    "params": {
+      "required": "Required",
+      "itemsSubField": "items sub-field",
+      "description": "Description",
+      "default": "Default",
+      "defaultPlaceholderScalar": "(empty = no default)",
+      "defaultPlaceholderNonScalar": "scalars only"
+    },
+    "actions": {
+      "save": "Save",
+      "restoreDefaults": "Restore defaults"
+    },
+    "toasts": {
+      "saved": "Tool \"{key}\" saved",
+      "saveFailed": "Save failed: {message}",
+      "restored": "Restored \"{key}\" to the code default",
+      "restoreFailed": "Restore failed: {message}"
+    }
+  },
+  "dialog": {
+    "createTitle": "Create custom tool",
+    "editTitle": "Edit {key}",
+    "description": "shell = a bash environment declaration (name + description only, telling the model bash is available); command/script/http need an execution spec.",
+    "keyLabel": "Key",
+    "keyPlaceholder": "e.g. nmap_scan",
+    "descriptionLabel": "Description (sent to the model)",
+    "typeLabel": "Type",
+    "kind": {
+      "shell": "shell (bash environment declaration)",
+      "command": "command (shell command template)",
+      "script": "script (Python script)",
+      "http": "http (API request)"
+    },
+    "shellHint": "Suited to well-known tools like nmap, sqlmap, ffuf — the model already knows their usage; you only need to declare \"can be invoked in bash\". The name + description are appended to the Bash tool's description.",
+    "command": {
+      "templateLabel": "Command template (placeholder '{param}', e.g. nmap -p '{ports}' '{target}')"
+    },
+    "script": {
+      "bodyLabel": "Python body (params arrive via stdin JSON / os.environ[\"TOOL_X\"])"
+    },
+    "http": {
+      "method": "Method",
+      "url": "URL (may contain '{param}')",
+      "headers": "Headers (JSON, may contain '{param}')",
+      "body": "Body (may contain '{param}')",
+      "proxy": "Proxy URL (empty = direct)",
+      "useRecordingProxy": "Use recording proxy"
+    },
+    "timeout": "Timeout (ms, empty = default)",
+    "schema": {
+      "labelHttp": "Parameter JSON Schema (required for http tools, must include properties)",
+      "labelAuto": "Parameter JSON Schema (empty = a thin '{args}' shell is generated automatically)"
+    },
+    "bindAgents": "Bind agents",
+    "enable": "Enable",
+    "deferred": "deferred (enable only for many rarely-used tools)",
+    "test": {
+      "label": "Test run (uses the current form, nothing is saved)",
+      "paramsPlaceholder": "Sample params JSON, e.g. '{\"target\":\"example.com\"}'",
+      "run": "Test run",
+      "running": "Running…",
+      "noOutput": "(no output)"
+    },
+    "actions": {
+      "create": "Create",
+      "save": "Save",
+      "delete": "Delete"
+    },
+    "toasts": {
+      "invalidKey": "key must start with a lowercase letter and contain only lowercase letters/digits/underscores",
+      "invalidSchema": "Invalid parameter JSON Schema",
+      "invalidHeaders": "Invalid headers JSON",
+      "httpNeedsSchema": "http tools must provide a parameter JSON Schema (with properties; cannot be empty)",
+      "created": "Custom tool created",
+      "saved": "Saved",
+      "saveFailed": "Save failed: {message}",
+      "deleted": "Deleted",
+      "deleteFailed": "Delete failed: {message}",
+      "invalidTestParams": "Invalid test parameter JSON"
+    }
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "roles": {
+    "mainagent": "Main Agent",
+    "planner": "Planner",
+    "worker": "Workers",
+    "system": "System audit"
+  },
+  "tokenMetrics": {
+    "in": "In",
+    "cache": "Cache",
+    "out": "Out",
+    "inputLong": "input",
+    "cacheLong": "cache",
+    "outputLong": "output"
+  },
+  "sessionItem": {
+    "sourceBadge": "Source #{id}",
+    "deleted": "Deleted",
+    "live": "Live",
+    "deleteIntent": "Delete this intent (reason required; soft or hard delete)"
+  },
+  "workerAsset": {
+    "current": "Current assets: {label}",
+    "fromSourceTask": " · from source task #{id}"
+  },
+  "sessionList": {
+    "title": "Sessions"
+  },
+  "sse": {
+    "healthy": "Live connection healthy",
+    "lost": "Live connection lost, reconnecting automatically (history still visible)",
+    "live": "Live",
+    "reconnecting": "Reconnecting"
+  },
+  "taskTotal": {
+    "label": "Task total"
+  },
+  "tokens": {
+    "breakdown": "Input {input} · Output {output} · Cache read {cacheRead} · Cache write {cacheWrite}"
+  },
+  "mainSession": {
+    "new": "New",
+    "newTitle": "New main agent session (clears context, task state preserved)",
+    "newAria": "New main agent session"
+  },
+  "workerList": {
+    "loadEarlier": "Load earlier workers",
+    "empty": "No running worker sessions."
+  },
+  "header": {
+    "workerSession": "Worker execution session",
+    "sourceTask": "Source task #{id} · read-only history",
+    "live": "Live",
+    "earlierHistory": "↑ Earlier history",
+    "earlierHistoryTitle": "Scroll up to load earlier history",
+    "runDurationTitle": "Run duration (first step → last step)",
+    "interactive": "Interactive"
+  },
+  "resolution": {
+    "currentConfig": "Current config: {label}",
+    "unavailable": "Model unavailable",
+    "noConfig": "No available LLM config",
+    "unnamedConfig": "Unnamed config"
+  },
+  "sessionTitle": {
+    "main": "Main Agent · Session #{n}",
+    "planner": "Planner · situational analysis",
+    "system": "System events · LLM failover",
+    "intentFallback": "Intent {id}"
+  },
+  "deletedBanner": {
+    "title": "This intent was deleted by the user",
+    "detail": "(execution stopped and the planner notified; the intent and its output are kept — view the history below)",
+    "reason": "Deletion reason: "
+  },
+  "transcript": {
+    "loadingEarlier": "Loading earlier history…",
+    "loadingStream": "Loading activity stream…",
+    "loadFailed": "Failed to load: {error}",
+    "retry": "Retry",
+    "emptyMain": "No conversation yet. Message the main agent below to steer exploration or step into the flow.",
+    "emptyOther": "No activity records."
+  },
+  "attachments": {
+    "remove": "Remove"
+  },
+  "composer": {
+    "aria": "Message the main agent",
+    "placeholder": "Message the main agent; @ to reference findings, assets, and more…",
+    "placeholderBusy": "The main agent is running; type /btw to ask a side question…",
+    "uploadFile": "Upload file",
+    "sendSideQuestion": "Send side question",
+    "stopExecution": "Stop current execution",
+    "sendMessage": "Send message"
+  },
+  "workspace": {
+    "workerLabel": "Worker #{id} · {title}"
+  },
+  "workerComposer": {
+    "aria": "Message Worker #{id}",
+    "placeholder": "Message Worker #{id}; @ to reference records and adjust execution direction…",
+    "pause": "Pause current worker",
+    "continueTitle": "Continue execution directly without sending a message",
+    "continueAria": "Continue execution directly",
+    "continue": "Continue directly"
+  },
+  "deleteDialog": {
+    "title": "Delete Worker #{id}?",
+    "hard": "<b>Hard delete</b> physically removes this intent and the downstream nodes <b>supported solely by it</b> (cascading to the leaves to avoid orphaned data); shared nodes, goals, and the task's root facts are kept. <b>This action is irreversible.</b> The planner is notified of the deletion and re-plans accordingly.",
+    "soft": "<b>Soft delete</b> marks the intent as \"deleted\" and records the reason; the intent node, execution records, registered facts, and findings <b>are all kept</b>. The planner receives \"intent deleted by user + reason\" and re-plans accordingly.",
+    "softOption": "Soft delete",
+    "softHint": "Data kept, traceable",
+    "hardOption": "Hard delete",
+    "hardHint": "Cascade removal, irreversible",
+    "reasonLabel": "Deletion reason (required)",
+    "reasonPlaceholder": "Explain why this intent is being deleted, e.g. wrong direction / goal obsolete / duplicate of another intent…",
+    "back": "Back",
+    "deletePermanently": "Delete permanently",
+    "confirmDelete": "Confirm delete"
+  },
+  "newSessionDialog": {
+    "title": "Start a new session?",
+    "description": "The current session will be archived (you can switch back anytime) and the main agent continues with a clean context. The task's graph, assets, and goals are unaffected.",
+    "cancel": "Cancel",
+    "starting": "Starting…",
+    "start": "Start new session"
+  },
+  "toasts": {
+    "uploadFailed": "Upload failed: {message}",
+    "createSessionFailed": "Failed to create session: {message}",
+    "provideReason": "Please provide a deletion reason",
+    "workerPaused": "Worker #{id} paused",
+    "workerResumed": "Worker #{id} resumed, waiting to be re-claimed",
+    "deletedExtra": " (including {intents} intents / {facts} facts / {findings} findings)",
+    "workerHardDeleted": "Worker #{id} and its exclusive downstream were permanently deleted{extra}",
+    "workerSoftDeleted": "Worker #{id} deleted (reason recorded; the planner will re-plan accordingly)",
+    "workerControlFailed": "Worker operation failed: {message}",
+    "messageTooLong": "Messages cannot exceed {max} characters",
+    "workerMessageSent": "Message sent to Worker #{id}; execution resumed immediately",
+    "sendFailed": "Send failed: {message}"
+  },
+  "errors": {
+    "retryLater": "please retry later"
+  }
+}

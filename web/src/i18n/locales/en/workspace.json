@@ -1,0 +1,52 @@
+{
+  "breadcrumbRoot": "Workspace",
+  "actions": {
+    "newFolder": "New folder",
+    "upload": "Upload",
+    "refresh": "Refresh",
+    "download": "Download",
+    "delete": "Delete",
+    "save": "Save",
+    "saving": "Saving…",
+    "create": "Create",
+    "cancel": "Cancel"
+  },
+  "columns": {
+    "name": "Name",
+    "size": "Size",
+    "modified": "Modified",
+    "actions": "Actions"
+  },
+  "loading": "Loading…",
+  "empty": "Empty directory",
+  "deleteConfirm": {
+    "dir": "Confirm deleting directory \"{name}\"? (including everything inside)",
+    "file": "Confirm deleting file \"{name}\"?"
+  },
+  "preview": {
+    "tooLarge": "File too large for online preview/editing.",
+    "binary": "Binary file; online preview/editing is not supported.",
+    "downloadFile": "Download file"
+  },
+  "editor": {
+    "unsaved": "Unsaved changes",
+    "inSync": "In sync"
+  },
+  "mkdir": {
+    "title": "New folder",
+    "placeholder": "Folder name"
+  },
+  "toasts": {
+    "readDirFailed": "Failed to read directory: {message}",
+    "openFileFailed": "Failed to open file: {message}",
+    "saved": "Saved",
+    "saveFailed": "Save failed: {message}",
+    "deleted": "Deleted",
+    "deleteFailed": "Delete failed: {message}",
+    "uploaded": "Uploaded {count} files",
+    "uploadFailed": "Upload failed: {message}",
+    "dirCreated": "Directory created",
+    "createFailed": "Create failed: {message}",
+    "downloadFailed": "Download failed: {message}"
+  }
+}

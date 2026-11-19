@@ -3,6 +3,8 @@
 import * as React from "react";
 
 import { format, subDays } from "date-fns";
+import { ko } from "date-fns/locale";
+import { useTranslations } from "next-intl";
 import type { DateRange } from "react-day-picker";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +17,7 @@ interface DateRangePickerProps {
 }
 
 export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
+  const t = useTranslations("dateRangePicker");
   const [open, setOpen] = React.useState(false);
   const [internalDateRange, setInternalDateRange] = React.useState<DateRange | undefined>(() => {
     const to = new Date();
@@ -22,14 +25,14 @@ export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
     return { from, to };
   });
   const dateRange = value ?? internalDateRange;
-  let dateRangeLabel = "Select date";
+  let dateRangeLabel = t("selectDate");
 
   if (dateRange?.from) {
-    dateRangeLabel = format(dateRange.from, "d MMM yyyy");
+    dateRangeLabel = format(dateRange.from, "P", { locale: ko });
   }
 
   if (dateRange?.from && dateRange.to) {
-    dateRangeLabel = `${format(dateRange.from, "d MMM yyyy")} - ${format(dateRange.to, "d MMM yyyy")}`;
+    dateRangeLabel = `${format(dateRange.from, "P", { locale: ko })} - ${format(dateRange.to, "P", { locale: ko })}`;
   }
 
   const handleDateChange = (nextValue: DateRange | undefined) => {

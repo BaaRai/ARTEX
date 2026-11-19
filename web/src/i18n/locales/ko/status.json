@@ -1,0 +1,65 @@
+{
+  "intent": {
+    "open": "열림",
+    "running": "실행 중",
+    "paused": "일시 중지됨",
+    "done": "완료",
+    "blocked": "오류",
+    "exhausted": "예산 소진",
+    "stopped": "중지됨",
+    "deleted": "삭제됨"
+  },
+  "task": {
+    "created": "생성됨",
+    "queued": "대기열에 있음",
+    "running": "실행 중",
+    "paused": "일시 중지됨",
+    "done": "완료",
+    "failed": "실패",
+    "timeout": "시간 초과"
+  },
+  "severity": {
+    "critical": "심각",
+    "high": "높음",
+    "medium": "보통",
+    "low": "낮음"
+  },
+  "finding": {
+    "pending": "대기 중",
+    "in_progress": "진행 중",
+    "confirmed": "확인됨",
+    "resolved": "해결됨",
+    "fixed": "수정됨",
+    "false_positive": "오탐",
+    "ignored": "무시됨",
+    "duplicate": "중복",
+    "risk_accepted": "위험 수용"
+  },
+  "engine": {
+    "exploring": "탐색 중",
+    "paused": "일시 중지됨",
+    "stalled": "정체됨",
+    "idle": "유휴"
+  },
+  "goal": {
+    "open": "진행 중",
+    "met": "달성됨",
+    "abandoned": "중단됨"
+  },
+  "audit": {
+    "allow": "허용",
+    "block": "차단"
+  },
+  "node": {
+    "observed": "관찰됨",
+    "confirmed": "확인됨",
+    "tombstoned": "삭제 표시됨"
+  },
+  "delivery": {
+    "pending": "대기 중",
+    "sending": "전송 중",
+    "sent": "전송됨",
+    "failed": "실패",
+    "skipped": "건너뜀"
+  }
+}

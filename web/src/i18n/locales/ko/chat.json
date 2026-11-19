@@ -1,0 +1,98 @@
+{
+  "live": "실시간",
+  "agentFallback": "에이전트",
+  "newConversation": "새 대화",
+  "custom": "사용자 지정",
+  "startConversation": "\"{name}\"와(과) 대화 시작",
+  "actions": {
+    "cancel": "취소",
+    "delete": "삭제"
+  },
+  "composer": {
+    "removeAttachment": "제거",
+    "uploadFiles": "파일 업로드",
+    "sendSideQuestion": "사이드 질문 전송",
+    "stopRun": "이 실행 중지",
+    "sendMessage": "메시지 전송",
+    "placeholder": "메시지를 입력하세요. @로 레코드 참조, Enter로 전송",
+    "placeholderRunning": "에이전트가 응답 중입니다. 사이드 질문을 하려면 /btw를 입력하세요…"
+  },
+  "profile": {
+    "default": "기본값",
+    "defaultWithName": "기본값 ({name})",
+    "change": "변경",
+    "select": "LLM 프로파일 선택"
+  },
+  "draft": {
+    "selectAgent": "에이전트 선택…"
+  },
+  "meta": {
+    "turns": "턴 {count}개",
+    "turnsTitle": "에이전트 루프 턴 (모델 호출 수)",
+    "tokens": "입력 {input} · 캐시 {cache} · 출력 {output}",
+    "tokensTitle": "입력 / 캐시(읽기) / 출력 토큰"
+  },
+  "transcript": {
+    "loadEarlier": "이전 메시지를 불러오려면 위로 스크롤하세요…"
+  },
+  "conversation": {
+    "running": "실행 중",
+    "agentRunning": "에이전트 실행 중",
+    "pinned": "고정됨",
+    "doubleClickRename": "더블클릭하여 이름 변경",
+    "rename": "이름 변경",
+    "pin": "고정",
+    "unpin": "고정 해제",
+    "selectAria": "대화 \"{title}\" 선택",
+    "manageAria": "대화 \"{title}\" 관리"
+  },
+  "deleteDialog": {
+    "title": "대화 \"{title}\"을(를) 삭제할까요?",
+    "description": "이 작업은 되돌릴 수 없습니다."
+  },
+  "group": {
+    "expand": "\"{name}\" 펼치기",
+    "collapse": "\"{name}\" 접기",
+    "currentHere": "현재 대화가 이 그룹에 있습니다",
+    "runningAria": "실행 중인 대화 {count}개"
+  },
+  "list": {
+    "filterByAgent": "에이전트별 대화 필터링",
+    "selectAllAria": "현재 필터와 일치하는 모든 대화 선택",
+    "allAgents": "모든 에이전트",
+    "countTotal": "총 {count}개",
+    "selectedCount": "{count}개 선택됨",
+    "done": "완료",
+    "select": "선택",
+    "emptyNone": "아직 대화가 없습니다",
+    "emptyForAgent": "이 에이전트에 대한 대화가 없습니다",
+    "loadMore": "더 보기"
+  },
+  "source": {
+    "deleted": "대화가 삭제되었습니다",
+    "loading": "대화를 불러오는 중…"
+  },
+  "bulkDelete": {
+    "title": "선택한 대화 {count}개를 삭제할까요?",
+    "description": "대화 메시지와 실행 기록이 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+    "deleting": "삭제 중",
+    "confirm": "삭제 확인"
+  },
+  "toasts": {
+    "sendFailed": "전송 실패: {message}",
+    "uploadFailed": "업로드 실패: {message}",
+    "switchLlmFailed": "LLM 전환 실패: {message}",
+    "stopFailed": "중지 실패: {message}",
+    "deleteFailed": "삭제 실패: {message}",
+    "renameFailed": "이름 변경 실패: {message}",
+    "pinFailed": "고정 실패: {message}",
+    "unpinFailed": "고정 해제 실패: {message}",
+    "deletedConversations": "대화 {count}개를 삭제했습니다",
+    "deleteFailedSome": "대화 {count}개 삭제 실패: {details}",
+    "etc": " 등",
+    "bulkDeleteFailed": "일괄 삭제 실패: {message}"
+  },
+  "errors": {
+    "conversationNotFound": "대화를 찾을 수 없음"
+  }
+}

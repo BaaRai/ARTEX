@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import { ArrowLeftIcon, ArrowUpRightIcon, ShieldAlertIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
@@ -22,13 +23,13 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { statusMeta } from "@/lib/status";
 import type { Finding, FindingReportState, FindingStatus, Severity } from "@/lib/types";
+import { useStatusMeta } from "@/lib/use-status-meta";
 
 import {
   FINDING_REPORT_STATES,
-  REPORT_STATE_META,
   ReportStateBadge,
+  useReportStateMeta,
   VerificationBadge,
 } from "../_components/findings-table";
 import { FindingLineageView } from "./lineage";
@@ -47,7 +48,7 @@ const FINDING_STATUSES: FindingStatus[] = [
 ];
 
 function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString("zh-CN");
+  return new Date(ts).toLocaleString("ko-KR");
 }
 
 // FieldRow is one label/value line in the right-hand status panel.
@@ -61,6 +62,9 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 }
 
 function FindingDetailInner() {
+  const t = useTranslations("findingsDetail");
+  const statusMeta = useStatusMeta();
+  const reportStateMeta = useReportStateMeta();
   const searchParams = useSearchParams();
   const id = searchParams.get("id") ?? "";
   const contextTaskId = searchParams.get("context_task") ?? "";
@@ -91,13 +95,13 @@ function FindingDetailInner() {
       try {
         const updated = await api.setFindingSeverity(id, next);
         setFinding(updated);
-        toast.success(`Severity changed to "${statusMeta("severity", next).label}"`);
+        toast.success(t("toasts.severityChanged", { label: statusMeta("severity", next).label }));
       } catch (e) {
         setFinding((cur) => (cur ? { ...cur, severity: prev } : cur));
-        toast.error("Update failed: " + (e as Error).message);
+        toast.error(t("toasts.updateFailed", { message: (e as Error).message }));
       }
     },
-    [finding, id],
+    [finding, id, statusMeta, t],
   );
 
   const changeStatus = React.useCallback(
@@ -108,13 +112,13 @@ function FindingDetailInner() {
       try {
         const updated = await api.setFindingStatus(id, next);
         setFinding(updated);
-        toast.success(`Status changed to "${statusMeta("finding", next).label}"`);
+        toast.success(t("toasts.statusChanged", { label: statusMeta("finding", next).label }));
       } catch (e) {
         setFinding((cur) => (cur ? { ...cur, status: prev } : cur));
-        toast.error("Update failed: " + (e as Error).message);
+        toast.error(t("toasts.updateFailed", { message: (e as Error).message }));
       }
     },
-    [finding, id],
+    [finding, id, statusMeta, t],
   );
 
   const changeReportState = React.useCallback(
@@ -125,23 +129,23 @@ function FindingDetailInner() {
       try {
         const updated = await api.setFindingReportState(id, next);
         setFinding(updated);
-        toast.success(`Report stage changed to "${REPORT_STATE_META[next].label}"`);
+        toast.success(t("toasts.reportStageChanged", { label: reportStateMeta(next).label }));
       } catch (e) {
         setFinding((cur) => (cur ? { ...cur, report_state: prev } : cur));
-        toast.error("Update failed: " + (e as Error).message);
+        toast.error(t("toasts.updateFailed", { message: (e as Error).message }));
       }
     },
-    [finding, id],
+    [finding, id, reportStateMeta, t],
   );
 
   if (!finding) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-        <p className="text-muted-foreground">{loaded ? `Finding ${id} not found` : "Loading…"}</p>
+        <p className="text-muted-foreground">{loaded ? t("notFound", { id }) : t("loading")}</p>
         {loaded && (
           <Button asChild variant="outline">
             <Link href="/function/findings">
-              <ArrowLeftIcon /> Back to findings
+              <ArrowLeftIcon /> {t("backToFindings")}
             </Link>
           </Button>
         )}
@@ -149,7 +153,7 @@ function FindingDetailInner() {
     );
   }
 
-  const title = finding.name || finding.vulnclass || "Uncategorized";
+  const title = finding.name || finding.vulnclass || t("uncategorized");
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col gap-0">
@@ -173,12 +177,12 @@ function FindingDetailInner() {
           <ReportStateBadge state={finding.report_state} />
           <VerificationBadge finding={finding} />
           {finding.inherited && finding.source_task_id && (
-            <Badge variant="outline">Source task #{finding.source_task_id} · read-only</Badge>
+            <Badge variant="outline">{t("sourceTaskReadOnly", { id: finding.source_task_id })}</Badge>
           )}
         </div>
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="lineage">Exploration graph</TabsTrigger>
+          <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
+          <TabsTrigger value="lineage">{t("tabs.lineage")}</TabsTrigger>
         </TabsList>
       </header>
 
@@ -191,16 +195,16 @@ function FindingDetailInner() {
             <div className="flex flex-col gap-4 lg:col-span-2">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-sm">Digest</CardTitle>
+                  <CardTitle className="text-sm">{t("digest.title")}</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.summary || "(no digest)"}</p>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.summary || t("digest.empty")}</p>
                 </CardContent>
               </Card>
               <FindingRetestPanel key={id} findingId={id} readOnly={finding.inherited} onCompleted={load} />
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-sm">Evidence / PoC</CardTitle>
+                  <CardTitle className="text-sm">{t("evidence.title")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {finding.evidence ? (
@@ -208,14 +212,14 @@ function FindingDetailInner() {
                       {finding.evidence}
                     </pre>
                   ) : (
-                    <p className="text-sm text-muted-foreground">(no evidence)</p>
+                    <p className="text-sm text-muted-foreground">{t("evidence.empty")}</p>
                   )}
                 </CardContent>
               </Card>
               {finding.counterevidence?.trim() && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-sm">Counterevidence</CardTitle>
+                    <CardTitle className="text-sm">{t("counterevidence.title")}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.counterevidence}</p>
@@ -225,7 +229,7 @@ function FindingDetailInner() {
               {finding.confidence_rationale?.trim() && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-sm">Confidence rationale</CardTitle>
+                    <CardTitle className="text-sm">{t("confidenceRationale.title")}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.confidence_rationale}</p>
@@ -242,19 +246,19 @@ function FindingDetailInner() {
               {/* Below evidence: detailed report (rendered Markdown) */}
               <Card>
                 <CardHeader className="flex-row items-center justify-between">
-                  <CardTitle className="text-sm">Detailed report</CardTitle>
-                  {finding.report && <CopyButton text={finding.report} successMessage="Detailed report copied" />}
+                  <CardTitle className="text-sm">{t("report.title")}</CardTitle>
+                  {finding.report && <CopyButton text={finding.report} successMessage={t("report.copied")} />}
                 </CardHeader>
                 <CardContent>
                   {finding.report_stale ? (
                     <Alert>
-                      <AlertDescription>Traffic evidence has changed; the detailed report is pending an update.</AlertDescription>
+                      <AlertDescription>{t("report.stale")}</AlertDescription>
                     </Alert>
                   ) : null}
                   {finding.report ? (
                     <Markdown text={finding.report} />
                   ) : (
-                    <p className="text-sm text-muted-foreground">No detailed report yet.</p>
+                    <p className="text-sm text-muted-foreground">{t("report.empty")}</p>
                   )}
                 </CardContent>
               </Card>
@@ -263,18 +267,18 @@ function FindingDetailInner() {
             {/* Right column: status panel */}
             <Card className="h-fit lg:sticky lg:top-24">
               <CardHeader>
-                <CardTitle className="text-sm">Status</CardTitle>
+                <CardTitle className="text-sm">{t("status.title")}</CardTitle>
               </CardHeader>
               <CardContent className="divide-y">
                 {/* Vulnerability ID */}
-                <FieldRow label="Vulnerability ID">
+                <FieldRow label={t("fields.vulnerabilityId")}>
                   <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                     #{finding.id}
                   </code>
                 </FieldRow>
 
                 {/* Severity */}
-                <FieldRow label="Severity">
+                <FieldRow label={t("fields.severity")}>
                   {finding.inherited ? (
                     <StatusBadge domain="severity" value={finding.severity} dot />
                   ) : (
@@ -296,7 +300,7 @@ function FindingDetailInner() {
                 </FieldRow>
 
                 {/* Triage status */}
-                <FieldRow label="Triage status">
+                <FieldRow label={t("fields.triageStatus")}>
                   {finding.inherited ? (
                     <StatusBadge domain="finding" value={finding.status} dot />
                   ) : (
@@ -317,7 +321,7 @@ function FindingDetailInner() {
                   )}
                 </FieldRow>
 
-                <FieldRow label="Report stage">
+                <FieldRow label={t("fields.reportStage")}>
                   {finding.inherited ? (
                     <ReportStateBadge state={finding.report_state} />
                   ) : (
@@ -332,7 +336,7 @@ function FindingDetailInner() {
                         <SelectGroup>
                           {FINDING_REPORT_STATES.map((st) => (
                             <SelectItem key={st} value={st}>
-                              {REPORT_STATE_META[st].label}
+                              {reportStateMeta(st).label}
                             </SelectItem>
                           ))}
                         </SelectGroup>
@@ -343,7 +347,7 @@ function FindingDetailInner() {
 
                 {/* Verification: automated outcome; the note explains any state other than verified */}
                 {finding.verification_status && (
-                  <FieldRow label="Verification">
+                  <FieldRow label={t("fields.verification")}>
                     <VerificationBadge finding={finding} />
                     {finding.verification_status !== "verified" && finding.verification_note?.trim() && (
                       <p className="whitespace-pre-wrap break-words text-muted-foreground text-xs">
@@ -354,7 +358,7 @@ function FindingDetailInner() {
                 )}
 
                 {/* Vulnerability type */}
-                <FieldRow label="Vulnerability type">
+                <FieldRow label={t("fields.vulnerabilityType")}>
                   {finding.vulnclass ? (
                     <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{finding.vulnclass}</code>
                   ) : (
@@ -363,7 +367,7 @@ function FindingDetailInner() {
                 </FieldRow>
 
                 {/* Assets */}
-                <FieldRow label="Assets">
+                <FieldRow label={t("fields.assets")}>
                   {finding.assets && finding.assets.length > 0 ? (
                     <div className="flex flex-wrap justify-end gap-1">
                       {finding.assets.map((a) => (
@@ -382,7 +386,7 @@ function FindingDetailInner() {
                 </FieldRow>
 
                 {/* Task */}
-                <FieldRow label="Task">
+                <FieldRow label={t("fields.task")}>
                   {finding.task_id ? (
                     <Link
                       href={`/function/tasks/detail?id=${finding.task_id}`}
@@ -393,12 +397,12 @@ function FindingDetailInner() {
                       <ArrowUpRightIcon className="size-3 shrink-0" />
                     </Link>
                   ) : (
-                    <span className="text-muted-foreground">— (task deleted)</span>
+                    <span className="text-muted-foreground">{t("fields.taskDeleted")}</span>
                   )}
                 </FieldRow>
 
                 {/* Found at */}
-                <FieldRow label="Found at">
+                <FieldRow label={t("fields.foundAt")}>
                   <span className="tabular-nums">{fmtTime(finding.ts)}</span>
                 </FieldRow>
               </CardContent>

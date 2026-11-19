@@ -1,0 +1,211 @@
+{
+  "page": {
+    "common": {
+      "cancel": "취소",
+      "save": "저장",
+      "saving": "저장 중…",
+      "loading": "불러오는 중…"
+    },
+    "badge": {
+      "allow": "허용",
+      "block": "차단",
+      "ask": "승인 요청"
+    },
+    "header": {
+      "title": "명령 가로채기",
+      "subtitle": "도구는 실행 전에 가로채기 규칙과 대조되며, 일치하지 않는 명령은 모델 폴백이 판단할 수 있습니다"
+    },
+    "scope": {
+      "label": "가로채기 범위",
+      "empty": "활성화된 도구가 없습니다 — 가로채기 규칙과 모델 폴백 모두 적용되지 않습니다",
+      "toolCount": "도구 {count}개",
+      "adjust": "범위 조정",
+      "dialogDescription": "가로채기가 활성화된 도구만 규칙 대조를 거치며, 그 외 모든 도구는 바로 통과합니다",
+      "groups": {
+        "execution": "실행",
+        "writeEdit": "쓰기/편집",
+        "system": "시스템 도구",
+        "custom": "사용자 지정 도구"
+      }
+    },
+    "tabs": {
+      "rules": "가로채기 규칙",
+      "judge": "모델 설정"
+    },
+    "rules": {
+      "hint": "규칙은 우선순위 순서(높은 숫자 우선)로 하나씩 대조되며, 첫 번째로 일치하는 규칙이 적용됩니다",
+      "create": "규칙 생성",
+      "empty": "아직 규칙이 없습니다",
+      "createFirst": "첫 번째 규칙 생성"
+    },
+    "table": {
+      "priority": "우선순위",
+      "name": "이름",
+      "target": "대상",
+      "type": "유형",
+      "pattern": "패턴",
+      "policy": "정책",
+      "enabled": "활성화",
+      "targetToolName": "도구 이름",
+      "targetInput": "입력 내용",
+      "typeRegex": "정규식",
+      "typeArgv": "Argv 접두사",
+      "typeString": "문자열"
+    },
+    "editor": {
+      "editTitle": "규칙 편집",
+      "createTitle": "규칙 생성",
+      "description": "우선순위가 높을수록 먼저 대조되며, 첫 번째로 일치하는 규칙이 적용되고 나머지는 건너뜁니다",
+      "nameLabel": "이름",
+      "namePlaceholder": "규칙 이름을 입력하세요",
+      "priorityLabel": "우선순위 (숫자가 클수록 먼저 대조)",
+      "matchTargetLabel": "대조 대상",
+      "targetToolName": "도구 이름 (tool_name)",
+      "targetToolInput": "입력 내용 (tool_input JSON)",
+      "matchTypeLabel": "대조 유형",
+      "typeString": "문자열 포함",
+      "typeRegex": "정규 표현식",
+      "typeArgv": "Argv 접두사 (Bash 전용)",
+      "patternLabel": "패턴",
+      "regexWarn": "Go RE2 확장 구문(예: <code>(?i)</code>)을 포함합니다. 브라우저에서는 미리 볼 수 없으며, 서버가 제출 시 검증합니다",
+      "argvHelp": "토큰 1~8개의 JSON 배열: 프로그램과 그 하위 명령으로, 플래그는 제외합니다. 접두사가 정확히 <code>{prefix}</code>인 단일 단순 Bash 명령과 일치합니다. 플래그는 제한되지 않습니다: <code>[\"git\",\"push\"]</code>는 <code>git push --force</code>도 포함합니다.",
+      "policyLabel": "가로채기 정책",
+      "policyAllow": "허용 — 나머지 규칙을 건너뛰고 바로 통과",
+      "policyDeny": "차단 — 실행을 끊고 모델에 거부 메시지를 반환",
+      "policyAsk": "사용자에게 확인 — 승인을 대기",
+      "denialLabel": "거부 메시지 (모델에 반환됨)",
+      "approvalNoteLabel": "승인 메모 (선택 사항)",
+      "denialPlaceholder": "보안 정책에 의해 차단됨",
+      "timeoutEnableLabel": "승인 시간 제한 활성화",
+      "timeoutEnableHint": "대기하지 않고 시간 초과 후 자동으로 처리",
+      "timeoutSecondsLabel": "시간 제한 (초)",
+      "timeoutActionLabel": "시간 초과 동작",
+      "autoDeny": "자동 거부",
+      "autoAllow": "자동 허용",
+      "enableRule": "이 규칙 활성화"
+    },
+    "toasts": {
+      "loadRulesFailed": "가로채기 규칙을 불러오지 못했습니다",
+      "nameRequired": "이름을 비울 수 없습니다",
+      "patternRequired": "패턴을 비울 수 없습니다",
+      "invalidRegex": "정규식 구문이 잘못되었습니다",
+      "ruleUpdated": "규칙을 수정했습니다",
+      "ruleCreated": "규칙을 생성했습니다",
+      "ruleDeleted": "규칙을 삭제했습니다",
+      "loadFailed": "불러오기에 실패했습니다: {message}",
+      "scopeSaved": "가로채기 범위를 저장했습니다",
+      "saveFailed": "저장에 실패했습니다: {message}"
+    },
+    "judge": {
+      "title": "모델 폴백 승인",
+      "description": "<scope>가로채기 범위</scope> 안에 있으면서 <rule>어떤 가로채기 규칙에도 일치하지 않는</rule> 명령만 모델이 의미적으로 판단합니다 (허용 / 사람 승인으로 에스컬레이션 / 차단)",
+      "enabled": "활성화됨",
+      "disabled": "비활성화됨",
+      "saveConfig": "설정 저장",
+      "toasts": {
+        "loadFailed": "모델 폴백 설정을 불러오지 못했습니다: {message}",
+        "saved": "모델 폴백 설정을 저장했습니다",
+        "templateRestored": "기본 제공 템플릿을 복원했습니다",
+        "restoreFailed": "복원에 실패했습니다: {message}"
+      },
+      "usage": {
+        "title": "승인 토큰 소비량",
+        "subtitle": "누적 모델 폴백 승인 사용량으로, 별도로 측정되며(worker=judge) 모델별 설정 통계와 섞이지 않습니다",
+        "refresh": "새로 고침",
+        "calls": "승인 호출",
+        "inputTokens": "입력 토큰",
+        "outputTokens": "출력 토큰",
+        "cacheRead": "캐시 읽기",
+        "cacheWrite": "캐시 쓰기",
+        "dailyLabel": "지난 30일간 일일 소비량 (입력 + 출력)"
+      },
+      "sparkbarTooltip": "{date} · 호출 {calls}회 · 토큰 {tokens}개",
+      "promptSection": {
+        "title": "승인 프롬프트",
+        "subtitle": "모델이 이를 바탕으로 ALLOW / ASK / DENY를 결정합니다. 직접 편집할 수 있습니다",
+        "restore": "기본 템플릿 복원",
+        "placeholder": "비워두면 기본 제공 템플릿을 사용합니다",
+        "chars": "{count}자"
+      },
+      "policy": {
+        "heading": "심사 모델 및 정책",
+        "modelLabel": "승인 모델",
+        "followActive": "활성 프로파일 따르기",
+        "modeLabel": "심사 모드",
+        "modeClosed": "폐쇄형 질문 (코드가 결정하고, 프롬프트는 운영자 정책이며, 실패 시 확인 요청)",
+        "modeFreeform": "자유 형식 프롬프트 (모델이 결정)",
+        "timeoutLabel": "모델 심사 시간 제한 (초)",
+        "failLabel": "모델 실패 시 (오류 / 시간 초과 / 파싱 불가)",
+        "failAllow": "허용",
+        "failEscalate": "사람 승인으로 에스컬레이션",
+        "failBlock": "차단"
+      },
+      "human": {
+        "heading": "사람 승인 (모델이 \"ask\"로 결정한 경우)",
+        "timeoutLabel": "승인 대기 시간 제한 (초)",
+        "timeoutActionLabel": "시간 초과 후 기본 동작",
+        "deny": "차단",
+        "allow": "허용"
+      }
+    }
+  },
+  "assets": {
+    "header": {
+      "title": "자산 가로채기",
+      "subtitle": "전역 자산 차단 목록: 일치하는 도메인 / IP / URL / 네트워크를 가로채며, 이들에 대해서는 어떤 작업도 실행하지 않습니다"
+    },
+    "intro": "도메인 / IP / URL의 정확 일치 및 부분 일치와 CIDR 네트워크를 지원합니다. 정부(.gov / .gov.cn) 및 교육(.edu / .edu.cn) 사이트에 대한 기본 제공 부분 일치 차단을 포함합니다",
+    "create": "규칙 생성",
+    "loading": "불러오는 중…",
+    "empty": "아직 자산 가로채기 규칙이 없습니다",
+    "createFirst": "첫 번째 규칙 생성",
+    "builtin": "기본 제공",
+    "confirmDelete": "자산 가로채기 규칙 \"{pattern}\"을(를) 삭제하시겠습니까?",
+    "group": {
+      "exact": "정확히 일치",
+      "fuzzy": "부분 일치",
+      "cidr": "CIDR"
+    },
+    "validate": {
+      "empty": "대조 내용을 비울 수 없습니다",
+      "cidr": "CIDR 형식이 올바르지 않습니다. 예: 192.168.0.0/16"
+    },
+    "table": {
+      "type": "유형",
+      "matchContent": "대조 내용",
+      "note": "메모",
+      "enabled": "활성화"
+    },
+    "kind": {
+      "exact_domain": "도메인 (정확히 일치)",
+      "exact_ip": "IP (정확히 일치)",
+      "exact_url": "URL (정확히 일치)",
+      "fuzzy_domain": "도메인 (부분 일치)",
+      "fuzzy_ip": "IP (부분 일치)",
+      "fuzzy_url": "URL (부분 일치)",
+      "cidr": "CIDR 네트워크"
+    },
+    "toasts": {
+      "loadFailed": "자산 가로채기 규칙을 불러오지 못했습니다",
+      "ruleUpdated": "규칙을 수정했습니다",
+      "ruleCreated": "규칙을 생성했습니다",
+      "ruleDeleted": "규칙을 삭제했습니다"
+    },
+    "editor": {
+      "editTitle": "자산 가로채기 규칙 편집",
+      "createTitle": "자산 가로채기 규칙 생성",
+      "description": "이 규칙과 일치하는 대상 자산을 전역에서 가로챕니다",
+      "matchTypeLabel": "대조 유형",
+      "matchContentLabel": "대조 내용",
+      "hintCidr": "CIDR 네트워크, 예: 192.168.0.0/16",
+      "hintFuzzy": "부분 일치: 대상이 이 내용을 포함하면 일치합니다",
+      "hintExact": "정확 일치: 대상이 이 내용과 정확히 같아야 합니다",
+      "noteLabel": "메모 (선택 사항)",
+      "notePlaceholder": "이 규칙의 용도를 설명하세요",
+      "enableRule": "이 규칙 활성화",
+      "cancel": "취소",
+      "save": "저장",
+      "saving": "저장 중…"
+    }
+  }
+}

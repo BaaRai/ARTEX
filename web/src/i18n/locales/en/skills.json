@@ -1,0 +1,129 @@
+{
+  "header": {
+    "title": "Skill",
+    "subtitle": "Skill library · agentskills.io spec · visibility granted per agent",
+    "missedCalls": "{count} missed calls",
+    "missingDescription": "Skills agents invoke by name that do not exist in the library. Sorted by invocation count."
+  },
+  "sidebar": {
+    "createSkill": "Create skill",
+    "uploadArchive": "Upload archive",
+    "uploading": "Uploading…",
+    "uploadTitle": "Upload a .zip archive containing SKILL.md",
+    "emptyNoSkills": "No skills yet — click \"Create\" to get started"
+  },
+  "tree": {
+    "newFile": "New file",
+    "newFolder": "New folder",
+    "deleteFolder": "Delete folder",
+    "deleteFile": "Delete file",
+    "deleteSkill": "Delete skill",
+    "callTooltip": "Called {count} times · last {time}",
+    "newFilePlaceholder": "filename.py",
+    "newFolderPlaceholder": "folder-name"
+  },
+  "common": {
+    "callsCount": "{count} calls",
+    "noCallRecords": "No call records yet.",
+    "cancel": "Cancel",
+    "noAgents": "(no agents)"
+  },
+  "overview": {
+    "emptyNoSkills": "No skills yet — click \"Create\" or \"Upload archive\" on the left to get started",
+    "title": "Skill library overview",
+    "subtitle": "Select a skill on the left to view details and call history, or get a quick picture of overall usage here.",
+    "stats": {
+      "totalSkills": "Total skills",
+      "totalSkillsHint": "{count} have been called",
+      "totalCalls": "Total calls",
+      "unused": "Unused",
+      "unusedHintSome": "never loaded by any agent",
+      "unusedHintNone": "all used",
+      "missedCalls": "Missed calls",
+      "missedCallsHintSome": "{count} missing skills",
+      "missedCallsHintNone": "none"
+    },
+    "callRanking": "Call ranking",
+    "noCallRecordsRanking": "No skill call records yet.",
+    "recentCalls": "Recent calls",
+    "noRecords": "No records yet.",
+    "unusedSkills": "Unused skills",
+    "allCalled": "All skills have been called."
+  },
+  "detail": {
+    "licenseLabel": "License: {license}",
+    "callStats": "Call stats",
+    "totalCalls": "Total calls",
+    "tasksCovered": "Tasks covered",
+    "lastCalled": "Last called",
+    "calledBy": "Called by:",
+    "loadingCallDetails": "Loading call details…",
+    "lastNCalls": "Last {count} calls",
+    "taskRef": "Task #{id}",
+    "chatSession": "Chat session",
+    "linkedMcp": "Linked MCP",
+    "linkedMcpHint": "(tools are disclosed/unlocked only when the skill loads)",
+    "visibility": "Visibility (granted per agent)"
+  },
+  "mcp": {
+    "noServers": "No MCP servers yet; add one on the \"MCP\" page."
+  },
+  "editor": {
+    "saving": "Saving…",
+    "save": "Save",
+    "loading": "Loading…"
+  },
+  "delete": {
+    "titleSkill": "Delete skill \"{name}\"?",
+    "titleFolder": "Delete folder \"{path}\"?",
+    "titleFile": "Delete file \"{path}\"?",
+    "descSkill": "This deletes all of the skill's files, MCP links and visibility config. This action cannot be undone.",
+    "descFolder": "This also deletes all files under the folder. This action cannot be undone.",
+    "descDefault": "This action cannot be undone.",
+    "deleting": "Deleting…",
+    "confirm": "Delete"
+  },
+  "create": {
+    "title": "Create skill",
+    "tabBasics": "Basics",
+    "tabLinkedMcp": "Linked MCP",
+    "tabVisibility": "Visibility",
+    "nameLabel": "Name",
+    "nameHint": "Lowercase letters / digits / hyphens, 1–64 characters",
+    "descLabel": "Description",
+    "descPlaceholder": "What this skill does and when to use it.",
+    "licenseLabel": "license",
+    "licensePlaceholder": "MIT / Proprietary",
+    "compatibilityLabel": "compatibility",
+    "compatibilityPlaceholder": "Requires sqlmap, python3",
+    "bodyLabel": "Body",
+    "bodyHint": "(skeleton generated automatically when empty)",
+    "bodyPlaceholder": "## How to run\n\n1. Probe for errors first\n2. Distinguish blind injection types\n\nScripts go in the scripts/ directory.",
+    "mcpHint": "The selected MCP's tools are disclosed and unlocked only when the skill loads.",
+    "visibilityHint": "The selected agents will see this skill once it is created.",
+    "creating": "Creating…",
+    "submit": "Create"
+  },
+  "toasts": {
+    "installed": "Skill installed: {name} ({files} files)",
+    "overwriteConfirm": "{message}\n\nOverwrite the skill with the same name?",
+    "uploadFailed": "Upload failed: {message}",
+    "readFileFailed": "Failed to read the file",
+    "folderCreated": "Folder created: {path}",
+    "fileCreated": "File created: {path}",
+    "createFailed": "Create failed: {message}",
+    "deleted": "Deleted: {path}",
+    "deleteFailed": "Delete failed: {message}",
+    "skillDeleted": "Skill deleted: {name}",
+    "saved": "Saved",
+    "saveFailed": "Save failed: {message}",
+    "mcpLinked": "Linked \"{name}\"",
+    "mcpUnlinked": "Unlinked \"{name}\"",
+    "operationFailed": "Operation failed: {message}",
+    "visibilityGranted": "Granted visibility to \"{name}\"",
+    "visibilityRevoked": "Revoked visibility to \"{name}\"",
+    "nameRequired": "Please fill in the name",
+    "descRequired": "description is required",
+    "skillCreated": "Skill created"
+  }
+}

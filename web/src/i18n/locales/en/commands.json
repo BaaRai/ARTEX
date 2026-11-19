@@ -1,0 +1,40 @@
+{
+  "header": {
+    "title": "Tool executions"
+  },
+  "toolbar": {
+    "searchPlaceholder": "Search tools / arguments...",
+    "taskIdPlaceholder": "Task ID",
+    "perPage": "{n} / page",
+    "stats": "Stats"
+  },
+  "table": {
+    "columns": {
+      "time": "Time",
+      "task": "Task",
+      "worker": "Worker",
+      "tool": "Tool",
+      "input": "Input",
+      "status": "Status"
+    },
+    "empty": "No tool execution records yet"
+  },
+  "status": {
+    "failed": "Failed",
+    "success": "Success"
+  },
+  "stats": {
+    "title": "Tool call stats",
+    "descFiltered": "All records under the current filters",
+    "descAll": "All tool execution records",
+    "summary": "<num>{tools}</num> tools · <num>{calls}</num> calls",
+    "failedSummary": " · Failed <err>{errors}</err>",
+    "empty": "No stats data"
+  },
+  "detail": {
+    "title": "Tool execution details",
+    "input": "Input",
+    "output": "Output",
+    "empty": "(empty)"
+  }
+}

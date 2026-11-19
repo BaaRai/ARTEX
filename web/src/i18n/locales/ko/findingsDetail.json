@@ -1,0 +1,56 @@
+{
+  "loading": "불러오는 중…",
+  "notFound": "발견 사항 {id}을(를) 찾을 수 없습니다",
+  "backToFindings": "발견 사항으로 돌아가기",
+  "uncategorized": "분류되지 않음",
+  "sourceTaskReadOnly": "원본 작업 #{id} · 읽기 전용",
+  "tabs": {
+    "overview": "개요",
+    "lineage": "탐색 그래프"
+  },
+  "digest": {
+    "title": "요약",
+    "empty": "(요약 없음)"
+  },
+  "evidence": {
+    "title": "증거 / PoC",
+    "empty": "(증거 없음)"
+  },
+  "counterevidence": {
+    "title": "반대 증거"
+  },
+  "confidenceRationale": {
+    "title": "신뢰도 근거"
+  },
+  "report": {
+    "title": "상세 보고서",
+    "copied": "상세 보고서가 복사되었습니다",
+    "stale": "트래픽 증거가 변경되었습니다. 상세 보고서 업데이트가 대기 중입니다.",
+    "empty": "아직 상세 보고서가 없습니다."
+  },
+  "status": {
+    "title": "상태"
+  },
+  "fields": {
+    "vulnerabilityId": "취약점 ID",
+    "severity": "심각도",
+    "triageStatus": "분류 상태",
+    "reportStage": "보고서 단계",
+    "verification": "검증",
+    "vulnerabilityType": "취약점 유형",
+    "assets": "자산",
+    "task": "작업",
+    "taskDeleted": "— (삭제된 작업)",
+    "foundAt": "발견 시각"
+  },
+  "toasts": {
+    "severityChanged": "심각도가 \"{label}\"(으)로 변경되었습니다",
+    "statusChanged": "상태가 \"{label}\"(으)로 변경되었습니다",
+    "reportStageChanged": "보고서 단계가 \"{label}\"(으)로 변경되었습니다",
+    "updateFailed": "업데이트 실패: {message}"
+  },
+  "lineage": {
+    "empty": "표시할 계보가 없습니다 (이 취약점이 탐색 노드에 연결되어 있지 않거나 해당 작업이 삭제되었습니다).",
+    "emptyHint": "계보 없음"
+  }
+}

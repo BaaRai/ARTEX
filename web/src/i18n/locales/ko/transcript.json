@@ -1,0 +1,48 @@
+{
+  "common": {
+    "loading": "불러오는 중…"
+  },
+  "liveStreaming": "실시간 스트리밍…",
+  "intercept": {
+    "approvalRequest": "승인 요청",
+    "historyReadOnly": "이력 · 읽기 전용",
+    "status": {
+      "allowed": "허용됨",
+      "timedOut": "시간 초과",
+      "denied": "거부됨"
+    },
+    "allow": "허용",
+    "deny": "거부",
+    "expandDetails": "승인 세부 정보 펼치기",
+    "collapseDetails": "승인 세부 정보 접기",
+    "retryDetails": "세부 정보 재시도",
+    "loadingDetails": "승인 세부 정보 불러오는 중…",
+    "loadFailed": "승인 세부 정보를 불러오지 못했습니다",
+    "toastAllowed": "실행이 허용되었습니다",
+    "toastDenied": "실행이 거부되었습니다"
+  },
+  "tool": {
+    "running": "실행 중…",
+    "failed": "✕ 실패",
+    "focusedAria": "포커스된 도구 호출 #{seq}"
+  },
+  "kindLabel": {
+    "thinking": "사고",
+    "result": "요약",
+    "note": "메모"
+  },
+  "round": {
+    "new": "새 라운드"
+  },
+  "segment": {
+    "command": "명령",
+    "output": "출력"
+  },
+  "message": {
+    "includesThinking": "· 사고 과정 포함"
+  },
+  "user": {
+    "targetDerivedTooltip": "이 요청에는 작업 목표에 없는 호스트가 포함되어 있으며, 대상 콘텐츠에서 비롯되었을 수 있습니다.",
+    "targetDerivedText": "대상에서 파생된 텍스트 포함: {hosts}"
+  }
+}

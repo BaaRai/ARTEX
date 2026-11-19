@@ -1,0 +1,40 @@
+{
+  "empty": "No exploration data",
+  "node": {
+    "inheritedTitle": "Inherited from task #{id}, read-only",
+    "sourceBadge": "Source #{id}"
+  },
+  "nodeType": {
+    "task": "Root task",
+    "begin": "Start",
+    "goal": "Goal",
+    "hint": "Hint",
+    "intent": "Intent",
+    "fact": "Fact",
+    "finding": "Vulnerability",
+    "digest": "Digest"
+  },
+  "relation": {
+    "spawns": "spawns",
+    "derived_from": "intent chain",
+    "yields": "yields",
+    "proves": "proves"
+  },
+  "detail": {
+    "sourceTaskBadge": "Source task #{id} · read-only",
+    "properties": "Properties",
+    "type": "Type",
+    "status": "Status",
+    "priority": "Priority",
+    "source": "Source",
+    "sourceTask": "Source task",
+    "sourceTaskValue": "#{id} (inherited, read-only)",
+    "time": "Time",
+    "digestConclusions": "Digest conclusions",
+    "compressedNodes": "Compressed nodes ({count})",
+    "membersNotLoaded": "{count} more member nodes not loaded with the current graph",
+    "rawData": "Raw data",
+    "copy": "Copy",
+    "copied": "Copied"
+  }
+}

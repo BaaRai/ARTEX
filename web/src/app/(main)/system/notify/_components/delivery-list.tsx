@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { RefreshCwIcon, RotateCcwIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -11,11 +12,14 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { statusMeta, toneClasses } from "@/lib/status";
+import { toneClasses } from "@/lib/status";
 import type { NotificationChannel, NotificationDelivery } from "@/lib/types";
+import { useStatusMeta } from "@/lib/use-status-meta";
 
 // DeliveryList is the delivery records table: filterable by channel and state, with manual retry for failed items.
 export function DeliveryList({ channels }: { channels: NotificationChannel[] }) {
+  const t = useTranslations("notify");
+  const statusMeta = useStatusMeta();
   const [rows, setRows] = React.useState<NotificationDelivery[]>([]);
   const [total, setTotal] = React.useState(0);
   const [page, setPage] = React.useState(1);
@@ -32,9 +36,9 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
         setRows(r.deliveries);
         setTotal(r.total);
       })
-      .catch((e) => toast.error("Failed to load delivery records: " + (e as Error).message))
+      .catch((e) => toast.error(t("deliveryList.loadFailed", { message: (e as Error).message })))
       .finally(() => setLoading(false));
-  }, [channelID, state, page]);
+  }, [channelID, state, page, t]);
   React.useEffect(() => {
     load();
   }, [load]);
@@ -42,10 +46,10 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
   async function retry(id: number) {
     try {
       await api.notifyRetryDelivery(id);
-      toast.success("Re-queued");
+      toast.success(t("deliveryList.requeued"));
       load();
     } catch (e) {
-      toast.error("Retry failed: " + (e as Error).message);
+      toast.error(t("deliveryList.retryFailed", { message: (e as Error).message }));
     }
   }
 
@@ -62,10 +66,10 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
           }}
         >
           <SelectTrigger size="sm" className="w-44">
-            <SelectValue placeholder="All channels" />
+            <SelectValue placeholder={t("deliveryList.allChannels")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All channels</SelectItem>
+            <SelectItem value="all">{t("deliveryList.allChannels")}</SelectItem>
             {channels.map((c) => (
               <SelectItem key={c.id} value={String(c.id)}>
                 {c.name}
@@ -81,10 +85,10 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
           }}
         >
           <SelectTrigger size="sm" className="w-32">
-            <SelectValue placeholder="All statuses" />
+            <SelectValue placeholder={t("deliveryList.allStatuses")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="all">{t("deliveryList.allStatuses")}</SelectItem>
             {["pending", "sending", "sent", "failed", "skipped"].map((s) => (
               <SelectItem key={s} value={s}>
                 {statusMeta("delivery", s).label}
@@ -93,21 +97,21 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
           </SelectContent>
         </Select>
         <Button size="sm" variant="outline" onClick={load} disabled={loading}>
-          <RefreshCwIcon className={loading ? "animate-spin" : ""} /> Refresh
+          <RefreshCwIcon className={loading ? "animate-spin" : ""} /> {t("deliveryList.refresh")}
         </Button>
-        <span className="text-muted-foreground ml-auto text-xs">{total} in total</span>
+        <span className="text-muted-foreground ml-auto text-xs">{t("deliveryList.total", { count: total })}</span>
       </div>
 
       <Card className="py-0">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-40">Time</TableHead>
-              <TableHead>Vulnerability</TableHead>
-              <TableHead className="w-40">Channel</TableHead>
-              <TableHead className="w-24">Status</TableHead>
-              <TableHead className="w-16">Attempts</TableHead>
-              <TableHead>Error</TableHead>
+              <TableHead className="w-40">{t("deliveryList.colTime")}</TableHead>
+              <TableHead>{t("deliveryList.colVulnerability")}</TableHead>
+              <TableHead className="w-40">{t("deliveryList.colChannel")}</TableHead>
+              <TableHead className="w-24">{t("deliveryList.colStatus")}</TableHead>
+              <TableHead className="w-16">{t("deliveryList.colAttempts")}</TableHead>
+              <TableHead>{t("deliveryList.colError")}</TableHead>
               <TableHead className="w-20" />
             </TableRow>
           </TableHeader>
@@ -115,7 +119,7 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
             {rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-muted-foreground py-8 text-center">
-                  {loading ? "Loading…" : "No delivery records"}
+                  {loading ? t("deliveryList.loading") : t("deliveryList.empty")}
                 </TableCell>
               </TableRow>
             ) : (
@@ -129,10 +133,10 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
                       <Badge variant="outline" className={toneClasses[statusMeta("severity", d.severity).tone]}>
                         {statusMeta("severity", d.severity).label}
                       </Badge>
-                      <span className="truncate text-sm">{d.title || "(untitled)"}</span>
+                      <span className="truncate text-sm">{d.title || t("deliveryList.untitled")}</span>
                       {d.event_kind === "finding_status_changed" && (
                         <Badge variant="outline" className="shrink-0">
-                          Status change
+                          {t("deliveryList.statusChange")}
                         </Badge>
                       )}
                     </div>
@@ -149,7 +153,7 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
                     {/* Only failed/skipped items get a retry button: re-sending a delivered one would duplicate the push. */}
                     {(d.state === "failed" || d.state === "skipped") && (
                       <Button size="sm" variant="outline" onClick={() => retry(d.id)}>
-                        <RotateCcwIcon /> Retry
+                        <RotateCcwIcon /> {t("deliveryList.retry")}
                       </Button>
                     )}
                   </TableCell>
@@ -163,13 +167,13 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
       {maxPage > 1 && (
         <div className="flex items-center justify-end gap-2">
           <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            Previous
+            {t("deliveryList.previous")}
           </Button>
           <span className="text-muted-foreground text-sm">
             {page} / {maxPage}
           </span>
           <Button size="sm" variant="outline" disabled={page >= maxPage} onClick={() => setPage((p) => p + 1)}>
-            Next
+            {t("deliveryList.next")}
           </Button>
         </div>
       )}
@@ -180,5 +184,5 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
 function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("zh-CN", { hour12: false });
+  return d.toLocaleString("ko-KR", { hour12: false });
 }

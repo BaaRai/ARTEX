@@ -1,0 +1,57 @@
+{
+  "title": "LLM 기록",
+  "toolbar": {
+    "searchPlaceholder": "세션 ID 검색...",
+    "modelPlaceholder": "모델",
+    "taskPlaceholder": "작업 선택…",
+    "noTaskRecords": "아직 작업 기록이 없습니다",
+    "deleteTaskTooltip": "먼저 위에서 작업을 선택하세요",
+    "deleteTask": "작업 대화 삭제",
+    "perPage": "{size} / 페이지",
+    "recording": "기록 중",
+    "off": "꺼짐"
+  },
+  "table": {
+    "columns": {
+      "time": "시간",
+      "task": "작업",
+      "worker": "워커",
+      "profile": "프로파일",
+      "model": "모델",
+      "latency": "지연 시간",
+      "tokens": "토큰",
+      "status": "상태"
+    }
+  },
+  "empty": {
+    "noRecords": "아직 LLM 호출 기록이 없습니다",
+    "recordingOff": "LLM 호출 기록이 꺼져 있습니다. 위의 기록 토글을 켜면 호출 수집이 시작됩니다."
+  },
+  "status": {
+    "ok": "성공",
+    "error": "오류"
+  },
+  "detail": {
+    "taskBadge": "작업 #{id}",
+    "rawToggle": "원시",
+    "rawAvailableTooltip": "공급자와 실제로 주고받은 원시 HTTP 보기",
+    "rawUnavailableTooltip": "이 기록은 기능 출시 이전에 수집되어 원시 데이터가 없습니다",
+    "request": "요청",
+    "response": "응답",
+    "raw": "원시",
+    "rawSse": "원시 (SSE)",
+    "loading": "불러오는 중…",
+    "empty": "(비어 있음)"
+  },
+  "copy": {
+    "copy": "내용 복사",
+    "copied": "복사됨"
+  },
+  "deleteDialog": {
+    "title": "작업 \"{task}\"의 모든 LLM 대화를 삭제하시겠습니까?",
+    "description": "이 작업의 모든 LLM 호출 기록(원시 요청/응답 포함)을 영구적으로 삭제합니다. 삭제 후에는 되돌릴 수 없습니다.",
+    "cancel": "취소",
+    "deleting": "삭제 중…",
+    "confirm": "삭제 확인"
+  }
+}

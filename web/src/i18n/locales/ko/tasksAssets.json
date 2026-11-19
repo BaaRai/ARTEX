@@ -1,0 +1,77 @@
+{
+  "header": {
+    "title": "테스트 자산",
+    "totalLinked": "이 작업은 총 {count}개 자산에 연결되어 있습니다",
+    "add": "테스트 자산 추가"
+  },
+  "tabs": {
+    "root_domain": "루트 도메인",
+    "ip": "IP",
+    "subdomain": "서브도메인",
+    "app": "앱",
+    "service": "서비스",
+    "endpoint": "엔드포인트"
+  },
+  "columns": {
+    "domain": "도메인",
+    "icpRecord": "ICP 등록",
+    "source": "출처",
+    "actions": "동작",
+    "ip": "IP",
+    "cSegment": "C 세그먼트",
+    "boundDomains": "연결된 도메인",
+    "openPorts": "열린 포트",
+    "rootDomain": "루트 도메인",
+    "recordType": "레코드 유형",
+    "recordValue": "레코드 값",
+    "app": "앱",
+    "address": "주소",
+    "category": "카테고리",
+    "title": "제목",
+    "fingerprints": "핑거프린트",
+    "addressService": "주소 / 서비스",
+    "statusCode": "상태 코드",
+    "responseSize": "응답 크기",
+    "auth": "인증",
+    "method": "메서드",
+    "fullUrl": "전체 URL",
+    "params": "파라미터"
+  },
+  "card": {
+    "empty": "이 카테고리에는 아직 테스트 자산이 없습니다",
+    "perPage": "{count} / 페이지",
+    "prevPage": "이전 페이지",
+    "nextPage": "다음 페이지"
+  },
+  "source": {
+    "summaryFallback": "과거 작업의 자산 연결에서 이전되었으며, 자세한 출처 정보가 없습니다",
+    "node": "출처 노드 #{id}"
+  },
+  "add": {
+    "title": "테스트 자산 추가",
+    "description": "테스트 범위를 직접 입력하세요. 도메인과 IP는 전역 자산을 생성하거나 재사용합니다. CIDR, ICP 등록, 키워드는 에이전트 범위 컨텍스트로 사용됩니다.",
+    "editorLabel": "테스트 자산 및 범위",
+    "editorDescription": "한 줄에 하나씩 입력하세요. 도메인, IP, CIDR, ICP 등록, 키워드가 자동으로 인식됩니다.",
+    "cancel": "취소",
+    "registerEntries": "항목 {count}개 등록",
+    "registered": "범위 {requested}개를 등록하고 도메인/IP 자산 {linked}개를 연결했습니다",
+    "failed": "추가 실패: {message}"
+  },
+  "actions": {
+    "removeAssetAria": "작업에서 자산 {name} 제거",
+    "removeFromTask": "작업에서 제거"
+  },
+  "remove": {
+    "title": "이 작업에서 제거하시겠습니까?",
+    "description": "이 작업의 테스트 자산에서 \"{name}\"을(를) 제거합니다.",
+    "keepNote": "전역 자산, 연결된 트래픽, 기존 블랙보드 앵커는 유지됩니다.",
+    "cancel": "취소",
+    "confirm": "제거",
+    "removing": "제거 중"
+  },
+  "toasts": {
+    "removed": "현재 작업에서 {name}을(를) 제거했습니다",
+    "removeFailed": "제거 실패: {message}",
+    "loadFailed": "작업 자산을 불러오지 못했습니다: {message}"
+  }
+}

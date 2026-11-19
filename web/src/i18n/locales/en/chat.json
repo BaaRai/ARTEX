@@ -1,0 +1,98 @@
+{
+  "live": "Live",
+  "agentFallback": "Agent",
+  "newConversation": "New conversation",
+  "custom": "Custom",
+  "startConversation": "Start a conversation with \"{name}\"",
+  "actions": {
+    "cancel": "Cancel",
+    "delete": "Delete"
+  },
+  "composer": {
+    "removeAttachment": "Remove",
+    "uploadFiles": "Upload files",
+    "sendSideQuestion": "Send side question",
+    "stopRun": "Stop this run",
+    "sendMessage": "Send message",
+    "placeholder": "Type a message, @ to reference records, Enter to send",
+    "placeholderRunning": "Agent is replying; type /btw to ask a side question…"
+  },
+  "profile": {
+    "default": "Default",
+    "defaultWithName": "Default ({name})",
+    "change": "Change",
+    "select": "Select an LLM profile"
+  },
+  "draft": {
+    "selectAgent": "Select an agent…"
+  },
+  "meta": {
+    "turns": "{count} turns",
+    "turnsTitle": "Agent loop turns (model calls)",
+    "tokens": "input {input} · cache {cache} · output {output}",
+    "tokensTitle": "input / cache(read) / output tokens"
+  },
+  "transcript": {
+    "loadEarlier": "Scroll up to load earlier messages…"
+  },
+  "conversation": {
+    "running": "Running",
+    "agentRunning": "Agent is running",
+    "pinned": "Pinned",
+    "doubleClickRename": "Double-click to rename",
+    "rename": "Rename",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "selectAria": "Select conversation \"{title}\"",
+    "manageAria": "Manage conversation \"{title}\""
+  },
+  "deleteDialog": {
+    "title": "Delete conversation \"{title}\"?",
+    "description": "This action cannot be undone."
+  },
+  "group": {
+    "expand": "Expand \"{name}\"",
+    "collapse": "Collapse \"{name}\"",
+    "currentHere": "The current conversation is in this group",
+    "runningAria": "{count} conversations running"
+  },
+  "list": {
+    "filterByAgent": "Filter conversations by agent",
+    "selectAllAria": "Select all conversations matching the current filter",
+    "allAgents": "All agents",
+    "countTotal": "{count} total",
+    "selectedCount": "{count} selected",
+    "done": "Done",
+    "select": "Select",
+    "emptyNone": "No conversations yet",
+    "emptyForAgent": "No conversations for this agent",
+    "loadMore": "Load more"
+  },
+  "source": {
+    "deleted": "The conversation has been deleted",
+    "loading": "Loading the conversation…"
+  },
+  "bulkDelete": {
+    "title": "Delete {count} selected conversations?",
+    "description": "Conversation messages and execution records will be deleted with them. This action cannot be undone.",
+    "deleting": "Deleting",
+    "confirm": "Confirm delete"
+  },
+  "toasts": {
+    "sendFailed": "Send failed: {message}",
+    "uploadFailed": "Upload failed: {message}",
+    "switchLlmFailed": "Failed to switch LLM: {message}",
+    "stopFailed": "Stop failed: {message}",
+    "deleteFailed": "Delete failed: {message}",
+    "renameFailed": "Rename failed: {message}",
+    "pinFailed": "Failed to pin: {message}",
+    "unpinFailed": "Failed to unpin: {message}",
+    "deletedConversations": "Deleted {count} conversations",
+    "deleteFailedSome": "Failed to delete {count} conversations: {details}",
+    "etc": " etc.",
+    "bulkDeleteFailed": "Bulk delete failed: {message}"
+  },
+  "errors": {
+    "conversationNotFound": "conversation not found"
+  }
+}

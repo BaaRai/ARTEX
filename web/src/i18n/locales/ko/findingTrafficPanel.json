@@ -1,0 +1,38 @@
+{
+  "header": {
+    "title": "연결된 트래픽",
+    "description": "재현 순서대로 정리된 요청과 응답입니다. 연결된 증거는 원본 트래픽이 삭제된 후에도 유지됩니다."
+  },
+  "readOnlyBadge": "상속된 증거 · 읽기 전용",
+  "roles": {
+    "baseline": "기준선",
+    "proof": "취약점 증명",
+    "verification": "보충 검증",
+    "supporting": "보조 증거"
+  },
+  "evidenceTag": "증거 #{id}",
+  "empty": {
+    "title": "연결된 트래픽 없음",
+    "description": "기준선, 취약점 증명, 보충 검증 요청을 연결하세요."
+  },
+  "actions": {
+    "linkTraffic": "트래픽 연결",
+    "retry": "재시도",
+    "viewMessage": "메시지 보기",
+    "editNote": "메모 편집",
+    "moveUp": "증거 {id} 위로 이동",
+    "moveDown": "증거 {id} 아래로 이동",
+    "unlink": "연결 해제",
+    "cancel": "취소",
+    "saveNote": "메모 저장"
+  },
+  "editDialog": {
+    "title": "트래픽 증거 편집",
+    "description": "이 요청/응답 집합이 취약점 결론을 어떻게 뒷받침하는지 설명하세요.",
+    "roleLabel": "역할",
+    "noteLabel": "증거 메모"
+  },
+  "toasts": {
+    "updated": "트래픽 증거가 업데이트되었습니다"
+  }
+}

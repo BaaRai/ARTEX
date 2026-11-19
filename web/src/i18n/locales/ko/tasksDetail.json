@@ -1,0 +1,62 @@
+{
+  "tabs": {
+    "sessions": "세션",
+    "overview": "개요",
+    "graph": "탐색 그래프",
+    "broadcast": "브로드캐스트",
+    "findings": "발견 사항",
+    "retests": "재검증",
+    "assets": "테스트 자산",
+    "credentials": "자격 증명",
+    "coverage": "자산 커버리지",
+    "intercept": "가로채기 승인",
+    "report": "보고서"
+  },
+  "llm": {
+    "chainExhausted": "구성 체인 소진됨",
+    "workerRotation": "워커 순환 ({count})",
+    "configNumber": "구성 #{id}",
+    "followDefault": "기본 구성 따름",
+    "backupsCount": "백업 {count}개",
+    "editorDescription": "순환 변경 사항은 새 워커 인텐트에 적용됩니다. 프로파일 변경 사항은 이후 LLM 호출에 적용되며, 처리 중인 호출은 기존 공급자를 유지합니다. 저장하면 소진된 프로파일이 초기화됩니다.",
+    "editorDescriptionTerminal": "작업이 종료되었습니다. 변경 사항은 이후 메인 에이전트 대화에만 영향을 줍니다.",
+    "save": "저장",
+    "saveAndReset": "저장 후 초기화",
+    "saving": "저장 중",
+    "updatedWithReopened": "LLM 구성이 업데이트되고 할당량으로 차단된 인텐트 {count}개가 다시 열렸습니다",
+    "updated": "LLM 구성이 업데이트되었습니다",
+    "updateFailed": "업데이트 실패: {message}",
+    "triggerAriaLabel": "작업 LLM 구성 보기 또는 전환",
+    "chainTitle": "작업 LLM 구성 체인",
+    "rotationOnSuffix": " · 워커 순환 켜짐",
+    "quotaExhaustedTitle": "구성 체인 할당량 소진",
+    "quotaExhaustedFallback": "선택한 모든 구성이 할당량을 초과한 것으로 판단되었습니다. 체인을 저장하면 실패 상태가 초기화됩니다.",
+    "close": "닫기"
+  },
+  "toasts": {
+    "explorationPaused": "탐색이 일시 중지됨",
+    "explorationResumed": "탐색이 재개됨",
+    "operationFailed": "처리 실패: {message}",
+    "archiveQueued": "작업이 보관 대기열에 추가되었습니다",
+    "archiveFailed": "보관 실패: {message}"
+  },
+  "notFound": "작업 {id}이(가) 삭제 또는 보관되었거나 존재하지 않습니다",
+  "loading": "불러오는 중…",
+  "backToTaskList": "작업 목록으로 돌아가기",
+  "archive": {
+    "reasonQueued": "대기열에 있는 작업은 먼저 일시 중지해야 합니다",
+    "reasonRunning": "실행 중인 작업은 먼저 일시 중지해야 합니다",
+    "reasonBlocked": "이 작업은 보관되지 않은 작업 #{id}에 직접 상속됩니다. 종속 작업을 먼저 보관하세요",
+    "ariaLabel": "작업 보관",
+    "dialogTitle": "작업 #{id}을(를) 보관하시겠습니까?",
+    "dialogDescription": "작업 그래프, 관련 레코드, 전용 자산 및 트래픽, 작업 파일, LLM 기록이 콜드 스토리지로 압축됩니다. 보관이 완료되면 작업 목록의 \"보관됨\" 탭에서 복원할 수 있습니다.",
+    "cancel": "취소",
+    "confirm": "보관 확인"
+  },
+  "control": {
+    "pause": "일시 중지",
+    "completed": "완료",
+    "ended": "종료",
+    "resume": "재개"
+  }
+}

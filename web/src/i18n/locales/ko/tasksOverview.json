@@ -1,0 +1,156 @@
+{
+  "descGoal": {
+    "title": "작업 설명 및 목표",
+    "description": "설명",
+    "goal": "목표"
+  },
+  "goals": {
+    "title": "목표 관리",
+    "subtitle": "(최종 검증 가능 목표, 총 {count}개; 추가/편집 시 플래너에 알리고 작업을 다시 활성화합니다)",
+    "addPlaceholder": "목표 추가, 예: '관리자 계정으로 무단 접근 획득'",
+    "vulnPlaceholder": "취약점 분류 (선택 사항)",
+    "add": "추가",
+    "addFailed": "추가 실패",
+    "saveFailed": "저장 실패",
+    "empty": "아직 목표가 없습니다. 목표를 추가하면 플래너가 이를 바탕으로 탐색 인텐트를 발송하고 완료 여부를 판단합니다."
+  },
+  "constraints": {
+    "title": "작업 제약 조건",
+    "subtitle": "(플래너/워커 탐색을 제한, 총 {count}개; 변경 사항은 다음 계획 라운드에 적용됩니다)",
+    "deny": "거부",
+    "allow": "허용",
+    "addPlaceholder": "작업 제약 하나, 예: '현재 포트만 테스트하고 다른 포트는 스캔하지 않음'",
+    "add": "추가",
+    "addFailed": "추가 실패",
+    "saveFailed": "저장 실패",
+    "empty": "아직 작업 제약 조건이 없습니다. 작업 생성 시 설명/목표에서 자동으로 추출되며, 여기에서 추가·편집·삭제하여 어떤 작업을 허용/거부할지 제한할 수 있습니다."
+  },
+  "coverage": {
+    "title": "자산 테스트 커버리지",
+    "subtitle": "(대략적인 추정치, 참고용)",
+    "testedInScope": "테스트됨 {tested} / 범위 내 {denominator}",
+    "gaps": "커버리지 공백: {count}"
+  },
+  "tokens": {
+    "title": "LLM 토큰 사용량",
+    "perModel": "모델별",
+    "callsSuffix": ", 총 {count}회 호출",
+    "input": "입력",
+    "output": "출력",
+    "cacheRead": "캐시 읽기",
+    "cacheHitRate": "캐시 적중률",
+    "table": {
+      "model": "모델",
+      "calls": "호출 수",
+      "input": "입력",
+      "output": "출력",
+      "cacheRead": "캐시 읽기",
+      "hitRate": "적중률"
+    },
+    "empty": "아직 LLM 사용량이 없습니다 (작업이 호출을 하지 않았거나, 기록이 아직 기록되는 중입니다)."
+  },
+  "scope": {
+    "title": "테스트 범위",
+    "subtitle": "(커버리지 범위, 강제 적용 안 됨, 총 {count}개)",
+    "placeholder": {
+      "company": "회사 이름 또는 ID",
+      "ipCidr": "예: 10.0.0.1 또는 10.0.0.0/24",
+      "icp": "예: Beijing ICP No.12345678-1",
+      "keyword": "예: 회사 이름 키워드",
+      "default": "예: example.com"
+    },
+    "add": "추가",
+    "addFailed": "추가 실패",
+    "inherited": "상속됨",
+    "empty": "아직 테스트 범위가 없습니다. 추가하면 자산 커버리지의 분모로 사용됩니다."
+  },
+  "scopeKind": {
+    "company": "회사",
+    "root_domain": "루트 도메인",
+    "subdomain": "서브도메인",
+    "ip": "IP",
+    "cidr": "CIDR",
+    "icp": "ICP",
+    "keyword": "키워드"
+  },
+  "scopeSource": {
+    "auto": "자동",
+    "agent": "에이전트",
+    "manual": "수동"
+  },
+  "scopeValue": {
+    "companyFallback": "회사 #{id}"
+  },
+  "heartbeat": {
+    "title": "하트비트",
+    "engineState": "엔진 상태",
+    "runningWorkers": "실행 중인 워커",
+    "lastActivity": "마지막 활동",
+    "goals": "목표 {met}/{total}",
+    "completedAt": "완료 시각"
+  },
+  "workset": {
+    "runningIntents": "실행 중인 인텐트",
+    "noRunningIntents": "실행 중인 인텐트 없음",
+    "needsAttention": "주의 필요",
+    "confirmedVulns": "확인된 취약점",
+    "running": "실행 중",
+    "frontierOpen": "열린 프런티어",
+    "blockedIntents": "차단된 인텐트",
+    "recentFindings": "최근 발견 사항",
+    "noFindings": "발견 사항 없음"
+  },
+  "blocked": {
+    "title": "차단/오류 인텐트",
+    "subtitle": "(총 {count}개, 재실행 가능)",
+    "rerunAll": "모두 재실행",
+    "rerun": "재실행",
+    "truncated": "처음 20개만 표시됩니다. 나머지 {count}개는 \"모두 재실행\"을 클릭하여 처리하세요."
+  },
+  "stats": {
+    "openIntents": "열린 인텐트",
+    "confirmedFindings": "확인된 발견 사항",
+    "totalIntents": "전체 인텐트",
+    "thisTask": "이 작업",
+    "allIntents": "이 작업의 모든 인텐트"
+  },
+  "intercept": {
+    "title": "작업 수준 자산 가로채기 / 허용",
+    "subtitle": "(이 작업에만 적용, 전역 아님; 차단 규칙이 허용 규칙보다 먼저 평가됨, 총 {count}개)",
+    "block": "차단",
+    "allow": "허용",
+    "notePlaceholder": "메모 (선택 사항)",
+    "add": "추가",
+    "empty": "작업 수준 규칙이 없습니다. \"차단\"에 걸리면 테스트가 금지되고, \"허용\"은 허용 목록입니다. 설정하면 이 작업은 허용 규칙과 일치하는 자산만 허용합니다(미설정 시 허용 목록 없음)."
+  },
+  "ruleKind": {
+    "exact_domain": {
+      "label": "도메인(정확)",
+      "placeholder": "example.gov.cn"
+    },
+    "exact_ip": {
+      "label": "IP(정확)",
+      "placeholder": "203.0.113.10"
+    },
+    "exact_url": {
+      "label": "URL(정확)",
+      "placeholder": "https://example.com/login"
+    },
+    "fuzzy_domain": {
+      "label": "도메인(유사)",
+      "placeholder": ".gov.cn"
+    },
+    "fuzzy_ip": {
+      "label": "IP(유사)",
+      "placeholder": "203.0.113."
+    },
+    "fuzzy_url": {
+      "label": "URL(유사)",
+      "placeholder": "/admin"
+    },
+    "cidr": {
+      "label": "CIDR",
+      "placeholder": "192.168.0.0/16"
+    }
+  }
+}

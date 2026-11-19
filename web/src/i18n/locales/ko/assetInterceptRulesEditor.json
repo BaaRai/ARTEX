@@ -1,0 +1,17 @@
+{
+  "action": {
+    "block": "차단",
+    "allow": "허용"
+  },
+  "kind": {
+    "exact_domain": "도메인(정확)",
+    "exact_ip": "IP(정확)",
+    "exact_url": "URL(정확)",
+    "fuzzy_domain": "도메인(유사)",
+    "fuzzy_ip": "IP(유사)",
+    "fuzzy_url": "URL(유사)",
+    "cidr": "CIDR"
+  },
+  "notePlaceholder": "메모 (선택 사항)",
+  "addRow": "행 추가"
+}

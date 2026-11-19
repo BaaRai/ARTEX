@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { CheckIcon, CopyIcon, FileTextIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Markdown } from "@/components/markdown";
@@ -12,6 +13,7 @@ import { api } from "@/lib/api";
 import { copyText } from "@/lib/utils";
 
 export function ReportTab({ taskId }: { taskId: string }) {
+  const t = useTranslations("tasksMisc");
   const [report, setReport] = React.useState<string>("");
   const [loading, setLoading] = React.useState(true);
   const [copied, setCopied] = React.useState(false);
@@ -40,10 +42,10 @@ export function ReportTab({ taskId }: { taskId: string }) {
     const ok = await copyText(report);
     if (ok) {
       setCopied(true);
-      toast.success("Markdown copied");
+      toast.success(t("report.copied"));
       setTimeout(() => setCopied(false), 1500);
     } else {
-      toast.error("Copy failed; please select the text and copy it manually");
+      toast.error(t("report.copyFailed"));
     }
   }
 
@@ -52,7 +54,7 @@ export function ReportTab({ taskId }: { taskId: string }) {
     content = (
       <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-16 text-muted-foreground text-sm">
         <FileTextIcon className="size-8 opacity-40" />
-        Loading…
+        {t("report.loading")}
       </div>
     );
   } else if (report) {
@@ -65,7 +67,7 @@ export function ReportTab({ taskId }: { taskId: string }) {
     content = (
       <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-16 text-muted-foreground text-sm">
         <FileTextIcon className="size-8 opacity-40" />
-        No report yet
+        {t("report.empty")}
       </div>
     );
   }
@@ -74,12 +76,12 @@ export function ReportTab({ taskId }: { taskId: string }) {
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2 text-sm">
-          <FileTextIcon className="size-4" /> Penetration test report (Markdown)
+          <FileTextIcon className="size-4" /> {t("report.title")}
         </CardTitle>
         <div className="flex gap-2">
           {report && (
             <Button size="sm" variant="outline" onClick={copy}>
-              {copied ? <CheckIcon /> : <CopyIcon />} Copy
+              {copied ? <CheckIcon /> : <CopyIcon />} {t("report.copy")}
             </Button>
           )}
         </div>

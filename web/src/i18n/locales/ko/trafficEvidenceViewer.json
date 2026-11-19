@@ -1,0 +1,23 @@
+{
+  "evidence": {
+    "title": "트래픽 증거 #{id}",
+    "descriptionFallback": "바인딩 시점에 저장된 요청과 응답을 봅니다"
+  },
+  "captured": {
+    "title": "트래픽 미리보기",
+    "description": "트래픽 ID: {id}. 전체 본문은 바인딩 시 저장됩니다."
+  },
+  "tabs": {
+    "request": "요청",
+    "response": "응답"
+  },
+  "body": {
+    "size": "본문 {size} 바이트",
+    "previewSuffix": " · 미리보기"
+  },
+  "download": {
+    "request": "전체 요청 본문 다운로드",
+    "response": "전체 응답 본문 다운로드"
+  },
+  "loadMore": "본문 더 불러오기"
+}

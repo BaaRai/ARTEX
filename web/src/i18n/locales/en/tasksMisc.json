@@ -1,0 +1,54 @@
+{
+  "findings": {
+    "sourceReadonly": "Source #{id} · read-only",
+    "trafficEvidence": "Traffic evidence {count}",
+    "viewDetailsTitle": "View vulnerability details",
+    "details": "Details",
+    "evidencePoc": "Evidence / PoC",
+    "markedAs": "Marked as \"{status}\"",
+    "updateFailed": "Update failed: {message}",
+    "vulnerabilities": "Vulnerabilities",
+    "discoveryTime": "Discovery time",
+    "ascending": "ascending",
+    "descending": "descending",
+    "sortToggleAria": "Discovery time currently {direction}, click to toggle sort direction",
+    "empty": "No confirmed findings yet for this task or its directly linked tasks."
+  },
+  "retests": {
+    "loadFailed": "Failed to load task vulnerabilities: {error}",
+    "retry": "Retry",
+    "selectVulnerability": "Select a vulnerability",
+    "description": "View retest history for this task's vulnerabilities, or start a new retest.",
+    "selectAria": "Select vulnerability: {name}",
+    "emptyTitle": "No vulnerabilities to retest",
+    "emptyDescription": "Once this task discovers vulnerabilities, you can manually start a retest here.",
+    "previousPage": "Previous page of vulnerabilities",
+    "pageIndicator": "Page {page} / {total}",
+    "nextPage": "Next page of vulnerabilities",
+    "vulnerabilityDetails": "Vulnerability details"
+  },
+  "credentials": {
+    "title": "Test accounts",
+    "description": "Test accounts for this task. Entries with an empty password mean the agent registers that account and records it. Agent-recorded accounts appear here automatically.",
+    "emptyTitle": "No test accounts",
+    "emptyDescription": "Add one below, or declare them when creating the task — the agent reuses them for authenticated testing.",
+    "sourceAgent": "agent-recorded",
+    "sourceDeclared": "declared",
+    "passwordAgentGenerates": "— agent generates —",
+    "passwordStored": "stored, hidden",
+    "deleteAria": "Delete credential",
+    "add": "Add",
+    "domainPlaceholder": "domain (e.g. target.example.com)",
+    "usernamePlaceholder": "email or username",
+    "passwordPlaceholder": "password (empty = agent generates)",
+    "notePlaceholder": "note (optional, e.g. program alias account)"
+  },
+  "report": {
+    "copied": "Markdown copied",
+    "copyFailed": "Copy failed; please select the text and copy it manually",
+    "loading": "Loading…",
+    "empty": "No report yet",
+    "title": "Penetration test report (Markdown)",
+    "copy": "Copy"
+  }
+}

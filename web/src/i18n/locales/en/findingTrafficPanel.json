@@ -1,0 +1,38 @@
+{
+  "header": {
+    "title": "Linked traffic",
+    "description": "Requests and responses organized in reproduction order. Bound evidence is kept even after raw traffic is purged."
+  },
+  "readOnlyBadge": "Inherited evidence · read-only",
+  "roles": {
+    "baseline": "Baseline",
+    "proof": "Vulnerability proof",
+    "verification": "Supplementary verification",
+    "supporting": "Supporting evidence"
+  },
+  "evidenceTag": "Evidence #{id}",
+  "empty": {
+    "title": "No linked traffic",
+    "description": "Link baseline, vulnerability proof, and supplementary verification requests."
+  },
+  "actions": {
+    "linkTraffic": "Link traffic",
+    "retry": "Retry",
+    "viewMessage": "View message",
+    "editNote": "Edit note",
+    "moveUp": "Move evidence {id} up",
+    "moveDown": "Move evidence {id} down",
+    "unlink": "Unlink",
+    "cancel": "Cancel",
+    "saveNote": "Save note"
+  },
+  "editDialog": {
+    "title": "Edit traffic evidence",
+    "description": "Explain how this set of requests/responses supports the vulnerability conclusion.",
+    "roleLabel": "Role",
+    "noteLabel": "Evidence note"
+  },
+  "toasts": {
+    "updated": "Traffic evidence updated"
+  }
+}

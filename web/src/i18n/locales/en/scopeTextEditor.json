@@ -1,0 +1,7 @@
+{
+  "label": "Asset scope",
+  "description": "One per line; domains, IPs, CIDRs, ICP filings, and company keywords are recognized automatically.",
+  "recognized": "{count} recognized",
+  "errorLine": "Line {line}: {error}",
+  "moreErrors": "{count} more errors"
+}
