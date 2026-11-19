@@ -737,17 +737,40 @@ func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
 // parallel's input separators (:::, :::+, ::::, ::::+), and matches the
 // wrapped command (including single-string shell commands like
 // "parallel 'nmap -p 80 {}' ::: target").
+//
+// When no command precedes ":::", GNU parallel executes each argument after
+// ":::" as a command line, so each literal argument up to the next separator
+// is parsed as a Bash line at depth+1.
+//
+// Note: "parallel -a FILE" / "--arg-file FILE" and "parallel :::: FILE" read
+// command lines from a file that the matcher does not read.
 func parallelMatchesArgv(rule []string, args []callWord, depth int) bool {
+	isParallelSep := func(w callWord) bool {
+		return w.Literal && (w.Value == ":::" || w.Value == ":::+" || w.Value == "::::" || w.Value == "::::+")
+	}
 	for _, cand := range stripOneWrapperCandidates("parallel", args) {
 		end := len(cand)
 		for idx, w := range cand {
-			if w.Literal && (w.Value == ":::" || w.Value == ":::+" || w.Value == "::::" || w.Value == "::::+") {
+			if isParallelSep(w) {
 				end = idx
 				break
 			}
 		}
 		cmd := cand[:end]
 		if len(cmd) == 0 {
+			// No command before separator: for ":::" each following literal
+			// argument (until any subsequent separator) runs as a command line.
+			// For ":::+", "::::", and "::::+", do not guess.
+			if end < len(cand) && cand[end].Literal && cand[end].Value == ":::" && depth < argvMaxNestedPayloads {
+				for _, arg := range cand[end+1:] {
+					if isParallelSep(arg) {
+						break
+					}
+					if arg.Literal && bashCommandMatchesArgv(rule, arg.Value, depth+1) {
+						return true
+					}
+				}
+			}
 			continue
 		}
 		if callMatchesArgv(rule, cmd, depth) {
