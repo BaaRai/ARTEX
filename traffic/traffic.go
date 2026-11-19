@@ -272,6 +272,14 @@ func Open(dir, addr string) (*Traffic, error) {
 		db.Close()
 		return nil, err
 	}
+	// go-mitmproxy writes the CA private key with os.Create (0666 less the umask),
+	// readable by every local user, the agents' executor included. Only the proxy
+	// in this process needs it. The certificate beside it (CACertPath) stays
+	// readable: the agents' tools trust it.
+	if err := os.Chmod(filepath.Join(dir, "_ca", "mitmproxy-ca.pem"), 0o600); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("restrict the MITM CA key: %w", err)
+	}
 	// Upstream selection. By default (no global egress proxy set) targets are
 	// dialed DIRECTLY: go-mitmproxy's own default upstream uses
 	// http.ProxyFromEnvironment, so an HTTP_PROXY/HTTPS_PROXY in the environment

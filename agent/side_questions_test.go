@@ -59,7 +59,11 @@ func TestSideActualChatCheckpointToolResultAndTranscriptIsolation(t *testing.T) 
 	for _, streaming := range []bool{false, true} {
 		t.Run(map[bool]string{true: "stream", false: "atomic"}[streaming], func(t *testing.T) {
 			dir := t.TempDir()
-			file := filepath.Join(dir, "asset.txt")
+			// Inside the chat's session working directory: the file tools reach nothing else.
+			file := filepath.Join(dir, "sessions", "conv-987654", "asset.txt")
+			if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(file, []byte("controlled-homepage-result"), 0600); err != nil {
 				t.Fatal(err)
 			}

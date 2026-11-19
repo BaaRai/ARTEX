@@ -33,10 +33,14 @@ func (d *DB) seedPersistenceApprovalRules() error {
 			message: "Approval needed: the agent asks to create or change a skill file. Every agent that sees the skill loads its content as instructions.",
 		},
 	}
+	// intercept_rules.name has no unique index, so ON CONFLICT cannot apply: the insert
+	// is conditional on the name instead. A start that stopped between these inserts
+	// and SetSetting re-runs them without duplicating a rule.
 	for _, r := range rules {
 		if _, err := d.Exec(`
 INSERT INTO intercept_rules(name, enabled, priority, match_target, match_type, pattern, action, message, timeout_enabled, timeout_seconds, timeout_action)
-VALUES ($1, true, 95, 'tool_name', 'regex', $2, 'ask', $3, false, 60, 'deny')`,
+SELECT $1, true, 95, 'tool_name', 'regex', $2, 'ask', $3, false, 60, 'deny'
+WHERE NOT EXISTS (SELECT 1 FROM intercept_rules WHERE name = $1)`,
 			r.name, r.pattern, r.message,
 		); err != nil {
 			return fmt.Errorf("rule %q: %w", r.name, err)

@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/agent"
 )
 
 // A child process spawned after startup must not see the startup secrets, while
@@ -62,5 +64,36 @@ func TestNewAppliesSecretScrubOption(t *testing.T) {
 
 	if os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("OPENAI_API_KEY") != "" {
 		t.Fatal("New did not apply WithSecretScrub: the secrets are still in the environment")
+	}
+}
+
+// The LLM proxy and endpoint URLs can carry user:pass@ credentials. They are
+// scrubbed and sealed like the keys, and a child spawned after the scrub sees
+// neither, while agent.FromEnv still read them before it.
+func TestSecretEnvCoversCredentialURLs(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh in PATH")
+	}
+	for _, k := range []string{"ARTEX_LLM_PROXY", "ARTEX_LLM_BASE_URL"} {
+		if !isSecretName(k) {
+			t.Errorf("%s is not in secretEnv", k)
+		}
+	}
+	t.Setenv("ARTEX_LLM_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ARTEX_LLM_PROXY", "http://proxyuser:proxypass@proxy.internal:3128")
+	t.Setenv("ARTEX_LLM_BASE_URL", "https://apiuser:apipass@llm.internal/v1")
+	cfg, ok := agent.FromEnv()
+	if !ok || cfg.Proxy != "http://proxyuser:proxypass@proxy.internal:3128" || cfg.BaseURL != "https://apiuser:apipass@llm.internal/v1" {
+		t.Fatalf("FromEnv must read the URLs before the scrub: ok=%v proxy=%q base=%q", ok, cfg.Proxy, cfg.BaseURL)
+	}
+	ScrubSecretEnv()
+	out, err := exec.Command(sh, "-c", "env").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "proxypass") || strings.Contains(string(out), "apipass") {
+		t.Fatalf("a child process still sees the proxy or endpoint credentials:\n%s", out)
 	}
 }

@@ -515,7 +515,6 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c := exec.CommandContext(runCtx, interp, tmp)
-	applyExecCredential(c, priv)
 	c.Dir = workDir
 	c.Env = append(os.Environ(), sessionEnv...) // session proxy env
 	for k, v := range params {                  // scalar params mirrored as TOOL_<NAME>
@@ -523,6 +522,7 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 			c.Env = append(c.Env, "TOOL_"+strings.ToUpper(k)+"="+sv)
 		}
 	}
+	applyExecCredential(c, priv) // after c.Env: it sets the executor's HOME there
 	pj, _ := json.Marshal(params)
 	c.Stdin = bytes.NewReader(pj) // parameter JSON goes via stdin
 	out, err := c.CombinedOutput()

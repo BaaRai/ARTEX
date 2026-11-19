@@ -15,20 +15,27 @@ import (
 	"syscall"
 )
 
-// Environment names the Bash shim reads. They carry no secret: the executor id and
-// the real bash path.
+// Environment names the shims read. They carry no secret: the executor id, the real
+// bash path and the executor's home directory.
 const (
 	envExecBash = "ARTEX_EXEC_BASH"
 	envExecUID  = "ARTEX_EXEC_UID"
 	envExecGID  = "ARTEX_EXEC_GID"
+	envExecHome = "ARTEX_EXEC_HOME"
 )
+
+// execHomeDir is the executor's home under the data directory. The server's HOME
+// (/root in the image) is not writable for the executor, so caches of npm, go, pip,
+// bbot or Playwright would fail there.
+const execHomeDir = "exec-home"
 
 func execPrivilegeSupported() bool { return true }
 
 func serverIsRoot() bool { return os.Geteuid() == 0 }
 
 // applyExecCredential runs c as the executor identity. The server's own children
-// (custom tools) use it directly; the Norma children go through the shims.
+// (custom tools) use it directly; the Norma children go through the shims. Call it
+// after c.Env is set: it points HOME and XDG_CACHE_HOME at the executor's home.
 func applyExecCredential(c *exec.Cmd, p ExecPrivilege) {
 	if !p.Enabled {
 		return
@@ -37,6 +44,49 @@ func applyExecCredential(c *exec.Cmd, p ExecPrivilege) {
 		c.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	c.SysProcAttr.Credential = &syscall.Credential{Uid: p.UID, Gid: p.GID, Groups: []uint32{p.GID}}
+	if home := execHomeEnv(); home != nil {
+		if c.Env == nil {
+			c.Env = os.Environ()
+		}
+		c.Env = append(c.Env, home...) // later entries win in exec.Cmd
+	}
+}
+
+// execHomeEnv returns HOME and XDG_CACHE_HOME for an executor process, or nil when
+// PrepareExecPrivilege has not set up the home.
+func execHomeEnv() []string {
+	home := os.Getenv(envExecHome)
+	if home == "" {
+		return nil
+	}
+	return []string{"HOME=" + home, "XDG_CACHE_HOME=" + filepath.Join(home, ".cache")}
+}
+
+// prepareExecHome creates the executor's home, owned by the executor, and records
+// its path for the shims and applyExecCredential.
+func prepareExecHome(p ExecPrivilege, dataDir string) error {
+	abs, err := filepath.Abs(dataDir)
+	if err != nil {
+		return err
+	}
+	home := filepath.Join(abs, execHomeDir)
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return err
+	}
+	fi, err := os.Lstat(home)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", home)
+	}
+	if err := os.Lchown(home, int(p.UID), int(p.GID)); err != nil {
+		return err
+	}
+	if err := os.Chmod(home, 0o700); err != nil {
+		return err
+	}
+	return os.Setenv(envExecHome, home)
 }
 
 // prepareExecScript lets the executor read a script the server wrote: the file stays
@@ -72,6 +122,9 @@ func PrepareExecPrivilege(p ExecPrivilege, dataDir, keyDir, configPath string) e
 		if err := shareWithExecGroup(root, int(p.GID)); err != nil {
 			return fmt.Errorf("share %s workspace with the executor group: %w", sub, err)
 		}
+	}
+	if err := prepareExecHome(p, dataDir); err != nil {
+		return fmt.Errorf("prepare the executor home: %w", err)
 	}
 	tasks := filepath.Join(dataDir, "tasks")
 	for _, name := range []string{"jwt.key", "secret.key"} {
@@ -189,10 +242,25 @@ func runBashShim(argv []string) {
 	if err != nil {
 		shimFail(err)
 	}
-	if err := dropTo(uid, gid); err != nil {
+	if err := enterExecutor(uid, gid); err != nil {
 		shimFail(err)
 	}
 	shimExec(os.Getenv(envExecBash), argv)
+}
+
+// enterExecutor drops to uid and gid. When this call performs the switch (not in a
+// nested shell already running as the executor, whose HOME the agent may have set),
+// HOME and XDG_CACHE_HOME move to the executor's home first.
+func enterExecutor(uid, gid int) error {
+	if os.Getuid() != uid || os.Getgid() != gid {
+		for _, kv := range execHomeEnv() {
+			k, v, _ := strings.Cut(kv, "=")
+			if err := os.Setenv(k, v); err != nil {
+				return err
+			}
+		}
+	}
+	return dropTo(uid, gid)
 }
 
 // runDropShim handles: <uid> <gid> -- <command> <args...>.
@@ -214,7 +282,7 @@ func runDropShim(args []string) {
 		}
 		target = resolved
 	}
-	if err := dropTo(uid, gid); err != nil {
+	if err := enterExecutor(uid, gid); err != nil {
 		shimFail(err)
 	}
 	shimExec(target, args[3:])

@@ -13,6 +13,9 @@ import (
 // server test suite so cross-package DELETE cleanup races with db/agent
 // packages are avoided when running `go test ./...`.
 func TestMain(m *testing.M) {
+	// The executor tests (execpriv_root_linux_test.go) start this binary as the bash
+	// shim and as the MCP drop shim, the way cmd/artex's main does.
+	RunExecShimIfRequested(os.Args)
 	// Own database per package (#80): with separate databases, packages stop
 	// contending on shared tables and the advisory lock below stops
 	// serializing go test ./... across packages.

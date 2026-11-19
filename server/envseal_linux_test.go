@@ -54,6 +54,9 @@ func TestSealedEnvironmentHandoff(t *testing.T) {
 		"ARTEX_SECRET_KEY":  "",
 		"ANTHROPIC_API_KEY": "sk-ant-test",
 		"OPENAI_API_KEY":    "=leading-equals",
+		// Proxy and endpoint URLs can carry credentials in their userinfo.
+		"ARTEX_LLM_PROXY":    "http://proxyuser:proxypass@proxy.internal:3128",
+		"ARTEX_LLM_BASE_URL": "https://apiuser:apipass@llm.internal/v1",
 	}
 	env := os.Environ()
 	for k, v := range want {
