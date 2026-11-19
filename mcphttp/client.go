@@ -31,6 +31,10 @@ import (
 const protocolVersion = "2025-11-25"
 const legacySSEProtocolVersion = "2024-11-05"
 
+// mcpMaxRPCBytes is the largest JSON-RPC response (JSON body or SSE data
+// payload) the client will buffer. A remote MCP server is untrusted.
+const mcpMaxRPCBytes = 8 << 20
+
 // ToolName mirrors mcp.ToolName so remote tools share the mcp__server__tool scheme.
 func ToolName(server, name string) string { return "mcp__" + server + "__" + name }
 
@@ -352,10 +356,14 @@ func (c *Client) wrap(rt remoteTool) actool.CoreTool {
 			if err := json.Unmarshal(raw, &res); err != nil {
 				return actool.Errorf("Error: bad MCP response: " + err.Error()), nil
 			}
-			var text string
+			var b strings.Builder
 			for _, blk := range res.Content {
-				text += blk.Text
+				b.WriteString(blk.Text)
+				if b.Len() > mcpMaxRPCBytes {
+					break
+				}
 			}
+			text := b.String()
 			// Consistent with built-in/custom tools: oversized output goes through Capture —
 			// truncated at the session's MaxOutputChars (default 30000), and when
 			// ToolOutputDir is configured the full output spills to disk leaving only the
@@ -510,8 +518,21 @@ func (c *Client) roundTrip(ctx context.Context, body rpcRequest, expectResp bool
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		return parseSSE(resp.Body, body.ID)
 	}
+	return decodeRPC(resp.Body)
+}
+
+// decodeRPC reads one JSON-RPC response, refusing a body larger than
+// mcpMaxRPCBytes so a remote server cannot force an unbounded allocation.
+func decodeRPC(r io.Reader) (*rpcResponse, error) {
+	data, err := io.ReadAll(io.LimitReader(r, mcpMaxRPCBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("mcp: read json response: %w", err)
+	}
+	if len(data) > mcpMaxRPCBytes {
+		return nil, fmt.Errorf("mcp: json response exceeds %d bytes", mcpMaxRPCBytes)
+	}
 	var out rpcResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, fmt.Errorf("mcp: decode json response: %w", err)
 	}
 	return &out, nil
@@ -602,6 +623,9 @@ func parseSSE(r io.Reader, wantID int) (*rpcResponse, error) {
 		}
 		if strings.HasPrefix(line, "data:") {
 			dataBuf.WriteString(strings.TrimSpace(line[len("data:"):]))
+			if dataBuf.Len() > mcpMaxRPCBytes {
+				return nil, fmt.Errorf("mcp: sse payload exceeds %d bytes", mcpMaxRPCBytes)
+			}
 		}
 	}
 	if resp, ok := flush(); ok {

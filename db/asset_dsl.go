@@ -136,9 +136,15 @@ func tokenize(s string) ([]tok, error) {
 //   and_expr = atom    (AND atom)*
 //   atom     = FIELD | BARE | '(' expr ')'
 
+const (
+	dslMaxLen   = 4096
+	dslMaxDepth = 32
+)
+
 type dslParser struct {
 	tokens []tok
 	pos    int
+	depth  int
 }
 
 func (p *dslParser) peek() tok {
@@ -201,8 +207,13 @@ func (p *dslParser) parseAtom() (*astNode, error) {
 		p.consume()
 		return leafNode(*t.expr), nil
 	case tkLP:
+		if p.depth >= dslMaxDepth {
+			return nil, fmt.Errorf("DSL syntax error: nested parentheses too deep")
+		}
+		p.depth++
 		p.consume()
 		node, err := p.parseOr()
+		p.depth--
 		if err != nil {
 			return nil, err
 		}
@@ -233,6 +244,9 @@ func (p *dslParser) parseAtom() (*astNode, error) {
 func ParseDSL(s string) (*astNode, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, nil
+	}
+	if len(s) > dslMaxLen {
+		return nil, fmt.Errorf("DSL query is too long")
 	}
 	tokens, err := tokenize(s)
 	if err != nil {

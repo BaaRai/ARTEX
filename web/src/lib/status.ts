@@ -1,6 +1,8 @@
 // Centralised status → color/label semantics, reused across the whole app.
 // Spec §8.3: intent / coverage / task / severity each have a consistent color set.
 
+import { t } from "@/i18n";
+
 export type Tone = "neutral" | "blue" | "green" | "amber" | "red" | "rose" | "violet" | "slate";
 
 export const toneClasses: Record<Tone, string> = {
@@ -32,81 +34,81 @@ interface StatusMeta {
 }
 
 const intent: Record<string, StatusMeta> = {
-  open: { label: "Open", tone: "slate" },
-  running: { label: "Running", tone: "blue" },
-  paused: { label: "Paused", tone: "amber" },
-  done: { label: "Completed", tone: "green" },
+  open: { label: t("Open"), tone: "slate" },
+  running: { label: t("Running"), tone: "blue" },
+  paused: { label: t("Paused"), tone: "amber" },
+  done: { label: t("Completed"), tone: "green" },
   // blocked = model/API/network failures exhausted the retries; this intent barely explored anything (not an interception).
-  blocked: { label: "Error", tone: "red" },
+  blocked: { label: t("Error"), tone: "red" },
   // exhausted = the step/time budget cut the run short midway, only partial results written back (not "direction exhausted").
-  exhausted: { label: "Budget exhausted", tone: "violet" },
+  exhausted: { label: t("Budget exhausted"), tone: "violet" },
   // stopped = legacy soft-deleted state (kept for historical data).
-  stopped: { label: "Stopped", tone: "slate" },
+  stopped: { label: t("Stopped"), tone: "slate" },
   // deleted = the user soft-deleted this intent (nodes and lineage kept; see delete_reason for the reason).
-  deleted: { label: "Deleted", tone: "slate" },
+  deleted: { label: t("Deleted"), tone: "slate" },
 };
 
 const task: Record<string, StatusMeta> = {
-  created: { label: "Created", tone: "slate" },
-  queued: { label: "Queued", tone: "amber" },
-  running: { label: "Running", tone: "blue" },
-  paused: { label: "Paused", tone: "amber" },
-  done: { label: "Completed", tone: "green" },
-  failed: { label: "Failed", tone: "red" },
-  timeout: { label: "Timed out", tone: "amber" },
+  created: { label: t("Created"), tone: "slate" },
+  queued: { label: t("Queued"), tone: "amber" },
+  running: { label: t("Running"), tone: "blue" },
+  paused: { label: t("Paused"), tone: "amber" },
+  done: { label: t("Completed"), tone: "green" },
+  failed: { label: t("Failed"), tone: "red" },
+  timeout: { label: t("Timed out"), tone: "amber" },
 };
 
 const severity: Record<string, StatusMeta> = {
-  critical: { label: "Critical", tone: "rose" },
-  high: { label: "High", tone: "red" },
-  medium: { label: "Medium", tone: "amber" },
-  low: { label: "Low", tone: "slate" },
+  critical: { label: t("Critical"), tone: "rose" },
+  high: { label: t("High"), tone: "red" },
+  medium: { label: t("Medium"), tone: "amber" },
+  low: { label: t("Low"), tone: "slate" },
 };
 
 const finding: Record<string, StatusMeta> = {
-  pending: { label: "Pending", tone: "amber" },
-  in_progress: { label: "In progress", tone: "blue" },
-  confirmed: { label: "Confirmed", tone: "red" },
-  resolved: { label: "Resolved", tone: "green" },
-  fixed: { label: "Fixed", tone: "green" },
-  false_positive: { label: "False positive", tone: "slate" },
-  ignored: { label: "Ignored", tone: "neutral" },
-  duplicate: { label: "Duplicate", tone: "neutral" },
-  risk_accepted: { label: "Risk accepted", tone: "violet" },
+  pending: { label: t("Pending"), tone: "amber" },
+  in_progress: { label: t("In progress"), tone: "blue" },
+  confirmed: { label: t("Confirmed"), tone: "red" },
+  resolved: { label: t("Resolved"), tone: "green" },
+  fixed: { label: t("Fixed"), tone: "green" },
+  false_positive: { label: t("False positive"), tone: "slate" },
+  ignored: { label: t("Ignored"), tone: "neutral" },
+  duplicate: { label: t("Duplicate"), tone: "neutral" },
+  risk_accepted: { label: t("Risk accepted"), tone: "violet" },
 };
 
 const engine: Record<string, StatusMeta> = {
-  exploring: { label: "Exploring", tone: "blue" },
-  paused: { label: "Paused", tone: "amber" },
-  stalled: { label: "Stalled", tone: "red" },
-  idle: { label: "Idle", tone: "neutral" },
+  exploring: { label: t("Exploring"), tone: "blue" },
+  paused: { label: t("Paused"), tone: "amber" },
+  stalled: { label: t("Stalled"), tone: "red" },
+  idle: { label: t("Idle"), tone: "neutral" },
 };
 
 const goal: Record<string, StatusMeta> = {
-  open: { label: "In progress", tone: "blue" },
-  met: { label: "Met", tone: "green" },
-  abandoned: { label: "Abandoned", tone: "slate" },
+  open: { label: t("In progress"), tone: "blue" },
+  met: { label: t("Met"), tone: "green" },
+  abandoned: { label: t("Abandoned"), tone: "slate" },
 };
 
 const audit: Record<string, StatusMeta> = {
-  allow: { label: "Allow", tone: "green" },
-  block: { label: "Block", tone: "red" },
+  allow: { label: t("Allow"), tone: "green" },
+  block: { label: t("Block"), tone: "red" },
 };
 
 const node: Record<string, StatusMeta> = {
-  observed: { label: "Observed", tone: "slate" },
-  confirmed: { label: "Confirmed", tone: "green" },
-  tombstoned: { label: "Tombstoned", tone: "neutral" },
+  observed: { label: t("Observed"), tone: "slate" },
+  confirmed: { label: t("Confirmed"), tone: "green" },
+  tombstoned: { label: t("Tombstoned"), tone: "neutral" },
 };
 
 // Notification delivery states. sending uses blue rather than amber: it is not "a problem"
 // but "claimed and sending now", which must stay distinguishable from pending's waiting.
 const delivery: Record<string, StatusMeta> = {
-  pending: { label: "Pending", tone: "amber" },
-  sending: { label: "Sending", tone: "blue" },
-  sent: { label: "Sent", tone: "green" },
-  failed: { label: "Failed", tone: "red" },
-  skipped: { label: "Skipped", tone: "neutral" },
+  pending: { label: t("Pending"), tone: "amber" },
+  sending: { label: t("Sending"), tone: "blue" },
+  sent: { label: t("Sent"), tone: "green" },
+  failed: { label: t("Failed"), tone: "red" },
+  skipped: { label: t("Skipped"), tone: "neutral" },
 };
 
 const maps = {
@@ -124,5 +126,5 @@ const maps = {
 export type StatusDomain = keyof typeof maps;
 
 export function statusMeta(domain: StatusDomain, key: string): StatusMeta {
-  return maps[domain][key] ?? { label: key, tone: "neutral" };
+  return maps[domain][key] ?? { label: t(key), tone: "neutral" };
 }

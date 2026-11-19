@@ -20,6 +20,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { MCPServer, MCPTool, Agent } from "@/lib/types";
 
@@ -139,15 +140,15 @@ export default function MCPPage() {
 
   async function saveForm() {
     if (!form.name.trim()) {
-      toast.error("Please fill in the name");
+      toast.error(t("Please fill in the name"));
       return;
     }
     if (form.transport === "stdio" && !form.command.trim()) {
-      toast.error("Please fill in the command");
+      toast.error(t("Please fill in the command"));
       return;
     }
     if (form.transport !== "stdio" && !form.url.trim()) {
-      toast.error("Please fill in the remote URL");
+      toast.error(t("Please fill in the remote URL"));
       return;
     }
     setSaving(true);
@@ -178,11 +179,11 @@ export default function MCPPage() {
         enabled: editing ? editing.enabled : true,
         ...base,
       });
-      toast.success(editing ? "Saved" : "MCP server added");
+      toast.success(editing ? t("Saved") : t("MCP server added"));
       if (!editing) setOpen(false);
       load();
     } catch (e) {
-      toast.error("Save failed: " + (e as Error).message);
+      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -192,12 +193,12 @@ export default function MCPPage() {
     if (!editing) return;
     setRefreshing(true);
     try {
-      const t = await api.refreshMcpServer(editing.id);
-      setTools(t);
-      toast.success(`Found ${t.length} tools`);
+      const found = await api.refreshMcpServer(editing.id);
+      setTools(found);
+      toast.success(t("Found {count} tools", { count: found.length }));
       load();
     } catch (e) {
-      toast.error("Refresh failed: " + (e as Error).message);
+      toast.error(t("Refresh failed: {error}", { error: (e as Error).message }));
     } finally {
       setRefreshing(false);
     }
@@ -206,11 +207,11 @@ export default function MCPPage() {
   async function removeServer(s: MCPServer) {
     try {
       await api.deleteMcpServer(s.id);
-      toast.success(`Deleted: ${s.name}`);
+      toast.success(t("Deleted: {name}", { name: s.name }));
       setOpen(false);
       load();
     } catch (e) {
-      toast.error("Delete failed: " + (e as Error).message);
+      toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
     }
   }
 
@@ -219,7 +220,7 @@ export default function MCPPage() {
       await api.saveMcpServer({ ...s, enabled: !s.enabled });
       load();
     } catch (e) {
-      toast.error("Operation failed: " + (e as Error).message);
+      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
     }
   }
 
@@ -227,10 +228,14 @@ export default function MCPPage() {
     const on = (visibility[serverId] ?? []).includes(agentId);
     try {
       await api.toggleVisibility(agentId, "mcp", serverId, !on);
-      toast.success(`${on ? "Revoked" : "Granted"} visibility to "${agentName}"`);
+      toast.success(
+        on
+          ? t("Revoked visibility from \"{agent}\"", { agent: agentName })
+          : t("Granted visibility to \"{agent}\"", { agent: agentName }),
+      );
       load();
     } catch (e) {
-      toast.error("Operation failed: " + (e as Error).message);
+      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
     }
   }
 
@@ -238,33 +243,33 @@ export default function MCPPage() {
     return (
       <div className="grid gap-4 py-4">
         <div className="grid gap-2">
-          <Label>Transport</Label>
+          <Label>{t("Transport")}</Label>
           <div className="flex gap-2">
             <Button
               type="button"
               variant={form.transport === "stdio" ? "default" : "outline"}
               onClick={() => setF({ transport: "stdio" })}
             >
-              stdio (local)
+              {t("stdio (local)")}
             </Button>
             <Button
               type="button"
               variant={form.transport === "http" ? "default" : "outline"}
               onClick={() => setF({ transport: "http" })}
             >
-              http (remote)
+              {t("http (remote)")}
             </Button>
             <Button
               type="button"
               variant={form.transport === "sse" ? "default" : "outline"}
               onClick={() => setF({ transport: "sse" })}
             >
-              sse (legacy)
+              {t("sse (legacy)")}
             </Button>
           </div>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="m-name">Name</Label>
+          <Label htmlFor="m-name">{t("Name")}</Label>
           <Input
             id="m-name"
             placeholder="filesystem"
@@ -275,7 +280,7 @@ export default function MCPPage() {
         {form.transport === "stdio" ? (
           <>
             <div className="grid gap-2">
-              <Label htmlFor="m-cmd">Command</Label>
+              <Label htmlFor="m-cmd">{t("Command")}</Label>
               <Input
                 id="m-cmd"
                 className="font-mono"
@@ -285,7 +290,7 @@ export default function MCPPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="m-args">Arguments (space-separated)</Label>
+              <Label htmlFor="m-args">{t("Arguments (space-separated)")}</Label>
               <Input
                 id="m-args"
                 className="font-mono"
@@ -297,7 +302,7 @@ export default function MCPPage() {
           </>
         ) : (
           <div className="grid gap-2">
-            <Label htmlFor="m-url">Remote URL</Label>
+            <Label htmlFor="m-url">{t("Remote URL")}</Label>
             <Input
               id="m-url"
               className="font-mono"
@@ -310,9 +315,9 @@ export default function MCPPage() {
                 checked={form.insecure}
                 onCheckedChange={(v) => setF({ insecure: v === true })}
               />
-              Skip TLS certificate verification (self-signed certs)
+              {t("Skip TLS certificate verification (self-signed certs)")}
             </label>
-            <Label htmlFor="m-timeout">Request timeout (seconds, default 120)</Label>
+            <Label htmlFor="m-timeout">{t("Request timeout (seconds, default 120)")}</Label>
             <Input
               id="m-timeout"
               type="number"
@@ -326,8 +331,8 @@ export default function MCPPage() {
         <div className="grid gap-2">
           <Label htmlFor="m-env">
             {form.transport !== "stdio"
-              ? "Request headers (one KEY=VALUE per line, e.g. Authorization=Bearer xxx)"
-              : "Environment variables (one KEY=VALUE per line)"}
+              ? t("Request headers (one KEY=VALUE per line, e.g. Authorization=Bearer xxx)")
+              : t("Environment variables (one KEY=VALUE per line)")}
           </Label>
           <Textarea
             id="m-env"
@@ -347,23 +352,23 @@ export default function MCPPage() {
     return (
       <div className="flex flex-col gap-3 py-4">
         <div className="flex items-center justify-between">
-          <span className="text-muted-foreground text-sm">{tools.length} tools</span>
+          <span className="text-muted-foreground text-sm">{t("{count} tools", { count: tools.length })}</span>
           <Button size="sm" variant="outline" disabled={refreshing} onClick={refreshTools}>
-            <RefreshCwIcon className={refreshing ? "animate-spin" : ""} /> Refresh
+            <RefreshCwIcon className={refreshing ? "animate-spin" : ""} /> {t("Refresh")}
           </Button>
         </div>
         {toolsLoading ? (
-          <p className="text-muted-foreground text-sm">Loading…</p>
+          <p className="text-muted-foreground text-sm">{t("Loading…")}</p>
         ) : tools.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No tools discovered yet; click refresh to fetch again.</p>
+          <p className="text-muted-foreground text-sm">{t("No tools discovered yet; click refresh to fetch again.")}</p>
         ) : (
           <div className="flex flex-col divide-y">
-            {tools.map((t) => (
-              <div key={t.name} className="py-2.5">
-                <code className="font-mono text-sm">{t.name}</code>
-                {t.description && (
+            {tools.map((tool) => (
+              <div key={tool.name} className="py-2.5">
+                <code className="font-mono text-sm">{tool.name}</code>
+                {tool.description && (
                   <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-                    {t.description}
+                    {tool.description}
                   </p>
                 )}
               </div>
@@ -378,7 +383,7 @@ export default function MCPPage() {
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">MCP</h1>
-        <p className="text-muted-foreground text-sm">External MCP tool servers · visibility granted per agent</p>
+        <p className="text-muted-foreground text-sm">{t("External MCP tool servers · visibility granted per agent")}</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -388,7 +393,7 @@ export default function MCPPage() {
           className="text-foreground/70 border-foreground/70 hover:bg-muted/60 hover:shadow-sm flex min-h-[116px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition"
         >
           <PlusIcon className="size-6" />
-          <span className="text-sm">Add MCP</span>
+          <span className="text-sm">{t("Add MCP")}</span>
         </button>
 
         {servers.map((s) => (
@@ -401,32 +406,32 @@ export default function MCPPage() {
               <div className="flex items-center gap-2">
                 <ServerIcon className="text-muted-foreground size-4 shrink-0" />
                 <CardTitle className="truncate text-base">{s.name}</CardTitle>
-                <Badge variant="outline" className="uppercase">
+                <Badge variant="outline" className="uppercase" lang="en">
                   {s.transport}
                 </Badge>
                 {s.last_connect_ok === false ? (
-                  <Badge variant="destructive" className="max-w-55 truncate font-normal" title={s.last_connect_err ?? "connect failed"}>
-                    down: {s.last_connect_err ? s.last_connect_err.slice(0, 60) : "connect failed"}
+                  <Badge variant="destructive" className="max-w-55 truncate font-normal" title={s.last_connect_err ?? t("connect failed")}>
+                    {t("down: {error}", { error: s.last_connect_err ? s.last_connect_err.slice(0, 60) : t("connect failed") })}
                   </Badge>
                 ) : s.last_connect_ok === true ? (
                   <Badge variant="secondary" className="font-normal">
-                    ok {s.last_connect_at ? new Date(s.last_connect_at).toLocaleTimeString() : ""}
+                    {t("ok {time}", { time: s.last_connect_at ? new Date(s.last_connect_at).toLocaleTimeString(intlLocale) : "" })}
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="text-muted-foreground font-normal">
-                    not connected yet
+                    {t("not connected yet")}
                   </Badge>
                 )}
                 <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                   <Switch
                     checked={s.enabled}
                     onCheckedChange={() => toggleEnabled(s)}
-                    aria-label="Enable"
+                    aria-label={t("Enable")}
                   />
                   <Button
                     size="icon"
                     variant="outline"
-                    aria-label="Delete"
+                    aria-label={t("Delete")}
                     onClick={() => removeServer(s)}
                   >
                     <Trash2Icon className="text-destructive" />
@@ -436,10 +441,10 @@ export default function MCPPage() {
             </CardHeader>
             <CardContent className="grid gap-3">
               <p className="text-muted-foreground text-sm">
-                {s.tools && s.tools.length > 0 ? `${s.tools.length} tools` : "No tools discovered yet"}
+                {s.tools && s.tools.length > 0 ? t("{count} tools", { count: s.tools.length }) : t("No tools discovered yet")}
               </p>
               <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
-                <span className="text-muted-foreground text-xs">Visibility (granted per agent)</span>
+                <span className="text-muted-foreground text-xs">{t("Visibility (granted per agent)")}</span>
                 <div className="flex flex-wrap gap-x-4 gap-y-2">
                   {agents.map((a) => (
                     <label key={a.key} className="flex items-center gap-2 text-sm">
@@ -463,9 +468,9 @@ export default function MCPPage() {
           className="w-full data-[side=right]:sm:max-w-lg"
         >
           <SheetHeader>
-            <SheetTitle>{editing ? editing.name : "Add MCP server"}</SheetTitle>
+            <SheetTitle>{editing ? editing.name : t("Add MCP server")}</SheetTitle>
             <SheetDescription>
-              stdio (local process) or http (remote Streamable HTTP)
+              {t("stdio (local process) or http (remote Streamable HTTP)")}
             </SheetDescription>
           </SheetHeader>
 
@@ -476,16 +481,16 @@ export default function MCPPage() {
               className="flex min-h-0 flex-1 flex-col px-4"
             >
               <TabsList>
-                <TabsTrigger value="config">Config</TabsTrigger>
+                <TabsTrigger value="config">{t("Config")}</TabsTrigger>
                 <TabsTrigger value="tools">
-                  Tools{tools.length ? ` (${tools.length})` : ""}
+                  {tools.length ? t("Tools ({count})", { count: tools.length }) : t("Tools")}
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="config" className="min-h-0 flex-1 overflow-y-auto">
                 {renderForm()}
                 <div className="flex gap-2 pt-2 pb-6">
                   <Button onClick={saveForm} disabled={saving}>
-                    Save
+                    {t("Save")}
                   </Button>
                 </div>
               </TabsContent>
@@ -498,7 +503,7 @@ export default function MCPPage() {
               {renderForm()}
               <div className="pt-2 pb-6">
                 <Button onClick={saveForm} disabled={saving}>
-                  <PlusIcon /> Add
+                  <PlusIcon /> {t("Add")}
                 </Button>
               </div>
             </div>

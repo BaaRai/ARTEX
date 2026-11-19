@@ -145,6 +145,10 @@ func TestBackoff(t *testing.T) {
 	if d, ok := g.backoff(h, 0); !ok || d <= 0 || d > 2*time.Second {
 		t.Fatalf("HTTP-date Retry-After: %s, %v", d, ok)
 	}
+	// A huge second count used to wrap Duration and look like an immediate retry.
+	if d, ok := g.backoff(http.Header{"Retry-After": {"9223372036854775807"}}, 0); ok || d != 0 {
+		t.Fatalf("overflow Retry-After: %s %v, want refuse", d, ok)
+	}
 }
 
 func TestDedupeAndCache(t *testing.T) {

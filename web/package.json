@@ -15,7 +15,8 @@
     "generate:presets": "ts-node -P tsconfig.scripts.json src/scripts/generate-theme-presets.ts",
     "test:polling": "node --test scripts/polling.test.mjs",
     "test:replay": "node --test scripts/replay.test.mjs",
-    "test:upload": "node --test scripts/upload.test.mjs"
+    "test:upload": "node --test scripts/upload.test.mjs",
+    "test:i18n": "node scripts/check-i18n.mjs"
   },
   "lint-staged": {
     "*.{js,ts,jsx,tsx}": [

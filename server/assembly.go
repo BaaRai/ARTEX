@@ -44,7 +44,7 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 			for _, n := range names {
 				nameSet[n] = true
 			}
-			if allReg, err := skill.LoadDir(skillDir); err == nil && allReg != nil {
+			if allReg, err := loadSkillsConfined(skillDir); err == nil && allReg != nil {
 				reg = skill.NewRegistry()
 				for _, s := range allReg.List() {
 					// match by directory name (Base of Dir), not by skill display Name

@@ -74,6 +74,8 @@ type Server struct {
 	// free slots off the same snapshot and over-promote past the limit.
 	concMu sync.Mutex
 
+	readyPG readyCache
+
 	cfgMu     sync.Mutex
 	chatAgent *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
 	// llmProv is the fully-decorated global provider (recorder + failover chain)
@@ -745,6 +747,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
 	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/ready", s.ready)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
@@ -1047,7 +1050,14 @@ func (s *Server) Handler() http.Handler {
 	api := cors(s.requireAuth(mux))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
-	root.Handle("/", s.webuiHandler())
+	webui := s.webuiHandler()
+	root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Keep the operator console out of cross-origin frames and referrers.
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		webui.ServeHTTP(w, r)
+	})
 	return limitRequestBody(root)
 }
 

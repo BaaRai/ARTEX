@@ -14,7 +14,7 @@ Notes:
 
 **Do not open a public issue for a security vulnerability.**
 
-Report through **GitHub Security Advisories**: **Security** tab → **Report a vulnerability** in the `BaaRai/ARTEX` repository. This is the only reporting channel.
+Sign in to GitHub and use the [private vulnerability report form](https://github.com/BaaRai/ARTEX/security/advisories/new). You can also reach it from the repository's **Security and quality** tab under **Advisories** → **Report a vulnerability**. This is the only reporting channel.
 
 Please include:
 - A description of the vulnerability and its expected impact.

@@ -44,6 +44,22 @@ func TestPostgresDSNPrecedence(t *testing.T) {
 
 // A config file that exists but is not valid JSON must fail loudly, not run with
 // defaults (or report "no database config") as if the file were absent.
+func TestRedactMasksEveryDSNPasswordForm(t *testing.T) {
+	cases := []struct{ in, secret string }{
+		{"postgres://u:secret@localhost:5432/d?sslmode=require", "secret"},
+		{"postgresql://localhost/d?password=secret&sslmode=require", "secret"},
+		{"host=localhost user=u password=secret dbname=d", "secret"},
+		{"host=localhost password='p a ss' dbname=d", "p a ss"},
+		{"not a dsn password=stillsecret", "stillsecret"},
+	}
+	for _, c := range cases {
+		got := Redact(c.in)
+		if strings.Contains(got, c.secret) {
+			t.Errorf("Redact(%q)=%q still contains %q", c.in, got, c.secret)
+		}
+	}
+}
+
 func TestMalformedConfigIsAnError(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	// What install.sh used to write for a password containing a double quote.

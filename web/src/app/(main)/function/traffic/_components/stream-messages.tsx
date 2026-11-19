@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import type { TrafficStreamMessage } from "@/lib/types";
+import { intlLocale, t } from "@/i18n";
 
 const PAGE_SIZE = 50;
 // Binary payloads loaded in full are shown as hex of their first 64 KiB.
@@ -22,8 +23,8 @@ function fmtBytes(n: number) {
 }
 
 function fmtDirection(direction: string) {
-  if (direction === "c2s") return "client -> server";
-  if (direction === "s2c") return "server -> client";
+  if (direction === "c2s") return t("client -> server");
+  if (direction === "s2c") return t("server -> client");
   return direction;
 }
 
@@ -53,7 +54,7 @@ function StreamMessageRow({ message }: { message: TrafficStreamMessage }) {
       .trafficBlob(message.blob)
       .then((bytes) => {
         const text = binary
-          ? `${hexDump(bytes.subarray(0, HEX_PREVIEW_BYTES))}\n(${bytes.length} bytes total)`
+          ? `${hexDump(bytes.subarray(0, HEX_PREVIEW_BYTES))}\n${t("({count} bytes total)", { count: bytes.length })}`
           : new TextDecoder().decode(bytes);
         setFull({ loading: false, text });
       })
@@ -64,7 +65,7 @@ function StreamMessageRow({ message }: { message: TrafficStreamMessage }) {
     return (
       <div className="mx-5 my-3 space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
         <div className="font-medium text-amber-700 text-xs dark:text-amber-400">
-          #{message.seq} Recording limit reached: later messages were not stored
+          {t("#{seq} Recording limit reached: later messages were not stored", { seq: message.seq })}
         </div>
         <pre className={payloadClass}>{message.payload}</pre>
       </div>
@@ -76,14 +77,14 @@ function StreamMessageRow({ message }: { message: TrafficStreamMessage }) {
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="font-mono text-muted-foreground tabular-nums">#{message.seq}</span>
         <Badge variant="outline">{fmtDirection(message.direction)}</Badge>
-        <Badge variant="secondary">{message.type}</Badge>
+        <Badge variant="secondary">{t(message.type)}</Badge>
         {binary && message.encoding === "base64" && <Badge variant="outline">base64</Badge>}
-        {message.truncated && <Badge variant="destructive">truncated</Badge>}
+        {message.truncated && <Badge variant="destructive">{t("truncated")}</Badge>}
         {message.event && <span className="font-mono">event: {message.event}</span>}
         {message.event_id && <span className="font-mono">id: {message.event_id}</span>}
         {message.retry ? <span className="font-mono">retry: {message.retry}</span> : null}
         <span className="ml-auto text-muted-foreground tabular-nums">
-          {fmtBytes(message.size)} · {new Date(message.ts * 1000).toLocaleTimeString()}
+          {fmtBytes(message.size)} · {new Date(message.ts * 1000).toLocaleTimeString(intlLocale)}
         </span>
       </div>
       <pre className={payloadClass}>{full?.text ?? message.payload}</pre>
@@ -93,7 +94,7 @@ function StreamMessageRow({ message }: { message: TrafficStreamMessage }) {
           {!full?.text && (
             <Button variant="outline" size="xs" disabled={full?.loading} onClick={loadFull}>
               {full?.loading && <Loader2Icon className="animate-spin" />}
-              Load full payload
+              {t("Load full payload")}
             </Button>
           )}
           {full?.error && <span className="text-destructive">{full.error}</span>}
@@ -153,11 +154,15 @@ export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; 
     <div className="flex flex-col">
       <div className="flex items-center gap-2 px-5 py-3 text-muted-foreground text-xs">
         <span>
-          {kind === "websocket" ? "WebSocket" : "Server-Sent Events"} · {items.length} of {total} messages
+          {t("{kind} · {count} of {total} messages", {
+            kind: kind === "websocket" ? "WebSocket" : "Server-Sent Events",
+            count: items.length,
+            total,
+          })}
         </span>
         <Button variant="outline" size="xs" className="ml-auto" disabled={loading} onClick={() => load(0)}>
           <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
-          Refresh
+          {t("Refresh")}
         </Button>
       </div>
       {renderBody()}
@@ -169,15 +174,15 @@ export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; 
       return (
         <div className="flex items-center gap-2 p-5 text-muted-foreground text-xs">
           <Loader2Icon className="size-3.5 animate-spin" />
-          Loading messages…
+          {t("Loading messages…")}
         </div>
       );
     }
     if (error) {
-      return <div className="p-5 text-destructive text-xs">Failed to load messages: {error}</div>;
+      return <div className="p-5 text-destructive text-xs">{t("Failed to load messages: {error}", { error })}</div>;
     }
     if (items.length === 0) {
-      return <div className="p-5 text-muted-foreground text-xs">No messages recorded for this stream.</div>;
+      return <div className="p-5 text-muted-foreground text-xs">{t("No messages recorded for this stream.")}</div>;
     }
     return (
       <>
@@ -190,7 +195,7 @@ export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; 
           <div className="flex justify-center p-4">
             <Button variant="outline" size="sm" disabled={loadingMore} onClick={() => load(items.length)}>
               {loadingMore && <Loader2Icon className="animate-spin" />}
-              Load more
+              {t("Load more")}
             </Button>
           </div>
         )}

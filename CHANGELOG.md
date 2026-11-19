@@ -49,6 +49,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Workspace and skill symlink confinement**: workspace file operations, the skill file APIs and the skill loader resolve symlinks in every path component and refuse a target outside their root, so a link planted in the workspace or a skill directory cannot expose another file.
+- **Target gate behind proxies**: a target approval is name-only whenever a proxy is in the path, including the recording proxy, the global egress proxy and a custom tool's own proxy, so the gate never claims an IP binding the proxy does not enforce.
+- **Remote MCP response bound**: Streamable HTTP JSON-RPC bodies and SSE data payloads are refused above 8 MiB, so a remote MCP server cannot force an unbounded decode.
+- **LLM response capture bound**: each recorded provider attempt keeps at most 1 MiB, and a call keeps at most 8 attempts, so a large or retrying stream cannot grow the recorder without bound. The live stream is unchanged.
+- **Intercept audit ring**: `preToolUse` records allow only after intercept and the target gate decide, so a blocked call no longer leaves a leftover allow row in `Guard.Audit()`.
+- **DSN password redaction**: `config.Redact` now masks libpq `password=` keywords and `?password=` query values as well as URL userinfo, so a ping-failure log cannot print the database password.
+- **Asset DSL nesting**: `ParseDSL` refuses queries longer than 4 KiB or nested more than 32 parentheses deep, so a crafted `dsl` cannot grow the goroutine stack without bound.
+- **Retry-After overflow**: a 429/503 `Retry-After` of huge seconds no longer wraps `time.Duration` into a tiny delay. Values above `MaxDelay` are not retried.
+- **Conversation message pages**: `GET /api/conversations/{id}/messages` clamps `limit` (200 for history, 1000 for `?since=`), so a huge query cannot load the whole transcript in one response.
 - **Findings CSV formula cells**: `FindingsCSV` prefixes name, class, summary, task, and other text fields that start with `=`, `+`, `-`, `@`, tab, or CR so Excel/LibreOffice do not evaluate them as formulas when the export is opened.
 - **Asset service links**: the Services tab only uses an asset URL as `href` when it is `http:` or `https:`. `javascript:`, `data:`, and other schemes render as text.
 - **Chat session directories**: `ChatAgent.Chat` accepts only `[A-Za-z0-9_-]` session ids (at most 64 bytes) before joining them under `<workDir>/sessions`, so `..` and path separators cannot escape that directory.

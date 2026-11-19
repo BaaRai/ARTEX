@@ -1,23 +1,24 @@
+import { t } from "@/i18n";
 import type { NewAssetType } from "@/lib/types";
 
 const ASSET_TYPE_LABELS: Record<NewAssetType, string> = {
-  app: "App",
-  endpoint: "Endpoint",
+  app: t("App"),
+  endpoint: t("Endpoint"),
   ip: "IP",
-  root_domain: "Root domain",
-  service: "Service",
-  subdomain: "Subdomain",
+  root_domain: t("Root domain"),
+  service: t("Service"),
+  subdomain: t("Subdomain"),
 };
 
 const TASK_ASSET_SOURCE_LABELS: Record<string, string> = {
-  agent: "Agent-discovered",
-  anchor: "Blackboard anchor",
-  api: "Assets API",
-  company: "Company association",
-  legacy: "Legacy association",
-  manual: "Manually added",
-  system: "System association",
-  task: "Task initialization",
+  agent: t("Agent-discovered"),
+  anchor: t("Blackboard anchor"),
+  api: t("Assets API"),
+  company: t("Company association"),
+  legacy: t("Legacy association"),
+  manual: t("Manually added"),
+  system: t("System association"),
+  task: t("Task initialization"),
 };
 
 export function taskAssetTypeLabel(type: NewAssetType): string {

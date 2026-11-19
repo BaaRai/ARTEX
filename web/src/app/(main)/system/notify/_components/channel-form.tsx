@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { t } from "@/i18n";
 import type { NotificationFilter } from "@/lib/types";
 
 // asText / inputType are value helpers local to this file (tightly coupled to control rendering); they do not belong in channel-fields.
@@ -120,7 +121,9 @@ export function ConfigField({
   const hint = masked ? (
     <p className="text-muted-foreground flex items-center gap-1 text-xs">
       <CheckIcon className="size-3" />
-      Saved{maskedTail ? ` (tail ${maskedTail})` : ""} · enter a new value to overwrite, clear to remove it
+      {maskedTail
+        ? t("Saved (tail {tail}) · enter a new value to overwrite, clear to remove it", { tail: maskedTail })
+        : t("Saved · enter a new value to overwrite, clear to remove it")}
     </p>
   ) : (
     def.help && <p className="text-muted-foreground text-xs">{def.help}</p>
@@ -141,13 +144,13 @@ export function FilterSummary({ filter }: { filter: NotificationFilter }) {
   if (filter.min_severity) {
     parts.push(SEVERITY_OPTIONS.find((o) => o.value === filter.min_severity)?.label ?? filter.min_severity);
   }
-  if (filter.vulnclass_include?.length) parts.push(`${filter.vulnclass_include.length} type keywords`);
-  if (filter.vulnclass_exclude?.length) parts.push(`excludes ${filter.vulnclass_exclude.length} keywords`);
-  if (filter.task_ids?.length) parts.push(`${filter.task_ids.length} tasks`);
-  if (filter.asset_ids?.length) parts.push(`${filter.asset_ids.length} assets`);
-  if (filter.on_status_change) parts.push("includes status changes");
+  if (filter.vulnclass_include?.length) parts.push(t("{count} type keywords", { count: filter.vulnclass_include.length }));
+  if (filter.vulnclass_exclude?.length) parts.push(t("excludes {count} keywords", { count: filter.vulnclass_exclude.length }));
+  if (filter.task_ids?.length) parts.push(t("{count} tasks", { count: filter.task_ids.length }));
+  if (filter.asset_ids?.length) parts.push(t("{count} assets", { count: filter.asset_ids.length }));
+  if (filter.on_status_change) parts.push(t("includes status changes"));
   if (parts.length === 0) {
-    return <p className="text-muted-foreground text-sm">All vulnerabilities</p>;
+    return <p className="text-muted-foreground text-sm">{t("All vulnerabilities")}</p>;
   }
   return <p className="text-muted-foreground text-sm">{parts.join(" · ")}</p>;
 }

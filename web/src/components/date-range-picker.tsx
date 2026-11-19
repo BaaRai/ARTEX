@@ -2,12 +2,15 @@
 
 import * as React from "react";
 
-import { format, subDays } from "date-fns";
+import { subDays } from "date-fns";
 import type { DateRange } from "react-day-picker";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { intlLocale, t } from "@/i18n";
+
+const fmtDate = (d: Date) => d.toLocaleDateString(intlLocale, { day: "numeric", month: "short", year: "numeric" });
 
 interface DateRangePickerProps {
   value?: DateRange;
@@ -22,14 +25,14 @@ export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
     return { from, to };
   });
   const dateRange = value ?? internalDateRange;
-  let dateRangeLabel = "Select date";
+  let dateRangeLabel = t("Select date");
 
   if (dateRange?.from) {
-    dateRangeLabel = format(dateRange.from, "d MMM yyyy");
+    dateRangeLabel = fmtDate(dateRange.from);
   }
 
   if (dateRange?.from && dateRange.to) {
-    dateRangeLabel = `${format(dateRange.from, "d MMM yyyy")} - ${format(dateRange.to, "d MMM yyyy")}`;
+    dateRangeLabel = `${fmtDate(dateRange.from)} - ${fmtDate(dateRange.to)}`;
   }
 
   const handleDateChange = (nextValue: DateRange | undefined) => {
