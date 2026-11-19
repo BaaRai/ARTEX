@@ -272,6 +272,41 @@ func TestConfinedFileToolsRunDirSymlinkSwap(t *testing.T) {
 	}
 }
 
+// A relative symlink that stays inside the data directory is still a symlink in the
+// run directory path: os.Root would follow it, so the run directory is refused
+// instead. Here it points at a root-only file's directory (the MITM CA's).
+func TestConfinedFileToolsRunDirRelativeSymlinkInside(t *testing.T) {
+	f := newConfinedFixture(t)
+	ca := filepath.Join(f.base, "traffic", "_ca")
+	if err := os.MkdirAll(ca, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ca, "mitmproxy-ca.pem"), []byte(confinedSecret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(f.work); err != nil {
+		t.Fatal(err)
+	}
+	// The link sits in sessions/, so ../traffic/_ca is <base>/traffic/_ca: the in-base CA case.
+	if err := os.Symlink(filepath.Join("..", "traffic", "_ca"), f.work); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		tool string
+		in   map[string]any
+	}{
+		{"Read", map[string]any{"file_path": "mitmproxy-ca.pem"}},
+		{"Read", map[string]any{"file_path": "in.txt"}},
+		{"LS", map[string]any{}},
+	} {
+		res := f.call(t, c.tool, c.in)
+		if !res.IsError || strings.Contains(res.Flatten(), confinedSecret) {
+			t.Errorf("relative run dir symlink: %s %v was not refused: %s", c.tool, c.in, res.Flatten())
+		}
+	}
+	f.secretUnchanged(t)
+}
+
 // Missing or misplaced working directories fail closed.
 func TestConfinedFileToolsNeedWorkDirUnderBase(t *testing.T) {
 	f := newConfinedFixture(t)

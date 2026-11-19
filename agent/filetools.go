@@ -115,6 +115,14 @@ func openWorkRoot(base, dir string) (*workRoot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("data directory: %w", err)
 	}
+	// A relative symlink inside the data directory passes os.Root (it stays in the
+	// root), so the path is also required to be free of symlinks: the agent's shell
+	// can replace a run directory with a link to another run's tree or to a
+	// root-only file such as the MITM CA key.
+	want := filepath.Join(realBase, rel)
+	if got, err := filepath.EvalSymlinks(want); err != nil || got != want {
+		return nil, errors.New("the working directory path contains a symlink")
+	}
 	r, err := os.OpenRoot(realBase)
 	if err != nil {
 		return nil, fmt.Errorf("data directory: %w", err)
