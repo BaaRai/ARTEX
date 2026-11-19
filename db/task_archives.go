@@ -60,7 +60,7 @@ type TaskArchive struct {
 	Warnings                json.RawMessage `json:"warnings"`
 	FormatVersion           int             `json:"format_version"`
 	ArchivePath             string          `json:"-"`
-	Storage                 string          `json:"storage"`
+	Storage                 string          `json:"storage,omitempty"`
 	SHA256                  string          `json:"sha256,omitempty"`
 	OriginalSize            int64           `json:"original_size"`
 	CompressedSize          int64           `json:"compressed_size"`
@@ -162,9 +162,11 @@ func scanTaskArchive(sc interface{ Scan(...any) error }) (*TaskArchive, error) {
 	if err != nil {
 		return nil, err
 	}
-	item.Storage = "local"
-	if strings.HasPrefix(item.ArchivePath, "s3://") {
-		item.Storage = "s3"
+	if item.ArchivePath != "" {
+		item.Storage = "local"
+		if strings.HasPrefix(item.ArchivePath, "s3://") {
+			item.Storage = "s3"
+		}
 	}
 	if err := json.Unmarshal([]byte(sources), &item.SourceTaskIDs); err != nil {
 		return nil, err

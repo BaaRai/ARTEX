@@ -24,7 +24,7 @@ func TestRemoteArchiveInterruptionRecovery(t *testing.T) {
 		t.Skip("requires isolated PostgreSQL")
 	}
 	phases := []string{
-		"staged_before_compression", "compressed_before_journal", "journal_before_upload",
+		"staged_before_compression", "compression_partial", "compressed_before_journal", "journal_before_upload",
 		"uploaded_before_verification", "verified_before_database",
 		"database_before_local_cleanup", "package_cleaned_before_stage_cleanup",
 		"restore_download_before_install", "restore_files_before_database", "restore_database_before_object_delete", "restore_object_deleted_before_stub",
@@ -71,22 +71,30 @@ func TestRemoteArchiveInterruptionRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			packagePath := taskArchivePath(m.dir, job.ID, task.ID)
+			if phase == "compression_partial" {
+				if err := os.MkdirAll(filepath.Dir(packagePath), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(packagePath+".partial", []byte("incomplete compressed package"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			var original, compressed int64
 			var checksum, uri, journal string
-			if phase != "staged_before_compression" {
+			if phase != "staged_before_compression" && phase != "compression_partial" {
 				original, compressed, checksum, err = writeTaskArchivePackage(packagePath, stage.payload, snapshot)
 				if err != nil {
 					t.Fatal(err)
 				}
 				uri = store.URI(id, job.ID, checksum)
 			}
-			if phase != "staged_before_compression" && phase != "compressed_before_journal" {
+			if phase != "staged_before_compression" && phase != "compression_partial" && phase != "compressed_before_journal" {
 				journal, err = s.writeRemoteArchiveJournal(remoteArchiveJournal{ArchiveID: job.ID, URI: uri, LocalPath: packagePath, Operation: "upload"})
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
-			committed := phase != "staged_before_compression" && phase != "compressed_before_journal" &&
+			committed := phase != "staged_before_compression" && phase != "compression_partial" && phase != "compressed_before_journal" &&
 				phase != "journal_before_upload" && phase != "uploaded_before_verification" && phase != "verified_before_database"
 			if phase == "uploaded_before_verification" {
 				data, err := os.ReadFile(packagePath)
@@ -196,6 +204,9 @@ func TestRemoteArchiveInterruptionRecovery(t *testing.T) {
 			if _, err := os.Stat(packagePath); !os.IsNotExist(err) {
 				t.Fatalf("temporary package remains: %v", err)
 			}
+			if _, err := os.Stat(packagePath + ".partial"); !os.IsNotExist(err) {
+				t.Fatalf("partial package remains: %v", err)
+			}
 			if got, want := objects.has(uri), committed && !remoteDeleted; got != want {
 				t.Fatalf("remote object exists=%v, want=%v", got, want)
 			}
@@ -288,4 +299,105 @@ func newRecoveryObjectStore(t *testing.T) (*archivestore.Store, *recoveryObjects
 		t.Fatal(err)
 	}
 	return store, objects
+}
+
+// Neither a rollback conflict nor a temporary-file cleanup failure may discard
+// the staging journal: recovery must be safe to retry after the obstruction ends.
+func TestArchivePartialRecoveryRetainsJournalOnFailure(t *testing.T) {
+	if os.Getenv("ARTEX_PG_DSN") == "" {
+		t.Skip("requires isolated PostgreSQL")
+	}
+	for _, failure := range []string{"rollback-conflict", "cleanup-failure"} {
+		t.Run(failure, func(t *testing.T) {
+			m, err := NewManager(t.TempDir(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer m.Close()
+			task, err := m.CreateTask("partial recovery "+failure, "retain source", nil, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, _ := strconv.ParseInt(task.ID, 10, 64)
+			defer func() { _, _ = m.pg.Exec("DELETE FROM task_archives WHERE task_id=$1", id); _ = m.pg.DeleteTask(id) }()
+			if err := m.pg.SetPaused(id, true); err != nil {
+				t.Fatal(err)
+			}
+			job, err := m.pg.QueueTaskArchive(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := filepath.Join(m.dir, "tasks", task.ID, "workspace", "source.txt")
+			if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(source, []byte("original"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := m.pg.SnapshotTaskArchive(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stage, err := stageTaskArchiveFiles(m.dir, job.ID, task.ID, snapshot.ExplorationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			partial := taskArchivePath(m.dir, job.ID, task.ID) + ".partial"
+			if err := os.MkdirAll(filepath.Dir(partial), 0700); err != nil {
+				t.Fatal(err)
+			}
+			var obstruction string
+			if failure == "rollback-conflict" {
+				if len(stage.journal.Moves) == 0 {
+					t.Fatal("no staged source")
+				}
+				obstruction = stage.journal.Moves[0].Source
+				if err := os.MkdirAll(obstruction, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(partial, []byte("partial"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Mkdir(partial, 0700); err != nil {
+					t.Fatal(err)
+				}
+				obstruction = filepath.Join(partial, "block-remove")
+				if err := os.WriteFile(obstruction, []byte("fixture"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := recoverTaskArchiveStages(m.dir, m.pg); err == nil {
+				t.Fatal("expected recovery obstruction")
+			}
+			if _, err := os.Stat(filepath.Join(stage.root, "journal.json")); err != nil {
+				t.Fatal("lost retry journal", err)
+			}
+			if _, err := os.Stat(partial); err != nil {
+				t.Fatal("removed partial before successful recovery", err)
+			}
+			if failure == "cleanup-failure" {
+				if got, err := os.ReadFile(source); err != nil || string(got) != "original" {
+					t.Fatal("source was not rolled back", err)
+				}
+			}
+			if err := os.RemoveAll(obstruction); err != nil {
+				t.Fatal(err)
+			}
+			if err := recoverTaskArchiveStages(m.dir, m.pg); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(source); err != nil || string(got) != "original" {
+				t.Fatal("source lost on retry", err)
+			}
+			for _, path := range []string{stage.root, partial} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("recovery left %s: %v", path, err)
+				}
+			}
+			if err := recoverTaskArchiveStages(m.dir, m.pg); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }

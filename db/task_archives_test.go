@@ -204,6 +204,13 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	if err != nil {
 		t.Fatal(err)
 	}
+	if archive.Storage != "" {
+		t.Fatalf("queued archive without a location has storage %q", archive.Storage)
+	}
+	encoded, err := json.Marshal(archive)
+	if err != nil || bytes.Contains(encoded, []byte(`"storage"`)) {
+		t.Fatalf("unknown storage must be omitted from JSON: %s, %v", encoded, err)
+	}
 	claimed, err := d.ClaimTaskArchiveJob(t.Context())
 	if err != nil || claimed == nil || claimed.ID != archive.ID || claimed.State != Archiving {
 		t.Fatalf("claim = %+v, %v", claimed, err)
@@ -242,7 +249,7 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 		t.Fatalf("hot compaction left nodes=%d assets=%d usage=%d", nodes, assets, usage)
 	}
 	ready, err := d.GetTaskArchive(archive.ID)
-	if err != nil || ready == nil || ready.State != ArchiveReady {
+	if err != nil || ready == nil || ready.State != ArchiveReady || ready.Storage != "local" {
 		t.Fatalf("ready archive = %+v, %v", ready, err)
 	}
 	var stats map[string]any

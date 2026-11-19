@@ -185,6 +185,16 @@ func (s *taskArchiveFileStage) rollback() error {
 	if s == nil || s.done {
 		return nil
 	}
+	err := s.rollbackFiles()
+	if err == nil {
+		err = os.RemoveAll(s.root)
+	}
+	s.done = true
+	return err
+}
+
+// Keep the journal until the caller has also cleaned temporary packages.
+func (s *taskArchiveFileStage) rollbackFiles() error {
 	var errs []error
 	for i := len(s.journal.Moves) - 1; i >= 0; i-- {
 		move := s.journal.Moves[i]
@@ -210,12 +220,6 @@ func (s *taskArchiveFileStage) rollback() error {
 			errs = append(errs, err)
 		}
 	}
-	if len(errs) == 0 {
-		if err := os.RemoveAll(s.root); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	s.done = true
 	return errors.Join(errs...)
 }
 
@@ -435,7 +439,7 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 			continue
 		}
 		stage := &taskArchiveFileStage{root: root, payload: filepath.Join(root, "payload"), journal: journal}
-		if err := stage.rollback(); err != nil {
+		if err := stage.rollbackFiles(); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -445,7 +449,15 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 		packagePath := taskArchivePath(dataDir, journal.ArchiveID, journal.TaskID)
 		if err := validateArchivePath(dataDir, packagePath); err != nil {
 			errs = append(errs, err)
-		} else if err := removeLocalArchivePackage(packagePath); err != nil {
+			continue
+		}
+		// A crash inside compression leaves .partial, before any upload journal.
+		// Retain this staging journal on cleanup failure so startup can retry.
+		if err := errors.Join(removeLocalArchivePackage(packagePath), removeLocalArchivePackage(packagePath+".partial")); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err := os.RemoveAll(root); err != nil {
 			errs = append(errs, err)
 		}
 	}
