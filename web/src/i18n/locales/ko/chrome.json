@@ -7,7 +7,9 @@
   "search": {
     "button": "검색",
     "placeholder": "대시보드, 사용자 등을 검색하세요…",
-    "empty": "검색 결과가 없습니다."
+    "empty": "검색 결과가 없습니다.",
+    "dialogTitle": "명령 팔레트",
+    "dialogDescription": "실행할 명령을 검색하세요…"
   },
   "account": {
     "changePassword": "비밀번호 변경",
@@ -55,5 +57,8 @@
   },
   "theme": {
     "ariaLabel": "현재 테마: {mode}. 클릭하여 테마를 전환하세요"
+  },
+  "sidebar": {
+    "toggle": "사이드바 토글"
   }
 }

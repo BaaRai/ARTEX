@@ -7,7 +7,9 @@
   "search": {
     "button": "Search",
     "placeholder": "Search dashboards, users, and more…",
-    "empty": "No results found."
+    "empty": "No results found.",
+    "dialogTitle": "Command Palette",
+    "dialogDescription": "Search for a command to run…"
   },
   "account": {
     "changePassword": "Change password",
@@ -55,5 +57,8 @@
   },
   "theme": {
     "ariaLabel": "Current theme: {mode}. Click to cycle themes"
+  },
+  "sidebar": {
+    "toggle": "Toggle Sidebar"
   }
 }
