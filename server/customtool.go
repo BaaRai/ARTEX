@@ -482,7 +482,7 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 		}
 		sessionEnv = tc.Env
 	}
-	body, err := execPython(ctx, interp, key, spec.Code, params, workDir, sessionEnv, timeoutOr(spec.TimeoutMs, 120000))
+	body, err := execPython(ctx, interp, key, spec.Code, params, workDir, sessionEnv, timeoutOr(spec.TimeoutMs, 120000), s.execPriv)
 	if err != nil {
 		return actool.Errorf(err.Error()), nil
 	}
@@ -492,7 +492,7 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 // execPython writes the code to a temp .py under workDir/.tools, runs it via interp
 // with the params JSON on stdin + scalar params mirrored to TOOL_<NAME> env, and
 // returns combined stdout+stderr (with a timeout/exit note). Standalone + testable.
-func execPython(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration) (string, error) {
+func execPython(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration, priv ExecPrivilege) (string, error) {
 	toolsDir := filepath.Join(workDir, ".tools")
 	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
 		return "", err
@@ -508,10 +508,14 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 		return "", err
 	}
 	f.Close()
+	if err := prepareExecScript(priv, tmp); err != nil {
+		return "", err
+	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c := exec.CommandContext(runCtx, interp, tmp)
+	applyExecCredential(c, priv)
 	c.Dir = workDir
 	c.Env = append(os.Environ(), sessionEnv...) // session proxy env
 	for k, v := range params {                  // scalar params mirrored as TOOL_<NAME>

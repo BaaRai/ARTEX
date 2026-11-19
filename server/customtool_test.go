@@ -96,7 +96,7 @@ print("port=" + str(a["port"]))
 `
 	out, err := execPython(context.Background(), interp, "test", code,
 		map[string]any{"target": "example.com", "port": float64(8080)},
-		t.TempDir(), nil, 10*time.Second)
+		t.TempDir(), nil, 10*time.Second, ExecPrivilege{})
 	if err != nil {
 		t.Fatalf("execPython error: %v", err)
 	}

@@ -160,13 +160,19 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event, cmd string) h
 	}
 	scope, gated := g.gateScope(ctx)
 	rules := !g.targetOnly && g.interceptor != nil && g.interceptor.IsToolEnabled(ev.ToolName)
-	if !rules && !gated {
+	// Persistence tools (custom tools, MCP servers, skills) always meet their built-in
+	// approval, in the target-only guard too; see intercept.MatchPersistence.
+	persist := g.interceptor != nil && intercept.IsPersistenceTool(ev.ToolName)
+	if !rules && !gated && !persist {
 		return hook.Result{}
 	}
 	ctx = intercept.WithCall(ctx, ev.ToolName, ev.Input)
 	var dec intercept.Decision
-	if rules {
-		var matched bool
+	matched := false
+	if persist {
+		dec, matched = g.interceptor.MatchPersistence(ev.ToolName, ev.Input)
+	}
+	if !matched && rules {
 		dec, matched = g.interceptor.Match(ev.ToolName, ev.Input)
 		if !matched {
 			// No rule matched. Ask the LLM fallback judge (if enabled); when it is off

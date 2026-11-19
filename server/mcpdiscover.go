@@ -21,13 +21,18 @@ type mcpClient interface {
 }
 
 // connectMCP dials one MCP server per its transport. Callers must Close the client.
-func connectMCP(ctx context.Context, m *db.MCPServer) (mcpClient, error) {
+func connectMCP(ctx context.Context, m *db.MCPServer, priv ExecPrivilege) (mcpClient, error) {
 	switch m.Transport {
 	case "stdio":
 		if m.Command == "" {
 			return nil, fmt.Errorf("stdio transport is missing a command")
 		}
-		return mcp.NewStdioClient(ctx, m.Name, m.Command, jsonStrMap(m.Env), jsonStrSlice(m.Args)...)
+		// The stdio command runs as the executor identity (see execpriv.go).
+		command, args, err := execDropCommand(priv, m.Command, jsonStrSlice(m.Args))
+		if err != nil {
+			return nil, err
+		}
+		return mcp.NewStdioClient(ctx, m.Name, command, jsonStrMap(m.Env), args...)
 	case "http":
 		if m.URL == "" {
 			return nil, fmt.Errorf("http transport is missing a URL")
@@ -47,7 +52,7 @@ func connectMCP(ctx context.Context, m *db.MCPServer) (mcpClient, error) {
 // discoverAndCacheMCP connects to one MCP, lists its tools, and persists the tool
 // names to mcp_tools_cache so the UI shows them without a live connection.
 func (s *Server) discoverAndCacheMCP(ctx context.Context, m *db.MCPServer) error {
-	cl, err := connectMCP(ctx, m)
+	cl, err := connectMCP(ctx, m, s.execPriv)
 	if err != nil {
 		_ = s.m.pg.UpdateMCPHealth(m.ID, false, err.Error())
 		return err

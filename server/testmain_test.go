@@ -18,7 +18,11 @@ func TestMain(m *testing.M) {
 	// serializing go test ./... across packages.
 	db.SuffixTestDatabase("server")
 	// Fixed test key via env: NewManager's InitSecrets then writes no key file.
-	os.Setenv("ARTEX_SECRET_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	// Not in the sealed-environment helper process (envseal_linux_test.go): it must see
+	// the empty ARTEX_SECRET_KEY the parent test set.
+	if os.Getenv("ARTEX_SEAL_TEST_HELPER") != "1" {
+		os.Setenv("ARTEX_SECRET_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	}
 	dsn, _, err := db.DSN()
 	if err != nil {
 		os.Exit(m.Run())

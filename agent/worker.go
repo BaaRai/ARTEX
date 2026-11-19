@@ -324,7 +324,9 @@ func ensureRunDir(base string, taskID, intentID int64) string {
 	if intentID > 0 {
 		dir = filepath.Join(dir, "i"+strconv.FormatInt(intentID, 10))
 	}
-	_ = os.MkdirAll(dir, 0o755)
+	// 0775: with the executor group sharing the task tree (server/execpriv.go) the
+	// agent's shell must write here; the umask of the server decides the final bits.
+	_ = os.MkdirAll(dir, 0o775)
 	return dir
 }
 

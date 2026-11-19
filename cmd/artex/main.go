@@ -77,7 +77,23 @@ func printBanner(addr string) {
 // main maps run's result onto the process exit code. The body lives in a
 // function that can *return* rather than os.Exit, so its own defers still run.
 func main() {
+	// Started as the Bash shim or as an MCP drop command: drop the identity and exec
+	// the real program. It returns only for an ordinary start.
+	server.RunExecShimIfRequested(os.Args)
+	// Before any listener or child exists: keep the secrets out of /proc/<pid>/environ.
+	server.SealProcessEnv()
 	os.Exit(run())
+}
+
+// flagWasSet reports whether the operator passed the named flag.
+func flagWasSet(name string) bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }
 
 func run() int {
@@ -85,6 +101,10 @@ func run() int {
 		addr    = flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
 		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "runtime data directory: traffic index, task files, transcripts (default: data/ next to the executable)")
 		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
+		// Identity of every agent process (Bash, the shell, custom tools, MCP stdio).
+		// A negative uid turns the drop off; 0 (root) is refused.
+		execUID = flag.Int("exec-uid", server.DefaultExecUID, "uid that agent processes run as (Bash, shell, custom tools, MCP stdio); -1 turns the drop off")
+		execGID = flag.Int("exec-gid", server.DefaultExecGID, "gid that agent processes run as")
 	)
 	flag.Parse()
 
@@ -152,6 +172,22 @@ func run() int {
 		TrustedProxies:    trustedAddrs,
 	})
 
+	// Agent processes run as the executor identity, never as the server's root (see
+	// server/execpriv.go). An explicit option that cannot be applied stops the start.
+	priv, err := server.ResolveExecPrivilege(*execUID, *execGID, flagWasSet("exec-uid") || flagWasSet("exec-gid"))
+	if err != nil {
+		log.Printf("[config] %v", err)
+		return 1
+	}
+	if err := server.PrepareExecPrivilege(priv, *dataDir, config.KeyDir(), config.Path()); err != nil {
+		log.Printf("[config] %v", err)
+		return 1
+	}
+	if err := server.InstallBashShim(priv); err != nil {
+		log.Printf("[config] %v", err)
+		return 1
+	}
+
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, shutdown := shutdownContext(sigCtx)
@@ -163,7 +199,7 @@ func run() int {
 	}
 	defer mgr.Close()
 
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted))
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv))
 	// ReadTimeout bounds how long the request headers and body may take to arrive.
 	// It does not limit how long a handler runs, so an event stream stays open.
 	// WriteTimeout is left unset: a write deadline would cut that stream.
