@@ -57,11 +57,26 @@ const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
   anthropic: "Only selectable for the openai format. Anthropic's field name is fixed as max_tokens.",
   "openai-responses": "Only selectable for the openai format. The Responses API's field name is fixed as max_output_tokens.",
   ollama: "Only selectable for the openai format. Ollama's field name is fixed as max_tokens.",
+  notholy: "Only selectable for the openai format. The NotHoly gateway is OpenAI-compatible; its field name is max_tokens.",
 };
 // LLM profile formats. The default in the create form is "anthropic"; "ollama" is the
-// keyless local-server format (base URL defaults to http://127.0.0.1:11434/v1).
-type ProfileFormat = "anthropic" | "openai" | "openai-responses" | "ollama";
+// keyless local-server format (base URL defaults to http://127.0.0.1:11434/v1);
+// "notholy" is the NotHoly gateway (OpenAI-compatible, base URL baked in — paste a key).
+type ProfileFormat = "anthropic" | "openai" | "openai-responses" | "ollama" | "notholy";
 const OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1";
+const NOTHOLY_DEFAULT_BASE_URL = "https://api.notholy.com/v1";
+
+// A small, discreet NotHoly spark mark (the red four-point glyph from the NotHoly
+// wordmark), rendered inline next to the provider name. Kept subtle on purpose.
+function NotHolyMark({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width={13} height={13} aria-hidden="true" className={className}>
+      <g transform="translate(-119.8 1.4) scale(0.1085)" fill="#F90B2B">
+        <path d="M1216.05 5.93 C1225.16 64.48 1247.20 87.25 1303.85 96.67 Q1304.75 97.60 1303.85 98.53 C1247.20 107.95 1225.16 130.72 1216.05 189.27 Q1215.15 190.20 1214.25 189.27 C1205.14 130.72 1183.10 107.95 1126.45 98.53 Q1125.55 97.60 1126.45 96.67 C1183.10 87.25 1205.14 64.48 1214.25 5.93 Q1215.15 5.00 1216.05 5.93Z" />
+      </g>
+    </svg>
+  );
+}
 const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: NONE, label: "Not sent (default)" },
   { value: "low", label: "low" },
@@ -351,7 +366,10 @@ function ProfileSheet({
     if (!open) return;
     setName(profile?.name ?? "");
     setFormat(
-      profile?.format === "openai" || profile?.format === "openai-responses" || profile?.format === "ollama"
+      profile?.format === "openai" ||
+        profile?.format === "openai-responses" ||
+        profile?.format === "ollama" ||
+        profile?.format === "notholy"
         ? profile.format
         : "anthropic",
     );
@@ -489,6 +507,8 @@ function ProfileSheet({
     keyPlaceholder = "optional — a local Ollama server runs keyless";
   } else if (keyHint) {
     keyPlaceholder = `Set (${keyHint}); leave empty to keep it`;
+  } else if (format === "notholy") {
+    keyPlaceholder = "your NotHoly API key — create one in your NotHoly console";
   }
 
   return (
@@ -535,6 +555,12 @@ function ProfileSheet({
                   <SelectItem value="openai">OpenAI (Chat Completions)</SelectItem>
                   <SelectItem value="openai-responses">OpenAI (Responses API)</SelectItem>
                   <SelectItem value="ollama">Ollama (local, no key needed)</SelectItem>
+                  <SelectItem value="notholy">
+                    <span className="flex items-center gap-1.5">
+                      <NotHolyMark />
+                      NotHoly
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -546,7 +572,13 @@ function ProfileSheet({
               <Input
                 id="p-model"
                 className="font-mono"
-                placeholder={format === "ollama" ? "llama3.2" : "claude-opus-4-8"}
+                placeholder={
+                  format === "ollama"
+                    ? "llama3.2"
+                    : format === "notholy"
+                      ? "load the catalog with ↻, then pick a model"
+                      : "claude-opus-4-8"
+                }
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
@@ -618,7 +650,13 @@ function ProfileSheet({
             <Input
               id="p-base-url"
               className="font-mono"
-              placeholder={format === "ollama" ? OLLAMA_DEFAULT_BASE_URL : "https://api.openai.com/v1"}
+              placeholder={
+                format === "ollama"
+                  ? OLLAMA_DEFAULT_BASE_URL
+                  : format === "notholy"
+                    ? `${NOTHOLY_DEFAULT_BASE_URL} (default — leave empty)`
+                    : "https://api.openai.com/v1"
+              }
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
             />

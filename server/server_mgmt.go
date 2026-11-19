@@ -2275,8 +2275,9 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	provider := strings.TrimSpace(req.Provider)
-	// Ollama serves its model list keyless on the local server: no key gate.
-	if apiKey == "" && provider != "ollama" {
+	// Ollama (local server) and NotHoly (public catalog) serve their model list
+	// keyless: no key gate.
+	if apiKey == "" && provider != "ollama" && provider != "notholy" {
 		msg := "no API Key provided"
 		if withheld {
 			msg = "no API Key provided: the saved key is only sent to the endpoint it was saved for; enter the key to list models from a different base URL or provider"
@@ -2328,6 +2329,19 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(b, "/v1") {
 			b += "/v1"
 		}
+		hdr := http.Header{}
+		if apiKey != "" {
+			hdr.Set("Authorization", "Bearer "+apiKey)
+		}
+		candidates = append(candidates, candidate{b + "/models", hdr})
+	case "notholy":
+		// NotHoly's gateway is OpenAI-compatible; the catalog lives at
+		// {base}/models and is public, so a key is optional for listing. Base URL
+		// defaults to the NotHoly gateway so a profile needs only a key.
+		if baseURL == "" {
+			baseURL = agent.DefaultNotHolyBaseURL
+		}
+		b := strings.TrimRight(strings.TrimSuffix(baseURL, "/chat/completions"), "/")
 		hdr := http.Header{}
 		if apiKey != "" {
 			hdr.Set("Authorization", "Bearer "+apiKey)

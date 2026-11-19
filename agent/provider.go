@@ -169,8 +169,35 @@ func normalizeOllamaBaseURL(raw string) string {
 	return b
 }
 
+// FormatNotHoly marks a NotHoly profile. NotHoly's gateway
+// (https://api.notholy.com/v1) is OpenAI-compatible, so on the wire it speaks
+// llm.FormatOpenAI; the distinct sentinel lets the base URL default to the
+// NotHoly gateway so the operator only pastes their NotHoly API key, and never
+// falls back to OpenAI's public endpoint on an empty base URL. The model comes
+// from the NotHoly catalog (GET /v1/models), never a hardcoded default. See
+// NewProvider and ConfigFrom.
+const FormatNotHoly llm.Format = "notholy"
+
+// DefaultNotHolyBaseURL is the base of NotHoly's OpenAI-compatible gateway the
+// provider appends /chat/completions to. Baked in so a NotHoly profile needs
+// only a key: an empty BaseURL resolves here, never to OpenAI's public endpoint.
+const DefaultNotHolyBaseURL = "https://api.notholy.com/v1"
+
+// normalizeNotHolyBaseURL maps whatever the operator typed onto the base the
+// OpenAI-compatible provider expects: it strips a pasted "/chat/completions"
+// suffix, and an empty value becomes the NotHoly gateway default. A custom base
+// (e.g. a self-hosted NotHoly) is preserved.
+func normalizeNotHolyBaseURL(raw string) string {
+	b := strings.TrimRight(strings.TrimSuffix(strings.TrimSpace(raw), "/chat/completions"), "/")
+	if b == "" {
+		return DefaultNotHolyBaseURL
+	}
+	return b
+}
+
 // NeedsAPIKey reports whether this provider format requires an API key to be
-// usable. Ollama (local server) is keyless; every cloud format needs one.
+// usable. Ollama (local server) is keyless; every cloud format — NotHoly
+// included — needs one.
 func (c Config) NeedsAPIKey() bool { return c.Format != FormatOllama }
 
 // CompactionWindow returns the model context window in TOKENS for compaction
@@ -229,9 +256,12 @@ func FromEnv() (Config, bool) {
 	prov := strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_LLM_PROVIDER")))
 	anthKey := os.Getenv("ANTHROPIC_API_KEY")
 	oaiKey := os.Getenv("OPENAI_API_KEY")
+	nhKey := os.Getenv("NOTHOLY_API_KEY")
 
 	if prov == "" {
 		switch {
+		case nhKey != "":
+			prov = "notholy"
 		case anthKey != "":
 			prov = "anthropic"
 		case oaiKey != "":
@@ -272,6 +302,13 @@ func FromEnv() (Config, bool) {
 		if c.Model == "" {
 			c.Model = "llama3.2"
 		}
+	case "notholy":
+		c.Format = FormatNotHoly
+		c.APIKey = nhKey
+		c.BaseURL = normalizeNotHolyBaseURL(c.BaseURL)
+		// No model default: the NotHoly catalog (GET /v1/models) drives the
+		// choice, so ARTEX_LLM_MODEL must name a catalog model id. Left empty
+		// otherwise — the gateway then returns a clear error listing the catalog.
 	default:
 		c.Format = llm.FormatAnthropic
 		c.APIKey = anthKey
@@ -323,6 +360,13 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		if c.Model == "" {
 			c.Model = "llama3.2"
 		}
+	case "notholy":
+		c.Format = FormatNotHoly
+		// NotHoly's gateway is OpenAI-compatible; the provider appends
+		// "/chat/completions". Base URL defaults to the NotHoly gateway so a
+		// profile needs only a key, never OpenAI's public endpoint. The model is
+		// not defaulted: it comes from the NotHoly catalog (/v1/models).
+		c.BaseURL = normalizeNotHolyBaseURL(c.BaseURL)
 	default:
 		c.Format = llm.FormatAnthropic
 		// provider appends "/v1/messages".
@@ -354,6 +398,8 @@ func (c Config) Provider() string {
 		return "openai-responses"
 	case FormatOllama:
 		return "ollama"
+	case FormatNotHoly:
+		return "notholy"
 	}
 	return "anthropic"
 }
@@ -381,6 +427,15 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		}
 		if strings.TrimSpace(apiKey) == "" {
 			apiKey = ollamaPlaceholderKey
+		}
+	}
+	// NotHoly speaks OpenAI's Chat Completions on the wire. Bake the gateway base
+	// URL so an empty base can never fall back to OpenAI's public endpoint. Unlike
+	// Ollama, NotHoly requires a real key, so no placeholder is substituted.
+	if wireFormat == FormatNotHoly {
+		wireFormat = llm.FormatOpenAI
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = DefaultNotHolyBaseURL
 		}
 	}
 	lc := llm.Config{
