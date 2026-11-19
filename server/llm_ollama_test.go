@@ -110,7 +110,7 @@ func TestOllamaKeylessProfileLifecycle(t *testing.T) {
 	}
 	t.Cleanup(func() { m.Close() })
 	if m.pg == nil {
-		t.Skip("no postgres for this run")
+		db.SkipNoPG(t)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -197,7 +197,7 @@ func TestOllamaListModels(t *testing.T) {
 	}
 	t.Cleanup(func() { m.Close() })
 	if m.pg == nil {
-		t.Skip("no postgres for this run")
+		db.SkipNoPG(t)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

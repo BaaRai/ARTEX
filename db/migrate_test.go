@@ -52,11 +52,11 @@ func scratchDSN(t *testing.T, suffix string) string {
 	admin.Path = "/postgres"
 	conn, err := sql.Open("pgx", admin.String())
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	if err := conn.Ping(); err != nil {
 		conn.Close()
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	drop := func() error {
 		_, err := conn.Exec(`DROP DATABASE IF EXISTS "` + name + `" WITH (FORCE)`)
@@ -189,7 +189,7 @@ func TestOpenRecordsEmbeddedMigrations(t *testing.T) {
 	dsn := testDSN(t)
 	d, err := Open(dsn)
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	applied := assertEmbeddedApplied(t, d)
 	d.Close()

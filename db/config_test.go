@@ -17,7 +17,7 @@ import (
 func TestPoolProfilesOrder(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Close via Cleanup, registered FIRST so it runs LAST: a plain defer would
 	// close the pool before the row-deleting cleanups below run.
@@ -83,7 +83,7 @@ func TestDeleteProfileContextHonorsCancellation(t *testing.T) {
 func TestConfigStores(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 

@@ -76,7 +76,7 @@ func TestRenderLessonsUsageOmitsTruncated(t *testing.T) {
 func TestTaskLessonsUsesTaskScopeAndRanksCompanyFirst(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -174,7 +174,7 @@ func TestTaskLessonsUsesTaskScopeAndRanksCompanyFirst(t *testing.T) {
 func TestExtractLessonsScopesSingleCompanyFromTaskScope(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -226,7 +226,7 @@ func TestExtractLessonsScopesSingleCompanyFromTaskScope(t *testing.T) {
 func TestExtractLessonsSkipsMultiCompanyTask(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -273,7 +273,7 @@ func TestExtractLessonsSkipsMultiCompanyTask(t *testing.T) {
 func TestExtractLessonsGenericWhenTaskHasNoCompany(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -311,7 +311,7 @@ func TestExtractLessonsGenericWhenTaskHasNoCompany(t *testing.T) {
 func TestTaskLessonsRanksCategoryBeforeGeneric(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -377,7 +377,7 @@ func TestTaskLessonsRanksCategoryBeforeGeneric(t *testing.T) {
 func TestLogLessonUsageRecordsOnlyRendered(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -457,7 +457,7 @@ func insertLessonFinding(t *testing.T, d *DB, taskID int64, status string) int64
 func TestExtractLessonsRetractsReversedDisposition(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -569,7 +569,7 @@ func TestExtractLessonsRetractsReversedDisposition(t *testing.T) {
 func TestExtractLessonsRetireOnlyWhenLastEvidence(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -660,7 +660,7 @@ func TestExtractLessonsRetireOnlyWhenLastEvidence(t *testing.T) {
 func TestExtractLessonsRetractsAllRetests(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -731,7 +731,7 @@ func TestExtractLessonsRetractsAllRetests(t *testing.T) {
 func TestExtractLessonsDoesNotUnretireWithEvidence(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -777,7 +777,7 @@ func TestExtractLessonsDoesNotUnretireWithEvidence(t *testing.T) {
 func TestExtractLessonsLeavesAdopted(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -820,7 +820,7 @@ func TestExtractLessonsLeavesAdopted(t *testing.T) {
 func TestExtractLessonsReopenRetractsNothing(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 

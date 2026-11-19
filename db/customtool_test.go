@@ -10,7 +10,7 @@ import (
 func TestCustomToolCRUD(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })

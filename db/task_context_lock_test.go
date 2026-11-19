@@ -11,7 +11,7 @@ func TestTaskLLMProfileMutationsLockTaskBeforeProfile(t *testing.T) {
 	dsn := testDSN(t)
 	d, err := Open(dsn)
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })
@@ -111,7 +111,7 @@ func TestDeleteProfileLocksNonTaskReferencesBeforeProfile(t *testing.T) {
 	t.Run("agent", func(t *testing.T) {
 		d, err := Open(dsn)
 		if err != nil {
-			t.Skipf("postgres unavailable (%v) - skipping", err)
+			SkipPGUnavailable(t, err)
 		}
 		// Registered FIRST so it runs LAST, after the row cleanup below.
 		t.Cleanup(func() { d.Close() })
@@ -169,7 +169,7 @@ func TestDeleteProfileLocksNonTaskReferencesBeforeProfile(t *testing.T) {
 	t.Run("conversation", func(t *testing.T) {
 		d, err := Open(dsn)
 		if err != nil {
-			t.Skipf("postgres unavailable (%v) - skipping", err)
+			SkipPGUnavailable(t, err)
 		}
 		// Registered FIRST so it runs LAST, after the row cleanup below.
 		t.Cleanup(func() { d.Close() })
@@ -226,7 +226,7 @@ func TestNonTaskProfileMutationsLockReferenceBeforeProfile(t *testing.T) {
 	t.Run("agent", func(t *testing.T) {
 		d, err := Open(dsn)
 		if err != nil {
-			t.Skipf("postgres unavailable (%v) - skipping", err)
+			SkipPGUnavailable(t, err)
 		}
 		// Registered FIRST so it runs LAST, after the row cleanup below.
 		t.Cleanup(func() { d.Close() })
@@ -275,7 +275,7 @@ func TestNonTaskProfileMutationsLockReferenceBeforeProfile(t *testing.T) {
 	t.Run("conversation", func(t *testing.T) {
 		d, err := Open(dsn)
 		if err != nil {
-			t.Skipf("postgres unavailable (%v) - skipping", err)
+			SkipPGUnavailable(t, err)
 		}
 		// Registered FIRST so it runs LAST, after the row cleanup below.
 		t.Cleanup(func() { d.Close() })
@@ -326,7 +326,7 @@ func TestCreateConversationAndDeleteProfileDoNotDeadlock(t *testing.T) {
 	dsn := testDSN(t)
 	d, err := Open(dsn)
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })
@@ -407,7 +407,7 @@ func TestDeleteProfileRetriesReferenceCommittedAfterInitialScan(t *testing.T) {
 	dsn := testDSN(t)
 	d, err := Open(dsn)
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })

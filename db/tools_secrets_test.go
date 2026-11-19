@@ -77,7 +77,7 @@ func jsonEqual(t *testing.T, a, b string) bool {
 func TestToolExecSealedAtRest(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() {
 		d.Exec(`DELETE FROM tools WHERE key LIKE 't_secexec%'`)
@@ -129,7 +129,7 @@ func TestToolExecSealedAtRest(t *testing.T) {
 func TestToolExecBackfillAndKeyChecks(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() {
 		d.Exec(`DELETE FROM tools WHERE key LIKE 't_secexec%'`)

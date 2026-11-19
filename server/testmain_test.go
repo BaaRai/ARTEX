@@ -41,6 +41,6 @@ func TestMain(m *testing.M) {
 func skipWithoutDSN(t *testing.T) {
 	t.Helper()
 	if _, _, err := db.DSN(); err != nil {
-		t.Skipf("no database config (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 }

@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// UntrustedBoundaryEnabled reports whether the untrusted-output boundary is on.
+// Exported for the startup configuration snapshot; the agents themselves keep
+// calling the private helper below.
+func UntrustedBoundaryEnabled() bool { return untrustedBoundaryEnabled() }
+
 // untrustedBoundaryEnabled reports whether Norma's untrusted-output boundary
 // (agentcore.Options.UntrustedOutputBoundary: tool results framed between
 // nonce-tagged markers) is on. It is on by default: unset, empty or any other

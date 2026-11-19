@@ -16,7 +16,7 @@ func TestCostLedgerEurOnUsage(t *testing.T) {
 	}
 	t.Cleanup(func() { m.Close() })
 	if m.pg == nil {
-		t.Skip("no postgres for this run")
+		db.SkipNoPG(t)
 	}
 
 	pid, err := m.pg.SaveProfile(&db.LLMProfile{

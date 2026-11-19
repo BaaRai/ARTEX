@@ -17,7 +17,7 @@ func TestPlannerQuietSkipEdge(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Close() })
 	if m.pg == nil {
-		t.Skip("no postgres for this run")
+		db.SkipNoPG(t)
 	}
 
 	created, err := m.CreateTaskWithOptions("quiet-mode probe", "probe goal", db.TaskCreateOptions{})
@@ -86,7 +86,7 @@ func TestPlannerQuietModeToggleMidRun(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Close() })
 	if m.pg == nil {
-		t.Skip("no postgres for this run")
+		db.SkipNoPG(t)
 	}
 
 	created, err := m.CreateTaskWithOptions("quiet-toggle probe", "goal", db.TaskCreateOptions{})

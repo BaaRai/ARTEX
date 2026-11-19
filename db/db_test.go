@@ -75,7 +75,7 @@ func testDSN(t *testing.T) string {
 	t.Helper()
 	dsn, _, err := DSN()
 	if err != nil {
-		t.Skipf("no database config (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	return dsn
 }
@@ -85,7 +85,7 @@ func testDSN(t *testing.T) string {
 func TestOpenSeed(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 

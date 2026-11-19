@@ -9,7 +9,7 @@ import (
 func TestListTasksBulkHydratesTaskContext(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })
@@ -71,7 +71,7 @@ func TestListTasksBulkHydratesTaskContext(t *testing.T) {
 func TestTaskListMetricsAll(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })
@@ -123,7 +123,7 @@ VALUES ($1,'goal','{}','met'), ($1,'goal','{}','open')`, task.ExplorationID); er
 func TestTaskListMetricsMatchesAll(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 

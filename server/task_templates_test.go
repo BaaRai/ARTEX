@@ -17,7 +17,7 @@ import (
 func TestTaskTemplateHTTPCRUD(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -89,7 +89,7 @@ func TestTaskTemplateHTTPCRUD(t *testing.T) {
 func TestConversationPatchReturnsPinState(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	ctx, cancel := context.WithCancel(context.Background())
