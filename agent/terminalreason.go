@@ -44,6 +44,9 @@ var reasonHint = map[harness.TerminalReason]string{
 	harness.ReasonAbortedTools:      "the run was cancelled during tool execution",
 }
 
+// refusalHint explains a turn the provider declined (see IsRefusalStop).
+const refusalHint = "the provider's safety system declined this request, so the model produced no output; the intent was not completed, and resending the same request unchanged is expected to be refused again. With LLM Recording on, the raw response carries the provider's stop details"
+
 // terminalText renders a terminal event with no final text into a compact summary
 // and a Markdown detail block.
 func terminalText(ctx context.Context, term *harness.Terminal, tr *runTrace) (string, string) {
@@ -54,6 +57,10 @@ func terminalText(ctx context.Context, term *harness.Terminal, tr *runTrace) (st
 	if reason == "" && ctx.Err() != nil {
 		aborted = true
 	}
+	// A provider refusal has no text and no tool calls, so the harness ends it as
+	// ReasonCompleted. Only the recorded stop reason tells the two apart.
+	stop := LastStopReason(ctx)
+	refused := reason == harness.ReasonCompleted && IsRefusalStop(stop)
 
 	var sum string
 	if aborted {
@@ -71,6 +78,8 @@ func terminalText(ctx context.Context, term *harness.Terminal, tr *runTrace) (st
 		sum = "(run interrupted: " + short + "; stopped during " + stage + progressSuffix(term, tr) + ", unfinished)"
 	} else if reason == harness.ReasonMaxTurns || reason == harness.ReasonTimeout {
 		sum = "(run budget cap reached (" + string(reason) + "); wrap-up wrote back facts" + progressSuffix(term, tr) + "; no text summary this run)"
+	} else if refused {
+		sum = "(no text summary; provider refusal (stop_reason " + stop + "): " + firstLine(refusalHint, 80) + ")"
 	} else {
 		hint := terminalReasonHint(reason)
 		sum = "(no text summary; terminal state " + terminalReasonLabel(reason) + ": " + firstLine(hint, 80) + ")"
@@ -80,7 +89,11 @@ func terminalText(ctx context.Context, term *harness.Terminal, tr *runTrace) (st
 	b.WriteString(sum)
 	b.WriteString("\n\n")
 	displayReason := terminalReasonLabel(reason)
-	fmt.Fprintf(&b, "- **Terminal state**: `%s` - %s\n", displayReason, terminalReasonHint(reason))
+	if refused {
+		fmt.Fprintf(&b, "- **Terminal state**: `%s`, but the last model call ended with stop_reason `%s` - %s\n", displayReason, stop, refusalHint)
+	} else {
+		fmt.Fprintf(&b, "- **Terminal state**: `%s` - %s\n", displayReason, terminalReasonHint(reason))
+	}
 	if aborted {
 		code, _, why, ok := AbortReason(ctx)
 		if ok {

@@ -879,6 +879,17 @@ func TestMarshalStringArray(t *testing.T) {
 	if got2 != "{}" {
 		t.Errorf("empty: %q", got2)
 	}
+
+	quoted := marshalStringArray([]string{`say "hi"`, `a\b`})
+	if quoted != `{"say \"hi\"","a\\b"}` {
+		t.Errorf("escape: %q", quoted)
+	}
+
+	// A backslash before a quote must not close the element and inject another.
+	injected := marshalStringArray([]string{`x\",evil,\"y`})
+	if strings.Contains(injected, `","evil`) {
+		t.Errorf("backslash-quote split the array: %q", injected)
+	}
 }
 
 // =====================================================================

@@ -72,7 +72,7 @@ func (s *Server) discoverAndCacheMCP(ctx context.Context, m *db.MCPServer) error
 
 // discoverEmptyMCPsOnStartup fills the tool cache for any enabled MCP that has none
 // yet (notably the seeded browser MCP on first run). Runs sequentially in one
-// goroutine so we never spawn many stdio servers (npx) at once, and never blocks
+// goroutine so we never spawn many stdio servers at once, and never blocks
 // startup. Best-effort: a failure leaves the cache empty to retry next start.
 func (s *Server) discoverEmptyMCPsOnStartup() {
 	servers, err := s.m.pg.ListMCP()
