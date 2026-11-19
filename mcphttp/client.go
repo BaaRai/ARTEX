@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -101,6 +102,66 @@ func normalizeHeaders(headers map[string]string) (map[string]string, error) {
 	return out, nil
 }
 
+// originKey returns the scheme, host and effective port of u, in a form two
+// URLs can be compared with. Empty means u is not an absolute http(s) URL with
+// a host.
+func originKey(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	var port string
+	switch scheme {
+	case "http":
+		port = "80"
+	case "https":
+		port = "443"
+	default:
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return ""
+	}
+	if p := u.Port(); p != "" {
+		port = p
+	}
+	return scheme + "://" + net.JoinHostPort(host, port)
+}
+
+// sameOrigin reports whether u has the same scheme, host and effective port as
+// base.
+func sameOrigin(base, u *url.URL) bool {
+	key := originKey(base)
+	return key != "" && key == originKey(u)
+}
+
+// redirectPolicy refuses a redirect that leaves the origin of the configured
+// endpoint, so a remote MCP server cannot retarget authenticated requests.
+func redirectPolicy(base *url.URL) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("mcp: stopped after 10 redirects")
+		}
+		if !sameOrigin(base, req.URL) {
+			return fmt.Errorf("mcp: refusing a redirect to another origin: %s", req.URL.Redacted())
+		}
+		return nil
+	}
+}
+
+// parseMCPURL parses and validates a configured MCP endpoint URL.
+func parseMCPURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("mcp url: %w", err)
+	}
+	if originKey(u) == "" {
+		return nil, fmt.Errorf("mcp url must be an absolute http or https URL with a host: %q", raw)
+	}
+	return u, nil
+}
+
 // New connects to a remote MCP endpoint and performs the initialize handshake.
 // headers are sent on every request (Authorization, custom API keys, …).
 // When insecure is true, TLS certificate verification is skipped so servers that
@@ -117,7 +178,11 @@ func New(ctx context.Context, server, url string, headers map[string]string, ins
 	if timeoutSeconds > 0 {
 		timeout = time.Duration(timeoutSeconds) * time.Second
 	}
-	hc := &http.Client{Timeout: timeout}
+	base, err := parseMCPURL(url)
+	if err != nil {
+		return nil, err
+	}
+	hc := &http.Client{Timeout: timeout, CheckRedirect: redirectPolicy(base)}
 	if insecure {
 		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	}
@@ -142,7 +207,11 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 	if err != nil {
 		return nil, err
 	}
-	hc := &http.Client{} // the SSE stream is intentionally long-lived.
+	base, err := parseMCPURL(sseURL)
+	if err != nil {
+		return nil, err
+	}
+	hc := &http.Client{CheckRedirect: redirectPolicy(base)} // the SSE stream is intentionally long-lived.
 	if insecure {
 		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	}
@@ -167,7 +236,7 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 		return nil, fmt.Errorf("mcp sse http %d: %s", resp.StatusCode, readSnippet(resp.Body))
 	}
 	reader := bufio.NewReader(resp.Body)
-	endpoint, err := readSSEEndpoint(reader, sseURL)
+	endpoint, err := readSSEEndpoint(reader, base)
 	if err != nil {
 		resp.Body.Close()
 		cancel()
@@ -195,7 +264,11 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 	return c, nil
 }
 
-func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
+// readSSEEndpoint reads the message endpoint announced by the SSE stream. The
+// endpoint must stay on the origin of the configured SSE URL: the POSTs that
+// follow carry the operator's headers, and a remote server must not be able to
+// retarget them.
+func readSSEEndpoint(r *bufio.Reader, base *url.URL) (string, error) {
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
@@ -213,14 +286,17 @@ func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("mcp sse endpoint URL: %w", err)
 		}
-		if !u.IsAbs() {
-			b, err := url.Parse(base)
-			if err != nil {
-				return "", err
-			}
-			candidate = b.ResolveReference(u).String()
+		if u.User != nil {
+			return "", errors.New("mcp sse endpoint must not carry userinfo")
 		}
-		return candidate, nil
+		abs := u
+		if !u.IsAbs() {
+			abs = base.ResolveReference(u)
+		}
+		if !sameOrigin(base, abs) {
+			return "", fmt.Errorf("mcp sse endpoint %q is not on the configured origin", abs.Redacted())
+		}
+		return abs.String(), nil
 	}
 }
 
