@@ -82,31 +82,40 @@ func (g *Guard) setGate(ic *intercept.Interceptor) {
 func (g *Guard) Hooks() *hook.Registry { return g.reg }
 
 func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
+	cmd := toolAuditCommand(ev)
+	res := g.applyIntercept(ctx, ev, cmd)
 	if g.targetOnly {
-		// Not recorded: the audit ring is for the gated worker and chat calls.
-		return g.applyIntercept(ctx, ev)
+		// Not recorded on a pass: the audit ring is for the gated worker and chat
+		// calls. A block still writes through block().
+		return res
 	}
-	// Extract the shell-command surface for the audit log: Bash + the interactive-shell
-	// tools (shell_open's command, shell_send's text). Destructive/exfil gating is no
-	// longer hard-coded here — it now lives in the DB intercept rules, evaluated by
-	// applyIntercept below. Other tools record an empty command.
-	var cmd string
+	// Record the final decision only. An allow written before applyIntercept
+	// stayed in the ring when the call was later blocked, so Audit() showed a
+	// call as allowed that never ran.
+	if res.Decision != "block" {
+		g.record(ev.ToolName, "allow", "", cmd)
+	}
+	return res
+}
+
+// toolAuditCommand is the shell-command surface for the audit log: Bash and
+// shell_open's command, shell_send's text. Other tools record an empty command.
+func toolAuditCommand(ev hook.Event) string {
 	switch ev.ToolName {
 	case "Bash", "shell_open":
 		var in struct {
 			Command string `json:"command"`
 		}
 		_ = json.Unmarshal(ev.Input, &in)
-		cmd = in.Command
+		return in.Command
 	case "shell_send":
 		var in struct {
 			Text string `json:"text"`
 		}
 		_ = json.Unmarshal(ev.Input, &in)
-		cmd = in.Text
+		return in.Text
 	}
-	g.record(ev.ToolName, "allow", "", cmd)
-	return g.applyIntercept(ctx, ev)
+	return ""
 }
 
 // targetGate is the approval gate for asset targets, as the guard uses it.
@@ -138,7 +147,7 @@ func (g *Guard) gateScope(ctx context.Context) (intercept.TargetScope, bool) {
 // is on: a deny blocks first, before any target request exists; an allow by a
 // rule or by the judge does not satisfy the gate; an ask and an unpinned target
 // share one approval request.
-func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
+func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event, cmd string) hook.Result {
 	if g.targetOnly && g.interceptor != nil {
 		// The planner and the main agent run Bash too (#124, F11): the built-in
 		// deny rules apply to them, before the target gate. User rules and the
@@ -146,7 +155,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		if dec, ok := g.interceptor.MatchBuiltin(ev.ToolName, ev.Input); ok {
 			ctx = intercept.WithCall(ctx, ev.ToolName, ev.Input)
 			g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), dec, ev.ToolName, ev.Input, "denied")
-			return g.block(ev.ToolName, systemBlockMessage(dec.Message), "")
+			return g.block(ev.ToolName, systemBlockMessage(dec.Message), cmd)
 		}
 	}
 	scope, gated := g.gateScope(ctx)
@@ -168,13 +177,13 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 	if dec.Action == "deny" {
 		// Note: a deny hit does not block for approval; it directly logs a denied entry (visible on the history / task interception pages).
 		g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), dec, ev.ToolName, ev.Input, "denied")
-		return g.block(ev.ToolName, systemBlockMessage(dec.Message), "")
+		return g.block(ev.ToolName, systemBlockMessage(dec.Message), cmd)
 	}
 	var unpinned []intercept.TargetRequest
 	if gated {
 		var res intercept.TargetResult
 		if unpinned, res = g.gate.CheckTargets(ctx, scope, ev.ToolName, ev.Input); res.Code != "" {
-			return g.block(ev.ToolName, TargetBlockMessage(res), "")
+			return g.block(ev.ToolName, TargetBlockMessage(res), cmd)
 		}
 	}
 	var ask *intercept.Decision
@@ -187,14 +196,14 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		// immediately without creating a pending record — avoids orphaned DB entries
 		// and makes execOne complete fast, reducing the race against drainSynthetic.
 		if ctx.Err() != nil {
-			return g.block(ev.ToolName, systemBlockMessage("work cancelled; platform safety controls blocked execution"), "")
+			return g.block(ev.ToolName, systemBlockMessage("work cancelled; platform safety controls blocked execution"), cmd)
 		}
 		ask = &dec
 	}
 	if len(unpinned) > 0 {
 		res, merged := g.requestTargets(ctx, scope, ev, unpinned, ask)
 		if res.Code != "" {
-			return g.block(ev.ToolName, TargetBlockMessage(res), "")
+			return g.block(ev.ToolName, TargetBlockMessage(res), cmd)
 		}
 		if merged {
 			// The approval of the target request answered the ask as well.
@@ -204,7 +213,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 	if ask != nil {
 		convID := intercept.ConvIDFromContext(ctx)
 		if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
-			return g.block(ev.ToolName, systemBlockMessage("manual approval not granted (user rejected or approval timed out)"), "")
+			return g.block(ev.ToolName, systemBlockMessage("manual approval not granted (user rejected or approval timed out)"), cmd)
 		}
 	}
 	return hook.Result{}
