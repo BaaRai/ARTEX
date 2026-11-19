@@ -12,7 +12,11 @@ import (
 
 func TestStageAskOperatorImage(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "shot.png")
+	taskDir := filepath.Join(dir, "tasks", "7")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(taskDir, "shot.png")
 	if err := os.WriteFile(src, []byte("fakepng"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -23,30 +27,66 @@ func TestStageAskOperatorImage(t *testing.T) {
 		t.Fatalf("empty src: att=%v err=%v", att, err)
 	}
 
-	// valid image -> copied under the task uploads, descriptor matches the chat format
-	att, err = stageAskOperatorImage(dir, "7", src)
+	// relative path from the task working directory (worker CWD)
+	att, err = stageAskOperatorImage(dir, "7", "shot.png")
 	if err != nil || len(att) != 1 {
 		t.Fatalf("valid src: att=%v err=%v", att, err)
 	}
 	if !strings.HasPrefix(att[0].Path, "uploads/ask-operator-") || !strings.HasSuffix(att[0].Path, ".png") {
 		t.Fatalf("unexpected attachment path %q", att[0].Path)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "tasks", "7", "uploads", att[0].Name)); err != nil {
+	if _, err := os.Stat(filepath.Join(taskDir, "uploads", att[0].Name)); err != nil {
 		t.Fatalf("copy missing: %v", err)
 	}
 
+	// absolute path still accepted when it stays inside the task dir
+	att, err = stageAskOperatorImage(dir, "7", src)
+	if err != nil || len(att) != 1 {
+		t.Fatalf("absolute inside task dir: att=%v err=%v", att, err)
+	}
+
 	// wrong extension rejected
-	bad := filepath.Join(dir, "payload.exe")
+	bad := filepath.Join(taskDir, "payload.exe")
 	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stageAskOperatorImage(dir, "7", bad); err == nil || !strings.Contains(err.Error(), "png/jpg") {
+	if _, err := stageAskOperatorImage(dir, "7", "payload.exe"); err == nil || !strings.Contains(err.Error(), "png/jpg") {
 		t.Fatalf("expected extension rejection, got %v", err)
 	}
 
 	// missing file rejected
-	if _, err := stageAskOperatorImage(dir, "7", filepath.Join(dir, "nope.png")); err == nil {
+	if _, err := stageAskOperatorImage(dir, "7", "nope.png"); err == nil {
 		t.Fatal("expected missing-file rejection")
+	}
+
+	outside := filepath.Join(dir, "outside.png")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stageAskOperatorImage(dir, "7", filepath.Join("..", "..", "outside.png")); err == nil {
+		t.Fatal("expected .. rejection")
+	}
+	if _, err := stageAskOperatorImage(dir, "7", outside); err == nil {
+		t.Fatal("expected outside-path rejection")
+	}
+
+	otherDir := filepath.Join(dir, "tasks", "8")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(otherDir, "shot.png")
+	if err := os.WriteFile(other, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stageAskOperatorImage(dir, "7", other); err == nil {
+		t.Fatal("expected other-task rejection")
+	}
+
+	link := filepath.Join(taskDir, "link.png")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Logf("symlink test skipped: %v", err)
+	} else if _, err := stageAskOperatorImage(dir, "7", "link.png"); err == nil {
+		t.Fatal("expected symlink-out rejection")
 	}
 }
 

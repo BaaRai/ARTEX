@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
@@ -478,5 +479,21 @@ func TestFindingTrafficUTF8SegmentsAndInheritedWrites(t *testing.T) {
 		if !strings.Contains(w.Body.String(), fmt.Sprint(list.Bindings[0].ID)) {
 			t.Fatal("export omitted evidence ID", format)
 		}
+	}
+}
+
+func TestFindingsZipLongNonASCIINameStaysUTF8(t *testing.T) {
+	f := &db.DBFinding{ID: 7, Severity: "high", Name: strings.Repeat("跨站脚本", 12)}
+	var buf bytes.Buffer
+	if err := writeFindingsEvidenceZip(&buf, []*db.DBFinding{f}, t.TempDir(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := archive.File[0]
+	if entry.NonUTF8 || !utf8.ValidString(entry.Name) || !strings.HasPrefix(entry.Name, "high_跨站脚本") || !strings.HasSuffix(entry.Name, ".md") {
+		t.Fatalf("entry name %q (NonUTF8=%v)", entry.Name, entry.NonUTF8)
 	}
 }

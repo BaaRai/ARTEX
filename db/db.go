@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/config"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx database/sql driver ("pgx")
 )
@@ -156,11 +157,19 @@ func ensureDatabase(dsn string) error {
 	var exists bool
 	_ = admin.QueryRow(`SELECT true FROM pg_database WHERE datname=$1`, dbName).Scan(&exists)
 	if !exists {
-		if _, err := admin.Exec(`CREATE DATABASE "` + dbName + `"`); err != nil {
+		if _, err := admin.Exec(createDatabaseSQL(dbName)); err != nil {
 			return fmt.Errorf("create database %q: %w", dbName, err)
 		}
 	}
 	return nil
+}
+
+// createDatabaseSQL builds the CREATE DATABASE statement for a DSN-supplied
+// database name. pgx.Identifier quotes it and doubles any embedded quote, so
+// the name cannot close the identifier, and names PostgreSQL accepts but a
+// restrictive allowlist would reject (hyphens, dots, non-ASCII) keep working.
+func createDatabaseSQL(name string) string {
+	return "CREATE DATABASE " + pgx.Identifier{name}.Sanitize()
 }
 
 // Open connects, applies the schema (idempotent) and the embedded versioned
@@ -317,12 +326,20 @@ ON CONFLICT (agent_id, var_name) DO UPDATE
 	// the recording proxy + CA at runtime (server.Manager.syncBrowserMCPProxy).
 	// Insert only if absent so we never clobber user edits (args/env/enabled/
 	// visibility) on restart.
+	// Launched through the installed playwright-mcp binary, not `npx
+	// @playwright/mcp`: npx asks the npm registry on every start, even with the
+	// package installed globally, so the version that runs is the registry's.
+	// --browser chromium: the default is the "chrome" channel (Google Chrome),
+	// which the image does not have; it ships Playwright's Chromium.
 	if _, err := d.Exec(`
 INSERT INTO mcp_servers(name, transport, command, args, env, enabled)
-VALUES ('browser', 'stdio', 'npx', $1, '{}', false)
+VALUES ('browser', 'stdio', $1, $2, '{}', false)
 ON CONFLICT (name) DO NOTHING`,
-		`["@playwright/mcp","--headless"]`); err != nil {
+		browserMCPCommand, browserMCPSeedArgs); err != nil {
 		return fmt.Errorf("seed browser mcp: %w", err)
+	}
+	if err := d.migrateStockBrowserMCP(); err != nil {
+		return fmt.Errorf("migrate browser mcp: %w", err)
 	}
 	// NOTE: the placeholder ScopeSentry data-source MCP (empty URL + empty X-API-Key,
 	// disabled) is seeded directly in schema.sql §F so a raw `psql < schema.sql` init

@@ -68,10 +68,18 @@ func TestRecordExternalRejectsBadInput(t *testing.T) {
 		{Method: "GET", URL: "not a url"},
 		{Method: "GET", URL: ""},
 		{Method: "", URL: "https://api.example.com/"},
+		{Method: "GET\r\nX-Injected: 1", URL: "https://api.example.com/"},
+		{Method: "GET", URL: "https://api.example.com/", RequestHeaders: map[string]string{"X-Bad\nName": "1"}},
+		{Method: "GET", URL: "https://api.example.com/", RequestHeaders: map[string]string{"x-ok": "one\r\ntwo"}},
+		{Method: "GET", URL: "https://api.example.com/", ResponseHeaders: map[string]string{"x-capture": "ok\r\nX-Forged-Header: injected"}},
+		{Method: "GET", URL: "https://api.example.com/", ResponseHeaders: map[string]string{"x-nul": "a\x00b"}},
 	}
 	for i, c := range cases {
 		if err := tr.RecordExternal(c); err == nil {
 			t.Fatalf("case %d: expected an error for %+v", i, c)
 		}
+	}
+	if n, _ := tr.Count(); n != 0 {
+		t.Fatalf("rejected exchanges were stored: count=%d", n)
 	}
 }

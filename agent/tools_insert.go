@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"strconv"
@@ -121,6 +122,17 @@ type assetInputItem struct {
 	Params []map[string]any `json:"params"`
 }
 
+// insertAssetsRuleLoadFailure refuses the whole insert_assets call when
+// intercept rules cannot be loaded. The underlying error stays in the process
+// log so the model never sees a driver string.
+func insertAssetsRuleLoadFailure(err error) (actool.Result, bool) {
+	if err == nil {
+		return actool.Result{}, false
+	}
+	log.Printf("[insert_assets] intercept rules unavailable: %v", err)
+	return actool.Errorf("asset intercept rules are unavailable; insertion refused"), true
+}
+
 // insertAssets is the unified insert_assets agent tool.
 func (t *ToolSet) insertAssets() actool.CoreTool {
 	return writeTool(
@@ -233,16 +245,20 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 			var results []result
 			var errs []errEntry
 
-			// Asset gate rules are loaded once; on read failure the check is skipped
-			// (insertion not blocked).
 			// Interception rules = global ∪ task-level block; allow rules = task-level allow.
-			blockRules, _ := t.as.ListAssetInterceptRules()
+			// Fail closed: a rule-load error must not evaluate as an empty set (allow all).
+			blockRules, err := t.as.ListAssetInterceptRules()
+			if out, refused := insertAssetsRuleLoadFailure(err); refused {
+				return out, nil
+			}
 			var allowRules []db.AssetInterceptRule
 			if t.taskID > 0 {
-				if tb, ta, err := t.as.TaskInterceptRulesSplit(t.taskID); err == nil {
-					blockRules = append(blockRules, tb...)
-					allowRules = ta
+				tb, ta, err := t.as.TaskInterceptRulesSplit(t.taskID)
+				if out, refused := insertAssetsRuleLoadFailure(err); refused {
+					return out, nil
 				}
+				blockRules = append(blockRules, tb...)
+				allowRules = ta
 			}
 
 			for i, item := range a.Assets {
