@@ -258,6 +258,10 @@ type Traffic struct {
 	// socks holds the opt-in SOCKS5 CONNECT listener when started via StartSOCKS5.
 	socksMu sync.Mutex
 	socks   *socks5Server
+	// transparent holds the opt-in Linux transparent TCP listener when started
+	// via StartTransparentTCP (P4.1b).
+	transparentMu sync.Mutex
+	transparent   *transparentServer
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -477,6 +481,13 @@ func (t *Traffic) Close() error {
 	t.socksMu.Unlock()
 	if srv != nil {
 		_ = srv.Close()
+	}
+	t.transparentMu.Lock()
+	tsrv := t.transparent
+	t.transparent = nil
+	t.transparentMu.Unlock()
+	if tsrv != nil {
+		_ = tsrv.Close()
 	}
 	t.reaping.Wait()
 	t.sweeping.Wait()
