@@ -1676,6 +1676,8 @@ export interface TrafficEvidenceSnapshot {
   resp_hash: string;
   req_len: number;
   resp_len: number;
+  rewritten?: boolean;
+  rewrite_rule_ids?: number[];
 }
 export interface FindingTrafficBinding {
   id: string;
