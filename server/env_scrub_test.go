@@ -80,6 +80,12 @@ func TestSecretEnvCoversCredentialURLs(t *testing.T) {
 			t.Errorf("%s is not in secretEnv", k)
 		}
 	}
+	// ScrubSecretEnv unsets every name in secretEnv for the rest of the test
+	// binary, and t.Setenv restores only the names it set. Setting all of them
+	// here gives ARTEX_PG_DSN and ARTEX_SECRET_KEY back to the tests that follow.
+	for _, k := range secretEnv {
+		t.Setenv(k, "probe-"+k)
+	}
 	t.Setenv("ARTEX_LLM_PROVIDER", "openai")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("ARTEX_LLM_PROXY", "http://proxyuser:proxypass@proxy.internal:3128")
