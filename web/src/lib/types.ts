@@ -914,6 +914,27 @@ export interface TrafficRewriteStats {
   sweeps: number;
 }
 
+export interface TrafficHARImportError {
+  index: number;
+  url?: string;
+  reason: string;
+}
+
+export interface TrafficHARImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  truncated?: boolean;
+  errors?: TrafficHARImportError[];
+}
+
+export interface TrafficHARExportMeta {
+  exported: number;
+  matched: number;
+  truncated: boolean;
+  truncatedReason?: string;
+}
+
 export interface TrafficResp {
   enabled: boolean;
   proxy?: string;
