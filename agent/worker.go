@@ -387,9 +387,6 @@ func IsRunDirName(name string) bool {
 	return true
 }
 
-// cmdOutDir is the SDK large-tool-output spill dir under an agent's run dir.
-func cmdOutDir(dir string) string { return filepath.Join(dir, "cmd-output") }
-
 func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
 	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr, DataDir: dataDir, Now: nowStr()})
 	// caCert is present only when the recording MITM is on, which is exactly when
@@ -604,10 +601,10 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		// deadline → task-timeout prompt; turns = the turn budget ran out inside the
 		// clamped window → fall back to the per-run prompt. Non-clamped stays pure per-run.
 		Settlement: settle,
-		// large tool output spills to cmd-output/ with a head + pointer (SDK tool.Capture);
-		// full output preserved on disk. The truncation cap uses the SDK default (30000
-		// chars).
-		ToolOutputDir: cmdOutDir(runDir),
+		// large tool output spills to a file with a head + pointer (SDK tool.Capture);
+		// full output preserved on disk, in cmd-output/ or in the task's spill
+		// directory (spill.go). The truncation cap uses the SDK default (30000 chars).
+		ToolOutputDir: TaskToolOutputDir(w.workDir, taskID, runDir),
 		Compaction:    compactionConfig(w.compactionWindow()), // long tool-heavy runs stay within the window
 		Todos:         actool.NewTodoStore(),                  // session-level scratch todos (TodoWrite), pure planning, discarded on exit
 		NonStreaming:  w.nonStreaming(),                       // when this profile selects non-streaming, use Provider.Complete
@@ -619,6 +616,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	opts.Hooks = SpillHooks(opts.Hooks, opts.ToolOutputDir)
 	// The session id is the provider-side identity (session header, usage metering)
 	// with or without persistence; Norma only puts it on ctx when it writes a transcript.
 	opts.SessionID = WorkerSessionID(ts.ID(), intent.ID)

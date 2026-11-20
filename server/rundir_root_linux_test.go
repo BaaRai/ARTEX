@@ -273,6 +273,12 @@ func TestTaskArchiveRestoreRunDirOwnershipAsRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A spill file of the task, as Norma writes it.
+	spillDir := agent.TaskToolOutputDir(f.data, 1, f.work)
+	spillFile := filepath.Join(spillDir, "output-1-1.txt")
+	if err := os.WriteFile(spillFile, []byte("spilled output"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	stage, err := stageTaskArchiveFiles(f.data, 1, taskID, 73)
 	if err != nil {
@@ -280,6 +286,9 @@ func TestTaskArchiveRestoreRunDirOwnershipAsRoot(t *testing.T) {
 	}
 	if _, err := os.Lstat(task); !os.IsNotExist(err) {
 		t.Fatalf("task directory still hot after staging: %v", err)
+	}
+	if _, err := os.Lstat(spillDir); !os.IsNotExist(err) {
+		t.Fatalf("spill directory still hot after staging: %v", err)
 	}
 	archivePath := taskArchivePath(f.data, 1, taskID)
 	snapshot := &pgdb.TaskArchiveSnapshot{FormatVersion: pgdb.TaskArchiveFormatVersion, TaskID: 1, ExplorationID: 73}
@@ -320,8 +329,16 @@ func TestTaskArchiveRestoreRunDirOwnershipAsRoot(t *testing.T) {
 			t.Errorf("%s: %v gid %d, want group read/write with gid %d", path, fi.Mode(), st.Gid, DefaultExecGID)
 		}
 	}
-	// The executor works in the restored run directory again.
-	c := exec.Command("sh", "-c", "echo more >> uploads/evidence.txt && echo new > after-restore.txt && id -u")
+	// The spill directory is back for the executor to read, and not to write.
+	checkDir(t, filepath.Join(f.data, "spill", "tasks"), 0, parentDirMode)
+	checkDir(t, spillDir, DefaultExecGID, 0o750)
+	if fi, err := os.Lstat(spillFile); err != nil {
+		t.Fatal(err)
+	} else if st := fi.Sys().(*syscall.Stat_t); fi.Mode() != 0o640 || st.Uid != 0 || st.Gid != DefaultExecGID {
+		t.Errorf("%s: %v uid %d gid %d, want 0640 root:%d", spillFile, fi.Mode(), st.Uid, st.Gid, DefaultExecGID)
+	}
+	// The executor works in the restored run directory again, and reads the spill.
+	c := exec.Command("sh", "-c", "echo more >> uploads/evidence.txt && echo new > after-restore.txt && test \"$(cat '"+spillFile+"')\" = 'spilled output' && ! touch '"+spillDir+"/planted' 2>/dev/null && id -u")
 	c.Dir = f.work
 	applyExecCredential(c, f.priv)
 	out, err := c.CombinedOutput()

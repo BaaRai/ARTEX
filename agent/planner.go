@@ -554,7 +554,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		WebSearchProxy:        p.webSearch.Proxy,
 		BashEnv:               proxyEnv(p.proxyAddr, p.proxyCACert), // Bash subcommands go through the proxy + trust its CA by default
 		WorkingDir:            taskDir,                              // the main run directory <workDir>/tasks/<taskID>/main
-		ToolOutputDir:         cmdOutDir(taskDir),
+		ToolOutputDir:         TaskToolOutputDir(p.workDir, taskID, taskDir),
 		MaxTurns:              p.maxTurns, // 0 = unlimited (configurable in agent management)
 		MaxDuration:           maxDur,     // 0=unlimited; with a deadline = time remaining until it
 		Compaction:            compactionConfig(p.compactionWindow()),
@@ -575,6 +575,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	opts.Hooks = SpillHooks(opts.Hooks, opts.ToolOutputDir)
 	// The session id is the provider-side identity (session header, usage metering)
 	// with or without persistence; Norma only puts it on ctx when it writes a transcript.
 	opts.SessionID = fmt.Sprintf("exp%d-planner", ts.ID())

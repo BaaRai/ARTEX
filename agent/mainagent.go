@@ -156,7 +156,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		WebSearchProxy:        m.webSearch.Proxy,
 		BashEnv:               proxyEnv(m.proxyAddr, m.proxyCACert), // Bash subcommands go through the proxy + trust the CA by default
 		WorkingDir:            mainDir,                              // the main run directory <workDir>/tasks/<taskID>/main
-		ToolOutputDir:         cmdOutDir(mainDir),
+		ToolOutputDir:         TaskToolOutputDir(m.workDir, taskID, mainDir),
 		MaxTurns:              m.maxTurns,                             // 0 = unlimited (configurable in agent management)
 		Compaction:            compactionConfig(m.compactionWindow()), // long chats stay within the window
 		Todos:                 actool.NewTodoStore(),                  // session-level temporary todos (TodoWrite), planning only, dropped on exit
@@ -171,6 +171,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	opts.Hooks = SpillHooks(opts.Hooks, opts.ToolOutputDir)
 	// Segment 0 keeps the legacy "exp%d-main" name so existing transcripts still
 	// load; each new session (seg>=1) gets its own file for a clean context. The id
 	// is the provider-side identity (session header, usage metering) with or without

@@ -143,8 +143,10 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // Their parents (tasks/, sessions/ and tasks/<id>) are root:root 0755, so the
 // executor cannot create, rename or remove a run directory, and no run directory is
 // an ancestor of another. Inside a run directory new subdirectories inherit the
-// group. The key files and the config file (which can hold the database DSN) are
-// restricted to root. Nothing else under the data directory changes; directories a
+// group. Command-output spills leave the run directories for <data>/spill, which the
+// executor group reads and cannot change (makeSpillDir). The key files and the
+// config file (which can hold the database DSN) are restricted to root. Nothing
+// else under the data directory changes; directories a
 // root-only path needs are left as they are. It sets p.ScriptDir to the script
 // directory it creates.
 func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
@@ -156,6 +158,10 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		return fmt.Errorf("share the run directories with the executor group: %w", err)
 	}
 	agent.SetRunDirMaker(func(base, leaf string) error { return makeRunDir(base, leaf, gid) })
+	agent.SetSpillDirMaker(
+		func(base, dir string) error { return makeSpillDir(base, dir, gid) },
+		func(dir string) error { return shareSpillFiles(dir, gid) },
+	)
 	if err := prepareExecHome(*p, dataDir); err != nil {
 		return fmt.Errorf("prepare the executor home: %w", err)
 	}
@@ -215,6 +221,66 @@ func setDirOwner(dir string, gid int, mode os.FileMode) error {
 // executor group. A parent is set before the next level is touched: once it is
 // root-only, the executor cannot swap what is below it.
 func makeRunDir(base, leaf string, gid int) error {
+	return makeLeafDir(base, leaf, gid, runDirMode)
+}
+
+// spillDirMode is the mode of a command-output spill directory: the executor group
+// reads what the server writes there and cannot create, rename or remove an entry.
+const spillDirMode = 0o750
+
+// makeSpillDir creates the spill directory dir below base (<base>/spill/tasks/<id>
+// or <base>/spill/sessions/<id>): root-owned with the executor as its group, below
+// root:root 0755 parents.
+func makeSpillDir(base, dir string, gid int) error {
+	return makeLeafDir(base, dir, gid, spillDirMode)
+}
+
+// shareSpillFiles lets the executor group read the spill files in dir. Norma writes
+// them 0600 and the agent reads them back with Bash, which runs as the executor:
+// each becomes root:gid 0640. The executor cannot write in dir, so every entry is a
+// file the server wrote; it is still opened without following a symlink.
+func shareSpillFiles(dir string, gid int) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		f, err := os.OpenFile(filepath.Join(dir, e.Name()), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			return err
+		}
+		err = f.Chown(0, gid)
+		if err == nil {
+			err = f.Chmod(0o640)
+		}
+		f.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// shareRestoredSpillDir puts the ownership back on a spill directory that was
+// restored from an archive: the package keeps neither owners nor directory modes.
+func shareRestoredSpillDir(p ExecPrivilege, dir string) error {
+	if !p.Enabled {
+		return nil
+	}
+	gid := int(p.GID)
+	if err := setDirOwner(dir, gid, spillDirMode); err != nil {
+		return err
+	}
+	return shareSpillFiles(dir, gid)
+}
+
+// makeLeafDir creates the directory leaf below base with mode and the group gid.
+// Every directory between base and the leaf is root:root 0755. A parent is set
+// before the next level is touched.
+func makeLeafDir(base, leaf string, gid int, leafMode os.FileMode) error {
 	rel, err := filepath.Rel(base, leaf)
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return fmt.Errorf("%s is not below %s", leaf, base)
@@ -225,7 +291,7 @@ func makeRunDir(base, leaf string, gid int) error {
 		dir = filepath.Join(dir, part)
 		group, mode := 0, os.FileMode(0o755)
 		if i == len(parts)-1 {
-			group, mode = gid, runDirMode
+			group, mode = gid, leafMode
 		}
 		if err := os.Mkdir(dir, mode.Perm()); err != nil && !errors.Is(err, fs.ErrExist) {
 			return err

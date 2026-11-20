@@ -54,7 +54,8 @@ func newExecRootFixture(t *testing.T) *execRootFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { agent.SetRunDirMaker(nil) }) // PrepareExecPrivilege sets it process-wide
+	// PrepareExecPrivilege sets them process-wide.
+	t.Cleanup(func() { agent.SetRunDirMaker(nil); agent.SetSpillDirMaker(nil, nil) })
 	if err := PrepareExecPrivilege(&priv, dataDir, "", ""); err != nil {
 		t.Fatal(err)
 	}

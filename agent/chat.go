@@ -191,9 +191,10 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		MaxDuration:           maxDuration,
 		Compaction:            compactionConfig(c.window),
 		Todos:                 actool.NewTodoStore(),
-		// large tool output spills to cmd-output/ under the session dir.
+		// large tool output spills to cmd-output/ under the session dir, or to the
+		// session's spill directory (spill.go).
 		// the truncation cap uses the SDK default (30000 chars of tool.Capture).
-		ToolOutputDir: filepath.Join(sessionWorkDir, "cmd-output"),
+		ToolOutputDir: SessionToolOutputDir(c.workDir, sessionID, sessionWorkDir),
 		// hitting the budget (steps) → the SDK runs wrap-up: output a one-line summary. The prompt and
 		// wrap-up rounds are editable in the backend per agent key
 		// (each custom agent gets its own copy; empty/0 uses the generic default: 10 rounds).
@@ -207,6 +208,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	if c.guard != nil {
 		opts.Hooks = c.guard.Hooks()
 	}
+	opts.Hooks = SpillHooks(opts.Hooks, opts.ToolOutputDir)
 	// The session id is the provider-side identity (session header, usage metering)
 	// with or without persistence; Norma only puts it on ctx when it writes a transcript.
 	opts.SessionID = sessionID

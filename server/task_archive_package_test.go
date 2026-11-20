@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Autumn-27/artex/agent"
 	pgdb "github.com/Autumn-27/artex/db"
 	"github.com/klauspost/compress/zstd"
 )
@@ -19,11 +20,16 @@ func TestTaskArchivePackageFilesRoundTrip(t *testing.T) {
 	// The task directory packs whole: the main agent's run directory and a worker's.
 	taskFile := filepath.Join(dataDir, "tasks", taskID, "main", "uploads", "evidence.txt")
 	workerFile := filepath.Join(dataDir, "tasks", taskID, "i7", "notes.txt")
+	// The task's command-output spills are packed with it, and those of another task stay.
+	spillFile := filepath.Join(agent.TaskSpillDir(dataDir, taskID), "output-1-1.txt")
+	unrelatedSpill := filepath.Join(agent.TaskSpillDir(dataDir, "43"), "output-1-2.txt")
 	transcriptFile := filepath.Join(dataDir, "transcripts", "exp73-worker-1.jsonl")
 	unrelatedTranscript := filepath.Join(dataDir, "transcripts", "exp74-worker-1.jsonl")
 	for path, body := range map[string]string{
 		taskFile:            "task evidence",
 		workerFile:          "worker notes",
+		spillFile:           "spilled output",
+		unrelatedSpill:      "leave me hot",
 		transcriptFile:      "transcript",
 		unrelatedTranscript: "leave me hot",
 	} {
@@ -39,10 +45,13 @@ func TestTaskArchivePackageFilesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{taskFile, workerFile} {
+	for _, path := range []string{taskFile, workerFile, spillFile, filepath.Dir(spillFile)} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("task file %s still hot after staging: %v", path, err)
 		}
+	}
+	if _, err := os.Stat(unrelatedSpill); err != nil {
+		t.Fatalf("the spill of another task was staged: %v", err)
 	}
 	if _, err := os.Stat(transcriptFile); !os.IsNotExist(err) {
 		t.Fatalf("task transcript still hot after staging: %v", err)
@@ -94,7 +103,7 @@ func TestTaskArchivePackageFilesRoundTrip(t *testing.T) {
 	if err := installed.commit(); err != nil {
 		t.Fatal(err)
 	}
-	for path, want := range map[string]string{taskFile: "task evidence", workerFile: "worker notes", transcriptFile: "transcript"} {
+	for path, want := range map[string]string{taskFile: "task evidence", workerFile: "worker notes", spillFile: "spilled output", transcriptFile: "transcript"} {
 		got, err := os.ReadFile(path)
 		if err != nil || string(got) != want {
 			t.Fatalf("restored %s = %q, %v; want %q", path, got, err, want)
