@@ -110,6 +110,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
     && rm -rf /var/lib/apt/lists/*
+
+# Python packages needed by agent-generated scripts
+RUN pip install --no-cache-dir --break-system-packages \
+      requests \
+      beautifulsoup4 \
+      lxml \
+      urllib3 \
+      pyyaml \
+      jinja2 \
+      colorama \
+      tqdm
+
+# SecLists (wordlists)
+RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/seclists
+    
 # Node 22 from the official nodejs.org tarball, verified against its SHASUMS256.txt:
 # bookworm's apt nodejs is 18, Playwright requires >=20, and 20 is end-of-life.
 # 22 matches the CI and release workflows.
