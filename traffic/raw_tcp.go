@@ -69,12 +69,51 @@ func (t *Traffic) spillRawDir(data []byte, previewCap int) (preview []byte, blob
 	}
 	blobPath := filepath.Join(blobDir, h+".bin")
 	if _, err := os.Stat(blobPath); os.IsNotExist(err) {
-		if err := os.WriteFile(blobPath, data, 0o644); err != nil {
+		if err := writeBlobAtomic(blobDir, blobPath, h, data); err != nil {
 			log.Printf("[traffic/socks5] failed to write blob %s: %v", h, err)
 			return append([]byte(nil), data[:previewCap]...), ""
 		}
 	}
 	return append([]byte(nil), data[:previewCap]...), h
+}
+
+// writeBlobAtomic writes data to a temporary file inside blobDir and renames it
+// into place at blobPath so a crash mid-write cannot leave a partial file under
+// a content-addressed SHA-256 hash.
+func writeBlobAtomic(blobDir, blobPath, hash string, data []byte) error {
+	tmp, err := os.CreateTemp(blobDir, hash+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, blobPath); err != nil {
+		// Another goroutine may have won the race writing the same
+		// content-addressed hash (notably on Windows where Rename can fail
+		// if the destination already exists).
+		if _, statErr := os.Stat(blobPath); statErr == nil {
+			return nil
+		}
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 // RecordRawTCPStream persists one raw TCP connection into raw_tcp_streams and

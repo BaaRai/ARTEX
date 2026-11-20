@@ -7,8 +7,11 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -839,5 +842,56 @@ func TestSOCKS5ConcurrentStreamsMaxLimitAndIdleTimeout(t *testing.T) {
 	streams := waitForRawStreams(t, tr, 2)
 	if len(streams) < 2 {
 		t.Fatalf("want at least 2 recorded concurrent streams, got %d", len(streams))
+	}
+}
+
+func TestRawTCPAtomicBlobSpillConcurrent(t *testing.T) {
+	tr, err := Open(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	payload := bytes.Repeat([]byte("ATOMIC-BLOB-"), 128) // 1536 bytes > 64 preview
+	const workers = 8
+	var wg sync.WaitGroup
+	hashes := make([]string, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			prev, h := tr.spillRawDir(payload, 64)
+			if len(prev) != 64 {
+				t.Errorf("worker %d preview len = %d, want 64", idx, len(prev))
+			}
+			hashes[idx] = h
+		}(i)
+	}
+	wg.Wait()
+
+	wantHash := hashes[0]
+	if wantHash == "" {
+		t.Fatal("expected non-empty blob hash")
+	}
+	for i, h := range hashes {
+		if h != wantHash {
+			t.Fatalf("worker %d hash = %q, want %q", i, h, wantHash)
+		}
+	}
+	blobDir := filepath.Join(tr.dir, "_blobs", "sha256", wantHash[:2])
+	entries, err := os.ReadDir(blobDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", blobDir, err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("leftover temp blob file: %s", e.Name())
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(blobDir, wantHash+".bin"))
+	if err != nil {
+		t.Fatalf("ReadFile blob: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("blob content mismatch: got %d bytes, want %d", len(got), len(payload))
 	}
 }

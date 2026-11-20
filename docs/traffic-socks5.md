@@ -10,7 +10,9 @@ ARTEX ships an opt-in **RFC 1928 SOCKS5 `CONNECT`** inbound listener in `traffic
 | `ARTEX_SOCKS5_ADDR` | `127.0.0.1:1080` | Explicit TCP bind address; setting a non-empty value also enables the listener unless `ARTEX_SOCKS5_ENABLED` is explicitly false. |
 
 - **Flag off**: no SOCKS5 listener is started and the HTTP MITM recording proxy is byte-identical.
+- **Requires traffic recorder**: the server only starts the SOCKS5 listener when the traffic recorder is enabled (inside the traffic proxy block in `server/manager.go`). If traffic capture is disabled, setting `ARTEX_SOCKS5_ENABLED` / `ARTEX_SOCKS5_ADDR` does not open a listener.
 - **Agents unchanged**: workers and tools keep `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` pointing to the existing HTTP proxy; ARTEX does not silently switch agents to SOCKS5.
+- **Non-loopback bind warning**: RFC 1929 username/password (`0x02`) accepts **any** username and password without verifying credentials (so the pace marker `artex-pace` can ride in the username). Binding `ARTEX_SOCKS5_ADDR` to a non-loopback address therefore exposes an **unauthenticated proxy** to anyone who can reach that port. The target gate and egress governor still apply to every connection, but keep the listener on loopback (`127.0.0.1`) or restrict access at the host firewall.
 
 ## Protocol Scope (P4.1a)
 
@@ -36,7 +38,7 @@ Each completed relayed connection writes one row to the `raw_tcp_streams` table 
 - **No HTTP exchange row**: raw TCP streams never insert into `exchanges`.
 - **Preview & blob spilling**:
   - Directional payloads up to `PreviewBytes` (default `8 KiB`) stay inline in `c2s_preview` / `s2c_preview`.
-  - Payloads above `PreviewBytes` keep the leading `PreviewBytes` inline and spill the captured bytes (up to `MaxBytesPerDir`) into `_blobs/sha256/` with references registered in `blob_refs` under the stream's `tcp-*` ID.
+  - Payloads above `PreviewBytes` keep the leading `PreviewBytes` inline and spill the captured bytes (up to `MaxBytesPerDir`) atomically (temp file + rename) into `_blobs/sha256/` with references registered in `blob_refs` under the stream's `tcp-*` ID.
   - Exceeding `MaxBytesPerDir` sets `truncated = 1` while continuing to count exact total relayed `c2s_bytes` / `s2c_bytes`.
 
 ## Operational Bounds
