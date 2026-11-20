@@ -16,7 +16,7 @@ ARTEX ships an opt-in **RFC 1928 SOCKS5 `CONNECT`** inbound listener in `traffic
 
 ## Protocol Scope (P4.1a)
 
-- **Commands**: `CONNECT` (`0x01`) only. `BIND` (`0x02`), `UDP ASSOCIATE` (`0x03`, planned for P4.1c), and unknown commands return RFC 1928 reply `0x07` (*Command not supported*).
+- **Commands**: `CONNECT` (`0x01`) by default. `BIND` (`0x02`) and unknown commands return RFC 1928 reply `0x07` (*Command not supported*). `UDP ASSOCIATE` (`0x03`) also returns `0x07` unless `ARTEX_SOCKS5_UDP_ENABLED=1` is set (see [docs/traffic-socks5-udp.md](traffic-socks5-udp.md)).
 - **Addressing**: IPv4 (`0x01`), domain name (`0x03`), and IPv6 (`0x04`). Unknown address types return `0x08` (*Address type not supported*).
 - **Authentication**:
   - Loopback peers (`net.IP.IsLoopback()`) may connect with **No Auth** (`0x00`). Non-loopback peers offering only `0x00` are rejected with `0x05 0xFF`.
