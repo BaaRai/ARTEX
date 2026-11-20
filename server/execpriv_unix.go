@@ -125,6 +125,32 @@ func prepareExecScriptDir(p ExecPrivilege, dataDir string) (string, error) {
 	return dir, nil
 }
 
+// prepareNormaTaskDir creates dir, the directory Norma keeps background-task output
+// in: os.TempDir()/norma, a path ARTEX does not choose. Norma creates it with the
+// first session and writes <session>/tasks/task_<n>.output below it from the server
+// process. The temp directory is world-writable: an executor process that runs
+// before that first session could create dir itself and place symlinks in it for
+// the server to write through. Created here, before any agent process starts, it is
+// root:root 0755. A symlink or a file in its place is refused. A directory that is
+// already there is used as found, and reported when root does not own it or others
+// can write in it: it may belong to another user of this host.
+func prepareNormaTaskDir(dir string) error {
+	if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && (st.Uid != 0 || fi.Mode().Perm()&0o022 != 0) {
+		log.Printf("[exec] %s (uid %d, mode %v) is not a root-owned directory only root can write in: background-task output written there is not protected from its owner", dir, st.Uid, fi.Mode().Perm())
+	}
+	return nil
+}
+
 // prepareExecScript lets the executor read a script the server wrote: the file stays
 // root-owned and becomes readable by the executor group only.
 func prepareExecScript(p ExecPrivilege, path string) error {
@@ -150,7 +176,8 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // config file (which can hold the database DSN) are restricted to root. Nothing
 // else under the data directory changes; directories a
 // root-only path needs are left as they are. It sets p.ScriptDir to the script
-// directory it creates.
+// directory it creates, and creates the directory of Norma's background-task output
+// under the temp directory (prepareNormaTaskDir).
 func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if !p.Enabled {
 		return nil
@@ -172,6 +199,9 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		return fmt.Errorf("prepare the executor script directory: %w", err)
 	}
 	p.ScriptDir = scriptDir
+	if err := prepareNormaTaskDir(filepath.Join(os.TempDir(), "norma")); err != nil {
+		return fmt.Errorf("prepare the background-task output directory: %w", err)
+	}
 	tasks := filepath.Join(dataDir, "tasks")
 	for _, name := range []string{"jwt.key", "secret.key"} {
 		if keyDir == "" {

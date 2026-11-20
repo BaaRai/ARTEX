@@ -241,6 +241,82 @@ func TestExecutorMCPStdioAsRoot(t *testing.T) {
 	f.check(t, "mcp stdio", string(out))
 }
 
+// The directory of Norma's background-task output is created when absent. A symlink
+// or a file in its place is refused, and nothing is created through the symlink.
+// Runs without root.
+func TestPrepareNormaTaskDir(t *testing.T) {
+	old := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(old) })
+	base := t.TempDir()
+	dir := filepath.Join(base, "norma")
+	for _, state := range []string{"absent", "already there"} {
+		if err := prepareNormaTaskDir(dir); err != nil {
+			t.Fatalf("%s: %v", state, err)
+		}
+		if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o755 {
+			t.Fatalf("%s: %v %v, want a 0755 directory", state, fi, err)
+		}
+	}
+	outside := t.TempDir()
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareNormaTaskDir(link); err == nil {
+		t.Fatal("a symlink to a directory was accepted")
+	}
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+		t.Fatalf("the symlink target holds %v (%v), want it empty", entries, err)
+	}
+	file := filepath.Join(base, "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareNormaTaskDir(file); err == nil {
+		t.Fatal("a file was accepted")
+	}
+}
+
+// With the drop enabled, PrepareExecPrivilege creates <temp>/norma before any agent
+// process runs: root:root 0755 in a world-writable sticky temp directory, where the
+// executor can neither add an entry nor rename it.
+func TestNormaTaskDirAsRoot(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root")
+	}
+	tmp, err := os.MkdirTemp("", "artex-norma-tmp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmp) })
+	if err := os.Chmod(tmp, 0o777|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", tmp)
+	f := newExecRootFixture(t)
+	fi, err := os.Lstat(filepath.Join(tmp, "norma"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := fi.Sys().(*syscall.Stat_t); !fi.IsDir() || st.Uid != 0 || st.Gid != 0 || fi.Mode().Perm() != 0o755 {
+		t.Fatalf("%s/norma: mode %v uid %d gid %d, want a directory 0755 root:root", tmp, fi.Mode(), st.Uid, st.Gid)
+	}
+	c := exec.Command("sh", "-c", `cd "$1" || exit 1
+mkdir norma/x 2>/dev/null || echo mkdir=denied
+ln -s / norma/l 2>/dev/null || echo symlink=denied
+mv norma moved 2>/dev/null || echo rename=denied
+id -u`, "sh", tmp)
+	applyExecCredential(c, f.priv)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	want := fmt.Sprintf("mkdir=denied\nsymlink=denied\nrename=denied\n%d\n", DefaultExecUID)
+	if string(out) != want {
+		t.Fatalf("executor probe in the temp directory:\n%s\nwant:\n%s", out, want)
+	}
+}
+
 // applyExecCredential sets the credential and the executor's HOME; the later env
 // entry wins in exec.Cmd. Runs without root: nothing is started.
 func TestApplyExecCredentialSetsExecutorHome(t *testing.T) {
