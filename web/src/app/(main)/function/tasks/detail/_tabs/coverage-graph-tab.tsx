@@ -24,7 +24,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
+import { statusMeta } from "@/lib/status";
 import type { CoverageAssetRef, CoverageAssetRefs, CoverageGraphEdge, CoverageGraphNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,13 +39,13 @@ type Kind = CoverageGraphNode["kind"];
 type KindMeta = { label: string; icon: LucideIcon; iconBg: string; hex: string; size: number };
 
 const kindMeta: Record<Kind, KindMeta> = {
-  company: { label: "Company", icon: Building2, iconBg: "bg-slate-500", hex: "#64748b", size: 46 },
-  root_domain: { label: "Root domain", icon: Globe, iconBg: "bg-indigo-500", hex: "#6366f1", size: 38 },
-  subdomain: { label: "Subdomain", icon: Waypoints, iconBg: "bg-blue-500", hex: "#3b82f6", size: 30 },
+  company: { label: t("Company"), icon: Building2, iconBg: "bg-slate-500", hex: "#64748b", size: 46 },
+  root_domain: { label: t("Root domain"), icon: Globe, iconBg: "bg-indigo-500", hex: "#6366f1", size: 38 },
+  subdomain: { label: t("Subdomain"), icon: Waypoints, iconBg: "bg-blue-500", hex: "#3b82f6", size: 30 },
   ip: { label: "IP", icon: Server, iconBg: "bg-cyan-600", hex: "#0891b2", size: 28 },
-  service: { label: "Service", icon: Radio, iconBg: "bg-amber-500", hex: "#f59e0b", size: 26 },
-  app: { label: "App", icon: AppWindow, iconBg: "bg-fuchsia-500", hex: "#d946ef", size: 26 },
-  endpoint: { label: "Endpoint", icon: Link2, iconBg: "bg-rose-500", hex: "#f43f5e", size: 20 },
+  service: { label: t("Service"), icon: Radio, iconBg: "bg-amber-500", hex: "#f59e0b", size: 26 },
+  app: { label: t("App"), icon: AppWindow, iconBg: "bg-fuchsia-500", hex: "#d946ef", size: 26 },
+  endpoint: { label: t("Endpoint"), icon: Link2, iconBg: "bg-rose-500", hex: "#f43f5e", size: 20 },
 };
 
 // G6 node icons use the platform's lucide icons: render lucide SVG paths (v1.22) as white-stroked
@@ -220,7 +222,7 @@ function toG6Nodes(renderNodes: RenderNode[]): G6NodeDatum[] {
         fold: true,
         tested: false,
         inScope: false,
-        lbl: `${rn.hidden.length} more ${kindMeta[rn.kind].label}`,
+        lbl: t("{count} more {kind}", { count: rn.hidden.length, kind: kindMeta[rn.kind].label }),
         size: 24,
       };
     }
@@ -280,11 +282,15 @@ function RefList({ title, items }: { title: string; items: CoverageAssetRef[] })
             className="flex flex-wrap items-start gap-2 rounded-md bg-muted/50 px-2 py-1.5 text-xs"
           >
             <span className="shrink-0 font-mono text-muted-foreground">#{r.id}</span>
-            {r.state && <span className="shrink-0 text-muted-foreground">{r.state}</span>}
+            {r.state && (
+              <span className="shrink-0 text-muted-foreground">
+                {statusMeta(r.kind === "intent" ? "intent" : "node", r.state).label}
+              </span>
+            )}
             <span className="min-w-32 flex-1 break-words text-foreground">{r.summary || "—"}</span>
             {r.inherited && r.source_task_id && (
               <Badge variant="outline" className="shrink-0">
-                Source #{r.source_task_id} · read-only
+                {t("Source #{id} · read-only", { id: r.source_task_id })}
               </Badge>
             )}
           </div>
@@ -345,42 +351,42 @@ function AssetSheet({
             <ScrollArea className="min-h-0 flex-1">
               <div className="flex w-full min-w-0 flex-col gap-4 p-4">
                 <section>
-                  <h4 className="text-muted-foreground mb-1 text-xs font-medium">Properties</h4>
-                  <DetailRow label="Type">{meta.label}</DetailRow>
-                  <DetailRow label="Test status">
+                  <h4 className="text-muted-foreground mb-1 text-xs font-medium">{t("Properties")}</h4>
+                  <DetailRow label={t("Type")}>{meta.label}</DetailRow>
+                  <DetailRow label={t("Test status")}>
                     {node.in_scope ? (
                       node.tested ? (
-                        <span className="text-emerald-600 dark:text-emerald-400">Tested</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">{t("Tested")}</span>
                       ) : (
-                        <span className="text-neutral-500">Untested</span>
+                        <span className="text-neutral-500">{t("Untested")}</span>
                       )
                     ) : (
-                      <span className="text-neutral-400">Out of scope (connecting node)</span>
+                      <span className="text-neutral-400">{t("Out of scope (connecting node)")}</span>
                     )}
                   </DetailRow>
-                  <DetailRow label="Domain">{node.domain}</DetailRow>
-                  <DetailRow label="Root domain">{node.root_domain}</DetailRow>
+                  <DetailRow label={t("Domain")}>{node.domain}</DetailRow>
+                  <DetailRow label={t("Root domain")}>{node.root_domain}</DetailRow>
                   <DetailRow label="IP">{node.ip}</DetailRow>
-                  <DetailRow label="Port">{node.port ? node.port : undefined}</DetailRow>
+                  <DetailRow label={t("Port")}>{node.port ? node.port : undefined}</DetailRow>
                   <DetailRow label="URL">
                     {node.url ? <span className="font-mono text-xs break-all">{node.url}</span> : undefined}
                   </DetailRow>
-                  <DetailRow label="Title">{node.page_title}</DetailRow>
-                  <DetailRow label="Status code">{node.status_code ? node.status_code : undefined}</DetailRow>
-                  <DetailRow label="App">{node.app_name}</DetailRow>
-                  <DetailRow label="Asset ID">
+                  <DetailRow label={t("Title")}>{node.page_title}</DetailRow>
+                  <DetailRow label={t("Status code")}>{node.status_code ? node.status_code : undefined}</DetailRow>
+                  <DetailRow label={t("App")}>{node.app_name}</DetailRow>
+                  <DetailRow label={t("Asset ID")}>
                     {node.asset_id ? <span className="font-mono text-xs">{node.asset_id}</span> : undefined}
                   </DetailRow>
                 </section>
                 {refs && (refs.intents.length > 0 || refs.facts.length > 0 || refs.findings.length > 0) && (
                   <section className="flex flex-col gap-3 border-t pt-3">
-                    <RefList title="Related intents" items={refs.intents} />
-                    <RefList title="Related facts" items={refs.facts} />
-                    <RefList title="Related findings" items={refs.findings} />
+                    <RefList title={t("Related intents")} items={refs.intents} />
+                    <RefList title={t("Related facts")} items={refs.facts} />
+                    <RefList title={t("Related findings")} items={refs.findings} />
                   </section>
                 )}
                 <section className="border-t pt-3">
-                  <h4 className="text-muted-foreground mb-1.5 text-xs font-medium">Raw data</h4>
+                  <h4 className="text-muted-foreground mb-1.5 text-xs font-medium">{t("Raw data")}</h4>
                   <pre className="bg-muted/50 text-foreground max-w-full overflow-hidden rounded-md border p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
                     {raw}
                   </pre>
@@ -414,9 +420,11 @@ function FoldSheet({
           <>
             <SheetHeader className="border-b p-4">
               <SheetTitle className="text-base">
-                Hidden {meta.label} ({fold.hidden.length})
+                {t("Hidden {kind} ({count})", { kind: meta.label, count: fold.hidden.length })}
               </SheetTitle>
-              <p className="text-muted-foreground text-xs">Tested items are shown first. Click "Show more" to pull the next batch into the graph.</p>
+              <p className="text-muted-foreground text-xs">
+                {t('Tested items are shown first. Click "Show more" to pull the next batch into the graph.')}
+              </p>
             </SheetHeader>
             <ScrollArea className="min-h-0 flex-1">
               <div className="flex flex-col gap-1 p-3">
@@ -445,7 +453,7 @@ function FoldSheet({
             </ScrollArea>
             <div className="border-t p-3">
               <Button className="w-full" variant="outline" onClick={() => onShowMore(fold.groupId)}>
-                Show more (+{FOLD_STEP})
+                {t("Show more (+{count})", { count: FOLD_STEP })}
               </Button>
             </div>
           </>
@@ -644,19 +652,21 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         <div className="flex items-center justify-between gap-3">
           {total > 0 ? (
             <span className="text-muted-foreground">
-              In scope <span className="text-foreground font-semibold tabular-nums">{inScope}</span>
+              {t("In scope")} <span className="text-foreground font-semibold tabular-nums">{inScope}</span>
               {coverageEnabled && (
                 <>
                   {" "}
-                  · Tested{" "}
+                  · {t("Tested")}{" "}
                   <span className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{tested}</span>
                 </>
               )}
             </span>
           ) : (
-            <span className="text-muted-foreground">{loading ? "Loading…" : "No in-scope assets yet (anchor the task scope first)"}</span>
+            <span className="text-muted-foreground">
+              {loading ? t("Loading…") : t("No in-scope assets yet (anchor the task scope first)")}
+            </span>
           )}
-          <Button variant="ghost" size="icon" className="size-6" onClick={fetchGraph} title="Refresh">
+          <Button variant="ghost" size="icon" className="size-6" onClick={fetchGraph} title={t("Refresh")}>
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           </Button>
         </div>
@@ -678,19 +688,20 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           {coverageEnabled && (
             <>
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-3 rounded-full bg-emerald-500" /> Tested (highlighted)
+                <span className="size-3 rounded-full bg-emerald-500" /> {t("Tested (highlighted)")}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-3 rounded-full bg-neutral-400" /> Untested
+                <span className="size-3 rounded-full bg-neutral-400" /> {t("Untested")}
               </span>
             </>
           )}
           <span className="inline-flex items-center gap-1.5">
-            <span className="size-3 rounded-full border border-dashed border-neutral-400 bg-neutral-200" /> Out of scope
+            <span className="size-3 rounded-full border border-dashed border-neutral-400 bg-neutral-200" />{" "}
+            {t("Out of scope")}
           </span>
         </div>
         <p className="text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed">
-          Force-directed layout; drag nodes and scroll to zoom. The gray "⋯" is a fold node — click it to expand more.
+          {t('Force-directed layout; drag nodes and scroll to zoom. The gray "⋯" is a fold node — click it to expand more.')}
         </p>
       </div>
 

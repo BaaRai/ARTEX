@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -85,5 +86,67 @@ VALUES('1-0001',1,'ws.example.com','GET','/ws','wss://ws.example.com/ws',101,'we
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &ex); err != nil || w.Code != 200 || ex.StreamCount != total || ex.StreamKind != "websocket" {
 		t.Fatalf("exchange = %d %s", w.Code, w.Body)
+	}
+}
+
+func TestTrafficStreamRouteDirection(t *testing.T) {
+	s, request := ingestServer(t)
+	db := s.m.Traffic().DB()
+	if _, err := db.Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path)
+VALUES('1-0002',1,'ws.example.com','GET','/ws','wss://ws.example.com/ws',101,'websocket',0,0,'')`); err != nil {
+		t.Fatal(err)
+	}
+	// seq 1 c2s, 2 s2c, 3 c2s, 4 s2c, 5 meta.
+	for i, dir := range []string{"c2s", "s2c", "c2s", "s2c", "meta"} {
+		kind := 1
+		if dir == "meta" {
+			kind = 0
+		}
+		if _, err := db.Exec(`INSERT INTO stream_messages(exchange_id,seq,ts,direction,kind,size,payload) VALUES('1-0002',?,1,?,?,1,'x')`, i+1, dir, kind); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	type page struct {
+		Items []struct {
+			Seq       int64  `json:"seq"`
+			Direction string `json:"direction"`
+		} `json:"items"`
+		Total int `json:"total"`
+	}
+	get := func(query string) page {
+		t.Helper()
+		w := request("GET", "/api/traffic/stream?exchange=1-0002"+query, "")
+		if w.Code != 200 {
+			t.Fatalf("GET %s = %d %s", query, w.Code, w.Body)
+		}
+		var p page
+		if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	seqs := func(p page) []int64 {
+		out := []int64{}
+		for _, it := range p.Items {
+			out = append(out, it.Seq)
+		}
+		return out
+	}
+
+	if p := get(""); p.Total != 5 || len(p.Items) != 5 {
+		t.Fatalf("unfiltered = %+v", p)
+	}
+	if p := get("&direction=c2s"); p.Total != 3 || fmt.Sprint(seqs(p)) != "[1 3 5]" {
+		t.Fatalf("c2s = total %d seqs %v, want 3 and [1 3 5]", p.Total, seqs(p))
+	}
+	if p := get("&direction=S2C"); p.Total != 3 || fmt.Sprint(seqs(p)) != "[2 4 5]" {
+		t.Fatalf("S2C = total %d seqs %v, want 3 and [2 4 5]", p.Total, seqs(p))
+	}
+	if p := get("&direction=s2c&offset=1&limit=1"); p.Total != 3 || fmt.Sprint(seqs(p)) != "[4]" {
+		t.Fatalf("s2c offset=1 limit=1 = total %d seqs %v, want 3 and [4]", p.Total, seqs(p))
+	}
+	if w := request("GET", "/api/traffic/stream?exchange=1-0002&direction=meta", ""); w.Code != 400 {
+		t.Fatalf("direction=meta = %d %s, want 400", w.Code, w.Body)
 	}
 }

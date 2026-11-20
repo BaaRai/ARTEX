@@ -71,7 +71,7 @@ jobs:
           ARTEX_PG_DSN: postgres://artex:testpass@localhost:5432/artextest_race?sslmode=disable
 
         run: >-
-          go test -race -p 1 ./agent ./cmd/artex ./config ./db ./evidence ./guard
+          go test -race -p 1 ./agent ./archivestore ./cmd/artex ./config ./db ./evidence ./guard
           ./intercept ./llmpool ./llmrec ./mcphttp ./notify ./server ./sidequestion
           ./traffic ./traffic/rewrite
 
@@ -149,6 +149,7 @@ jobs:
       - run: npm run test:polling
       - run: npm run test:replay
       - run: npm run test:upload
+      - run: npm run test:i18n
       - run: npm run build:static
 
   python:

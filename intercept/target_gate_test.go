@@ -975,6 +975,31 @@ func TestUpstreamProxyMakesPinsNameOnlyAtCallTime(t *testing.T) {
 	g.passes("name-only pin, no proxy", g.fetch(appURL))
 }
 
+// A custom tool that carries its own proxy cannot enforce an approved IP, so
+// its pins are name-only at call time, the same as behind the upstream proxy.
+func TestToolProxyMakesPinsNameOnlyAtCallTime(t *testing.T) {
+	g := newGate(t)
+	proxied := false
+	g.ic.SetToolProxyCheck(func(string) bool { return proxied })
+	const tool = "my_http_tool"
+	const input = `{"url":"https://app.example.com/login"}`
+	g.res.set("app.example.com", "203.0.113.7")
+	g.pin("app.example.com", 443, "203.0.113.7")
+
+	// The address changes. A direct call asks.
+	g.res.set("app.example.com", "198.51.100.99")
+	g.expire()
+	g.requests("changed address, direct tool", g.check(tool, input))
+
+	// The same pin covers the name for the proxied tool, and the first-use row
+	// records that the connection was not bound.
+	proxied = true
+	g.passes("changed address, proxied tool", g.check(tool, input))
+	if got := g.store.outcomes(); len(got) != 1 || got[0] != "allowed/pin_match" || !g.store.logged[0].Audit.Targets[0].NameOnlyEffective {
+		t.Fatalf("rows %v, target %+v; want a name-only first use", got, g.store.logged[0].Audit.Targets[0])
+	}
+}
+
 // The first call that a pin version covers is logged once per process.
 func TestPinFirstUseLoggedOncePerVersion(t *testing.T) {
 	g := newGate(t)

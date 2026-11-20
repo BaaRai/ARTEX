@@ -428,6 +428,14 @@ runtime supports it.
 `/chat/completions` (or `/responses` for `openai-responses`), so their base **does** end in `/v1`
 (for example `https://api.openai.com/v1`).
 
+**OpenAI-compatible gateways**: any provider that serves an OpenAI-style
+`/v1/chat/completions` endpoint works through the **OpenAI** format — no dedicated format
+needed. Create a profile with format **OpenAI**, set **Base URL** to the gateway's `/v1`
+root, paste the key, then click the **↻** button next to *Model* to load the provider's
+catalog (`GET /v1/models`) and pick a model; models the provider adds later appear on the
+next refresh. For example, [NotHoly](https://notholy.com) (offensive-security models) uses
+base URL `https://api.notholy.com/v1` with an API key from its console.
+
 **Task archive storage**: local disk by default. Set `ARTEX_ARCHIVE_STORAGE=s3` to
 store cold task packages in an S3-compatible bucket and release their local
 package space after verification. Existing local archives remain usable. See

@@ -5,6 +5,7 @@ import * as React from "react";
 import { ExplorationGraph } from "@/components/exploration-graph";
 import { api } from "@/lib/api";
 import type { Edge, TaskNode } from "@/lib/types";
+import { t } from "@/i18n";
 
 // FindingLineageView renders the exploration sub-graph from the task's initial
 // node down to this finding's node — the same exploration graph canvas as the task graph,
@@ -35,7 +36,7 @@ export function FindingLineageView({ findingId }: { findingId: string }) {
   if (loaded && nodes.length === 0) {
     return (
       <p className="text-muted-foreground p-6 text-sm">
-        No lineage to display (this vulnerability is not linked to an exploration node, or its task has been deleted).
+        {t("No lineage to display (this vulnerability is not linked to an exploration node, or its task has been deleted).")}
       </p>
     );
   }
@@ -45,7 +46,7 @@ export function FindingLineageView({ findingId }: { findingId: string }) {
       nodes={nodes}
       edges={edges}
       className="h-[68vh]"
-      emptyHint={loaded ? "No lineage" : "Loading…"}
+      emptyHint={loaded ? t("No lineage") : t("Loading…")}
     />
   );
 }

@@ -530,7 +530,9 @@ func TestGateOffLeavesEveryBranchUnchanged(t *testing.T) {
 	for name, ctx := range off {
 		before := len(g.rows())
 		// 1. A tool outside the enabled set: passes, nothing is written.
-		for _, c := range []struct{ tool, input string }{{"Monitor", curl(deny)}, {"mcp__scan__run", `{"target":"203.0.113.7","note":"` + deny + `"}`}} {
+		// Monitor and ExecuteExtraTool are in the default set now, so use read-only
+		// tools and an MCP name (inner names are not in the set).
+		for _, c := range []struct{ tool, input string }{{"list_assets", curl(deny)}, {"mcp__scan__run", `{"target":"203.0.113.7","note":"` + deny + `"}`}} {
 			if block, msg := pre(guard, ctx, c.tool, c.input); block {
 				t.Fatalf("%s: %s blocked: %s", name, c.tool, msg)
 			}

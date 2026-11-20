@@ -130,6 +130,7 @@ func TestStoredProfileKeyOnlyForStoredEndpoint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	s.allowLoopbackModels = true
 	s.cfgMu.Lock()
 	s.llmCfg = agent.Config{} // no global key to fall back on
 	s.cfgMu.Unlock()

@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import type { SSProject, SSTask } from "@/lib/types";
+import { t } from "@/i18n";
 
 type SSStatus = {
   exists: boolean;
@@ -28,17 +29,17 @@ type SSStatus = {
 type Dimension = "project" | "task";
 
 const ASSET_TYPES: { key: string; label: string }[] = [
-  { key: "subdomain", label: "Subdomain" },
-  { key: "service", label: "Service" },
-  { key: "app", label: "App" },
+  { key: "subdomain", label: t("Subdomain") },
+  { key: "service", label: t("Service") },
+  { key: "app", label: t("App") },
 ];
 
 export default function AssetSyncPage() {
   return (
     <div className="p-4 md:p-6">
       <div className="mb-4">
-        <h1 className="font-semibold text-xl">Asset sync</h1>
-        <p className="text-muted-foreground text-sm">Sync assets into the store from external data sources</p>
+        <h1 className="font-semibold text-xl">{t("Asset sync")}</h1>
+        <p className="text-muted-foreground text-sm">{t("Sync assets into the store from external data sources")}</p>
       </div>
       <Tabs defaultValue="scopesentry">
         <TabsList>
@@ -61,7 +62,7 @@ function ScopeSentryPanel() {
     api
       .ssStatus()
       .then(setStatus)
-      .catch((e) => toast.error(`Failed to read data source status: ${e.message}`))
+      .catch((e) => toast.error(t("Failed to read data source status: {error}", { error: e.message })))
       .finally(() => setLoadingStatus(false));
   }, []);
 
@@ -79,7 +80,7 @@ function ScopeSentryPanel() {
       ) : (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground text-sm">
-            Once the data source is ready, you can pick projects / tasks to sync.
+            {t("Once the data source is ready, you can pick projects / tasks to sync.")}
           </CardContent>
         </Card>
       )}
@@ -110,25 +111,25 @@ function DataSourceCard({
     setBusy(true);
     try {
       await api.ssDatasource({});
-      toast.success("ScopeSentry data source created; fill in the URL and key");
+      toast.success(t("ScopeSentry data source created; fill in the URL and key"));
       onChanged();
     } catch (e) {
-      toast.error(`Create failed: ${(e as Error).message}`);
+      toast.error(t("Create failed: {error}", { error: (e as Error).message }));
     } finally {
       setBusy(false);
     }
   };
 
   const save = async () => {
-    if (!url.trim()) return toast.error("Please enter the MCP URL");
+    if (!url.trim()) return toast.error(t("Please enter the MCP URL"));
     setBusy(true);
     try {
       const r = await api.ssDatasource({ url: url.trim(), api_key: apiKey.trim() });
-      toast.success(r.enabled ? "Data source saved and enabled" : "Saved (enable conditions not yet met)");
+      toast.success(r.enabled ? t("Data source saved and enabled") : t("Saved (enable conditions not yet met)"));
       setApiKey("");
       onChanged();
     } catch (e) {
-      toast.error(`Save failed: ${(e as Error).message}`);
+      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -138,32 +139,34 @@ function DataSourceCard({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2 text-base">
-          <PlugZapIcon className="size-4" /> Data source status
+          <PlugZapIcon className="size-4" /> {t("Data source status")}
           <StatusBadge status={status} loading={loading} />
         </CardTitle>
         <Button variant="ghost" size="sm" onClick={onChanged} disabled={loading}>
-          <RefreshCwIcon className={loading ? "size-4 animate-spin" : "size-4"} /> Refresh
+          <RefreshCwIcon className={loading ? "size-4 animate-spin" : "size-4"} /> {t("Refresh")}
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
         {!status?.exists ? (
           <div className="flex items-center justify-between gap-4">
             <p className="text-muted-foreground text-sm">
-              No ScopeSentry data source yet. Creating one adds a placeholder MCP (empty URL/key, disabled).
+              {t("No ScopeSentry data source yet. Creating one adds a placeholder MCP (empty URL/key, disabled).")}
             </p>
             <Button onClick={create} disabled={busy}>
-              Create data source
+              {t("Create data source")}
             </Button>
           </div>
         ) : (
           <>
             {!status.configured && (
               <p className="text-amber-600 text-sm dark:text-amber-500">
-                The data source is created but not configured; fill in the MCP URL and API key, then enable it.
+                {t("The data source is created but not configured; fill in the MCP URL and API key, then enable it.")}
               </p>
             )}
             {status.configured && !status.enabled && (
-              <p className="text-amber-600 text-sm dark:text-amber-500">The data source is configured but not enabled; it will be enabled automatically on save.</p>
+              <p className="text-amber-600 text-sm dark:text-amber-500">
+                {t("The data source is configured but not enabled; it will be enabled automatically on save.")}
+              </p>
             )}
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
@@ -171,7 +174,7 @@ function DataSourceCard({
                 <Input placeholder="http://<host>:8082/mcp" value={url} onChange={(e) => setUrl(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>API Key (X-API-Key; leave empty to keep the current value)</Label>
+                <Label>{t("API Key (X-API-Key; leave empty to keep the current value)")}</Label>
                 <Input
                   type="password"
                   placeholder="ssk_..."
@@ -182,10 +185,12 @@ function DataSourceCard({
             </div>
             <div className="flex items-center gap-2">
               <Button onClick={save} disabled={busy}>
-                Save & enable
+                {t("Save & enable")}
               </Button>
               {status.enabled && status.tools.length > 0 && (
-                <span className="text-muted-foreground text-xs">{status.tools.length} tools discovered</span>
+                <span className="text-muted-foreground text-xs">
+                  {t("{count} tools discovered", { count: status.tools.length })}
+                </span>
               )}
             </div>
           </>
@@ -196,19 +201,19 @@ function DataSourceCard({
 }
 
 function StatusBadge({ status, loading }: { status: SSStatus | null; loading: boolean }) {
-  if (loading || !status) return <Badge variant="secondary">Checking…</Badge>;
-  if (!status.exists) return <Badge variant="destructive">Not created</Badge>;
-  if (!status.configured) return <Badge variant="outline">Not configured</Badge>;
-  if (!status.enabled) return <Badge variant="outline">Not enabled</Badge>;
+  if (loading || !status) return <Badge variant="secondary">{t("Checking…")}</Badge>;
+  if (!status.exists) return <Badge variant="destructive">{t("Not created")}</Badge>;
+  if (!status.configured) return <Badge variant="outline">{t("Not configured")}</Badge>;
+  if (!status.enabled) return <Badge variant="outline">{t("Not enabled")}</Badge>;
   if (status.reachable)
     return (
       <Badge className="bg-emerald-600 hover:bg-emerald-600">
-        <CheckCircle2Icon className="mr-1 size-3" /> Connected
+        <CheckCircle2Icon className="mr-1 size-3" /> {t("Connected")}
       </Badge>
     );
   return (
     <Badge variant="destructive">
-      <AlertCircleIcon className="mr-1 size-3" /> Unreachable
+      <AlertCircleIcon className="mr-1 size-3" /> {t("Unreachable")}
     </Badge>
   );
 }
@@ -241,7 +246,9 @@ function SyncWorkbench() {
       dimension === "project"
         ? api.ssProjects(page, 50, search).then((r) => setProjects(r.projects))
         : api.ssTasks(page, 50, search).then(setTasks);
-    fn.catch((e) => toast.error(`Failed to load the list: ${e.message}`)).finally(() => setLoading(false));
+    fn.catch((e) => toast.error(t("Failed to load the list: {error}", { error: e.message }))).finally(() =>
+      setLoading(false),
+    );
   }, [dimension, page, search]);
 
   React.useEffect(() => {
@@ -266,8 +273,9 @@ function SyncWorkbench() {
   const chosenTypes = ASSET_TYPES.filter((t) => assetTypes[t.key]).map((t) => t.key);
 
   const runSync = async () => {
-    if (selected.size === 0) return toast.error(`Select at least one ${dimension === "project" ? "project" : "task"}`);
-    if (chosenTypes.length === 0) return toast.error("Select at least one asset type");
+    if (selected.size === 0)
+      return toast.error(dimension === "project" ? t("Select at least one project") : t("Select at least one task"));
+    if (chosenTypes.length === 0) return toast.error(t("Select at least one asset type"));
     setSyncing(true);
     setResult(null);
     try {
@@ -279,9 +287,9 @@ function SyncWorkbench() {
       });
       setResult(r);
       const total = Object.values(r.synced ?? {}).reduce((a, b) => a + b, 0);
-      toast.success(`Sync finished; ${total} assets ingested in total`);
+      toast.success(t("Sync finished; {count} assets ingested in total", { count: total }));
     } catch (e) {
-      toast.error(`Sync failed: ${(e as Error).message}`);
+      toast.error(t("Sync failed: {error}", { error: (e as Error).message }));
     } finally {
       setSyncing(false);
     }
@@ -292,7 +300,7 @@ function SyncWorkbench() {
       return (
         <TableRow>
           <TableCell colSpan={4} className="py-8 text-center text-muted-foreground text-sm">
-            Loading…
+            {t("Loading…")}
           </TableCell>
         </TableRow>
       );
@@ -301,7 +309,7 @@ function SyncWorkbench() {
       return (
         <TableRow>
           <TableCell colSpan={4} className="py-8 text-center text-muted-foreground text-sm">
-            No data
+            {t("No data")}
           </TableCell>
         </TableRow>
       );
@@ -337,7 +345,7 @@ function SyncWorkbench() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Pick data to sync</CardTitle>
+        <CardTitle className="text-base">{t("Pick data to sync")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Dimension switch */}
@@ -349,14 +357,14 @@ function SyncWorkbench() {
           }}
         >
           <TabsList>
-            <TabsTrigger value="project">By project</TabsTrigger>
-            <TabsTrigger value="task">By task</TabsTrigger>
+            <TabsTrigger value="project">{t("By project")}</TabsTrigger>
+            <TabsTrigger value="task">{t("By task")}</TabsTrigger>
           </TabsList>
         </Tabs>
 
         {/* Asset types + options */}
         <div className="flex flex-wrap items-center gap-4">
-          <span className="font-medium text-sm">Assets to sync:</span>
+          <span className="font-medium text-sm">{t("Assets to sync:")}</span>
           {ASSET_TYPES.map((t) => (
             <label key={t.key} htmlFor={`at-${t.key}`} className="flex items-center gap-1.5 text-sm">
               <Checkbox
@@ -370,7 +378,7 @@ function SyncWorkbench() {
           {dimension === "project" && (
             <label htmlFor="create-company" className="flex items-center gap-1.5 text-sm">
               <Checkbox id="create-company" checked={createCompany} onCheckedChange={(c) => setCreateCompany(!!c)} />
-              Create a company per project and write its asset scope
+              {t("Create a company per project and write its asset scope")}
             </label>
           )}
         </div>
@@ -381,7 +389,7 @@ function SyncWorkbench() {
             <SearchIcon className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="pl-8"
-              placeholder={dimension === "project" ? "Search project names" : "Search task names"}
+              placeholder={dimension === "project" ? t("Search project names") : t("Search task names")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => {
@@ -396,9 +404,9 @@ function SyncWorkbench() {
             <RefreshCwIcon className={loading ? "size-4 animate-spin" : "size-4"} />
           </Button>
           <div className="flex-1" />
-          <span className="text-muted-foreground text-xs">{selected.size} selected</span>
+          <span className="text-muted-foreground text-xs">{t("{count} selected", { count: selected.size })}</span>
           <Button onClick={runSync} disabled={syncing || selected.size === 0}>
-            <DownloadIcon className={syncing ? "size-4 animate-pulse" : "size-4"} /> Sync selected
+            <DownloadIcon className={syncing ? "size-4 animate-pulse" : "size-4"} /> {t("Sync selected")}
           </Button>
         </div>
 
@@ -410,16 +418,16 @@ function SyncWorkbench() {
                 <TableHead className="w-10">
                   <Checkbox checked={rows.length > 0 && selected.size === rows.length} onCheckedChange={toggleAll} />
                 </TableHead>
-                <TableHead>{dimension === "project" ? "Project name" : "Task name"}</TableHead>
+                <TableHead>{dimension === "project" ? t("Project name") : t("Task name")}</TableHead>
                 {dimension === "project" ? (
                   <>
-                    <TableHead>Tag</TableHead>
-                    <TableHead className="text-right">Assets</TableHead>
+                    <TableHead>{t("Tag")}</TableHead>
+                    <TableHead className="text-right">{t("Assets")}</TableHead>
                   </>
                 ) : (
                   <>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Time</TableHead>
+                    <TableHead>{t("Status")}</TableHead>
+                    <TableHead>{t("Time")}</TableHead>
                   </>
                 )}
               </TableRow>
@@ -431,16 +439,16 @@ function SyncWorkbench() {
         {/* Pagination */}
         <div className="flex items-center justify-end gap-2">
           <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)}>
-            Previous
+            {t("Previous")}
           </Button>
-          <span className="text-muted-foreground text-xs">Page {page}</span>
+          <span className="text-muted-foreground text-xs">{t("Page {page}", { page })}</span>
           <Button
             variant="outline"
             size="sm"
             disabled={rows.length < 50 || loading}
             onClick={() => setPage((p) => p + 1)}
           >
-            Next
+            {t("Next")}
           </Button>
         </div>
 
@@ -453,7 +461,7 @@ function SyncWorkbench() {
 
 function SyncResult({ result }: { result: Awaited<ReturnType<typeof api.ssSync>> }) {
   const synced = result.synced ?? {};
-  const labels: Record<string, string> = { subdomain: "Subdomain", service: "Service", app: "App", ip: "IP" };
+  const labels: Record<string, string> = { subdomain: t("Subdomain"), service: t("Service"), app: t("App"), ip: "IP" };
   return (
     <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
       <div className="flex flex-wrap gap-3">
@@ -464,7 +472,9 @@ function SyncResult({ result }: { result: Awaited<ReturnType<typeof api.ssSync>>
         ))}
       </div>
       {result.companies && result.companies.length > 0 && (
-        <p className="text-muted-foreground">Companies created/updated: {result.companies.join(", ")}</p>
+        <p className="text-muted-foreground">
+          {t("Companies created/updated: {names}", { names: result.companies.join(", ") })}
+        </p>
       )}
       {result.warnings && result.warnings.length > 0 && (
         <ul className="list-inside list-disc text-amber-600 dark:text-amber-500">
@@ -478,7 +488,7 @@ function SyncResult({ result }: { result: Awaited<ReturnType<typeof api.ssSync>>
           {result.errors.slice(0, 20).map((em) => (
             <li key={em}>{em}</li>
           ))}
-          {result.errors.length > 20 && <li>… {result.errors.length} errors in total</li>}
+          {result.errors.length > 20 && <li>{t("… {count} errors in total", { count: result.errors.length })}</li>}
         </ul>
       )}
     </div>

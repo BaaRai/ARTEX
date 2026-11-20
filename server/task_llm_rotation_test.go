@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"fmt"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/llm"
 )
@@ -209,5 +211,182 @@ func TestNextRotatedProfileRoundRobin(t *testing.T) {
 	tk.setLLMState(nil, nil, []int64{3, 1, 2}, 1, "ready", "", false)
 	if _, ok := tk.nextRotatedProfile(); ok {
 		t.Fatal("disabled rotation must not assign a pin")
+	}
+}
+
+type pinCapture struct {
+	id int64
+	ok bool
+}
+
+type pinCaptureProvider struct {
+	mu   sync.Mutex
+	seen []pinCapture
+}
+
+func (p *pinCaptureProvider) record(ctx context.Context) {
+	id, ok := llmProfilePinFrom(ctx)
+	p.mu.Lock()
+	p.seen = append(p.seen, pinCapture{id: id, ok: ok})
+	p.mu.Unlock()
+}
+
+func (p *pinCaptureProvider) Stream(ctx context.Context, _ llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+	p.record(ctx)
+	return func(yield func(llm.StreamEvent, error) bool) {
+		if !yield(llm.StreamEvent{Type: llm.SETextDelta, Text: "done"}, nil) {
+			return
+		}
+		if !yield(llm.StreamEvent{Type: llm.SEMessageDelta, StopReason: "end_turn"}, nil) {
+			return
+		}
+		yield(llm.StreamEvent{Type: llm.SEMessageStop}, nil)
+	}
+}
+
+func (p *pinCaptureProvider) Complete(ctx context.Context, _ llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	p.record(ctx)
+	return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("done")}}, "end_turn", llm.Usage{}, nil
+}
+
+// Regression test for #376 (DB-free): warming e.execContextFor first (as the
+// planner does) must not drop the per-intent LLM profile pin on subsequent
+// worker intents, and a paused/deleting rollback must not advance rotation.
+func TestIntentWorkContextRotatesWithCachedExecCtx(t *testing.T) {
+	const (
+		taskID   = "77"
+		profileA = int64(101)
+		profileB = int64(202)
+	)
+	e := NewEngine(nil)
+	tk := &Task{ID: taskID, LLMProfileIDs: []int64{profileA, profileB}, LLMRotate: true}
+
+	// Warm the per-task cached execCtx, simulating the planner running first.
+	warm := e.execContextFor(context.Background(), taskID)
+	if warm == nil || warm.Err() != nil {
+		t.Fatalf("warm execContextFor returned invalid ctx: %v", warm)
+	}
+
+	// A paused task must roll back without advancing the rotation counter.
+	e.Pause(taskID, agent.AbortPausedByUser)
+	if _, _, _, ok := e.intentWorkContext(context.Background(), tk); ok {
+		t.Fatal("paused task unexpectedly yielded a work context")
+	}
+	e.Resume(tk)
+	// Re-warm cached execCtx after resume (again simulating planner before worker).
+	_ = e.execContextFor(context.Background(), taskID)
+
+	// A deleting task must also roll back without advancing the rotation counter.
+	e.BeginDelete(taskID)
+	if _, _, _, ok := e.intentWorkContext(context.Background(), tk); ok {
+		t.Fatal("deleting task unexpectedly yielded a work context")
+	}
+	e.AbortDelete(taskID, false)
+
+	// Two consecutive claimed intents must carry distinct rotated pins (A then B).
+	_, workA, cancelA, ok := e.intentWorkContext(context.Background(), tk)
+	if !ok {
+		t.Fatal("first intentWorkContext failed")
+	}
+	defer cancelA(nil)
+	gotA, okA := llmProfilePinFrom(workA)
+	if !okA || gotA != profileA {
+		t.Fatalf("first workCtx pin = (%d, %v), want (%d, true)", gotA, okA, profileA)
+	}
+
+	_, workB, cancelB, ok := e.intentWorkContext(context.Background(), tk)
+	if !ok {
+		t.Fatal("second intentWorkContext failed")
+	}
+	defer cancelB(nil)
+	gotB, okB := llmProfilePinFrom(workB)
+	if !okB || gotB != profileB {
+		t.Fatalf("second workCtx pin = (%d, %v), want (%d, true)", gotB, okB, profileB)
+	}
+	if gotA == gotB {
+		t.Fatalf("expected distinct pinned profile IDs, both were %d", gotA)
+	}
+}
+
+// Regression test for #376 (end-to-end through runIntent): warm execContextFor
+// first (simulating the planner running before workers), then run two intents
+// through runIntent and assert the two work contexts carry distinct pinned
+// profile IDs (A then B).
+func TestRunIntentRotatesPinnedProfileWithCachedExecCtx(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable: %v", err)
+	}
+	defer m.Close()
+
+	ids := make([]int64, 0, 2)
+	for i := 0; i < 2; i++ {
+		id, err := m.pg.SaveProfile(&db.LLMProfile{
+			Name:    fmt.Sprintf("runintent-rotate-%d-%d", time.Now().UnixNano(), i),
+			Format:  "openai",
+			BaseURL: "http://127.0.0.1:1/v1",
+			Model:   "test",
+			APIKey:  "test-key",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		defer m.pg.DeleteProfile(id)
+	}
+
+	on := true
+	task, err := m.CreateTaskWithOptions("runIntent rotation", "verify pin survives cached execCtx", db.TaskCreateOptions{
+		LLMProfileIDs: ids,
+		LLMRotate:     &on,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.DeleteTask(task.ID, DeleteTaskOptions{})
+
+	e := NewEngine(m)
+	// Warm the per-task cached execCtx before any worker intent runs.
+	_ = e.execContextFor(context.Background(), task.ID)
+
+	// Verify paused rollback through runIntent does not advance rotation.
+	if _, err := task.Store.AddIntent(map[string]any{"summary": "rolled back while paused"}, 1, nil, "planner"); err != nil {
+		t.Fatal(err)
+	}
+	pausedIntent, pausedToken := e.claimNext(task, "work#0")
+	if pausedIntent == nil {
+		t.Fatal("failed to claim intent for paused rollback check")
+	}
+	e.Pause(task.ID, agent.AbortPausedByUser)
+	probe := &pinCaptureProvider{}
+	worker := agent.NewWorker(probe, "test-model", m.dir, nil, 0, 2)
+	e.runIntent(context.Background(), task, "work#0", worker, pausedIntent, pausedToken, "", "")
+	if len(probe.seen) != 0 {
+		t.Fatalf("paused runIntent called provider %d times, want 0", len(probe.seen))
+	}
+	e.Resume(task)
+	// Re-warm cached execCtx after resume (simulating planner before workers).
+	_ = e.execContextFor(context.Background(), task.ID)
+
+	// Run two intents through runIntent and assert distinct pins: ids[0] then ids[1].
+	if _, err := task.Store.AddIntent(map[string]any{"summary": "rotate intent 2"}, 1, nil, "planner"); err != nil {
+		t.Fatal(err)
+	}
+	for i, wantID := range ids {
+		name := fmt.Sprintf("work#%d", i+1)
+		intent, token := e.claimNext(task, name)
+		if intent == nil {
+			t.Fatalf("intent %d not claimed", i+1)
+		}
+		p := &pinCaptureProvider{}
+		w := agent.NewWorker(p, "test-model", m.dir, nil, 0, 2)
+		e.runIntent(context.Background(), task, name, w, intent, token, "", "")
+		if len(p.seen) == 0 {
+			t.Fatalf("intent %d: provider was not called", i+1)
+		}
+		got := p.seen[0]
+		if !got.ok || got.id != wantID {
+			t.Fatalf("intent %d: workCtx pin = (%d, %v), want (%d, true)", i+1, got.id, got.ok, wantID)
+		}
 	}
 }

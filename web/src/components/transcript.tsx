@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { intlLocale, t } from "@/i18n";
 import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -90,7 +91,7 @@ function groupSteps(steps: Activity[], chat: boolean): Group[] {
   for (const s of steps) {
     if (s.kind === "usage") continue; // live token-usage marker — not a rendered step
     if (s.kind === "round") {
-      out.push({ type: "round", key: s.seq, label: s.summary || "New round" }); // planner round boundary
+      out.push({ type: "round", key: s.seq, label: s.summary || t("New round") }); // planner round boundary
       continue;
     }
     if (s.kind === "intercept_request") {
@@ -129,7 +130,7 @@ function groupSteps(steps: Activity[], chat: boolean): Group[] {
   return out;
 }
 
-const kindLabel = (k: string) => (k === "thinking" ? "Thinking" : k === "result" ? "Summary" : "Note");
+const kindLabel = (k: string) => (k === "thinking" ? t("Thinking") : k === "result" ? t("Summary") : t("Note"));
 
 function ActivityTime({ ts }: { ts: string }) {
   const date = new Date(ts);
@@ -137,11 +138,11 @@ function ActivityTime({ ts }: { ts: string }) {
   return (
     <time
       dateTime={date.toISOString()}
-      title={date.toLocaleString("zh-CN")}
+      title={date.toLocaleString(intlLocale)}
       className="text-[10px] text-muted-foreground tabular-nums"
       suppressHydrationWarning
     >
-      {date.toLocaleString("zh-CN", {
+      {date.toLocaleString(intlLocale, {
         month: "2-digit",
         day: "2-digit",
         hour: "2-digit",
@@ -234,7 +235,7 @@ function InterceptCard({
         setStatusError("");
         if (p.status !== "pending") setDecided(p.status as "allowed" | "denied" | "timeout");
       })
-      .catch((error) => { if (live) setStatusError((error as Error).message || "Failed to load approval details"); });
+      .catch((error) => { if (live) setStatusError((error as Error).message || t("Failed to load approval details")); });
     return () => { live = false; };
   }, [pendingId, retry]);
 
@@ -244,7 +245,7 @@ function InterceptCard({
     try {
       await api.interceptDecide(pendingId, decision);
       setDecided(decision);
-      toast.success(decision === "allowed" ? "Execution allowed" : "Execution denied");
+      toast.success(decision === "allowed" ? t("Execution allowed") : t("Execution denied"));
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -265,7 +266,7 @@ function InterceptCard({
           <ShieldAlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
           <div className="min-w-0 space-y-0.5">
             <div className="flex items-center gap-1.5 font-medium">
-              <span className="text-amber-700 dark:text-amber-400">Approval request</span>
+              <span className="text-amber-700 dark:text-amber-400">{t("Approval request")}</span>
               <code className="rounded bg-amber-100 dark:bg-amber-900/50 px-1 font-mono text-amber-800 dark:text-amber-300">
                 {toolName}
               </code>
@@ -280,7 +281,7 @@ function InterceptCard({
         </div>
 
         {step.inherited ? (
-          <Badge variant="outline">History · Read-only</Badge>
+          <Badge variant="outline">{t("History · Read-only")}</Badge>
         ) : decided ? (
           <span className={
             "shrink-0 rounded px-2 py-0.5 text-[11px] font-medium " +
@@ -290,7 +291,7 @@ function InterceptCard({
                 ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
                 : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400")
           }>
-            {decided === "allowed" ? "Allowed" : decided === "timeout" ? "Timed out" : "Denied"}
+            {decided === "allowed" ? t("Allowed") : decided === "timeout" ? t("Timed out") : t("Denied")}
           </span>
         ) : (
           <div className="flex shrink-0 gap-1.5">
@@ -301,7 +302,7 @@ function InterceptCard({
               onClick={() => decide("allowed")}
             >
               <CheckIcon className="h-3 w-3" />
-              Allow
+              {t("Allow")}
             </Button>
             <Button
               size="sm"
@@ -311,7 +312,7 @@ function InterceptCard({
               onClick={() => decide("denied")}
             >
               <XIcon className="h-3 w-3" />
-              Deny
+              {t("Deny")}
             </Button>
           </div>
         )}
@@ -319,9 +320,10 @@ function InterceptCard({
       {pendingId ? (
         <Collapsible open={expanded} onOpenChange={setExpanded} className="mt-2 min-w-0">
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" aria-label={expanded ? "Collapse approval details" : "Expand approval details"}>
+            <Button variant="ghost" size="sm" aria-label={expanded ? t("Collapse approval details") : t("Expand approval details")}
+            >
               {expanded ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}
-              {expanded ? "Collapse approval details" : "Expand approval details"}
+              {expanded ? t("Collapse approval details") : t("Expand approval details")}
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -338,9 +340,11 @@ function InterceptCard({
             ) : statusError ? (
               <div className="flex flex-wrap items-center gap-2 p-3" role="alert">
                 <span>{statusError}</span>
-                <Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>Retry details</Button>
+                <Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>
+                  {t("Retry details")}
+                </Button>
               </div>
-            ) : <p className="p-3 text-muted-foreground">Loading approval details…</p>}
+            ) : <p className="p-3 text-muted-foreground">{t("Loading approval details…")}</p>}
           </CollapsibleContent>
         </Collapsible>
       ) : null}
@@ -370,7 +374,8 @@ function ToolBlock({
   // effect below re-fetches — so the output shows up instead of being cached out.
   const loadedKey = React.useRef<string | null>(null);
   const { use, result } = group;
-  const toolName = use?.tool || result?.tool || "Tool";
+  const rawToolName = use?.tool || result?.tool || "";
+  const toolName = rawToolName || "Tool";
   const ToolIcon = toolName === "Bash" ? Terminal : Wrench;
   const running = !result;
   const ok = !!result && !result.is_error;
@@ -383,27 +388,27 @@ function ToolBlock({
     use && use.summary.startsWith(toolName) ? use.summary.slice(toolName.length).trimStart() : (use?.summary ?? "");
   const cmd = toolInputText(toolName, rawCmd);
   // status only — the full result lives behind the expand ([Output]), not previewed inline
-  const statusText = running ? "Running…" : ok ? "✓" : "✕ Failed";
+  const statusText = running ? t("Running…") : ok ? "✓" : t("✕ Failed");
 
   // key over the seqs we'd load; changes when the result (or command) arrives.
   const detailKey = `${use?.seq ?? ""}:${result?.seq ?? ""}`;
   React.useEffect(() => {
     if (!open || loadedKey.current === detailKey) return;
     let live = true;
-    const segs: { label: string; seq: number }[] = [];
-    if (use) segs.push({ label: "Command", seq: use.seq });
-    if (result) segs.push({ label: "Output" + (result.is_error ? " ✕" : " ✓"), seq: result.seq });
+    const segs: { label: string; seq: number; command: boolean }[] = [];
+    if (use) segs.push({ label: t("Command"), seq: use.seq, command: true });
+    if (result) segs.push({ label: t("Output") + (result.is_error ? " ✕" : " ✓"), seq: result.seq, command: false });
     void Promise.all(
       segs.map((x) =>
         getDetail(x.seq)
-          .then((d) => d || "(empty)")
-          .catch(() => "(failed to load)"),
+          .then((d) => d || t("(empty)"))
+          .catch(() => t("(failed to load)")),
       ),
     ).then((parts) => {
       if (!live) return;
       setDetail(
         segs
-          .map((x, i) => `[${x.label}]\n${x.label === "Command" ? toolInputText(toolName, parts[i]) : parts[i]}`)
+          .map((x, i) => `[${x.label}]\n${x.command ? toolInputText(toolName, parts[i]) : parts[i]}`)
           .join("\n\n"),
       );
       loadedKey.current = detailKey;
@@ -457,7 +462,7 @@ function ToolBlock({
   return (
     <section
       ref={targetRef}
-      aria-label={focused ? `Focused tool call #${use?.seq}` : undefined}
+      aria-label={focused ? t("Focused tool call #{seq}", { seq: use?.seq ?? "" }) : undefined}
       className={focused ? "rounded-lg border-2 border-primary bg-primary/5 p-3 text-xs" : "text-xs"}
     >
       <button type="button" onClick={toggle} className="flex w-full items-start gap-2 py-1 text-left hover:bg-muted/40">
@@ -466,13 +471,13 @@ function ToolBlock({
         </span>
         <ToolIcon className={"mt-0.5 size-3.5 shrink-0 " + (running ? "text-sky-600 dark:text-sky-400" : statusTone)} />
         {showWorker && <span className={chip(group.worker)}>{group.worker}</span>}
-        <span className="shrink-0 font-medium text-sky-600 dark:text-sky-400">{toolName}</span>
+        <span className="shrink-0 font-medium text-sky-600 dark:text-sky-400">{rawToolName || t("Tool")}</span>
         {cmd && <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{cmd}</span>}
         <span className={"ml-auto shrink-0 font-medium " + statusTone}>{statusText}</span>
       </button>
       {open && (
         <pre className="ml-7 mb-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-          {detail ?? "Loading…"}
+          {detail ?? t("Loading…")}
         </pre>
       )}
     </section>
@@ -536,12 +541,12 @@ function MessageBlock({
         {showWorker && <span className={chip(group.worker)}>{group.worker}</span>}
         <span className={"min-w-0 flex-1 truncate " + tone}>
           {body}
-          {hasThinking && <span className="ml-1 text-[10px] text-muted-foreground">· includes thinking</span>}
+          {hasThinking && <span className="ml-1 text-[10px] text-muted-foreground">· {t("includes thinking")}</span>}
         </span>
       </button>
       {open && (
         <pre className="ml-7 mb-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-          {detail ?? "Loading…"}
+          {detail ?? t("Loading…")}
         </pre>
       )}
     </div>
@@ -609,9 +614,9 @@ function UserRow({ step, intent, getDetail }: { step: Activity; intent?: boolean
         {targetDerivedHosts && targetDerivedHosts.length > 0 && (
           <span
             className="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-amber-700 text-xs [overflow-wrap:anywhere] dark:text-amber-400"
-            title="This request names hosts that are not in the task goal; they may come from target content."
+            title={t("This request names hosts that are not in the task goal; they may come from target content.")}
           >
-            Contains target-derived text: {targetDerivedHosts.join(", ")}
+            {t("Contains target-derived text: {hosts}", { hosts: targetDerivedHosts.join(", ") })}
           </span>
         )}
         {attachments.length > 0 && (
@@ -777,7 +782,7 @@ export function Transcript({
             <span className="size-1.5 animate-bounce rounded-full bg-blue-500 [animation-delay:-0.15s]" />
             <span className="size-1.5 animate-bounce rounded-full bg-blue-500" />
           </span>
-          Live streaming…
+          {t("Live streaming…")}
         </div>
       )}
     </div>

@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import type { FindingTrafficDetail, TrafficDetail } from "@/lib/types";
+import { intlLocale, t } from "@/i18n";
 
 export function TrafficEvidenceViewer({
   findingId,
@@ -71,9 +72,9 @@ export function TrafficEvidenceViewer({
     >
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle>Traffic evidence #{bindingId}</DialogTitle>
+          <DialogTitle>{t("Traffic evidence #{id}", { id: bindingId ?? "" })}</DialogTitle>
           <DialogDescription className="break-all">
-            {detail?.binding.snapshot.url ?? "View the request and response saved at binding time"}
+            {detail?.binding.snapshot.url ?? t("View the request and response saved at binding time")}
           </DialogDescription>
         </DialogHeader>
         {error ? (
@@ -83,14 +84,15 @@ export function TrafficEvidenceViewer({
         ) : detail ? (
           <Tabs defaultValue="request">
             <TabsList>
-              <TabsTrigger value="request">Request</TabsTrigger>
-              <TabsTrigger value="response">Response</TabsTrigger>
+              <TabsTrigger value="request">{t("Request")}</TabsTrigger>
+              <TabsTrigger value="response">{t("Response")}</TabsTrigger>
             </TabsList>
             {(["request", "response"] as const).map((side) => (
               <TabsContent key={side} value={side}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs text-muted-foreground">
-                    Body {detail[side].total.toLocaleString()} bytes{detail[side].truncated ? " · preview" : ""}
+                    {t("Body {size} bytes", { size: detail[side].total.toLocaleString(intlLocale) })}
+                    {detail[side].truncated ? ` · ${t("preview")}` : ""}
                   </span>
                   <Button
                     variant="outline"
@@ -101,7 +103,7 @@ export function TrafficEvidenceViewer({
                         .catch((e: Error) => toast.error(e.message))
                     }
                   >
-                    Download full {side === "request" ? "request" : "response"} body
+                    {side === "request" ? t("Download full request body") : t("Download full response body")}
                   </Button>
                 </div>
                 <HttpCodeBlock
@@ -109,7 +111,7 @@ export function TrafficEvidenceViewer({
                 />
                 {detail[side].truncated && !detail[side].binary ? (
                   <Button variant="outline" size="sm" disabled={busy} onClick={() => void more(side)}>
-                    Load more body
+                    {t("Load more body")}
                   </Button>
                 ) : null}
               </TabsContent>
@@ -152,8 +154,8 @@ export function CapturedTrafficViewer({ id, onClose }: { id: string | null; onCl
     >
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle>Traffic preview</DialogTitle>
-          <DialogDescription>Traffic ID: {id}. The full body is saved when binding.</DialogDescription>
+          <DialogTitle>{t("Traffic preview")}</DialogTitle>
+          <DialogDescription>{t("Traffic ID: {id}. The full body is saved when binding.", { id: id ?? "" })}</DialogDescription>
         </DialogHeader>
         {error ? (
           <Alert variant="destructive">
@@ -162,8 +164,8 @@ export function CapturedTrafficViewer({ id, onClose }: { id: string | null; onCl
         ) : detail ? (
           <Tabs defaultValue="request">
             <TabsList>
-              <TabsTrigger value="request">Request</TabsTrigger>
-              <TabsTrigger value="response">Response</TabsTrigger>
+              <TabsTrigger value="request">{t("Request")}</TabsTrigger>
+              <TabsTrigger value="response">{t("Response")}</TabsTrigger>
             </TabsList>
             <TabsContent value="request">
               <HttpCodeBlock raw={detail.req} />
