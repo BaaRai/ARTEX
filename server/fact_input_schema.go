@@ -56,7 +56,7 @@ func (s *Server) refreshRecordFactContract() {
 	case sliceHas(legacyTool, desc):
 		desc = seed.Desc
 	default:
-		log.Printf("[facts] record_fact description does not match a known default and still describes the earlier contract; the facts-only schema is published anyway, review the text in the tool catalog")
+		log.Printf("[facts] record_fact description does not match a known default (operator edit or an older release); the facts-only schema is published anyway, review the text in the tool catalog")
 	}
 	var schema map[string]any
 	if err := json.Unmarshal(row.Schema, &schema); err != nil {
