@@ -1057,6 +1057,8 @@ const (
 // newest-first by timestamp.
 type PageQuery struct {
 	Host      string // host substring
+	Hosts     []string // exact host allowlist (company scope); empty = no filter
+	MatchNone bool     // force an empty result (a company that owns no host yet)
 	Method    string // exact method (case-insensitive)
 	Query     string // broad search box: metadata columns OR captured text
 	Body      string // content box: captured request/response text only (full-text)
@@ -1131,6 +1133,18 @@ func (t *Traffic) Page(f PageQuery, page, size int) (rows []ExchangeMeta, total 
 	}
 	if h := strings.TrimSpace(f.Host); h != "" {
 		add("host LIKE ?", "%"+h+"%")
+	}
+	if f.MatchNone {
+		add("1=0")
+	}
+	if len(f.Hosts) > 0 {
+		placeholders := make([]string, len(f.Hosts))
+		args2 := make([]any, len(f.Hosts))
+		for i, h := range f.Hosts {
+			placeholders[i] = "?"
+			args2[i] = h
+		}
+		add("host IN ("+strings.Join(placeholders, ",")+")", args2...)
 	}
 	if m := strings.TrimSpace(f.Method); m != "" {
 		add("method=?", strings.ToUpper(m))

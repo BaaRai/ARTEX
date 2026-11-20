@@ -192,6 +192,9 @@ type FindingFilter struct {
 	// __none__); selecting a node means selecting its whole subtree.
 	// Empty = do not filter by asset.
 	AssetScope string
+	// IncludeUnanchored keeps findings that carry no live asset in an asset-scoped
+	// query. Set for company scopes, where such a finding belongs to no other company.
+	IncludeUnanchored bool
 
 	// The three below are resolved from AssetScope by applyAssetScope; callers
 	// do not set them.
@@ -249,9 +252,24 @@ func (f FindingFilter) where() (string, []any) {
 				JOIN assets a ON a.id = e.v::bigint
 			)
 		)`)
-	case len(f.assetIDs) > 0:
-		args = append(args, assetIDContainments(f.assetIDs))
-		conds = append(conds, fmt.Sprintf("f.asset_ids @> ANY($%d::jsonb[])", len(args)))
+	case len(f.assetIDs) > 0 || f.IncludeUnanchored:
+		cond := "FALSE"
+		if len(f.assetIDs) > 0 {
+			args = append(args, assetIDContainments(f.assetIDs))
+			cond = fmt.Sprintf("f.asset_ids @> ANY($%d::jsonb[])", len(args))
+		}
+		if f.IncludeUnanchored {
+			// A finding with no anchored asset belongs to no other company, so a
+			// company-wide view keeps it instead of hiding work it cannot attribute.
+			// FALSE above covers a company that owns no asset at all.
+			cond = "(" + cond + `
+				OR jsonb_array_length(COALESCE(f.asset_ids, '[]'::jsonb)) = 0
+				OR NOT EXISTS (
+					SELECT 1 FROM jsonb_array_elements_text(f.asset_ids) e(v)
+					JOIN assets a ON a.id = e.v::bigint
+				))`
+		}
+		conds = append(conds, cond)
 	}
 	if query := strings.TrimSpace(f.Query); query != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query)
@@ -296,11 +314,7 @@ func (d *DB) ListFindingsPage(f FindingFilter, page, pageSize int) ([]*DBFinding
 		return []*DBFinding{}, total, nil
 	}
 
-	order := "f.created_at DESC, f.id DESC"
-	if f.Sort == "severity" {
-		// critical > high > medium > low > others, then newest first.
-		order = `CASE f.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC, f.created_at DESC, f.id DESC`
-	}
+	order := f.orderBy()
 	pageArgs := append(append([]any{}, args...), pageSize, (page-1)*pageSize)
 	q := fmt.Sprintf(`
 		SELECT %s
@@ -315,6 +329,40 @@ func (d *DB) ListFindingsPage(f FindingFilter, page, pageSize int) ([]*DBFinding
 	defer rows.Close()
 	out, err := scanFindings(rows)
 	return out, total, err
+}
+
+// ListFindingsFiltered returns up to limit findings matching f, newest first,
+// without the total count. The dashboard aggregates from it and needs no count.
+func (d *DB) ListFindingsFiltered(f FindingFilter, limit int) ([]*DBFinding, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	f, err := d.applyAssetScope(f)
+	if err != nil {
+		return nil, err
+	}
+	where, args := f.where()
+	q := fmt.Sprintf(`
+		SELECT %s
+		FROM findings f
+		LEFT JOIN tasks t ON f.task_id = t.id%s
+		ORDER BY %s
+		LIMIT $%d`, findingSelectCols, where, f.orderBy(), len(args)+1)
+	rows, err := d.Query(q, append(args, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFindings(rows)
+}
+
+// orderBy is the list order: severity first when asked, newest first otherwise.
+func (f FindingFilter) orderBy() string {
+	if f.Sort == "severity" {
+		// critical > high > medium > low > others, then newest first.
+		return `CASE f.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC, f.created_at DESC, f.id DESC`
+	}
+	return "f.created_at DESC, f.id DESC"
 }
 
 // FindingGroup is one task-level bucket in the global findings view. TaskID is

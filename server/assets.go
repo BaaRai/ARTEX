@@ -70,6 +70,33 @@ func (s *Server) companyStore() *db.CompanyStore {
 	return s.m.pg.Companies()
 }
 
+// companyHosts lists the hosts a company owns, for the views that filter on a
+// host string instead of an asset id (traffic). Empty for "all companies" and
+// for a company that owns no host yet.
+func (s *Server) companyHosts(id int64) ([]string, error) {
+	if id <= 0 || s.m.pg == nil {
+		return nil, nil
+	}
+	rows, err := s.m.pg.Query(`
+		SELECT DISTINCT COALESCE(NULLIF(domain, ''), NULLIF(ip, ''))
+		FROM assets
+		WHERE company_id = $1
+		  AND COALESCE(NULLIF(domain, ''), NULLIF(ip, '')) IS NOT NULL`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var host string
+		if err := rows.Scan(&host); err != nil {
+			return nil, err
+		}
+		out = append(out, host)
+	}
+	return out, rows.Err()
+}
+
 // =====================================================================
 // GET /api/companies
 // =====================================================================
@@ -341,6 +368,13 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 	// beyond the last row can return an empty page without an expensive scan.
 	total := 0
 
+	// company_id narrows both paths to one company's assets (the sidebar switcher).
+	if cid, _ := strconv.ParseInt(q.Get("company_id"), 10, 64); cid > 0 {
+		if dsl := strings.TrimSpace(q.Get("dsl")); dsl != "" {
+			// No spaces around '=': the DSL lexer takes the operator only tight.
+			q.Set("dsl", fmt.Sprintf("(company_id=%d) AND (%s)", cid, dsl))
+		}
+	}
 	if dsl := q.Get("dsl"); dsl != "" {
 		if err := db.ValidateDSL(dsl); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())

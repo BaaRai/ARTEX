@@ -242,3 +242,80 @@ func TestFindingAssetScopeFilter(t *testing.T) {
 		t.Fatalf("unassigned bucket count: want 2, got %+v", none)
 	}
 }
+
+// TestFindingCompanyScopeFilter pins the company scope semantics: a company
+// sees the findings on its own assets plus the ones no asset anchors (they
+// belong to no other company), and never another company's. A company with no
+// asset yet still shows the unanchored ones instead of an empty page.
+func TestFindingCompanyScopeFilter(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	defer d.Close()
+
+	tk, err := d.CreateTask("company scope filter test", "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(tk.ID)
+
+	const root = "company-scope-test.example"
+	const other = "other-company-scope-test.example"
+	defer cleanupTreeFixtures(d, tk.ID, root, other)
+
+	var mineID, theirsID, emptyID int64
+	if err := d.QueryRow(`INSERT INTO companies(name, nkey) VALUES ('scope test co', 'scope-test-co') RETURNING id`).Scan(&mineID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`INSERT INTO companies(name, nkey) VALUES ('other scope test co', 'other-scope-test-co') RETURNING id`).Scan(&theirsID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`INSERT INTO companies(name, nkey) VALUES ('empty scope test co', 'empty-scope-test-co') RETURNING id`).Scan(&emptyID); err != nil {
+		t.Fatal(err)
+	}
+	defer d.Exec(`DELETE FROM companies WHERE id = ANY($1::bigint[])`, []int64{mineID, theirsID, emptyID}) //nolint:errcheck
+
+	mineAsset := seedTreeAsset(t, d, "root_domain", map[string]any{"domain": root, "root_domain": root, "company_id": mineID})
+	theirAsset := seedTreeAsset(t, d, "root_domain", map[string]any{"domain": other, "root_domain": other, "company_id": theirsID})
+
+	if _, err := d.AddFinding(tk.ID, 0, "mine", "on my asset", "high", "s", "e", "w", []int64{mineAsset}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.AddFinding(tk.ID, 0, "theirs", "on their asset", "high", "s", "e", "w", []int64{theirAsset}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.AddFinding(tk.ID, 0, "floating", "without an asset", "high", "s", "e", "w", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	base := FindingFilter{TaskID: strconv.FormatInt(tk.ID, 10)}
+	cases := []struct {
+		name  string
+		scope string
+		want  int
+	}{
+		{"own asset plus unanchored", companyKey(mineID), 2},
+		{"other company", companyKey(theirsID), 2},
+		{"company without assets", companyKey(emptyID), 1},
+		{"nonexistent company", "c:999000444", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := base
+			f.AssetScope = tc.scope
+			items, total, err := d.ListFindingsPage(f, 1, 50)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if total != tc.want || len(items) != tc.want {
+				t.Fatalf("scope %s: want %d findings, got total=%d items=%d", tc.scope, tc.want, total, len(items))
+			}
+			for _, it := range items {
+				if tc.scope != companyKey(mineID) && it.Name == "mine" {
+					t.Fatalf("scope %s leaked the other company's finding", tc.scope)
+				}
+			}
+		})
+	}
+}

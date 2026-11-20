@@ -663,6 +663,37 @@ func (d *DB) applyAssetScope(f FindingFilter) (FindingFilter, error) {
 		f.assetNone = true
 		return f, nil
 	}
+	// A company scope reads the ownership column directly. The tree holds only
+	// assets that carry findings plus their ancestors, so an asset reached by a
+	// finding through a path the tree does not model would be lost.
+	if id, ok := strings.CutPrefix(scope, "c:"); ok {
+		var companyID int64
+		companyID, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			f.assetMiss = true
+			return f, nil
+		}
+		// Such findings keep the rows no asset anchors: they belong to no other
+		// company, so dropping them would hide work from every company view.
+		f.IncludeUnanchored = true
+		rows, err := d.Query(`SELECT id FROM assets WHERE company_id = $1`, companyID)
+		if err != nil {
+			return f, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var assetID int64
+			if err := rows.Scan(&assetID); err != nil {
+				return f, err
+			}
+			f.assetIDs = append(f.assetIDs, assetID)
+		}
+		if err := rows.Err(); err != nil {
+			return f, err
+		}
+		// No assetMiss on an empty company: it still owns the unanchored findings.
+		return f, nil
+	}
 	// No truncation: dropped endpoints must still take part in id collection,
 	// otherwise the list would lose rows.
 	tree, err := d.buildFindingAssetTree(f, 0)

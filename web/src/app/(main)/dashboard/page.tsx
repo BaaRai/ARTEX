@@ -42,6 +42,7 @@ import type {
 import { cn } from "@/lib/utils";
 import { t } from "@/i18n";
 import { setVisibleInterval } from "@/lib/polling";
+import { useActiveCompanyScope } from "@/stores/company/company-store";
 
 // ── chart constants ───────────────────────────────────────────────────────────
 
@@ -132,6 +133,9 @@ function SectionTitle({
 // ── page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
+  // The sidebar's company switcher narrows the finding-derived panels to that
+  // company's asset subtree (asset_scope node key). Null means all companies.
+  const companyScope = useActiveCompanyScope();
   // data state
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [findings, setFindings] = React.useState<Finding[]>([]);
@@ -190,7 +194,7 @@ export default function DashboardPage() {
       loading = true;
       try {
         const [findings, stats, settings, pending, activity, tokens, conversationTokens] = await Promise.all([
-          api.findings(),
+          api.findings(undefined, companyScope),
           api.stats(),
           api.settings(),
           api.interceptPending(),
@@ -218,7 +222,7 @@ export default function DashboardPage() {
       alive = false;
       stopPolling();
     };
-  }, []);
+  }, [companyScope]);
 
   // slow poll: traffic, assets, system-static (every 15s)
   React.useEffect(() => {
