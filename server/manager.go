@@ -471,6 +471,14 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 					log.Printf("[traffic/socks5] opt-in SOCKS5 CONNECT listener on %s", bound)
 				}
 			}
+			if tcfg, ok := traffic.TransparentTCPConfigFromEnv(); ok {
+				tcfg.DialContext = m.interceptor.DialSOCKS5
+				if bound, terr := tr.StartTransparentTCP(tcfg); terr != nil {
+					log.Printf("[traffic/transparent] disabled: %v", terr)
+				} else {
+					log.Printf("[traffic/transparent] opt-in transparent TCP listener on %s (Linux IPv4 SO_ORIGINAL_DST)", bound)
+				}
+			}
 			go func() {
 				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
 				if err := tr.Start(); err != nil {
