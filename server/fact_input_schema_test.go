@@ -129,7 +129,7 @@ func recordFactLegacySchema(t *testing.T) (string, map[string]string) {
 		"intent_id": map[string]any{"type": "integer", "description": legacyItems["intent_id"]},
 		"detail":    map[string]any{"type": "string", "description": "Details of this fact, including all related observations."},
 		"source":    map[string]any{"type": "string", "enum": []string{"inference"}},
-		"facts":     map[string]any{"type": "array", "minItems": 1, "description": legacyFacts, "items": item},
+		"facts":     map[string]any{"type": "array", "minItems": 1, "description": legacyFacts[0], "items": item},
 	}}
 	raw, _ := json.Marshal(schema)
 	return string(raw), legacyItems

@@ -56,7 +56,7 @@ func (s *Server) refreshRecordFactContract() {
 	case sliceHas(legacyTool, desc):
 		desc = seed.Desc
 	default:
-		log.Printf("[facts] record_fact description was edited by an operator and still describes the earlier contract; the facts-only schema is published anyway, review the text in the tool catalog")
+		log.Printf("[facts] record_fact description does not match a known default and still describes the earlier contract; the facts-only schema is published anyway, review the text in the tool catalog")
 	}
 	var schema map[string]any
 	if err := json.Unmarshal(row.Schema, &schema); err != nil {
@@ -66,7 +66,7 @@ func (s *Server) refreshRecordFactContract() {
 	repaired := agent.RepairRecordFactSchema(schema)
 	facts := repaired["properties"].(map[string]any)["facts"].(map[string]any)
 	canonFacts := seed.Schema["properties"].(map[string]any)["facts"].(map[string]any)
-	if facts["description"] == legacyFacts {
+	if d, ok := facts["description"].(string); ok && sliceHas(legacyFacts, d) {
 		facts["description"] = canonFacts["description"]
 	}
 	items := facts["items"].(map[string]any)["properties"].(map[string]any)
