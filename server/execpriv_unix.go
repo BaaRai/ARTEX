@@ -131,13 +131,17 @@ func prepareExecScriptDir(p ExecPrivilege, dataDir string) (string, error) {
 // process. The temp directory is world-writable: an executor process that runs
 // before that first session could create dir itself and place symlinks in it for
 // the server to write through. Created here, before any agent process starts, it is
-// root:root 0755. A symlink or a file in its place is refused. A directory that is
-// already there and that the executor p can write in is refused too
-// (normaTaskDirExecWrite): the executor could have placed the symlinks before this
-// start, and can place them at any time. Any other directory already there is used
-// as found, and reported when root does not own it or others can write in it: it
-// may belong to another user of this host. It is never chowned or removed.
+// root:root 0755. What is found at dir afterwards, created here or already there,
+// goes through checkNormaTaskDir, which fails the start for a symlink, for a file
+// and for a directory the executor p can write in or replace. Any other directory
+// already there is used as found, with a warning when root does not own it or its
+// group can write in it: it may belong to another user of this host. A directory
+// that was already there is never chmodded, chowned, renamed or removed. Nothing is
+// checked or created when the privilege drop is disabled.
 func prepareNormaTaskDir(dir string, p ExecPrivilege) error {
+	if !p.Enabled {
+		return nil
+	}
 	if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
 	}
@@ -145,21 +149,76 @@ func prepareNormaTaskDir(dir string, p ExecPrivilege) error {
 	if err != nil {
 		return err
 	}
-	if !fi.IsDir() {
-		return fmt.Errorf("%s is not a directory", dir)
+	// The parent is followed: TMPDIR may be a symlink, and its target holds dir.
+	parent, err := os.Stat(filepath.Dir(dir))
+	if err != nil {
+		return err
 	}
 	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return nil
+	pst, pok := parent.Sys().(*syscall.Stat_t)
+	if !ok || !pok {
+		return fmt.Errorf("%s: no owner in its file information", dir)
 	}
-	perm := fi.Mode().Perm()
-	if why := normaTaskDirExecWrite(perm, st.Uid, st.Gid, p.UID, p.GID); why != "" {
-		return fmt.Errorf("%s (uid %d, gid %d, mode %v) can be written by the executor: %s. Background-task output written there by the server would follow a symlink the executor places; remove the directory or make it root-owned with mode 0755, then start again", dir, st.Uid, st.Gid, perm, why)
+	warning, err := checkNormaTaskDir(dir, normaTaskDirFacts{
+		mode: fi.Mode(), uid: st.Uid, gid: st.Gid,
+		parentMode: parent.Mode(), parentUID: pst.Uid, parentGID: pst.Gid,
+	}, p.UID, p.GID)
+	if err != nil {
+		return err
 	}
-	if st.Uid != 0 || perm&0o022 != 0 {
-		log.Printf("[exec] %s (uid %d, mode %v) is not a root-owned directory only root can write in: background-task output written there is not protected from its owner", dir, st.Uid, perm)
+	if warning != "" {
+		log.Printf("[exec] %s (uid %d, mode %v) %s", dir, st.Uid, fi.Mode().Perm(), warning)
 	}
 	return nil
+}
+
+// normaTaskDirFacts is what prepareNormaTaskDir reads about <temp>/norma: the Lstat
+// of the path (mode carries the file type) and the Stat of its parent directory.
+type normaTaskDirFacts struct {
+	mode                 fs.FileMode
+	uid, gid             uint32
+	parentMode           fs.FileMode
+	parentUID, parentGID uint32
+}
+
+// checkNormaTaskDir decides whether the server may write background-task output
+// below dir while agent processes run as execUID and execGID. It decides from the
+// owners and the mode bits in f and from the executor identity; an access check
+// would answer for root, which the server is. It returns an error when the start
+// must fail:
+//   - dir is a symlink or not a directory;
+//   - the executor uid owns dir: it can change the mode and, even in a sticky
+//     parent, rename dir and put another in its place;
+//   - the group or other bits let the executor write in dir;
+//   - the executor owns the parent directory, or can write in it and it is not
+//     sticky: it can rename dir and put another in its place.
+//
+// Otherwise it returns the reason for a warning, or "" for a directory that root
+// owns and only root can write in.
+func checkNormaTaskDir(dir string, f normaTaskDirFacts, execUID, execGID uint32) (warning string, err error) {
+	refuse := func(why string) error {
+		return fmt.Errorf("%s (owner %d:%d, mode %v) cannot hold background-task output while agent processes run as uid %d gid %d: %s; remove the directory or set TMPDIR to a directory the executor cannot write", dir, f.uid, f.gid, f.mode, execUID, execGID, why)
+	}
+	if f.mode&fs.ModeSymlink != 0 {
+		return "", refuse("it is a symbolic link")
+	}
+	if !f.mode.IsDir() {
+		return "", refuse("it is not a directory")
+	}
+	if why := normaTaskDirExecWrite(f.mode.Perm(), f.uid, f.gid, execUID, execGID); why != "" {
+		return "", refuse(why)
+	}
+	parent := fmt.Sprintf("its parent directory (owner %d:%d, mode %v)", f.parentUID, f.parentGID, f.parentMode)
+	if f.parentUID == execUID {
+		return "", refuse(parent + " is owned by the executor, which can rename the directory and put another in its place")
+	}
+	if f.parentMode&fs.ModeSticky == 0 && normaTaskDirExecWrite(f.parentMode.Perm(), f.parentUID, f.parentGID, execUID, execGID) != "" {
+		return "", refuse(parent + " is writable by the executor and not sticky: the executor can rename the directory and put another in its place")
+	}
+	if f.uid != 0 || f.mode.Perm()&0o022 != 0 {
+		return "is not a root-owned directory only root can write in: background-task output written there is not protected from its owner", nil
+	}
+	return "", nil
 }
 
 // normaTaskDirExecWrite reports why the executor (execUID, execGID) can write in a
@@ -204,7 +263,7 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // root-only path needs are left as they are. It sets p.ScriptDir to the script
 // directory it creates, and creates the directory of Norma's background-task output
 // under the temp directory (prepareNormaTaskDir); it fails when that directory is
-// already there and the executor can write in it.
+// already there and the executor can write in it or replace it.
 func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if !p.Enabled {
 		return nil
