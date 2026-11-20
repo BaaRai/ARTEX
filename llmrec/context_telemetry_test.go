@@ -149,6 +149,53 @@ func TestMeasureContextExactSizesAndBoundaryModes(t *testing.T) {
 		t.Fatalf("DynamicBoundary=5 system = (%d, %d), want (%d, 0)",
 			got3.SystemStaticBytes, got3.SystemDynamicBytes, len("AAA\n\nBBBB"))
 	}
+
+	// Case 4: whitespace-padded and empty segments match norma's llm.joinSystem
+	// (strings.TrimSpace per segment, drop empty, join remaining with "\n\n").
+	for _, tc := range []struct {
+		name     string
+		segs     []string
+		boundary int
+		wantStat int64
+		wantDyn  int64
+	}{
+		{
+			name:     "padded and empty unsplit",
+			segs:     []string{"  STATIC  ", "", "\n", "TAIL\n\n"},
+			boundary: 0,
+			wantStat: int64(len("STATIC\n\nTAIL")),
+			wantDyn:  0,
+		},
+		{
+			name:     "padded split at boundary 2",
+			segs:     []string{" A ", " B ", " C "},
+			boundary: 2,
+			wantStat: int64(len("A\n\nB")),
+			wantDyn:  int64(len("C")),
+		},
+		{
+			name:     "only empty and whitespace",
+			segs:     []string{"", "   "},
+			boundary: 1,
+			wantStat: 0,
+			wantDyn:  0,
+		},
+		{
+			name:     "empty segments around boundary",
+			segs:     []string{"  ", "HEAD ", "", "\t\n", " TAIL"},
+			boundary: 2,
+			wantStat: int64(len("HEAD")),
+			wantDyn:  int64(len("TAIL")),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := MeasureContext(llm.CompletionRequest{System: tc.segs, DynamicBoundary: tc.boundary})
+			if got.SystemStaticBytes != tc.wantStat || got.SystemDynamicBytes != tc.wantDyn {
+				t.Fatalf("MeasureContext(%q, b=%d) = (%d, %d), want (%d, %d)",
+					tc.segs, tc.boundary, got.SystemStaticBytes, got.SystemDynamicBytes, tc.wantStat, tc.wantDyn)
+			}
+		})
+	}
 }
 
 func TestContextTelemetryFlagOffAndOnPostgres(t *testing.T) {

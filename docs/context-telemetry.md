@@ -14,6 +14,14 @@ This phase measures context composition without changing any prompt, compaction 
 
 Telemetry runs independently of `llm_record` (`recordBodies`): enabling `ARTEX_CONTEXT_TELEMETRY=1` works even when full request/response body recording is disabled, and stores **no prompt, tool, or message content** — only byte lengths, counts, token usage, and metadata.
 
+### Stopping, retention, and write cost
+
+When `ARTEX_CONTEXT_TELEMETRY=1` is active, each LLM call incurs one lightweight `INSERT` into `llm_context` (~200 bytes/row plus index entries, no bodies), so the table grows by one row per completion call. Unset `ARTEX_CONTEXT_TELEMETRY` (and restart) once the measurement campaign is finished to stop all writes and sizing work, or purge old rows periodically:
+
+```sql
+DELETE FROM llm_context WHERE ts < now() - interval '30 days';
+```
+
 ---
 
 ## Measurement Semantics (`llmrec.MeasureContext`)
@@ -21,8 +29,8 @@ Telemetry runs independently of `llm_record` (`recordBodies`): enabling `ARTEX_C
 Every enabled `Stream` and `Complete` call measures the assembled `llm.CompletionRequest` right before it is handed to the inner provider, and persists one row to `llm_context` (migration `0009_llm_context.sql`) on completion or error:
 
 - **`system_static_bytes` & `system_dynamic_bytes`**:
-  - `norma`'s `CompletionRequest.System` is a slice of segments joined with blank lines (`"\n\n"`).
-  - When `DynamicBoundary > 0`, `System` is split at `b = min(DynamicBoundary, len(System))`: `System[:b]` is measured into `system_static_bytes` and `System[b:]` into `system_dynamic_bytes` (each joined with `"\n\n"`).
+  - `norma`'s `CompletionRequest.System` is a slice of segments that `llm.joinSystem` trims (`strings.TrimSpace`), drops when empty, and joins with blank lines (`"\n\n"`). `MeasureContext` applies the exact same trim, drop-empty, and `"\n\n"` join rules per slice.
+  - When `DynamicBoundary > 0`, `System` is split at `b = min(DynamicBoundary, len(System))`: `System[:b]` is measured into `system_static_bytes` and `System[b:]` into `system_dynamic_bytes`.
   - When `DynamicBoundary <= 0`, there is no provider-visible cache split, so the entire `System` slice is measured as one block in `system_static_bytes` and `system_dynamic_bytes` is `0`.
   - **Why this choice**: `agent/deferred.go` returns `boundary = 0` when no global deferred-MCP block exists and `boundary = len(system)` when one does. Placing the single unsplit block in `system_static_bytes` ensures `system_static_bytes + system_dynamic_bytes` always equals total system bytes and `system_dynamic_bytes > 0` strictly signals a dynamic suffix placed after a cache breakpoint.
 - **`tool_count` & `tools_bytes`**: `len(req.Tools)` and `len(json.Marshal(req.Tools))` (`0` when no tools). Go's `encoding/json` sorts map keys deterministically.

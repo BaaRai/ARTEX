@@ -46,10 +46,11 @@ type ContextMetrics struct {
 //
 //   - System: when DynamicBoundary > 0, req.System is split at
 //     min(DynamicBoundary, len(req.System)) into SystemStaticBytes ([:b]) and
-//     SystemDynamicBytes ([b:]), joining segments within each slice with "\n\n"
-//     to match norma's prompt assembly. When DynamicBoundary <= 0, the whole
-//     req.System is measured as a single static block (SystemStaticBytes) and
-//     SystemDynamicBytes is 0.
+//     SystemDynamicBytes ([b:]). Within each slice, each segment is trimmed with
+//     strings.TrimSpace, empty segments are dropped, and remaining segments are
+//     joined with "\n\n", matching norma's llm.joinSystem. When
+//     DynamicBoundary <= 0, the whole req.System is measured as a single static
+//     block (SystemStaticBytes) and SystemDynamicBytes is 0.
 //   - Tools: ToolCount = len(req.Tools); ToolsBytes = len(json.Marshal(req.Tools))
 //     (0 when no tools). Go's encoding/json sorts map keys deterministically.
 //   - Messages: MessageCount = len(req.Messages). Each message is measured by
@@ -114,18 +115,23 @@ func MeasureContext(req llm.CompletionRequest) ContextMetrics {
 	return m
 }
 
-// joinedSegmentBytes returns the byte length of segs joined with "\n\n"
-// without allocating a joined string.
+// joinedSegmentBytes returns the byte length of segs after trimming whitespace
+// from each segment, dropping empty segments, and joining the remaining ones
+// with "\n\n" — matching norma's llm.joinSystem without allocating a joined
+// string.
 func joinedSegmentBytes(segs []string) int64 {
-	if len(segs) == 0 {
-		return 0
-	}
 	var total int64
-	for i, s := range segs {
-		if i > 0 {
+	nonEmpty := 0
+	for _, s := range segs {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if nonEmpty > 0 {
 			total += 2 // "\n\n"
 		}
 		total += int64(len(s))
+		nonEmpty++
 	}
 	return total
 }
