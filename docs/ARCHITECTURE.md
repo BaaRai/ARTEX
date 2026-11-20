@@ -62,7 +62,9 @@ binary via `server/webui_embed.go` when built with `-tags embedui`.
    the guard hooks attached and writes observed facts back to the exploration graph.
 6. **Tools and traffic.** Shell and HTTP/WebFetch calls go through the recording proxy
    and the egress governor. Platform-owned HTTP clients use `intercept.PinnedDialer`
-   and `intercept.RedirectCheck` so a redirect or a direct retry cannot leave the gate.
+   and `intercept.RedirectCheck`, so a redirect or a direct retry is re-checked at
+   dial time. When a proxy is in the path the gate records the pin as name-only: the
+   proxy makes the outbound connection, so no IP binding can be claimed.
 7. **Findings.** `addFinding` (`agent/tools.go`) records severity, class, confidence and
    asset references; `db/findings.go` dedups and keeps the status workflow. Evidence is
    linked to captured traffic (`traffic/evidence.go`, `db/finding_traffic.go`).
@@ -86,9 +88,9 @@ binary via `server/webui_embed.go` when built with `-tags embedui`.
 
 | Boundary | Implementation |
 | --- | --- |
-| Tool output → model | Norma's untrusted-output boundary: nonce-tagged markers around tool results. On unless `ARTEX_UNTRUSTED_BOUNDARY` disables it. See `agent/untrusted_boundary.go` |
-| Command → host | `intercept.ParseSimpleCommand` parses exactly one Bash simple command; pipelines, redirections, wrappers (`env`, `exec`, `eval`, `command`), substitutions and expansions are rejected. `ArgvPrefixOf` derives the human-readable prefix for allow/deny rules |
-| URL → network | Target gate + `PinnedDialer` + `RedirectCheck`: scope decisions are re-made against a fresh DNS lookup at dial time, and the client connects only to the addresses it compared |
+| Tool output → model | Norma's untrusted-output boundary: nonce-tagged markers around tool results. On by default; `ARTEX_UNTRUSTED_BOUNDARY=0` disables it. See `agent/untrusted_boundary.go` |
+| Command → host | Allow rules match one Bash simple command with the exact prefix: a pipeline, redirection, wrapper (`env`, `sudo`, `xargs`, `find -exec`, a shell `-c`), substitution or expansion does not inherit an allow. Deny and ask rules also inspect every simple command inside wrappers, lists and pipelines. `ArgvPrefixOf` derives the human-readable prefix |
+| URL → network | Target gate + `PinnedDialer` + `RedirectCheck`: scope decisions are re-made against a fresh DNS lookup at dial time, and without a proxy the client connects only to the addresses it compared; with a proxy the pin is name-only |
 | Secrets → disk/log | `db/secrets.go` seals API keys, proxy credentials, MCP env, task credentials and captured auth headers with AES-256-GCM, nonce per value, AAD `table.column`. JWT keys live in `KeyDir()`, never in the browsable data dir. The boot snapshot logs only `config.Redact(dsn)` |
 | Approval → audit | Every decision records the approver (`jwtSubject`), source and decision; history is queryable through `/api/intercept/history` and `/api/intercept/history/{id}` (with `/execution` for the audit detail). `/api/tasks/{id}/intercept-rules` manages rules, not history |
 
