@@ -233,7 +233,7 @@ func TestParseStructuredCompanyScope(t *testing.T) {
 func TestCompanyICPAttribution(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Closing the connection must go through t.Cleanup and be **registered before
 	// the data cleanup**: t.Cleanup is last-in-first-out, so registering Close
@@ -322,7 +322,7 @@ func TestCompanyICPAttribution(t *testing.T) {
 func TestCompanyScopeAttribution(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	as := d.Assets()
 	cs := d.Companies()

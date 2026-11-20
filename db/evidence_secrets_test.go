@@ -92,7 +92,7 @@ func assertClearHeads(t *testing.T, d *DB, findingID int64, want TrafficEvidence
 func TestEvidenceHeadsSealedAtInsert(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 	_, fid, s := evidenceFixture(t, d, "insert", false)
@@ -106,7 +106,7 @@ func TestEvidenceHeadsSealedAtInsert(t *testing.T) {
 func TestEvidenceHeadsBackfillAndKeyChecks(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 	_, fid, s := evidenceFixture(t, d, "legacy", true)
@@ -171,7 +171,7 @@ func TestEvidenceHeadsBackfillAndKeyChecks(t *testing.T) {
 func TestEvidenceHeadsArchiveRoundTrip(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 	if err = d.EnsureLLMRecordsTable(); err != nil {

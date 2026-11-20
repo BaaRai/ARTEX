@@ -54,6 +54,8 @@ type Server struct {
 
 	scrubSecrets bool // drop ARTEX_PG_DSN and the API keys from the environment once read (binary only)
 
+	execPriv ExecPrivilege // identity agent processes run under; zero keeps the server's own
+
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
 	// pwdVersion is auth.password_version, a counter. Zero means no password
@@ -270,7 +272,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			}
 			return a.TaskTimeoutWrapupMaxTurns, true
 		})
-		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
+		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg)   // built-in tools table: filter per agent + override description/schema + inject defaults
 		seedPrompts(m.pg)            // seed built-in agent default prompt bodies into agent_prompts (only when empty)
@@ -899,6 +901,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
 	mux.HandleFunc("POST /api/traffic/ingest", s.ingestTraffic)
 	mux.HandleFunc("POST /api/traffic/replay", s.replayTraffic)
+	mux.HandleFunc("POST /api/traffic/import/har", s.importTrafficHAR)
+	mux.HandleFunc("GET /api/traffic/export/har", s.exportTrafficHAR)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // aggregate call counts per tool
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
@@ -3536,24 +3540,13 @@ func taskActivityDetail(t *Task, seq int64) (string, error) {
 func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	tr := s.m.Traffic()
 	if tr == nil {
-		writeJSON(w, 200, map[string]any{"enabled": false, "exchanges": []any{}})
+		writeJSON(w, 200, map[string]any{"enabled": false, "exchanges": []any{}, "rewrite": traffic.RewriteStats{}})
 		return
 	}
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 0)
 	size := atoiDefault(q.Get("size"), 100)
-	ex, matched, _ := tr.Page(traffic.PageQuery{
-		Host:    q.Get("host"),
-		Method:  q.Get("method"),
-		Query:   q.Get("q"),
-		Body:    q.Get("body"),
-		Path:    q.Get("path"),
-		Status:  q.Get("status"),
-		RespMin: int64(atoiDefault(q.Get("resp_min"), -1)),
-		RespMax: int64(atoiDefault(q.Get("resp_max"), -1)),
-		Sort:    q.Get("sort"),
-		Order:   q.Get("order"),
-	}, page, size)
+	ex, matched, _ := tr.Page(parseTrafficPageQuery(q), page, size)
 	count, _ := tr.Count() // global total, for the stat card
 	writeJSON(w, 200, map[string]any{
 		"enabled":   s.m.TrafficEnabled(), // reflect the capture toggle
@@ -3563,6 +3556,7 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 		"page":      page,
 		"size":      size,
 		"exchanges": trafficDTOs(ex),
+		"rewrite":   tr.RewriteStats(),
 	})
 }
 
@@ -3741,6 +3735,7 @@ func (s *Server) replayTraffic(w http.ResponseWriter, r *http.Request) {
 		Headers    []traffic.ReplayHeader `json:"headers"`
 		Body       string                 `json:"body"`
 		BodyBase64 bool                   `json:"body_base64"`
+		ApplyRules bool                   `json:"apply_rules"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -3762,7 +3757,13 @@ func (s *Server) replayTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	res, err := tr.Replay(ctx, traffic.ReplayRequest{Method: body.Method, URL: body.URL, Headers: body.Headers, Body: payload})
+	res, err := tr.Replay(ctx, traffic.ReplayRequest{
+		Method:     body.Method,
+		URL:        body.URL,
+		Headers:    body.Headers,
+		Body:       payload,
+		ApplyRules: body.ApplyRules,
+	})
 	switch {
 	case errors.Is(err, traffic.ErrReplayTooLarge):
 		writeErr(w, 413, err.Error())
@@ -4344,9 +4345,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			maTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 			resume := func() { s.reviveTask(t) } // set_goals added a goal → pulls the task back to running
 			// Splice the list of [absolute paths] of uploaded attachments into the message sent to the agent; it uses them to open files via Read/Bash.
-			// taskDir = the agent's working directory (CWD), consistent with chatUpload's target dir and ensureRunDir.
-			taskDir := filepath.Join(s.m.dir, "tasks", t.ID)
-			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
+			// mainDir = the main agent's run directory (its CWD, tasks/<id>/main), the same call as chatUpload's target dir and the agent itself.
+			mainDir := agent.EnsureRunDir(s.m.dir, maTaskID, 0)
+			agentMsg := composeAgentMessage(agentMessage, req.Attachments, mainDir)
 			// Tag the turn for the target gate: the task, the "mainagent" lane and the approval scope.
 			gctx := intercept.WithTaskContext(ctx, t.ID, "mainagent", func(a db.Activity) {
 				a.Worker = "mainagent"

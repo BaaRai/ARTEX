@@ -659,6 +659,7 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 - Backend: `go run ./cmd/artex` (without `-tags embedui`, the frontend is not embedded)
 - Frontend: `cd web && npm run dev` (`/api` is reverse-proxied to the backend, with hot reload)
 - Tests: `go test ./...`
+- Reproduce all CI checks locally: `./scripts/verify.sh` (add `--full` for `-race` and the static web build)
 - Mock preview (no backend): `cd web && NEXT_PUBLIC_MOCK=1 npm run dev`
 
 ---
@@ -725,6 +726,10 @@ flowchart TB
 | **agent** | goals / planner / worker / mainagent; `ToolSet` exposes the dual graphs as LLM tools |
 | **db** | PostgreSQL persistence (pgx); embedded schema and numbered migrations applied at startup |
 | **Supporting** | Recording MITM proxy, approval gate, async enrichment, MCP/skills/memory/report |
+
+For the code-level map (execution flow, trust boundaries, decisions) see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for startup, configuration precedence,
+backup and key rotation see [docs/OPS.md](docs/OPS.md).
 
 ---
 

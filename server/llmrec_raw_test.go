@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
@@ -21,7 +22,7 @@ import (
 func TestRecorderPersistsRawWireBodies(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	pg := m.PG()

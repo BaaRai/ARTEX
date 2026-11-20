@@ -14,7 +14,7 @@ import (
 func TestTaskOutcomeCard(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	task, err := m.CreateTask("outcome card", "goal", nil, 0, 0)

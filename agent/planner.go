@@ -486,7 +486,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	}
 	// Domain tools + the basic default tool set (Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash).
 	// When the asset-coverage feature is off, drop add_task_scope/list_untested_assets (not in the prompt).
-	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), actool.DefaultTools()...)
+	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), defaultTools(p.workDir)...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts)})
 	tools, def, cleanup := AugmentTools(WithToolQuery(ctx, plannerToolQuery(goal, triggers)), "planner", base)
 	defer cleanup()
@@ -514,7 +514,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// wrap-up round. Its agent-reported gap lines are framed with this message's env.
 	budgetRound, _ := ctx.Value(budgetRoundKey{}).(BudgetRound)
 	situational += tsx.coverageLedgerBlock(tc.Final || budgetRound.WrapUp, env)
-	// This task's work dir <workDir>/tasks/<taskID>; create it first.
+	// The main run directory <workDir>/tasks/<taskID>/main; create it first.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
 	sysBody := plannerSystem(goal, p.workDir, taskDir) + frameLessonsBlock(p.lessonsBlock)
@@ -553,8 +553,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		DeepSeekSearchModel:   p.webSearch.DeepSeekModel,
 		WebSearchProxy:        p.webSearch.Proxy,
 		BashEnv:               proxyEnv(p.proxyAddr, p.proxyCACert), // Bash subcommands go through the proxy + trust its CA by default
-		WorkingDir:            taskDir,                              // this task's work dir <workDir>/tasks/<taskID>
-		ToolOutputDir:         cmdOutDir(taskDir),
+		WorkingDir:            taskDir,                              // the main run directory <workDir>/tasks/<taskID>/main
+		ToolOutputDir:         TaskToolOutputDir(p.workDir, taskID, taskDir),
 		MaxTurns:              p.maxTurns, // 0 = unlimited (configurable in agent management)
 		MaxDuration:           maxDur,     // 0=unlimited; with a deadline = time remaining until it
 		Compaction:            compactionConfig(p.compactionWindow()),
@@ -575,6 +575,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	opts.Hooks = SpillHooks(opts.Hooks, opts.ToolOutputDir)
 	// The session id is the provider-side identity (session header, usage metering)
 	// with or without persistence; Norma only puts it on ctx when it writes a transcript.
 	opts.SessionID = fmt.Sprintf("exp%d-planner", ts.ID())

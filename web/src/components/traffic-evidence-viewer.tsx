@@ -82,41 +82,52 @@ export function TrafficEvidenceViewer({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : detail ? (
-          <Tabs defaultValue="request">
-            <TabsList>
-              <TabsTrigger value="request">{t("Request")}</TabsTrigger>
-              <TabsTrigger value="response">{t("Response")}</TabsTrigger>
-            </TabsList>
-            {(["request", "response"] as const).map((side) => (
-              <TabsContent key={side} value={side}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {t("Body {size} bytes", { size: detail[side].total.toLocaleString(intlLocale) })}
-                    {detail[side].truncated ? ` · ${t("preview")}` : ""}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      void api
-                        .downloadFindingTrafficBody(findingId, detail.binding.id, side, contextTask)
-                        .catch((e: Error) => toast.error(e.message))
-                    }
-                  >
-                    {side === "request" ? t("Download full request body") : t("Download full response body")}
-                  </Button>
-                </div>
-                <HttpCodeBlock
-                  raw={`${(side === "request" ? detail.binding.snapshot.req_head : detail.binding.snapshot.resp_head)?.trimEnd() ?? ""}\n\n${detail[side].content}`}
-                />
-                {detail[side].truncated && !detail[side].binary ? (
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => void more(side)}>
-                    {t("Load more body")}
-                  </Button>
-                ) : null}
-              </TabsContent>
-            ))}
-          </Tabs>
+          <>
+            {detail.binding.snapshot.rewritten ? (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                {detail.binding.snapshot.rewrite_rule_ids?.length
+                  ? t("Rewritten by capture rules: {ids}", {
+                      ids: detail.binding.snapshot.rewrite_rule_ids.map((id) => `#${id}`).join(", "),
+                    })
+                  : t("Rewritten by capture rules")}
+              </p>
+            ) : null}
+            <Tabs defaultValue="request">
+              <TabsList>
+                <TabsTrigger value="request">{t("Request")}</TabsTrigger>
+                <TabsTrigger value="response">{t("Response")}</TabsTrigger>
+              </TabsList>
+              {(["request", "response"] as const).map((side) => (
+                <TabsContent key={side} value={side}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {t("Body {size} bytes", { size: detail[side].total.toLocaleString(intlLocale) })}
+                      {detail[side].truncated ? ` · ${t("preview")}` : ""}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        void api
+                          .downloadFindingTrafficBody(findingId, detail.binding.id, side, contextTask)
+                          .catch((e: Error) => toast.error(e.message))
+                      }
+                    >
+                      {side === "request" ? t("Download full request body") : t("Download full response body")}
+                    </Button>
+                  </div>
+                  <HttpCodeBlock
+                    raw={`${(side === "request" ? detail.binding.snapshot.req_head : detail.binding.snapshot.resp_head)?.trimEnd() ?? ""}\n\n${detail[side].content}`}
+                  />
+                  {detail[side].truncated && !detail[side].binary ? (
+                    <Button variant="outline" size="sm" disabled={busy} onClick={() => void more(side)}>
+                      {t("Load more body")}
+                    </Button>
+                  ) : null}
+                </TabsContent>
+              ))}
+            </Tabs>
+          </>
         ) : (
           <Skeleton className="h-56 w-full" />
         )}

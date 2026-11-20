@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -420,11 +421,43 @@ func engineRequest(r *mproxy.Request) rewrite.Request {
 	return rewrite.Request{Method: r.Method, URL: r.URL, Header: r.Header, Body: r.Body}
 }
 
+// takeReplayNonce removes every occurrence of X-ARTEX-Replay-Nonce from h
+// unconditionally and returns its value only when exactly one header value was
+// present.
+func takeReplayNonce(h http.Header) (nonce string, present bool) {
+	if h == nil {
+		return "", false
+	}
+	count := 0
+	for k, vs := range h {
+		if strings.EqualFold(k, replayNonceHeader) {
+			present = true
+			for _, v := range vs {
+				count++
+				if count == 1 {
+					nonce = strings.TrimSpace(v)
+				}
+			}
+			delete(h, k)
+		}
+	}
+	if count != 1 {
+		return "", present
+	}
+	return nonce, present
+}
+
 // Request runs the request phase. The result goes on the flow only once the
 // request's snapshot slot is reserved; without one the request leaves as the
 // client sent it. Rules fail open: a panic leaves the request unchanged.
 func (s *sink) Request(f *mproxy.Flow) {
 	if s.t == nil || f.Request == nil || f.Request.URL == nil {
+		return
+	}
+	// Strip the internal replay bypass header unconditionally before forwarding
+	// or running rules; honour it only when its value matches a registered nonce.
+	if nonce, present := takeReplayNonce(f.Request.Header); present && consumeReplayNonce(nonce) {
+		s.bypass.Store(keyOf(f), struct{}{})
 		return
 	}
 	set := s.t.rewriteRules.Load()
@@ -457,6 +490,10 @@ func (s *sink) Request(f *mproxy.Flow) {
 // plain record.
 func (s *sink) Response(f *mproxy.Flow) {
 	if f.Request == nil || f.Response == nil {
+		return
+	}
+	if _, bypassed := s.bypass.LoadAndDelete(keyOf(f)); bypassed {
+		s.t.record(f)
 		return
 	}
 	snap := s.t.snaps.take(keyOf(f))
@@ -506,6 +543,13 @@ func (s *sink) applyResponse(f *mproxy.Flow, set *rewrite.Set, in rewrite.Input)
 // upgrade, with no response on the flow: nothing of the handshake can change
 // there, so every candidate rule is traced "not rewritten: stream".
 func (s *sink) rewriteStream(f *mproxy.Flow, kind string) (rq requestView, rs responseView, lines []rewrite.TraceLine, res rewrite.Result) {
+	if _, bypassed := s.bypass.LoadAndDelete(keyOf(f)); bypassed {
+		rq = flowRequestView(f.Request)
+		if kind == "sse" {
+			rs = flowResponseView(f.Response)
+		}
+		return rq, rs, nil, rewrite.Result{}
+	}
 	snap := s.t.snaps.take(keyOf(f))
 	set := s.t.rewriteRules.Load()
 	if snap != nil {
@@ -568,6 +612,7 @@ func (s *sink) applyStreamResponse(f *mproxy.Flow, res rewrite.Result) {
 // and the rules, never the URL or the error text.
 func (s *sink) RequestError(f *mproxy.Flow, err error) {
 	if f != nil {
+		s.bypass.Delete(keyOf(f))
 		if snap := s.t.snaps.take(keyOf(f)); snap != nil && snap.requestRewritten() {
 			ids := snap.appliedRuleIDs()
 			for _, id := range ids {
@@ -593,6 +638,7 @@ func (s *sink) StreamResponseModifier(f *mproxy.Flow, in io.Reader) (out io.Read
 	if s == nil || s.t == nil || f == nil || !f.Stream || f.SSE != nil {
 		return in
 	}
+	s.bypass.Delete(keyOf(f))
 	snap := s.t.snaps.take(keyOf(f))
 	if snap == nil {
 		return in

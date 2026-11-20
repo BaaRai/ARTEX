@@ -20,7 +20,7 @@ import (
 func TestCoreTaskLifecyclePG(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	td := t.TempDir()

@@ -350,6 +350,9 @@ ON CONFLICT (name) DO NOTHING`,
 	if err := d.seedDefaultInterceptRules(); err != nil {
 		return fmt.Errorf("seed intercept rules: %w", err)
 	}
+	if err := d.seedPersistenceApprovalRules(); err != nil {
+		return fmt.Errorf("seed persistence approval rules: %w", err)
+	}
 	if err := d.seedDefaultInterceptRulesV2(); err != nil {
 		return fmt.Errorf("seed intercept rules v2: %w", err)
 	}

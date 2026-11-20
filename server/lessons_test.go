@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 func TestRSILessonsMode(t *testing.T) {
@@ -23,7 +25,7 @@ func TestRSILessonsMode(t *testing.T) {
 func TestTaskLessonsExtractionAndIdempotency(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	if _, err := m.pg.Exec(`DELETE FROM rsi_lessons`); err != nil {
@@ -124,7 +126,7 @@ SELECT id,'completed','fixed','{}'::jsonb FROM findings WHERE task_id=$1 AND nam
 func TestTerminalStatusExtractsLessons(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	if _, err := m.pg.Exec(`DELETE FROM rsi_lessons`); err != nil {

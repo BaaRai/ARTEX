@@ -23,6 +23,10 @@ services:
       args:
         ARTEX_VERSION: ${ARTEX_VERSION:-dev}
     image: artex:local
+    # Agent processes run as an unprivileged executor (-exec-uid): no setuid program
+    # or file capability may raise them back to root.
+    security_opt:
+      - "no-new-privileges:true"
     depends_on:
       postgres:
         condition: service_healthy

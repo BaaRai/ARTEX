@@ -87,7 +87,7 @@ INSERT INTO exploration_anchors(node_id,asset_id) SELECT fn.id, an.id FROM fn JO
 func TestBuildCoverageGraphLargeInvariants(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 	f := seedLargeCoverageFixture(t, d)

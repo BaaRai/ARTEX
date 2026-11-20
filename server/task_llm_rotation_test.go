@@ -32,7 +32,7 @@ func TestLLMProfilePinRoundTrip(t *testing.T) {
 func TestRotationConcurrentProvidersAndPrecedence(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable: %v", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

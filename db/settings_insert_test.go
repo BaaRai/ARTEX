@@ -13,7 +13,7 @@ import (
 func TestInsertSettingIfAbsentDoesNotOverwrite(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 
@@ -50,7 +50,7 @@ func TestInsertSettingIfAbsentDoesNotOverwrite(t *testing.T) {
 func TestRotatePasswordRollsBackHashWhenVersionCannotIncrement(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 

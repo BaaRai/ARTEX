@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Autumn-27/artex/db"
+	actool "github.com/Autumn-27/norma/tool"
 )
 
 // A benign bbot output: one in-scope host, one out-of-scope host, one event
@@ -41,12 +43,22 @@ func TestIngestBbotScopeSplit(t *testing.T) {
 	tsx.SetTaskID(task.ID)
 	tsx.SetAssetStore(d.Assets(), d.Companies())
 
-	path := filepath.Join(t.TempDir(), "output.json")
+	// The file is read through the run's working directory under the data directory.
+	base := t.TempDir()
+	runDir := filepath.Join(base, "tasks", "1", "i1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tsx.SetWorkBase(base)
+	path := filepath.Join(runDir, "output.json")
 	if err := os.WriteFile(path, []byte(bbotToolFixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	input, _ := json.Marshal(map[string]string{"path": path})
-	res := callGuardTool(t, tsx.ingestBbot(), string(input))
+	res, err := tsx.ingestBbot().Call(context.Background(), input, &actool.ToolContext{WorkingDir: runDir})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if res.IsError {
 		t.Fatalf("ingest_bbot: %s", res.Flatten())
 	}

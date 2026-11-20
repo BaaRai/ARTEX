@@ -124,7 +124,7 @@ func TestLLMTestValidatesUserAgent(t *testing.T) {
 func TestStoredProfileKeyOnlyForStoredEndpoint(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { m.Close() })
 	ctx, cancel := context.WithCancel(context.Background())

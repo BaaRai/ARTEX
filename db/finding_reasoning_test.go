@@ -10,7 +10,7 @@ import (
 func TestFindingReasoningFieldsRoundTrip(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 	tk, err := d.CreateTask("finding reasoning fields", "goal", nil, 0, 0)

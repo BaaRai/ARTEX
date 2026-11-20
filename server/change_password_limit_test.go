@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Autumn-27/artex/db"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -61,7 +62,7 @@ func changePasswordServer(t *testing.T, clk *fakeClock) (*Server, string, func(r
 	t.Helper()
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { m.Close() })
 

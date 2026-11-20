@@ -259,7 +259,7 @@ func TestTaskLLMOpaqueThinkingCommitsStream(t *testing.T) {
 func TestTaskLLMRetryKeepsOneLedgerRowPerPhysicalCall(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	pg := m.PG()

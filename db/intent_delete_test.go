@@ -41,7 +41,7 @@ func gone(t *testing.T, es *ExplorationStore, id int64) bool {
 func TestSoftDeleteIntent(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 	expID, err := d.CreateExploration("soft delete", "soft delete")
@@ -89,7 +89,7 @@ func TestSoftDeleteIntent(t *testing.T) {
 func TestHardDeleteCascadesExclusiveDescendants(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 	expID, err := d.CreateExploration("hard cascade", "cascade delete")
@@ -127,7 +127,7 @@ func TestHardDeleteCascadesExclusiveDescendants(t *testing.T) {
 func TestHardDeletePreservesSharedAndGoal(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 	expID, err := d.CreateExploration("hard preserve", "keep shared/goal")
