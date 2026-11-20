@@ -1,22 +1,22 @@
 [Unit]
 Description=ARTEX application
-Requires=postgresql@18-main.service
-After=network.target postgresql@18-main.service
+After=network.target
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
 Type=simple
-User=parallels
-Group=parallels
-WorkingDirectory=/home/parallels/ARTEX
-ExecStart=/home/parallels/ARTEX/artex -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788
+User=artex
+Group=artex
+WorkingDirectory=/opt/artex
+Environment=ARTEX_JWT_KEY_DIR=/opt/artex/keys
+ExecStart=/opt/artex/artex -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
 KillMode=control-group
-UMask=0077
+UMask=0002
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=artex
