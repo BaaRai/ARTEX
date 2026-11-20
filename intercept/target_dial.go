@@ -3,12 +3,15 @@ package intercept
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 // The HTTP clients the platform owns (WebFetch and the custom http tool)
@@ -177,4 +180,60 @@ func (e *dialError) Error() string {
 		msg += " An approval was requested. Retry the same call after the approval."
 	}
 	return msg + " Do not fetch the target with another tool or by its address."
+}
+
+// IsTargetBlocked reports whether err came from PinnedDialer / DialSOCKS5
+// refusing a target before dialing (rule block, unpinned target, or unavailable
+// target gate), returning its platform control code.
+func IsTargetBlocked(err error) (string, bool) {
+	var de *dialError
+	if errors.As(err, &de) {
+		return de.code, true
+	}
+	return "", false
+}
+
+// DialSOCKS5 enforces the platform's target gate before dialing a SOCKS5
+// CONNECT destination, reusing the same policy functions as PinnedDialer:
+//   - When ctx carries an enabled TargetScope, delegates directly to dialTarget
+//     (asset block rules, exemptions, fresh DNS resolution, and pin checks).
+//   - Otherwise enforces global asset block rules (domain, IP, and CIDR, before
+//     and after fresh DNS resolution) and dials only the resolved addresses that
+//     passed those rules.
+func (i *Interceptor) DialSOCKS5(ctx context.Context, network, addr string) (net.Conn, error) {
+	if i == nil {
+		return baseDial(ctx, network, addr)
+	}
+	if scope, ok := TargetScopeFromContext(ctx); ok && scope.Enabled != nil && scope.Enabled() {
+		return i.dialTarget(ctx, scope, "socks5", network, addr)
+	}
+	t, err := addrTarget(network, addr)
+	if err != nil {
+		return nil, &dialError{code: TargetGateUnavailable, target: addr, reason: "the address of the connection could not be read (" + err.Error() + ")"}
+	}
+	if i.targets == nil {
+		return i.baseDialer()(ctx, network, addr)
+	}
+	rules, err := i.targets.BlockRules(db.TargetScopeRef{})
+	if err != nil {
+		return nil, &dialError{code: TargetGateUnavailable, target: t.String(), reason: "the asset rules could not be read: " + err.Error()}
+	}
+	ct := &checkedTarget{Target: t}
+	if t.Kind != TargetDomain {
+		ct.ips, ct.resolver, ct.resolvedAt = []string{t.Host}, literalResolver, time.Now().UTC()
+	}
+	if rule, hit := blockRule(rules, ct); hit {
+		return nil, &dialError{code: TargetRuleBlocked, target: t.String(), reason: fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason())}
+	}
+	if t.Kind == TargetDomain {
+		c := &targetCheck{i: i, ctx: ctx, tool: "socks5", fresh: true}
+		c.resolve(ct, true)
+		if ct.err != nil {
+			return nil, ct.err
+		}
+		if rule, hit := blockRule(rules, ct); hit {
+			return nil, &dialError{code: TargetRuleBlocked, target: t.String(), reason: fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason())}
+		}
+	}
+	return i.dialAddrs(ctx, network, ct.ips, t.Port)
 }

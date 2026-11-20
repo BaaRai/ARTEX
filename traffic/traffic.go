@@ -113,6 +113,29 @@ CREATE TABLE IF NOT EXISTS exchange_rewrites (
   after_blob    TEXT,
   PRIMARY KEY (exchange_id, seq)
 );
+
+-- Raw TCP streams relayed through the opt-in SOCKS5 CONNECT listener (P4.1a).
+-- Stored separately from HTTP exchanges: a raw TCP stream never creates a row
+-- in exchanges. Oversized directional payloads spill to _blobs/sha256 and
+-- register their hashes in blob_refs under the stream's tcp-* id.
+CREATE TABLE IF NOT EXISTS raw_tcp_streams (
+  id          TEXT PRIMARY KEY,
+  protocol    TEXT NOT NULL DEFAULT 'tcp',
+  host        TEXT NOT NULL,
+  port        INTEGER NOT NULL,
+  started_at  INTEGER NOT NULL,             -- unix milliseconds
+  ended_at    INTEGER NOT NULL,             -- unix milliseconds
+  duration_ms INTEGER NOT NULL,
+  c2s_bytes   INTEGER NOT NULL DEFAULT 0,
+  s2c_bytes   INTEGER NOT NULL DEFAULT 0,
+  truncated   INTEGER NOT NULL DEFAULT 0,
+  c2s_preview BLOB,
+  c2s_blob    TEXT,
+  s2c_preview BLOB,
+  s2c_blob    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_raw_tcp_host    ON raw_tcp_streams(host);
+CREATE INDEX IF NOT EXISTS idx_raw_tcp_started ON raw_tcp_streams(started_at DESC, id DESC);
 `
 
 // ftsSchema is applied separately from indexSchema: a driver build without FTS5
@@ -232,6 +255,9 @@ type Traffic struct {
 	// sweeping tracks the snapshot sweeper, which runs until Close. It is kept
 	// apart from reaping, which only ever holds work that finishes on its own.
 	sweeping sync.WaitGroup
+	// socks holds the opt-in SOCKS5 CONNECT listener when started via StartSOCKS5.
+	socksMu sync.Mutex
+	socks   *socks5Server
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -444,6 +470,13 @@ func (t *Traffic) Start() error { return t.proxy.Start() }
 func (t *Traffic) Close() error {
 	if t.closed != nil {
 		t.closeOnce.Do(func() { close(t.closed) })
+	}
+	t.socksMu.Lock()
+	srv := t.socks
+	t.socks = nil
+	t.socksMu.Unlock()
+	if srv != nil {
+		_ = srv.Close()
 	}
 	t.reaping.Wait()
 	t.sweeping.Wait()
