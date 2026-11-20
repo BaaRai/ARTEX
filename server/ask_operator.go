@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -189,10 +192,57 @@ func resolveAskOperatorImage(runDir, src string) (string, error) {
 	return real, nil
 }
 
+// openAskOperatorImage opens the image at path and requires the opened file to be
+// the regular file lst describes, lst being the Lstat of path. Between the
+// EvalSymlinks of resolveAskOperatorImage and this open, the agent can replace the
+// file with a symlink: Lstat does not follow one and the open does, so the two then
+// name different files and the image is refused.
+func openAskOperatorImage(path string, lst os.FileInfo) (*os.File, error) {
+	if !lst.Mode().IsRegular() {
+		return nil, fmt.Errorf("image_path must be a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("image not readable")
+	}
+	if st, err := f.Stat(); err != nil || !os.SameFile(lst, st) {
+		f.Close()
+		return nil, fmt.Errorf("image changed while it was read")
+	}
+	return f, nil
+}
+
+// askOperatorUploadsDir returns tasks/<id>/uploads, created when absent. A symlink
+// or anything else that is not a directory is refused: the copy would be written
+// through it.
+func askOperatorUploadsDir(taskDir string) (string, error) {
+	dir := filepath.Join(taskDir, "uploads")
+	if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
+	if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("the task uploads directory is not a directory")
+	}
+	return dir, nil
+}
+
+// askOperatorStageTries bounds the names tried for one staged copy.
+const askOperatorStageTries = 5
+
+// askOperatorStageName returns the file name of a staged copy. It cannot be
+// predicted, so it cannot be prepared in uploads/ ahead of the copy. A variable for
+// the tests.
+var askOperatorStageName = func(ext string) string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("ask-operator-%d-%x%s", time.Now().UnixNano(), b, ext)
+}
+
 // stageAskOperatorImage copies the referenced image into the task's uploads dir
 // (tasks/<id>/uploads, where the transcript attachment card resolves) and returns
 // the attachment descriptor. The image is read from the run directory of the agent
 // that asks: tasks/<id>/i<intentID> for a worker, tasks/<id>/main without an intent.
+// The copy is a new file, mode 0640: an existing name is never opened or replaced.
 // Empty src returns no attachment.
 func stageAskOperatorImage(dataDir string, taskID, intentID int64, src string) ([]chatAttachment, error) {
 	src = strings.TrimSpace(src)
@@ -204,30 +254,34 @@ func stageAskOperatorImage(dataDir string, taskID, intentID int64, src string) (
 	if err != nil {
 		return nil, err
 	}
-	st, err := os.Stat(resolved)
+	st, err := os.Lstat(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("image not readable")
 	}
-	if !st.Mode().IsRegular() {
-		return nil, fmt.Errorf("image_path must be a regular file")
+	in, err := openAskOperatorImage(resolved, st)
+	if err != nil {
+		return nil, err
 	}
+	defer in.Close()
 	if st.Size() > askOperatorMaxImage {
 		return nil, fmt.Errorf("image too large (%s, max 10MB)", humanBytes(st.Size()))
 	}
-	dir := filepath.Join(taskDir, "uploads")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := askOperatorUploadsDir(taskDir)
+	if err != nil {
 		return nil, err
 	}
 	ext := strings.ToLower(filepath.Ext(resolved))
-	name := fmt.Sprintf("ask-operator-%d%s", time.Now().Unix(), ext)
-	in, err := os.Open(resolved)
-	if err != nil {
-		return nil, fmt.Errorf("image not readable")
-	}
-	defer in.Close()
-	out, err := os.Create(filepath.Join(dir, name))
-	if err != nil {
-		return nil, err
+	var name string
+	var out *os.File
+	for try := 1; ; try++ {
+		name = askOperatorStageName(ext)
+		out, err = os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, fs.ErrExist) || try == askOperatorStageTries {
+			return nil, err
+		}
 	}
 	defer out.Close()
 	if _, err := io.Copy(out, in); err != nil {
