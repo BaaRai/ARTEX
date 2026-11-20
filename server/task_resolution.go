@@ -42,7 +42,7 @@ func (s *Server) resolutionFromProfile(p *db.LLMProfile, source string) taskLLMR
 	return result
 }
 
-// resolveTaskRoleLLM mirrors taskLLMRuntime.current without creating a provider:
+// resolveTaskRoleLLM mirrors taskLLMRuntime.currentFor without creating a provider:
 // role Agent binding -> explicit task chain -> active/global environment config.
 // Database failures are returned rather than represented as an unavailable model.
 func (s *Server) resolveTaskRoleLLM(t *Task, agentKey string) (taskLLMResolution, error) {
