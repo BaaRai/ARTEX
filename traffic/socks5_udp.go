@@ -436,9 +436,10 @@ func (s *socks5Server) recordUDPCapture(rec RawUDPCapture) {
 		s.cfg.OnRecordUDP(rec)
 		return
 	}
-	// Commit 2 wires SQLite raw_udp_datagrams persistence here.
 	if s.t != nil && s.t.db != nil {
-		log.Printf("[traffic/socks5-udp] recorded datagram assoc=%s dir=%s dst=%s:%d bytes=%d",
-			rec.AssociationID, rec.Direction, rec.Host, rec.Port, len(rec.Payload))
+		if _, err := s.t.RecordRawUDPDatagram(rec, s.cfg.UDPPreviewBytes); err != nil {
+			log.Printf("[traffic/socks5-udp] failed to record datagram assoc=%s dst=%s:%d: %v",
+				rec.AssociationID, rec.Host, rec.Port, err)
+		}
 	}
 }
