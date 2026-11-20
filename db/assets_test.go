@@ -1143,6 +1143,7 @@ func TestAssetIPRejectsHostname(t *testing.T) {
 		t.Fatalf("empty ip rejected: %v", err)
 	}
 	deleteAsset(d, id)
+	_, _ = d.Exec(`DELETE FROM assets WHERE domain IN ('ip-guard.example.com','example.com')`)
 	id, err = av2.UpsertIP(UpsertIPReq{IP: "203.0.113.7"})
 	if err != nil {
 		t.Fatalf("valid ip rejected: %v", err)

@@ -25,7 +25,10 @@ func TestReportFindingOptionalTrafficWithoutCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.DeleteTask(task.ID)
+	defer func() {
+		_, _ = d.DeleteFindingsByTask(task.ID)
+		_ = d.DeleteTask(task.ID)
+	}()
 	ts := NewToolSet(nil, "")
 	ts.ts, ts.taskID = d.Exploration(task.ExplorationID), task.ID
 	ts.SetFindingRecorder(evidence.New(d, nil, t.TempDir()))
@@ -60,7 +63,10 @@ func TestReportFindingAtomicContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.DeleteTask(task.ID)
+	defer func() {
+		_, _ = d.DeleteFindingsByTask(task.ID)
+		_ = d.DeleteTask(task.ID)
+	}()
 	ts := NewToolSet(nil, "")
 	ts.ts = d.Exploration(task.ExplorationID)
 	ts.taskID = task.ID

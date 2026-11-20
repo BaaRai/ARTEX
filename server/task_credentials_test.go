@@ -49,6 +49,7 @@ func TestTaskCredentialsFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = s.m.pg.DeleteTask(id) })
 	t.Cleanup(func() { s.m.PG().Exec(`DELETE FROM tasks WHERE id=$1`, id) })
 
 	// List: both rows, user source, order stable.

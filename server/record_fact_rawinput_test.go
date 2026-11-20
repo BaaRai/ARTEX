@@ -73,7 +73,7 @@ func TestFix410AcceptsRawInputSurvivesWrappers(t *testing.T) {
 		if err != nil {
 			db.SkipPGUnavailable(t, err)
 		}
-		defer pg.Close()
+		t.Cleanup(func() { _ = pg.Close() })
 		agent.SetToolAugment(nil)
 		wireTools(pg, nil)
 		task, err := pg.CreateTaskWithOptions("fix410", "record_fact through the wrapper chain", db.TaskCreateOptions{})

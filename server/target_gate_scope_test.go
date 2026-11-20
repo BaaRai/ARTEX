@@ -174,6 +174,7 @@ func (f *targetScopeFixture) newTask(t *testing.T) *Task {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _, _ = f.m.DeleteTask(created.ID, DeleteTaskOptions{}) })
 	task, ok := f.m.Task(created.ID)
 	if !ok {
 		t.Fatal("task not found after creation")

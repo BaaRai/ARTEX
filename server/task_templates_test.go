@@ -91,7 +91,7 @@ func TestConversationPatchReturnsPinState(t *testing.T) {
 	if err != nil {
 		db.SkipPGUnavailable(t, err)
 	}
-	defer m.Close()
+	t.Cleanup(func() { _ = m.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
 	defer stopTestServer(t, s, cancel)

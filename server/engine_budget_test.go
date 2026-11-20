@@ -84,7 +84,7 @@ func TestResetSettledRunReseedsBudgetFromUsage(t *testing.T) {
 	if err != nil {
 		pgdb.SkipPGUnavailable(t, err)
 	}
-	defer m.Close()
+	t.Cleanup(func() { _ = m.Close() })
 
 	taskID := strconv.FormatInt(time.Now().UnixNano(), 10)
 	t.Cleanup(func() {

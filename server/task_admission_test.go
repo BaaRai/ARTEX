@@ -650,6 +650,15 @@ func TestTaskLLMResolutionReportsDatabaseFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	taskID := mustTaskID(t, task.ID)
+	t.Cleanup(func() {
+		if dsn, _, err := db.DSN(); err == nil {
+			if pg, err := db.Open(dsn); err == nil {
+				_ = pg.DeleteTask(taskID)
+				_ = pg.Close()
+			}
+		}
+	})
 	if err := m.pg.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -154,19 +154,28 @@ func TestTaskArchiveDatabaseRoundTrip(t *testing.T) {
 VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmProfileID, exhaustedAt, chainCreatedAt); err != nil {
 		t.Fatal(err)
 	}
+	var assetID, findingID int64
 	defer func() {
 		_, _ = d.Exec(`DELETE FROM llm_usage WHERE task_id=$1 OR exploration_id=$2`, fmt.Sprint(task.ID), task.ExplorationID)
+		_, _ = d.Exec(`DELETE FROM llm_records WHERE task_id=$1`, fmt.Sprint(task.ID))
 		_, _ = d.Exec(`DELETE FROM skill_usage WHERE task_id=$1 OR exploration_id=$2`, task.ID, task.ExplorationID)
 		_, _ = d.Exec(`DELETE FROM tool_usage WHERE task_id=$1 OR exploration_id=$2`, task.ID, task.ExplorationID)
+		_, _ = d.DeleteFindingsByTask(task.ID)
+		if findingID != 0 {
+			_, _ = d.DeleteFinding(findingID)
+		}
 		_, _ = d.Exec(`DELETE FROM task_archives WHERE task_id=$1`, task.ID)
 		_ = d.DeleteTask(task.ID)
+		if assetID != 0 {
+			_, _ = d.Exec(`DELETE FROM assets WHERE id=$1`, assetID)
+		}
 		_, _ = d.Exec(`DELETE FROM llm_profiles WHERE id=$1`, llmProfileID)
 		_, _ = d.Exec(`DELETE FROM companies WHERE id=$1`, companyID)
 	}()
 	if err := d.SetPaused(task.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	assetID, err := d.Assets().UpsertRootDomain(UpsertRootDomainReq{Domain: fmt.Sprintf("archive-%d.example", task.ID), TaskID: task.ID})
+	assetID, err = d.Assets().UpsertRootDomain(UpsertRootDomainReq{Domain: fmt.Sprintf("archive-%d.example", task.ID), TaskID: task.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +206,7 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.AddFinding(task.ID, nodeID, vulnclass, "archive finding", SeverityCritical, "summary", "evidence", "worker", []int64{assetID}); err != nil {
+	if findingID, err = d.AddFinding(task.ID, nodeID, vulnclass, "archive finding", SeverityCritical, "summary", "evidence", "worker", []int64{assetID}); err != nil {
 		t.Fatal(err)
 	}
 	archive, err := d.QueueTaskArchive(task.ID)
