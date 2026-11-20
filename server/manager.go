@@ -1756,17 +1756,19 @@ type taskFileDeleteStage struct {
 	done     bool
 }
 
-// stageTaskFiles atomically renames the task workspace and owned transcripts to
-// a same-filesystem staging directory. The trailing dash in the transcript
-// prefix is significant: exploration 12 must not match exploration 123.
+// stageTaskFiles atomically renames the task workspace, its command-output spill
+// directory and owned transcripts to a same-filesystem staging directory. The
+// trailing dash in the transcript prefix is significant: exploration 12 must not
+// match exploration 123.
 func stageTaskFiles(dataDir, taskID string, explorationID int64) (*taskFileDeleteStage, error) {
 	stage := &taskFileDeleteStage{}
 	var targets []string
-	taskDir := filepath.Join(dataDir, "tasks", taskID)
-	if _, err := os.Lstat(taskDir); err == nil {
-		targets = append(targets, taskDir)
-	} else if !os.IsNotExist(err) {
-		return nil, err
+	for _, dir := range []string{filepath.Join(dataDir, "tasks", taskID), agent.TaskSpillDir(dataDir, taskID)} {
+		if _, err := os.Lstat(dir); err == nil {
+			targets = append(targets, dir)
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
 	}
 
 	transcriptDir := filepath.Join(dataDir, "transcripts")
