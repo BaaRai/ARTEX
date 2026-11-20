@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/traffic"
+	"github.com/Autumn-27/artex/traffic/rewrite"
 )
 
 // replayServer wires a Server like ingestServer. With traffic off,
@@ -159,5 +160,82 @@ func TestTrafficReplayRouteEndToEnd(t *testing.T) {
 			t.Fatalf("replayed exchange not recorded (%d rows)", n)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestGetTrafficExposesRewriteStats(t *testing.T) {
+	// Traffic disabled: rewrite object still present with zero counters.
+	sOff := &Server{m: &Manager{}}
+	wOff := httptest.NewRecorder()
+	sOff.getTraffic(wOff, httptest.NewRequest(http.MethodGet, "/api/traffic", nil))
+	if wOff.Code != http.StatusOK {
+		t.Fatalf("getTraffic(off) status = %d", wOff.Code)
+	}
+	var bodyOff map[string]any
+	if err := json.Unmarshal(wOff.Body.Bytes(), &bodyOff); err != nil {
+		t.Fatal(err)
+	}
+	rwOff, ok := bodyOff["rewrite"].(map[string]any)
+	if !ok {
+		t.Fatalf("getTraffic(off) missing rewrite object: %s", wOff.Body.String())
+	}
+	for _, k := range []string{"large_responses", "capacity_refusals", "tombstone_drops", "conversions", "sweeps"} {
+		if _, exists := rwOff[k]; !exists {
+			t.Fatalf("getTraffic(off) rewrite object missing key %q: %v", k, rwOff)
+		}
+	}
+
+	// Traffic store open: rewrite counters mirror tr.RewriteStats().
+	tr, err := traffic.Open(t.TempDir(), ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tr.Close() })
+	sOn := &Server{m: &Manager{traffic: tr}}
+	wOn := httptest.NewRecorder()
+	sOn.getTraffic(wOn, httptest.NewRequest(http.MethodGet, "/api/traffic", nil))
+	if wOn.Code != http.StatusOK {
+		t.Fatalf("getTraffic(on) status = %d", wOn.Code)
+	}
+	var bodyOn struct {
+		Rewrite traffic.RewriteStats `json:"rewrite"`
+	}
+	if err := json.Unmarshal(wOn.Body.Bytes(), &bodyOn); err != nil {
+		t.Fatal(err)
+	}
+	if bodyOn.Rewrite != tr.RewriteStats() {
+		t.Fatalf("getTraffic rewrite = %+v, want %+v", bodyOn.Rewrite, tr.RewriteStats())
+	}
+}
+
+func TestTrafficReplayRouteApplyRulesToggle(t *testing.T) {
+	s, replay := replayServer(t, true, true)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Seen-Rule", r.Header.Get("X-Rule-Tag"))
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(target.Close)
+
+	set := rewrite.Compile([]rewrite.Rule{{
+		ID: 7, Name: "tag", Enabled: true, Phase: rewrite.PhaseRequest,
+		Actions: []rewrite.Action{{Type: rewrite.ActionSetHeader, Name: "X-Rule-Tag", Value: "on"}},
+	}}, rewrite.Options{})
+	if len(set.LoadErrors()) != 0 {
+		t.Fatalf("load errors: %v", set.LoadErrors())
+	}
+	s.m.Traffic().SetRewriteRules(set)
+
+	// Default (apply_rules absent -> false): bypasses rule.
+	reqOff, _ := json.Marshal(map[string]any{"method": "GET", "url": target.URL + "/toggle-off"})
+	wOff := replay(string(reqOff))
+	if wOff.Code != 200 || strings.Contains(wOff.Body.String(), `"X-Seen-Rule","value":"on"`) {
+		t.Fatalf("default replay applied rewrite rule: %d %s", wOff.Code, wOff.Body.String())
+	}
+
+	// Opt-in (apply_rules: true): applies rule.
+	reqOn, _ := json.Marshal(map[string]any{"method": "GET", "url": target.URL + "/toggle-on", "apply_rules": true})
+	wOn := replay(string(reqOn))
+	if wOn.Code != 200 || !strings.Contains(wOn.Body.String(), `"value":"on"`) {
+		t.Fatalf("apply_rules=true did not apply rewrite rule: %d %s", wOn.Code, wOn.Body.String())
 	}
 }

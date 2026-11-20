@@ -3533,7 +3533,7 @@ func taskActivityDetail(t *Task, seq int64) (string, error) {
 func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	tr := s.m.Traffic()
 	if tr == nil {
-		writeJSON(w, 200, map[string]any{"enabled": false, "exchanges": []any{}})
+		writeJSON(w, 200, map[string]any{"enabled": false, "exchanges": []any{}, "rewrite": traffic.RewriteStats{}})
 		return
 	}
 	q := r.URL.Query()
@@ -3560,6 +3560,7 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 		"page":      page,
 		"size":      size,
 		"exchanges": trafficDTOs(ex),
+		"rewrite":   tr.RewriteStats(),
 	})
 }
 
@@ -3738,6 +3739,7 @@ func (s *Server) replayTraffic(w http.ResponseWriter, r *http.Request) {
 		Headers    []traffic.ReplayHeader `json:"headers"`
 		Body       string                 `json:"body"`
 		BodyBase64 bool                   `json:"body_base64"`
+		ApplyRules bool                   `json:"apply_rules"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -3759,7 +3761,13 @@ func (s *Server) replayTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	res, err := tr.Replay(ctx, traffic.ReplayRequest{Method: body.Method, URL: body.URL, Headers: body.Headers, Body: payload})
+	res, err := tr.Replay(ctx, traffic.ReplayRequest{
+		Method:     body.Method,
+		URL:        body.URL,
+		Headers:    body.Headers,
+		Body:       payload,
+		ApplyRules: body.ApplyRules,
+	})
 	switch {
 	case errors.Is(err, traffic.ErrReplayTooLarge):
 		writeErr(w, 413, err.Error())
