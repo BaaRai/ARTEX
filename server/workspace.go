@@ -31,7 +31,42 @@ func (s *Server) wsResolveConfined(rel string) (confinedPath, bool) {
 	if err != nil {
 		return confinedPath{}, false
 	}
+	if workspacePathDenied(cp.realRoot, cp.realPath) {
+		return confinedPath{}, false
+	}
 	return cp, true
+}
+
+// workspaceDeniedPrefixes are platform-internal subtrees under the data dir
+// that the workspace file manager must not expose. traffic/_ca holds the
+// capture proxy CA private key; traffic/_index holds the SQLite exchange index.
+var workspaceDeniedPrefixes = []string{"traffic/_ca", "traffic/_index"}
+
+// workspacePathDenied reports whether realPath lands in a platform-internal
+// subtree. It compares the canonicalized path relative to the real root, so a
+// symlink alias cannot reach a denied directory. Segments are lower-cased and
+// trailing dots/spaces are trimmed because Windows resolves those spellings to
+// the same directory.
+func workspacePathDenied(realRoot, realPath string) bool {
+	rel, err := filepath.Rel(realRoot, realPath)
+	if err != nil {
+		return true // fail closed
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") || strings.HasPrefix(rel, "/") {
+		return true // outside the root: fail closed
+	}
+	segs := strings.Split(rel, "/")
+	for i, seg := range segs {
+		segs[i] = strings.ToLower(strings.TrimRight(seg, ". "))
+	}
+	rel = strings.Join(segs, "/")
+	for _, prefix := range workspaceDeniedPrefixes {
+		if rel == prefix || strings.HasPrefix(rel, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // wsResolve maps a user-supplied relative path to an absolute path INSIDE the work
