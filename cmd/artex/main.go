@@ -179,7 +179,7 @@ func run() int {
 		log.Printf("[config] %v", err)
 		return 1
 	}
-	if err := server.PrepareExecPrivilege(priv, *dataDir, config.KeyDir(), config.Path()); err != nil {
+	if err := server.PrepareExecPrivilege(&priv, *dataDir, config.KeyDir(), config.Path()); err != nil {
 		log.Printf("[config] %v", err)
 		return 1
 	}

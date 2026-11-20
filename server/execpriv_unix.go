@@ -89,6 +89,40 @@ func prepareExecHome(p ExecPrivilege, dataDir string) error {
 	return os.Setenv(envExecHome, home)
 }
 
+// execScriptDir is the directory under the data directory that custom-tool scripts
+// are written to when agent processes run as the executor.
+const execScriptDir = "exec-scripts"
+
+// prepareExecScriptDir creates the script directory and returns its path. It is
+// owned by root with the executor as its group and mode 0750: the executor can
+// reach and read a script there, and cannot create, rename or replace an entry.
+// The run directory is no place for the script: the executor can write there, and
+// could turn the script's directory into a symlink that root then writes through.
+func prepareExecScriptDir(p ExecPrivilege, dataDir string) (string, error) {
+	abs, err := filepath.Abs(dataDir)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(abs, execScriptDir)
+	if err := os.Mkdir(dir, 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return "", err
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", dir)
+	}
+	if err := os.Lchown(dir, 0, int(p.GID)); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o750); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
 // prepareExecScript lets the executor read a script the server wrote: the file stays
 // root-owned and becomes readable by the executor group only.
 func prepareExecScript(p ExecPrivilege, path string) error {
@@ -107,8 +141,8 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // workspace is created in many places, and new subdirectories inherit the group. The key files and the
 // config file (which can hold the database DSN) are restricted to root. Nothing
 // else under the data directory changes; directories a root-only path needs are
-// left as they are.
-func PrepareExecPrivilege(p ExecPrivilege, dataDir, keyDir, configPath string) error {
+// left as they are. It sets p.ScriptDir to the script directory it creates.
+func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if !p.Enabled {
 		return nil
 	}
@@ -123,9 +157,14 @@ func PrepareExecPrivilege(p ExecPrivilege, dataDir, keyDir, configPath string) e
 			return fmt.Errorf("share %s workspace with the executor group: %w", sub, err)
 		}
 	}
-	if err := prepareExecHome(p, dataDir); err != nil {
+	if err := prepareExecHome(*p, dataDir); err != nil {
 		return fmt.Errorf("prepare the executor home: %w", err)
 	}
+	scriptDir, err := prepareExecScriptDir(*p, dataDir)
+	if err != nil {
+		return fmt.Errorf("prepare the executor script directory: %w", err)
+	}
+	p.ScriptDir = scriptDir
 	tasks := filepath.Join(dataDir, "tasks")
 	for _, name := range []string{"jwt.key", "secret.key"} {
 		if keyDir == "" {

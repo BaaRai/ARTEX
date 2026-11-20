@@ -53,7 +53,7 @@ func newExecRootFixture(t *testing.T) *execRootFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := PrepareExecPrivilege(priv, dataDir, "", ""); err != nil {
+	if err := PrepareExecPrivilege(&priv, dataDir, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	secret := filepath.Join(dataDir, "root-only.key")
@@ -132,6 +132,95 @@ print(subprocess.run(["sh", "-c", os.environ["PROBE"]], capture_output=True, tex
 		t.Fatal(err)
 	}
 	f.check(t, "custom tool", out)
+}
+
+// The script of a custom tool is written to the root-owned script directory, not
+// under the run directory: the agent turned <run dir>/.tools into a symlink to a
+// root-only directory, and nothing may be written through it. The script runs as
+// the executor, which can read it and cannot change the directory it is in.
+func TestExecPythonScriptDirAsRoot(t *testing.T) {
+	f := newExecRootFixture(t)
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatalf("python3 is needed for the custom-tool path: %v", err)
+	}
+	dataDir := filepath.Dir(f.secret)
+	dir := f.priv.ScriptDir
+	if dir != filepath.Join(dataDir, execScriptDir) {
+		t.Fatalf("script directory = %q, want %s under the data directory", dir, execScriptDir)
+	}
+	checkDir := func() {
+		t.Helper()
+		fi, err := os.Lstat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st := fi.Sys().(*syscall.Stat_t)
+		if !fi.IsDir() || st.Uid != 0 || st.Gid != DefaultExecGID || fi.Mode().Perm() != 0o750 || fi.Mode()&os.ModeSetgid != 0 {
+			t.Fatalf("script directory: mode %v uid %d gid %d, want a directory 0750 root:%d", fi.Mode(), st.Uid, st.Gid, DefaultExecGID)
+		}
+		if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+			t.Fatalf("script directory holds %v (%v), want it empty", entries, err)
+		}
+	}
+	checkDir()
+
+	trap := filepath.Join(dataDir, "trap")
+	if err := os.Mkdir(trap, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(trap, filepath.Join(f.work, ".tools")); err != nil {
+		t.Fatal(err)
+	}
+
+	code := `import errno, os
+d = os.path.dirname(os.path.abspath(__file__))
+print("uid=%d gid=%d" % (os.getuid(), os.getgid()))
+print("script_dir=" + d)
+st = os.stat(__file__)
+print("script=%o uid=%d gid=%d" % (st.st_mode & 0o777, st.st_uid, st.st_gid))
+def attempt(name, fn):
+    try:
+        fn()
+        print(name + "=done")
+    except OSError as e:
+        print(name + "=" + errno.errorcode.get(e.errno, str(e.errno)))
+attempt("create", lambda: open(os.path.join(d, "planted.py"), "w").close())
+attempt("symlink", lambda: os.symlink("/etc/passwd", os.path.join(d, "planted-link")))
+attempt("mkdir", lambda: os.mkdir(os.path.join(d, "planted-dir")))
+attempt("rename", lambda: os.rename(__file__, __file__ + ".moved"))
+attempt("unlink", lambda: os.unlink(__file__))
+attempt("write", lambda: open(__file__, "a").close())
+attempt("chmod", lambda: os.chmod(d, 0o777))
+`
+	out, err := execPython(context.Background(), py, "probe", code, nil, f.work, nil, 30*time.Second, f.priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("script probe output:\n%s", out)
+	for _, want := range []string{
+		fmt.Sprintf("uid=%d gid=%d\n", DefaultExecUID, DefaultExecGID),
+		"script_dir=" + dir + "\n",
+		fmt.Sprintf("script=640 uid=0 gid=%d\n", DefaultExecGID),
+		"create=EACCES\n", "symlink=EACCES\n", "mkdir=EACCES\n", "rename=EACCES\n", "unlink=EACCES\n", "write=EACCES\n",
+		"chmod=EPERM\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("want %q in the probe output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "[exit:") || strings.Contains(out, "=done") {
+		t.Errorf("the script failed or changed its directory:\n%s", out)
+	}
+	// The script is removed, and nothing went through the planted symlink or to the
+	// run directory.
+	checkDir()
+	if entries, err := os.ReadDir(trap); err != nil || len(entries) != 0 {
+		t.Fatalf("the symlinked .tools target holds %v (%v), want it empty", entries, err)
+	}
+	if fi, err := os.Lstat(filepath.Join(f.work, ".tools")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf(".tools in the run directory changed: %v %v", fi, err)
+	}
 }
 
 // An MCP stdio command is started as `<server> __artex-exec-drop uid gid -- cmd`;

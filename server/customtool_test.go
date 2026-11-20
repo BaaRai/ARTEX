@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +106,20 @@ print("port=" + str(a["port"]))
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// With the privilege drop on and no script directory, execPython fails closed: it
+// must not fall back to writing the script under the run directory.
+func TestExecPythonNeedsScriptDirWhenDropping(t *testing.T) {
+	work := t.TempDir()
+	_, err := execPython(context.Background(), "python3", "test", "print(1)", nil, work, nil, time.Second,
+		ExecPrivilege{Enabled: true, UID: DefaultExecUID, GID: DefaultExecGID})
+	if err == nil {
+		t.Fatal("execPython ran without a script directory")
+	}
+	if _, err := os.Lstat(filepath.Join(work, ".tools")); err == nil {
+		t.Fatal(".tools was created under the run directory")
 	}
 }
 

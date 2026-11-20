@@ -22,7 +22,7 @@ func applyExecCredential(c *exec.Cmd, p ExecPrivilege) {}
 func prepareExecScript(p ExecPrivilege, path string) error { return nil }
 
 // PrepareExecPrivilege fails when a drop is enabled; a disabled one does nothing.
-func PrepareExecPrivilege(p ExecPrivilege, dataDir, keyDir, configPath string) error {
+func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if p.Enabled {
 		return errExecUnsupported
 	}

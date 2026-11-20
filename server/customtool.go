@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -492,9 +493,17 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 // execPython writes the code to a temp .py under workDir/.tools, runs it via interp
 // with the params JSON on stdin + scalar params mirrored to TOOL_<NAME> env, and
 // returns combined stdout+stderr (with a timeout/exit note). Standalone + testable.
+// When agent processes run as the executor, the script goes to priv.ScriptDir
+// instead: the executor can write workDir, so it could make workDir/.tools a
+// symlink and have the server, which is root, create and chown a file through it.
 func execPython(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration, priv ExecPrivilege) (string, error) {
 	toolsDir := filepath.Join(workDir, ".tools")
-	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+	if priv.Enabled {
+		if priv.ScriptDir == "" {
+			return "", errors.New("the executor script directory is not prepared")
+		}
+		toolsDir = priv.ScriptDir
+	} else if err := os.MkdirAll(toolsDir, 0o755); err != nil {
 		return "", err
 	}
 	f, err := os.CreateTemp(toolsDir, key+"-*.py")

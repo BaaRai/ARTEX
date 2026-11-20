@@ -37,6 +37,10 @@ type ExecPrivilege struct {
 	Enabled bool
 	UID     uint32
 	GID     uint32
+	// ScriptDir is where custom-tool scripts are written for the executor to run.
+	// PrepareExecPrivilege creates it and sets it: root-owned, outside the workspace
+	// tree the executor can write.
+	ScriptDir string
 }
 
 // ResolveExecPrivilege turns the -exec-uid and -exec-gid options into an
