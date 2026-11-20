@@ -18,8 +18,9 @@ import (
 //   - the tool description;
 //   - the facts property and item descriptions that referred to the top level.
 //
-// Operator edits stay and are named in the log. The schema structure itself is
-// repaired by seedFactInputSchema on every start (RepairRecordFactSchema).
+// Operator edits stay; a description that matches no known default is logged
+// as such and left in place. The schema structure itself is repaired by
+// seedFactInputSchema on every start (RepairRecordFactSchema).
 //
 // The flag is written only once the outcome is known: the UPDATE succeeded
 // (also when it changed no row) or the row is not the built-in one. A failed
