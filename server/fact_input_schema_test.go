@@ -241,3 +241,86 @@ func TestRefreshRecordFactContract(t *testing.T) {
 		t.Fatalf("schema not repaired beside an operator description: %s", row.Schema)
 	}
 }
+
+// A start on which the refresh fails must not spend the one-time flag: the
+// next start retries and the stored default text is refreshed then.
+func TestFix410RefreshFlagNotSetOnFailure(t *testing.T) {
+	skipWithoutDSN(t)
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v)", err)
+	}
+	defer m.Close()
+	s := &Server{m: m}
+	const flag = "tool_schema_refresh_record_fact_facts_only"
+	seed := recordFactSeed(t)
+	seedSchema, _ := json.Marshal(seed.Schema)
+	seedAgents, _ := json.Marshal(seed.Agents)
+	legacyTool, _, _ := agent.RecordFactLegacyDescriptions()
+	legacySchema, _ := recordFactLegacySchema(t)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := m.pg.Exec(query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const dropTrigger = `DROP TRIGGER IF EXISTS fix410_fail_update ON tools`
+	defer func() {
+		_, _ = m.pg.Exec(dropTrigger)
+		_, _ = m.pg.Exec(`DROP FUNCTION IF EXISTS fix410_fail_update()`)
+		_ = m.pg.UpsertToolForce("record_fact", seed.Desc, seedSchema, seedAgents)
+		_, _ = m.pg.Exec(`DELETE FROM settings WHERE key=$1`, flag)
+	}()
+	exec(`CREATE OR REPLACE FUNCTION fix410_fail_update() RETURNS trigger LANGUAGE plpgsql AS
+'BEGIN RAISE EXCEPTION ''fix410: simulated transient failure''; END'`)
+
+	start := func() {
+		s.seedFactInputSchema()
+		s.seedFactSourceSchema()
+		s.refreshRecordFactContract()
+	}
+	for _, tc := range []struct {
+		name        string
+		fail, clear func()
+	}{
+		{"update fails", func() {
+			exec(`CREATE TRIGGER fix410_fail_update BEFORE UPDATE ON tools
+FOR EACH ROW WHEN (OLD.key = 'record_fact') EXECUTE FUNCTION fix410_fail_update()`)
+		}, func() { exec(dropTrigger) }},
+		{"schema does not decode", func() {
+			exec(`UPDATE tools SET schema='[]'::jsonb WHERE key='record_fact'`)
+		}, func() {
+			exec(`UPDATE tools SET schema=$1::jsonb WHERE key='record_fact'`, legacySchema)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A database that stores the earlier default text and has not run the refresh.
+			if err := m.pg.UpsertToolForce("record_fact", legacyTool[0], json.RawMessage(legacySchema), seedAgents); err != nil {
+				t.Fatal(err)
+			}
+			exec(`DELETE FROM settings WHERE key=$1`, flag)
+
+			tc.fail()
+			start()
+			if v, ok, _ := m.pg.GetSetting(flag); ok {
+				t.Errorf("flag is %q after a failed refresh: later starts skip it", v)
+			}
+			if row, _ := m.pg.GetTool("record_fact"); row == nil || row.Description != legacyTool[0] {
+				t.Fatal("the simulated failure did not leave the earlier description in place")
+			}
+
+			tc.clear()
+			start()
+			row, err := m.pg.GetTool("record_fact")
+			if err != nil || row == nil {
+				t.Fatalf("row: %v", err)
+			}
+			if row.Description != seed.Desc {
+				t.Errorf("the next start did not refresh the description: %.60q", row.Description)
+			}
+			if v, _, _ := m.pg.GetSetting(flag); v != "true" {
+				t.Errorf("flag = %q after a successful refresh, want true", v)
+			}
+		})
+	}
+}

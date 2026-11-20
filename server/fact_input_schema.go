@@ -20,12 +20,16 @@ import (
 //
 // Operator edits stay and are named in the log. The schema structure itself is
 // repaired by seedFactInputSchema on every start (RepairRecordFactSchema).
+//
+// The flag is written only once the outcome is known: the UPDATE succeeded
+// (also when it changed no row) or the row is not the built-in one. A failed
+// read, decode or UPDATE leaves it unset, so the next start retries.
 func (s *Server) refreshRecordFactContract() {
 	const flag = "tool_schema_refresh_record_fact_facts_only"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}
-	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	done := func() { _ = s.m.pg.SetSetting(flag, "true") }
 	var seed *agent.ToolSeed
 	for _, sd := range agent.BuiltinToolSeeds() {
 		if sd.Key == "record_fact" {
@@ -34,7 +38,15 @@ func (s *Server) refreshRecordFactContract() {
 		}
 	}
 	row, err := s.m.pg.GetTool("record_fact")
-	if err != nil || row == nil || seed == nil || !row.System || row.Kind != "builtin" {
+	if err != nil {
+		log.Printf("[facts] read record_fact for the contract refresh: %v", err)
+		return
+	}
+	if row == nil || seed == nil {
+		return
+	}
+	if !row.System || row.Kind != "builtin" {
+		done()
 		return
 	}
 	legacyTool, legacyFacts, legacyItems := agent.RecordFactLegacyDescriptions()
@@ -76,6 +88,7 @@ WHERE key='record_fact' AND system AND kind='builtin'
 		log.Printf("[facts] refresh record_fact contract: %v", err)
 		return
 	}
+	done()
 	log.Printf("[facts] record_fact now publishes the facts-only contract (one-time)")
 }
 
