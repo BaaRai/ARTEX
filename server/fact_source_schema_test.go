@@ -35,12 +35,13 @@ func TestRecordFactSourceSchemaUpgrade(t *testing.T) {
 	t.Cleanup(func() { pg.UpdateTool(old.Key, old.Description, old.Schema, bindings, old.Enabled) })
 
 	// Simulate a pre-provenance row customised by the operator: no source
-	// property, an edited description and an edited parameter description.
+	// property on the facts items, an edited description and an edited
+	// parameter description (facts-only contract: the items carry the fields).
 	var schema map[string]any
 	if err := json.Unmarshal(old.Schema, &schema); err != nil {
 		t.Fatal(err)
 	}
-	props := schema["properties"].(map[string]any)
+	props := schema["properties"].(map[string]any)["facts"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
 	delete(props, "source")
 	props["confidence"].(map[string]any)["description"] = "operator confidence text"
 	custom, _ := json.Marshal(schema)
@@ -72,16 +73,23 @@ func TestRecordFactSourceSchemaUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got struct {
-		Properties map[string]map[string]any `json:"properties"`
+		Properties struct {
+			Facts struct {
+				Items struct {
+					Properties map[string]map[string]any `json:"properties"`
+				} `json:"items"`
+			} `json:"facts"`
+		} `json:"properties"`
 	}
 	if err := json.Unmarshal(tool.Schema, &got); err != nil {
 		t.Fatal(err)
 	}
+	itemProps := got.Properties.Facts.Items.Properties
 	wantEnum := "[target_response tool_output third_party_intel operator_input inference]"
-	if src := got.Properties["source"]; src == nil || fmt.Sprint(src["enum"]) != wantEnum {
+	if src := itemProps["source"]; src == nil || fmt.Sprint(src["enum"]) != wantEnum {
 		t.Fatalf("upgrade did not add the source enum: %s", tool.Schema)
 	}
-	if tool.Description != "operator description" || got.Properties["confidence"]["description"] != "operator confidence text" || len(got.Properties) != len(props)+1 {
+	if tool.Description != "operator description" || itemProps["confidence"]["description"] != "operator confidence text" || len(itemProps) != len(props)+1 {
 		t.Fatalf("operator configuration overwritten: %q %s", tool.Description, tool.Schema)
 	}
 
@@ -92,15 +100,18 @@ func TestRecordFactSourceSchemaUpgrade(t *testing.T) {
 	}
 }
 
-// resolvedRecordFactProps returns the properties of record_fact as ToolResolve
-// serves it to the worker.
+// resolvedRecordFactProps returns the facts[] item properties of record_fact as
+// ToolResolve serves it to the worker.
 func resolvedRecordFactProps(t *testing.T) map[string]any {
 	t.Helper()
 	tools := agent.ToolResolve()(context.Background(), "worker", agent.NewToolSet(nil, "").WorkerTools())
 	for _, tl := range tools {
 		if tl.Name() == "record_fact" {
 			props, _ := tl.InputSchema()["properties"].(map[string]any)
-			return props
+			facts, _ := props["facts"].(map[string]any)
+			items, _ := facts["items"].(map[string]any)
+			itemProps, _ := items["properties"].(map[string]any)
+			return itemProps
 		}
 	}
 	t.Fatal("worker lost record_fact")

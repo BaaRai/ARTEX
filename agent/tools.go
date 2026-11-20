@@ -394,8 +394,21 @@ func readTool(name, desc string, schema map[string]any, run func(context.Context
 }
 
 func writeTool(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
+	return buildWriteTool(name, desc, schema, false, run)
+}
+
+// writeRawTool is writeTool for a handler that validates its own input: the
+// harness skips its schema check (Spec.RawInput), so the published schema can
+// be stricter (required properties) than the legacy shapes the handler still
+// accepts, and refusals carry the handler's own message instead of the
+// SDK's generic one.
+func writeRawTool(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
+	return buildWriteTool(name, desc, schema, true, run)
+}
+
+func buildWriteTool(name, desc string, schema map[string]any, raw bool, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
 	return actool.Build(actool.Spec{
-		Name: name, Description: desc, Schema: schema,
+		Name: name, Description: desc, Schema: schema, RawInput: raw,
 		Permissions: func(context.Context, json.RawMessage, acperm.Context) acperm.Decision { return acperm.Allowed() },
 		Run: func(ctx context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
 			return run(ctx, in)
@@ -417,6 +430,12 @@ func (t *ToolSet) readExpTool(name, desc string, schema map[string]any, run func
 
 func (t *ToolSet) writeExpTool(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
 	return writeTool(name, desc, schema, t.needExploration(name, run))
+}
+
+// writeExpToolRaw is writeExpTool with the harness schema check skipped (see
+// writeRawTool); the handler validates the input itself.
+func (t *ToolSet) writeExpToolRaw(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
+	return writeRawTool(name, desc, schema, t.needExploration(name, run))
 }
 
 // needExploration wraps a handler so it only runs with an exploration store.
@@ -1588,15 +1607,30 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 	return id, nil
 }
 
+// runningIntent is the intent this ToolSet works for (the worker's claimed
+// intent, set by SetOwnerNode), or 0 when the owner node is not an intent
+// (planner: the task root) or unknown.
+func (t *ToolSet) runningIntent() int64 {
+	if t.ts == nil || t.ownerNode <= 0 {
+		return 0
+	}
+	node, err := t.ts.GetNode(t.ownerNode)
+	if err != nil || node == nil || node.Kind != db.KindIntent {
+		return 0
+	}
+	return node.ID
+}
+
 func (t *ToolSet) recordFact() actool.CoreTool {
-	return t.writeExpTool("record_fact", "Write an exploration [fact/conclusion] into the exploration graph, linked to the intent that produced it (intent_id). Used to record exploration results — both [positive conclusions] like fingerprinting/enumeration, and [negative conclusions] like 'port closed'/'parameter not injectable'/'no login entry found'.\n"+
+	return t.writeExpToolRaw("record_fact", "Write an exploration [fact/conclusion] into the exploration graph, linked to the intent that produced it (intent_id). Used to record exploration results — both [positive conclusions] like fingerprinting/enumeration, and [negative conclusions] like 'port closed'/'parameter not injectable'/'no login entry found'.\n"+
 		"⚠️Multiple observations from one exploration must be [consolidated into ONE fact], not split into many; whenever they can be merged into one fact, use one: summary = a one-sentence summary of this conclusion, detail = the related details (may contain multiple concrete items). Example: a fingerprinting intent → one fact {summary:'identified the tech stack and response characteristics of site X', detail:'nginx 1.25 / Vue3 / 200 / title=.. / body_len=..'}, rather than one fact each for status code, fingerprint, and title. One intent usually produces exactly one fact; splitting too finely bloats the graph endlessly.\n"+
-		"★The facts array writes several [mutually distinct] conclusions at once (each may omit intent_id, defaulting to the top-level intent_id). Returns an ids array, same length and order as facts.\n"+
+		"★facts is the only parameter: facts:[{...}] with one item per [mutually distinct] conclusion, usually exactly one item. Returns an ids array, same length and order as facts. An item without intent_id is linked to the intent you are running.\n"+
 		"⚠️Write only conclusions you [actually saw] in tool output — don't extrapolate. evidence and confidence keep inaccurate conclusions from polluting the graph:\n"+
 		"  · evidence = [one line] of key evidence supporting this conclusion (the command + the one or two most proving output lines), **keep it brief** — details belong in detail; don't paste large output blocks here.\n"+
 		"  · confidence = observed (seen directly in output) | inferred (inferred from phenomena).\n"+
 		"  · source = where the content came from: target_response (content the target itself returned: page bodies, headers, error messages, banners, even when a tool fetched it) | tool_output (a tool's own result about the target: port states, scanner verdicts, status codes, timings) | third_party_intel (OSINT, CVE databases, public reports) | operator_input (given by the human operator) | inference (your own reasoning; the default when omitted). Any other value is refused.\n"+
-		"  · **Negative conclusions** (not injectable / port closed / no entry found, etc.) state only \"observation + tentative reading\" — state what you actually saw; whether to abandon the direction is for the planner to decide globally; always provide evidence, mark inferred when the means weren't exhausted or the evidence is weak (including probed only once, looks-like), and mark observed only when truly exhausted and directly seen.",
+		"  · **Negative conclusions** (not injectable / port closed / no entry found, etc.) state only \"observation + tentative reading\" — state what you actually saw; whether to abandon the direction is for the planner to decide globally; always provide evidence, mark inferred when the means weren't exhausted or the evidence is weak (including probed only once, looks-like), and mark observed only when truly exhausted and directly seen."+
+		recordFactContractNote,
 		recordFactSchema(),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			a, batch, err := decodeRecordFactInput(in)
@@ -1607,7 +1641,12 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 			if !batch {
 				items = []factItem{a.factItem}
 			}
-			defaultIntent := pid(a.factItem.IntentID) // top-level intent_id = batch default
+			// Default intent of the items: a legacy top-level intent_id, else the
+			// intent this worker is running (the published schema has no top level).
+			defaultIntent := pid(a.factItem.IntentID)
+			if defaultIntent <= 0 {
+				defaultIntent = t.runningIntent()
+			}
 
 			ids := make([]int64, len(items))
 			errs := map[string]string{}
