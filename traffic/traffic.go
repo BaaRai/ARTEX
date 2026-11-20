@@ -136,6 +136,28 @@ CREATE TABLE IF NOT EXISTS raw_tcp_streams (
 );
 CREATE INDEX IF NOT EXISTS idx_raw_tcp_host    ON raw_tcp_streams(host);
 CREATE INDEX IF NOT EXISTS idx_raw_tcp_started ON raw_tcp_streams(started_at DESC, id DESC);
+
+-- Raw UDP datagrams relayed through opt-in SOCKS5 UDP ASSOCIATE (P4.1c).
+-- Stored separately from HTTP exchanges: a UDP datagram never creates a row
+-- in exchanges. No fragmentation reassembly is performed: each forwarded
+-- datagram is recorded individually as it arrives. Oversized payloads spill
+-- atomically to _blobs/sha256 and register their hashes in blob_refs under
+-- the datagram's udp-* id.
+CREATE TABLE IF NOT EXISTS raw_udp_datagrams (
+  id             TEXT PRIMARY KEY,
+  association_id TEXT NOT NULL,
+  protocol       TEXT NOT NULL DEFAULT 'udp',
+  host           TEXT NOT NULL,
+  port           INTEGER NOT NULL,
+  direction      TEXT NOT NULL,              -- 'c2s' | 's2c'
+  ts             INTEGER NOT NULL,           -- unix milliseconds
+  size           INTEGER NOT NULL DEFAULT 0, -- datagram payload bytes
+  preview        BLOB,
+  blob           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_raw_udp_assoc ON raw_udp_datagrams(association_id, ts);
+CREATE INDEX IF NOT EXISTS idx_raw_udp_host  ON raw_udp_datagrams(host);
+CREATE INDEX IF NOT EXISTS idx_raw_udp_ts    ON raw_udp_datagrams(ts DESC, id DESC);
 `
 
 // ftsSchema is applied separately from indexSchema: a driver build without FTS5

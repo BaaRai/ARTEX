@@ -31,15 +31,26 @@ const (
 	// Setting a non-empty address also enables the listener unless
 	// ARTEX_SOCKS5_ENABLED is explicitly false/0/off/no.
 	SOCKS5AddrEnv = "ARTEX_SOCKS5_ADDR"
+	// SOCKS5UDPEnabledEnv turns on RFC 1928 UDP ASSOCIATE (IPv4 first) on the
+	// SOCKS5 listener when set to 1/true/on/yes. Off by default: when off,
+	// UDP ASSOCIATE is refused with reply 0x07 and no UDP relay socket is opened.
+	// Setting ARTEX_SOCKS5_UDP_ENABLED=1 also enables the SOCKS5 listener on
+	// ARTEX_SOCKS5_ADDR (or DefaultSOCKS5Addr) unless ARTEX_SOCKS5_ENABLED is
+	// explicitly false/0/off/no.
+	SOCKS5UDPEnabledEnv = "ARTEX_SOCKS5_UDP_ENABLED"
 
-	DefaultSOCKS5Addr             = "127.0.0.1:1080"
-	DefaultSOCKS5MaxConcurrent    = 64
-	DefaultSOCKS5MaxBytesPerDir   = 4 * 1024 * 1024
-	DefaultSOCKS5PreviewBytes     = blobPreview
-	DefaultSOCKS5IdleTimeout      = 2 * time.Minute
-	DefaultSOCKS5HandshakeTimeout = 10 * time.Second
-	DefaultSOCKS5DialTimeout      = 30 * time.Second
-	DefaultSOCKS5PaceTimeout      = paceWaitMax
+	DefaultSOCKS5Addr               = "127.0.0.1:1080"
+	DefaultSOCKS5MaxConcurrent      = 64
+	DefaultSOCKS5MaxBytesPerDir     = 4 * 1024 * 1024
+	DefaultSOCKS5PreviewBytes       = blobPreview
+	DefaultSOCKS5IdleTimeout        = 2 * time.Minute
+	DefaultSOCKS5HandshakeTimeout   = 10 * time.Second
+	DefaultSOCKS5DialTimeout        = 30 * time.Second
+	DefaultSOCKS5PaceTimeout        = paceWaitMax
+	DefaultSOCKS5UDPMaxDatagrams    = 1000
+	DefaultSOCKS5UDPMaxBytes        = 4 * 1024 * 1024
+	DefaultSOCKS5UDPIdleTimeout     = 2 * time.Minute
+	DefaultSOCKS5UDPMaxDatagramSize = 65535
 )
 
 // RFC 1928 / RFC 1929 protocol constants.
@@ -97,6 +108,24 @@ type SOCKS5Config struct {
 	// OnRecord, when non-nil, receives each completed raw TCP capture.
 	// When nil and attached to a Traffic store, the store's raw-TCP recorder runs.
 	OnRecord func(RawTCPCapture)
+
+	// EnableUDP opts into RFC 1928 UDP ASSOCIATE (IPv4 first, P4.1c).
+	// Off by default: when false, UDP ASSOCIATE returns 0x07.
+	EnableUDP bool
+	// UDPMaxDatagrams caps total forwarded datagrams (c2s + s2c) per UDP association (default 1000).
+	UDPMaxDatagrams int
+	// UDPMaxBytes caps total forwarded payload bytes (c2s + s2c) per UDP association (default 4 MiB).
+	UDPMaxBytes int64
+	// UDPIdleTimeout closes a UDP association after no forwarded datagrams move (default 2m).
+	UDPIdleTimeout time.Duration
+	// UDPPreviewBytes caps inline preview per stored UDP datagram before blob spill (default PreviewBytes / 8 KiB).
+	UDPPreviewBytes int
+	// ResolveUDP4 enforces the target gate and resolves each UDP datagram destination
+	// to a verified IPv4 *net.UDPAddr before forwarding. Defaults to intercept.PinnedUDP4Resolver("socks5-udp", false).
+	ResolveUDP4 func(ctx context.Context, addr string) (*net.UDPAddr, error)
+	// OnRecordUDP, when non-nil, receives each forwarded UDP datagram capture.
+	// When nil and attached to a Traffic store, the store's raw-UDP recorder runs.
+	OnRecordUDP func(RawUDPCapture)
 }
 
 // RawTCPCapture is the completed metadata and bounded directional payloads of
@@ -114,11 +143,22 @@ type RawTCPCapture struct {
 	Paced     bool
 }
 
-// SOCKS5ConfigFromEnv parses ARTEX_SOCKS5_ENABLED and ARTEX_SOCKS5_ADDR.
-// Returns (cfg, false) when disabled (the default).
+// SOCKS5ConfigFromEnv parses ARTEX_SOCKS5_ENABLED, ARTEX_SOCKS5_ADDR, and
+// ARTEX_SOCKS5_UDP_ENABLED. Returns (cfg, false) when disabled (the default).
 func SOCKS5ConfigFromEnv() (SOCKS5Config, bool) {
 	rawEnabled := strings.ToLower(strings.TrimSpace(os.Getenv(SOCKS5EnabledEnv)))
 	rawAddr := strings.TrimSpace(os.Getenv(SOCKS5AddrEnv))
+	rawUDP := strings.ToLower(strings.TrimSpace(os.Getenv(SOCKS5UDPEnabledEnv)))
+
+	enableUDP := false
+	switch rawUDP {
+	case "", "0", "false", "off", "no":
+		enableUDP = false
+	case "1", "true", "on", "yes":
+		enableUDP = true
+	default:
+		log.Printf("[traffic] %s=%q is not a boolean; leaving SOCKS5 UDP disabled", SOCKS5UDPEnabledEnv, rawUDP)
+	}
 
 	switch rawEnabled {
 	case "0", "false", "off", "no":
@@ -128,12 +168,16 @@ func SOCKS5ConfigFromEnv() (SOCKS5Config, bool) {
 		if addr == "" {
 			addr = DefaultSOCKS5Addr
 		}
-		return SOCKS5Config{Addr: addr}, true
+		return SOCKS5Config{Addr: addr, EnableUDP: enableUDP}, true
 	case "":
-		if rawAddr == "" {
+		if rawAddr == "" && !enableUDP {
 			return SOCKS5Config{}, false
 		}
-		return SOCKS5Config{Addr: rawAddr}, true
+		addr := rawAddr
+		if addr == "" {
+			addr = DefaultSOCKS5Addr
+		}
+		return SOCKS5Config{Addr: addr, EnableUDP: enableUDP}, true
 	default:
 		log.Printf("[traffic] %s=%q is not a boolean; leaving SOCKS5 disabled", SOCKS5EnabledEnv, rawEnabled)
 		return SOCKS5Config{}, false
@@ -168,6 +212,21 @@ func (c SOCKS5Config) withDefaults() SOCKS5Config {
 	if c.DialContext == nil {
 		c.DialContext = intercept.PinnedDialer("socks5", false)
 	}
+	if c.UDPMaxDatagrams <= 0 {
+		c.UDPMaxDatagrams = DefaultSOCKS5UDPMaxDatagrams
+	}
+	if c.UDPMaxBytes <= 0 {
+		c.UDPMaxBytes = DefaultSOCKS5UDPMaxBytes
+	}
+	if c.UDPIdleTimeout <= 0 {
+		c.UDPIdleTimeout = DefaultSOCKS5UDPIdleTimeout
+	}
+	if c.UDPPreviewBytes <= 0 {
+		c.UDPPreviewBytes = c.PreviewBytes
+	}
+	if c.ResolveUDP4 == nil {
+		c.ResolveUDP4 = intercept.PinnedUDP4Resolver("socks5-udp", false)
+	}
 	return c
 }
 
@@ -181,10 +240,10 @@ type socks5Server struct {
 	wg   sync.WaitGroup
 
 	mu     sync.Mutex
-	active map[net.Conn]struct{}
+	active map[io.Closer]struct{}
 }
 
-// StartSOCKS5 binds and starts the opt-in RFC 1928 SOCKS5 CONNECT listener on t.
+// StartSOCKS5 binds and starts the opt-in RFC 1928 SOCKS5 listener on t.
 // Returns the actual bound address (useful when cfg.Addr uses port 0).
 func (t *Traffic) StartSOCKS5(cfg SOCKS5Config) (string, error) {
 	cfg = cfg.withDefaults()
@@ -198,7 +257,7 @@ func (t *Traffic) StartSOCKS5(cfg SOCKS5Config) (string, error) {
 		ln:     ln,
 		sem:    make(chan struct{}, cfg.MaxConcurrent),
 		stop:   make(chan struct{}),
-		active: map[net.Conn]struct{}{},
+		active: map[io.Closer]struct{}{},
 	}
 	t.socksMu.Lock()
 	if t.socks != nil {
@@ -222,6 +281,14 @@ func (t *Traffic) SOCKS5Addr() string {
 		return ""
 	}
 	return t.socks.ln.Addr().String()
+}
+
+// SOCKS5UDPEnabled reports whether the running SOCKS5 listener accepts RFC 1928
+// UDP ASSOCIATE requests.
+func (t *Traffic) SOCKS5UDPEnabled() bool {
+	t.socksMu.Lock()
+	defer t.socksMu.Unlock()
+	return t.socks != nil && t.socks.cfg.EnableUDP
 }
 
 func (s *socks5Server) Close() error {
@@ -248,7 +315,7 @@ func (s *socks5Server) stopping() bool {
 	}
 }
 
-func (s *socks5Server) trackConn(c net.Conn) bool {
+func (s *socks5Server) trackConn(c io.Closer) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopping() {
@@ -258,7 +325,7 @@ func (s *socks5Server) trackConn(c net.Conn) bool {
 	return true
 }
 
-func (s *socks5Server) untrackConn(c net.Conn) {
+func (s *socks5Server) untrackConn(c io.Closer) {
 	s.mu.Lock()
 	delete(s.active, c)
 	s.mu.Unlock()
@@ -302,9 +369,13 @@ func (s *socks5Server) handleConn(client net.Conn) {
 		return
 	}
 
-	host, port, rep := readSOCKS5Request(client)
+	cmd, atyp, host, port, rep := readSOCKS5Request(client, s.cfg.EnableUDP)
 	if rep != socks5RepSuccess {
 		_ = writeSOCKS5Reply(client, rep, nil)
+		return
+	}
+	if cmd == socks5CmdUDPAssociate {
+		s.handleUDPAssociate(client, atyp, host, port)
 		return
 	}
 
@@ -458,16 +529,16 @@ func readSOCKS5UserPass(conn net.Conn) (paced bool, ok bool) {
 	return string(uname) == egress.PaceUser, true
 }
 
-func readSOCKS5Request(conn net.Conn) (host string, port int, rep byte) {
+func readSOCKS5Request(conn net.Conn, enableUDP bool) (cmd byte, atyp byte, host string, port int, rep byte) {
 	var hdr [4]byte
 	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
-		return "", 0, socks5RepGeneralFailure
+		return 0, 0, "", 0, socks5RepGeneralFailure
 	}
 	if hdr[0] != socks5Version || hdr[2] != 0x00 {
-		return "", 0, socks5RepGeneralFailure
+		return 0, 0, "", 0, socks5RepGeneralFailure
 	}
-	cmd := hdr[1]
-	atyp := hdr[3]
+	cmd = hdr[1]
+	atyp = hdr[3]
 
 	// Read the address + port before rejecting unsupported commands so the stream
 	// stays cleanly framed if the peer reads our reply.
@@ -475,56 +546,75 @@ func readSOCKS5Request(conn net.Conn) (host string, port int, rep byte) {
 	case socks5AtypIPv4:
 		var ip [4]byte
 		if _, err := io.ReadFull(conn, ip[:]); err != nil {
-			return "", 0, socks5RepGeneralFailure
+			return cmd, atyp, "", 0, socks5RepGeneralFailure
 		}
 		host = net.IP(ip[:]).String()
 	case socks5AtypDomain:
 		var l [1]byte
 		if _, err := io.ReadFull(conn, l[:]); err != nil {
-			return "", 0, socks5RepGeneralFailure
+			return cmd, atyp, "", 0, socks5RepGeneralFailure
 		}
 		if l[0] == 0 {
-			return "", 0, socks5RepGeneralFailure
+			return cmd, atyp, "", 0, socks5RepGeneralFailure
 		}
 		dom := make([]byte, int(l[0]))
 		if _, err := io.ReadFull(conn, dom); err != nil {
-			return "", 0, socks5RepGeneralFailure
+			return cmd, atyp, "", 0, socks5RepGeneralFailure
 		}
 		host = strings.TrimSpace(string(dom))
 		if host == "" {
-			return "", 0, socks5RepGeneralFailure
+			return cmd, atyp, "", 0, socks5RepGeneralFailure
 		}
 	case socks5AtypIPv6:
 		var ip [16]byte
 		if _, err := io.ReadFull(conn, ip[:]); err != nil {
-			return "", 0, socks5RepGeneralFailure
+			return cmd, atyp, "", 0, socks5RepGeneralFailure
 		}
 		host = net.IP(ip[:]).String()
 	default:
-		return "", 0, socks5RepAtypNotSupported
+		return cmd, atyp, "", 0, socks5RepAtypNotSupported
 	}
 
 	var pbuf [2]byte
 	if _, err := io.ReadFull(conn, pbuf[:]); err != nil {
-		return "", 0, socks5RepGeneralFailure
+		return cmd, atyp, "", 0, socks5RepGeneralFailure
 	}
 	port = int(binary.BigEndian.Uint16(pbuf[:]))
 
-	if cmd != socks5CmdConnect {
-		return "", 0, socks5RepCmdNotSupported
+	switch cmd {
+	case socks5CmdConnect:
+		if port <= 0 || port > 65535 {
+			return cmd, atyp, "", 0, socks5RepGeneralFailure
+		}
+		return cmd, atyp, host, port, socks5RepSuccess
+	case socks5CmdUDPAssociate:
+		if !enableUDP {
+			return cmd, atyp, "", 0, socks5RepCmdNotSupported
+		}
+		// P4.1c covers IPv4 first; IPv6 UDP ASSOCIATE is rejected explicitly.
+		if atyp == socks5AtypIPv6 {
+			return cmd, atyp, "", 0, socks5RepAtypNotSupported
+		}
+		return cmd, atyp, host, port, socks5RepSuccess
+	default:
+		return cmd, atyp, "", 0, socks5RepCmdNotSupported
 	}
-	if port <= 0 || port > 65535 {
-		return "", 0, socks5RepGeneralFailure
-	}
-	return host, port, socks5RepSuccess
 }
 
 func writeSOCKS5Reply(conn net.Conn, rep byte, bindAddr net.Addr) error {
 	var bndIP net.IP
 	var bndPort int
-	if tcpAddr, ok := bindAddr.(*net.TCPAddr); ok && tcpAddr != nil {
-		bndIP = tcpAddr.IP
-		bndPort = tcpAddr.Port
+	switch a := bindAddr.(type) {
+	case *net.TCPAddr:
+		if a != nil {
+			bndIP = a.IP
+			bndPort = a.Port
+		}
+	case *net.UDPAddr:
+		if a != nil {
+			bndIP = a.IP
+			bndPort = a.Port
+		}
 	}
 	var out []byte
 	if ip4 := bndIP.To4(); ip4 != nil {

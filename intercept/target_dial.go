@@ -117,9 +117,23 @@ func (i *Interceptor) dialTarget(ctx context.Context, scope TargetScope, toolNam
 func addrTarget(network, addr string) (Target, error) {
 	switch network {
 	case "tcp", "tcp4", "tcp6":
+		return parseTargetAddr(addr)
 	default:
 		return Target{}, fmt.Errorf("network %q is not tcp", network)
 	}
+}
+
+// addrTargetUDP reads the address a UDP relay datagram names.
+func addrTargetUDP(network, addr string) (Target, error) {
+	switch network {
+	case "udp", "udp4", "udp6":
+		return parseTargetAddr(addr)
+	default:
+		return Target{}, fmt.Errorf("network %q is not udp", network)
+	}
+}
+
+func parseTargetAddr(addr string) (Target, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return Target{}, err
@@ -236,4 +250,140 @@ func (i *Interceptor) DialSOCKS5(ctx context.Context, network, addr string) (net
 		}
 	}
 	return i.dialAddrs(ctx, network, ct.ips, t.Port)
+}
+
+// PinnedUDP4Resolver returns a per-datagram IPv4 destination resolver that
+// enforces the platform's target gate identically to PinnedDialer. When scoped
+// is true, a missing or incomplete TargetScope fails closed with
+// TARGET_GATE_UNAVAILABLE.
+func PinnedUDP4Resolver(toolName string, scoped bool) func(ctx context.Context, addr string) (*net.UDPAddr, error) {
+	return func(ctx context.Context, addr string) (*net.UDPAddr, error) {
+		scope, ok := TargetScopeFromContext(ctx)
+		switch {
+		case !ok && scoped:
+			return nil, &dialError{code: TargetGateUnavailable, target: addr, reason: "the target scope of the session did not reach the connection"}
+		case !ok:
+			return resolvePlainUDP4(ctx, addr)
+		case scope.Enabled == nil || !scope.Enabled():
+			if scope.Interceptor != nil {
+				return scope.Interceptor.ResolveUDP4(ctx, addr)
+			}
+			return resolvePlainUDP4(ctx, addr)
+		case scope.Interceptor == nil:
+			return nil, &dialError{code: TargetGateUnavailable, target: addr, reason: "the session's target scope carries no gate"}
+		}
+		return scope.Interceptor.resolveTargetUDP4(ctx, scope, toolName, addr)
+	}
+}
+
+// ResolveUDP4 enforces the platform's target gate before forwarding a SOCKS5
+// UDP ASSOCIATE datagram, reusing the exact same asset block rules, fresh DNS
+// resolution, and TargetScope pin/exemption logic as DialSOCKS5 / PinnedDialer.
+// Returns the first verified IPv4 *net.UDPAddr.
+func (i *Interceptor) ResolveUDP4(ctx context.Context, addr string) (*net.UDPAddr, error) {
+	if i == nil {
+		return resolvePlainUDP4(ctx, addr)
+	}
+	if scope, ok := TargetScopeFromContext(ctx); ok && scope.Enabled != nil && scope.Enabled() {
+		return i.resolveTargetUDP4(ctx, scope, "socks5-udp", addr)
+	}
+	t, err := addrTargetUDP("udp4", addr)
+	if err != nil {
+		return nil, &dialError{code: TargetGateUnavailable, target: addr, reason: "the address of the datagram could not be read (" + err.Error() + ")"}
+	}
+	if i.targets == nil {
+		return resolvePlainUDP4(ctx, addr)
+	}
+	rules, err := i.targets.BlockRules(db.TargetScopeRef{})
+	if err != nil {
+		return nil, &dialError{code: TargetGateUnavailable, target: t.String(), reason: "the asset rules could not be read: " + err.Error()}
+	}
+	ct := &checkedTarget{Target: t}
+	if t.Kind != TargetDomain {
+		ct.ips, ct.resolver, ct.resolvedAt = []string{t.Host}, literalResolver, time.Now().UTC()
+	}
+	if rule, hit := blockRule(rules, ct); hit {
+		return nil, &dialError{code: TargetRuleBlocked, target: t.String(), reason: fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason())}
+	}
+	if t.Kind == TargetDomain {
+		c := &targetCheck{i: i, ctx: ctx, tool: "socks5-udp", fresh: true}
+		c.resolve(ct, true)
+		if ct.err != nil {
+			return nil, ct.err
+		}
+		if rule, hit := blockRule(rules, ct); hit {
+			return nil, &dialError{code: TargetRuleBlocked, target: t.String(), reason: fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason())}
+		}
+	}
+	return firstIPv4UDPAddr(ct.ips, t.Port)
+}
+
+func (i *Interceptor) resolveTargetUDP4(ctx context.Context, scope TargetScope, toolName, addr string) (*net.UDPAddr, error) {
+	input, _ := json.Marshal(map[string]string{"udp": addr})
+	ctx = WithCall(ctx, toolName, input)
+	t, err := addrTargetUDP("udp4", addr)
+	if err != nil {
+		res := undeterminedTarget(ctx, scope, toolName, input, "the address of the datagram could not be read ("+err.Error()+")")
+		return nil, &dialError{code: res.Code, target: addr, reason: res.Reason}
+	}
+	blocked := func(res TargetResult) error {
+		return &dialError{code: res.Code, target: t.String(), reason: res.Reason}
+	}
+	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, fresh: true}
+	unpinned, res := c.run([]Target{t})
+	if res.Code != "" {
+		return nil, blocked(res)
+	}
+	if len(unpinned) > 0 {
+		scope.WaitBound = 0
+		res = i.RequestTargets(ctx, scope, toolName, input, unpinned, nil)
+		if res.Code == TargetApprovalPending {
+			res.Reason = notCovered(unpinned[0], scope)
+		}
+		return nil, blocked(res)
+	}
+	switch ct := c.checked[0]; ct.cover {
+	case coverDerived, coverNameOnly:
+		return resolvePlainUDP4(ctx, addr)
+	default:
+		return firstIPv4UDPAddr(ct.ips, t.Port)
+	}
+}
+
+func firstIPv4UDPAddr(ips []string, port int) (*net.UDPAddr, error) {
+	for _, raw := range ips {
+		a, err := netip.ParseAddr(raw)
+		if err == nil && a.Is4() {
+			return &net.UDPAddr{IP: net.IP(a.AsSlice()), Port: port}, nil
+		}
+	}
+	return nil, &net.AddrError{Err: "no IPv4 address found", Addr: strings.Join(ips, ", ")}
+}
+
+func resolvePlainUDP4(ctx context.Context, addr string) (*net.UDPAddr, error) {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return nil, fmt.Errorf("invalid udp port %q", portStr)
+	}
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		ip4 := ip.To4()
+		if ip4 == nil {
+			return nil, &net.AddrError{Err: "IPv6 UDP destination not supported", Addr: addr}
+		}
+		return &net.UDPAddr{IP: ip4, Port: port}, nil
+	}
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range ips {
+		if ip4 := ip.To4(); ip4 != nil {
+			return &net.UDPAddr{IP: ip4, Port: port}, nil
+		}
+	}
+	return nil, &net.AddrError{Err: "no IPv4 address found", Addr: addr}
 }

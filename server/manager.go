@@ -465,8 +465,11 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 			m.reloadRewriteRules() // in place before the proxy accepts a connection
 			if scfg, ok := traffic.SOCKS5ConfigFromEnv(); ok {
 				scfg.DialContext = m.interceptor.DialSOCKS5
+				scfg.ResolveUDP4 = m.interceptor.ResolveUDP4
 				if bound, serr := tr.StartSOCKS5(scfg); serr != nil {
 					log.Printf("[traffic/socks5] disabled: %v", serr)
+				} else if scfg.EnableUDP {
+					log.Printf("[traffic/socks5] opt-in SOCKS5 CONNECT + UDP ASSOCIATE listener on %s", bound)
 				} else {
 					log.Printf("[traffic/socks5] opt-in SOCKS5 CONNECT listener on %s", bound)
 				}
