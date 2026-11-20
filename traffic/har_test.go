@@ -204,13 +204,64 @@ func TestHARRoundTripPlainBase64BinaryEmptyAndLargeBlob(t *testing.T) {
 		t.Fatalf("ExportHAR entries = %d, want 4", len(exported.Log.Entries))
 	}
 
-	// Verify no invented fields (time, serverIPAddress) in marshaled HAR JSON.
+	// Verify HAR 1.2 required keys are present with explicit unknown placeholders
+	// and serverIPAddress is not fabricated.
 	rawExported, err := json.Marshal(exported)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(rawExported), `"serverIPAddress"`) || strings.Contains(string(rawExported), `"time":`) {
-		t.Fatalf("exported HAR invented prohibited fields: %s", string(rawExported))
+	if strings.Contains(string(rawExported), `"serverIPAddress"`) {
+		t.Fatalf("exported HAR invented serverIPAddress: %s", string(rawExported))
+	}
+	var rawDoc map[string]any
+	if err := json.Unmarshal(rawExported, &rawDoc); err != nil {
+		t.Fatal(err)
+	}
+	rawLog := rawDoc["log"].(map[string]any)
+	rawEntries := rawLog["entries"].([]any)
+	firstEntry := rawEntries[0].(map[string]any)
+	if got, ok := firstEntry["time"].(float64); !ok || got != 0 {
+		t.Fatalf("entry.time = %#v, want 0", firstEntry["time"])
+	}
+	if cacheObj, ok := firstEntry["cache"].(map[string]any); !ok || len(cacheObj) != 0 {
+		t.Fatalf("entry.cache = %#v, want {}", firstEntry["cache"])
+	}
+	timingsObj, ok := firstEntry["timings"].(map[string]any)
+	if !ok || timingsObj["send"] != float64(-1) || timingsObj["wait"] != float64(-1) || timingsObj["receive"] != float64(-1) {
+		t.Fatalf("entry.timings = %#v, want {send:-1 wait:-1 receive:-1}", firstEntry["timings"])
+	}
+	reqObj := firstEntry["request"].(map[string]any)
+	if cookies, ok := reqObj["cookies"].([]any); !ok || len(cookies) != 0 {
+		t.Fatalf("request.cookies = %#v, want []", reqObj["cookies"])
+	}
+	if qs, ok := reqObj["queryString"].([]any); !ok || len(qs) != 0 {
+		t.Fatalf("request.queryString = %#v, want []", reqObj["queryString"])
+	}
+	if hs, ok := reqObj["headersSize"].(float64); !ok || hs != -1 {
+		t.Fatalf("request.headersSize = %#v, want -1", reqObj["headersSize"])
+	}
+	if _, ok := reqObj["httpVersion"].(string); !ok {
+		t.Fatalf("request.httpVersion missing: %#v", reqObj)
+	}
+	respObj := firstEntry["response"].(map[string]any)
+	if cookies, ok := respObj["cookies"].([]any); !ok || len(cookies) != 0 {
+		t.Fatalf("response.cookies = %#v, want []", respObj["cookies"])
+	}
+	if redir, ok := respObj["redirectURL"].(string); !ok || redir != "" {
+		t.Fatalf("response.redirectURL = %#v, want \"\"", respObj["redirectURL"])
+	}
+	if hs, ok := respObj["headersSize"].(float64); !ok || hs != -1 {
+		t.Fatalf("response.headersSize = %#v, want -1", respObj["headersSize"])
+	}
+	if _, ok := respObj["httpVersion"].(string); !ok {
+		t.Fatalf("response.httpVersion missing: %#v", respObj)
+	}
+	if _, ok := respObj["statusText"].(string); !ok {
+		t.Fatalf("response.statusText missing: %#v", respObj)
+	}
+	contentObj := respObj["content"].(map[string]any)
+	if _, ok := contentObj["mimeType"].(string); !ok {
+		t.Fatalf("response.content.mimeType missing: %#v", contentObj)
 	}
 
 	// Verify stable chronological ordering & exact body encodings.
@@ -432,8 +483,9 @@ VALUES(?,?,?,?,?)`, id, "GET /"+id+" HTTP/1.1\nHost: "+host, []byte{}, "HTTP/1.1
 		t.Fatalf("entry-capped log fields = %+v", docEntryCap.Log)
 	}
 
-	// Truncation by MaxTotalBytes.
-	docByteCap, metaByteCap, err := tr.ExportHAR(PageQuery{RespMin: -1, RespMax: -1}, HARExportOptions{MaxTotalBytes: 15})
+	// Truncation by MaxTotalBytes (note: raw cap counts both headers and bodies).
+	// Each row here has req_head (~46B) + resp_head (15B) + body (10B) ≈ 71B.
+	docByteCap, metaByteCap, err := tr.ExportHAR(PageQuery{RespMin: -1, RespMax: -1}, HARExportOptions{MaxTotalBytes: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,5 +494,324 @@ VALUES(?,?,?,?,?)`, id, "GET /"+id+" HTTP/1.1\nHost: "+host, []byte{}, "HTTP/1.1
 	}
 	if !docByteCap.Log.Truncated || docByteCap.Log.TruncatedReason != "max_bytes" || docByteCap.Log.TotalMatched != 3 {
 		t.Fatalf("byte-capped log fields = %+v", docByteCap.Log)
+	}
+}
+
+func TestHARTwoIdenticalExchangesRoundTripPreservesBoth(t *testing.T) {
+	src, err := Open(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+
+	// Two distinct ARTEX exchanges recorded in the same second with identical
+	// method, URL, status, headers, and bodies.
+	for _, id := range []string{"dup-a", "dup-b"} {
+		if _, err := src.DB().Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path)
+VALUES(?,1700000000,'same.example','POST','/ping','https://same.example/ping',200,'application/json',2,2,'')`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := src.DB().Exec(`INSERT INTO exchange_bodies(id,req_head,req_body,resp_head,resp_body)
+VALUES(?,'POST /ping HTTP/1.1\nHost: same.example\n',?,'HTTP/1.1 200 OK\n',?)`, id, []byte("{}"), []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	exported, meta, err := src.ExportHAR(PageQuery{RespMin: -1, RespMax: -1}, HARExportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Exported != 2 || len(exported.Log.Entries) != 2 {
+		t.Fatalf("export = %+v, want 2 entries", meta)
+	}
+	if exported.Log.Entries[0].ArtexExchangeID != "dup-a" || exported.Log.Entries[1].ArtexExchangeID != "dup-b" {
+		t.Fatalf("exported _artexExchangeId = [%q %q], want [dup-a dup-b]",
+			exported.Log.Entries[0].ArtexExchangeID, exported.Log.Entries[1].ArtexExchangeID)
+	}
+	raw, err := json.Marshal(exported)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-importing into src is idempotent (both skipped).
+	reimpSrc, err := src.ImportHAR(raw, HARImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reimpSrc.Imported != 0 || reimpSrc.Skipped != 2 || reimpSrc.Failed != 0 {
+		t.Fatalf("re-import into src = %+v, want 0/2/0", reimpSrc)
+	}
+
+	// Importing into a fresh store preserves BOTH dup-a and dup-b (no collapse!).
+	dst, err := Open(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dst.Close()
+
+	impDst, err := dst.ImportHAR(raw, HARImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if impDst.Imported != 2 || impDst.Skipped != 0 || impDst.Failed != 0 {
+		t.Fatalf("import into fresh dst = %+v, want 2/0/0", impDst)
+	}
+	if count, err := dst.Count(); err != nil || count != 2 {
+		t.Fatalf("dst.Count() = (%d, %v), want 2", count, err)
+	}
+	if _, _, err := dst.Get("dup-a"); err != nil {
+		t.Fatalf("dup-a missing in dst: %v", err)
+	}
+	if _, _, err := dst.Get("dup-b"); err != nil {
+		t.Fatalf("dup-b missing in dst: %v", err)
+	}
+	// Re-importing into dst is idempotent.
+	reimpDst, err := dst.ImportHAR(raw, HARImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reimpDst.Imported != 0 || reimpDst.Skipped != 2 || reimpDst.Failed != 0 {
+		t.Fatalf("re-import into dst = %+v, want 0/2/0", reimpDst)
+	}
+}
+
+func TestHARExportBinaryNearCapFitsUnderImportLimit(t *testing.T) {
+	src, err := Open(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+
+	// Binary body near the 20 MiB raw export cap (~19.5 MiB). After base64
+	// expansion (4/3x ≈ 26 MiB) plus headers and JSON envelope, it must still
+	// marshal strictly under the 32 MiB HTTP import limit.
+	const bodySize = 19*1024*1024 + 512*1024
+	binBody := make([]byte, bodySize)
+	for i := range binBody {
+		binBody[i] = byte((i*31 + 0x80) & 0xff)
+	}
+	binBody[0] = 0x00 // guarantee binary/base64 encoding
+
+	respB := src.spill(binBody, "application/octet-stream")
+	reqHead := "GET /big.bin HTTP/1.1\nHost: cap.example\n" + strings.Repeat("X-Pad: 0123456789\n", 10)
+	respHead := "HTTP/1.1 200 OK\nContent-Type: application/octet-stream\n"
+	if err := src.insertExchange("bin-near-cap", 1700000100, "cap.example", "GET", "/big.bin",
+		"https://cap.example/big.bin", 200, "application/octet-stream", 0, len(binBody), reqHead, storedBody{}, respHead, respB); err != nil {
+		t.Fatal(err)
+	}
+
+	doc, meta, err := src.ExportHAR(PageQuery{RespMin: -1, RespMax: -1}, HARExportOptions{})
+	if err != nil {
+		t.Fatalf("ExportHAR near cap: %v", err)
+	}
+	if meta.Truncated || meta.Exported != 1 {
+		t.Fatalf("near-cap export meta = %+v, want Truncated=false Exported=1", meta)
+	}
+	// Verify headers were counted in TotalBytes alongside the body.
+	wantRaw := int64(len(reqHead) + len(respHead) + len(binBody))
+	if meta.TotalBytes != wantRaw {
+		t.Fatalf("meta.TotalBytes = %d, want %d (headers + body)", meta.TotalBytes, wantRaw)
+	}
+
+	rawJSON, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const httpImportLimit = 32 << 20
+	if len(rawJSON) >= httpImportLimit {
+		t.Fatalf("marshaled near-cap binary HAR = %d bytes, exceeds 32 MiB import limit (%d)", len(rawJSON), httpImportLimit)
+	}
+
+	// Re-importing into a fresh store succeeds with exact bytes.
+	dst, err := Open(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dst.Close()
+	imp, err := dst.ImportHAR(rawJSON, HARImportOptions{})
+	if err != nil || imp.Imported != 1 || imp.Failed != 0 || imp.Truncated {
+		t.Fatalf("re-import near-cap binary HAR = (%+v, %v)", imp, err)
+	}
+	_, _, _, gotResp, err := dst.loadFullExchange("bin-near-cap", "")
+	if err != nil || !bytes.Equal(gotResp, binBody) {
+		t.Fatalf("near-cap binary round-trip mismatch: len=%d err=%v", len(gotResp), err)
+	}
+}
+
+func TestHARImportPostDataParamsAndCookies(t *testing.T) {
+	tr, err := Open(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+
+	// Entry 0: form body ONLY in postData.params, cookies ONLY in cookies arrays.
+	// Entry 1: Cookie and Set-Cookie already present in headers -> must NOT duplicate.
+	harJSON := `{
+		"log": {
+			"version": "1.2",
+			"entries": [
+				{
+					"startedDateTime": "2026-05-02T09:00:00Z",
+					"request": {
+						"method": "POST",
+						"url": "https://form.example/login",
+						"headers": [{"name": "Host", "value": "form.example"}],
+						"cookies": [
+							{"name": "sid", "value": "abc123"},
+							{"name": "theme", "value": "dark"}
+						],
+						"postData": {
+							"mimeType": "application/x-www-form-urlencoded",
+							"params": [
+								{"name": "user", "value": "alice"},
+								{"name": "msg", "value": "hello world"}
+							]
+						}
+					},
+					"response": {
+						"status": 302,
+						"headers": [{"name": "Location", "value": "/home"}],
+						"cookies": [
+							{"name": "session", "value": "xyz", "path": "/", "httpOnly": true, "secure": true}
+						],
+						"content": {"size": 0, "mimeType": ""}
+					}
+				},
+				{
+					"startedDateTime": "2026-05-02T09:00:05Z",
+					"request": {
+						"method": "GET",
+						"url": "https://form.example/home",
+						"headers": [{"name": "Cookie", "value": "existing=1"}],
+						"cookies": [{"name": "existing", "value": "1"}]
+					},
+					"response": {
+						"status": 200,
+						"headers": [{"name": "Set-Cookie", "value": "kept=2; Path=/"}],
+						"cookies": [{"name": "kept", "value": "2", "path": "/"}],
+						"content": {"size": 2, "mimeType": "text/plain", "text": "ok"}
+					}
+				}
+			]
+		}
+	}`
+
+	res, err := tr.ImportHAR([]byte(harJSON), HARImportOptions{})
+	if err != nil || res.Imported != 2 || res.Failed != 0 {
+		t.Fatalf("ImportHAR(params+cookies) = (%+v, %v)", res, err)
+	}
+
+	rows, _, err := tr.Page(PageQuery{Host: "form.example", RespMin: -1, RespMax: -1, Sort: "ts", Order: "asc"}, 0, 10)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("Page = (%d, %v)", len(rows), err)
+	}
+	req0, resp0, err := tr.Get(rows[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req0, "Cookie: sid=abc123; theme=dark\n") {
+		t.Fatalf("entry 0 missing synthesized Cookie header: %q", req0)
+	}
+	if !strings.Contains(req0, "user=alice&msg=hello+world") {
+		t.Fatalf("entry 0 missing postData.params form body: %q", req0)
+	}
+	if !strings.Contains(resp0, "Set-Cookie: session=xyz; Path=/; Secure; HttpOnly\n") {
+		t.Fatalf("entry 0 missing synthesized Set-Cookie header: %q", resp0)
+	}
+
+	req1, resp1, err := tr.Get(rows[1].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(req1, "Cookie:") != 1 {
+		t.Fatalf("entry 1 duplicated Cookie header: %q", req1)
+	}
+	if strings.Count(resp1, "Set-Cookie:") != 1 {
+		t.Fatalf("entry 1 duplicated Set-Cookie header: %q", resp1)
+	}
+}
+
+func TestHARImportStripsAndRedactsURLUserinfo(t *testing.T) {
+	tr, err := Open(t.TempDir(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+
+	harJSON := `{
+		"log": {
+			"version": "1.2",
+			"entries": [
+				{
+					"startedDateTime": "2026-05-03T10:00:00Z",
+					"request": {
+						"method": "GET",
+						"url": "https://alice:supersecret@api.example.com/v1/items?k=1",
+						"headers": []
+					},
+					"response": {
+						"status": 200,
+						"headers": [],
+						"content": {"mimeType": "text/plain", "text": "ok"}
+					}
+				},
+				{
+					"startedDateTime": "2026-05-03T10:00:01Z",
+					"request": {
+						"method": "BAD METHOD",
+						"url": "https://bob:topsecret@bad.example.com/fail",
+						"headers": []
+					},
+					"response": {"status": 200, "headers": [], "content": {}}
+				},
+				{
+					"startedDateTime": "2026-05-03T10:00:02Z",
+					"request": {
+						"method": "GET",
+						"url": "https://carol:hiddenpass@bad host/x",
+						"headers": []
+					},
+					"response": {"status": 200, "headers": [], "content": {}}
+				}
+			]
+		}
+	}`
+
+	res, err := tr.ImportHAR([]byte(harJSON), HARImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Imported != 1 || res.Failed != 2 || len(res.Errors) != 2 {
+		t.Fatalf("ImportHAR userinfo result = %+v, want 1 imported / 2 failed", res)
+	}
+	for _, e := range res.Errors {
+		for _, secret := range []string{"bob", "topsecret", "carol", "hiddenpass"} {
+			if strings.Contains(e.URL, secret) || strings.Contains(e.Reason, secret) {
+				t.Fatalf("import error leaked userinfo %q: %+v", secret, e)
+			}
+		}
+	}
+
+	// Stored URL must have userinfo stripped.
+	rows, total, err := tr.Page(PageQuery{RespMin: -1, RespMax: -1}, 0, 10)
+	if err != nil || total != 1 || len(rows) != 1 {
+		t.Fatalf("Page = (%d, %d, %v)", len(rows), total, err)
+	}
+	if rows[0].URL != "https://api.example.com/v1/items?k=1" {
+		t.Fatalf("stored URL = %q, want userinfo stripped", rows[0].URL)
+	}
+	// FTS must NOT find the stripped password.
+	if found, tot, err := tr.Page(PageQuery{Query: "supersecret", RespMin: -1, RespMax: -1}, 0, 10); err != nil || tot != 0 || len(found) != 0 {
+		t.Fatalf("FTS leaked userinfo secret: %+v", found)
+	}
+	// Exported HAR must NOT contain the password.
+	doc, _, err := tr.ExportHAR(PageQuery{RespMin: -1, RespMax: -1}, HARExportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(doc)
+	if strings.Contains(string(raw), "supersecret") || strings.Contains(string(raw), "alice") {
+		t.Fatalf("exported HAR leaked userinfo: %s", string(raw))
 	}
 }

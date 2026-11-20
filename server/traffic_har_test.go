@@ -197,3 +197,60 @@ func TestTrafficHAREndpointsRequireAuth(t *testing.T) {
 		t.Fatalf("unauthenticated HAR export status=%d, want 401", wExp.Code)
 	}
 }
+
+func TestTrafficHARExportNearCapReimportsThroughHTTPHandler(t *testing.T) {
+	s, request := ingestServer(t)
+	tr := s.m.Traffic()
+
+	// Seed a binary exchange near the 20 MiB export raw cap (~19.5 MiB).
+	const bodySize = 19*1024*1024 + 512*1024
+	binBody := make([]byte, bodySize)
+	for i := range binBody {
+		binBody[i] = byte((i*17 + 0x81) & 0xff)
+	}
+	binBody[0] = 0x00
+
+	rawSeed, err := json.Marshal(traffic.HAR{
+		Log: &traffic.HARLog{
+			Version: "1.2",
+			Entries: []traffic.HAREntry{{
+				StartedDateTime: "2026-06-02T00:00:00Z",
+				Request:         traffic.HARRequest{Method: "GET", URL: "https://nearcap.example/bin", Headers: []traffic.HARHeader{}},
+				Response: traffic.HARResponse{
+					Status:  200,
+					Headers: []traffic.HARHeader{{Name: "Content-Type", Value: "application/octet-stream"}},
+					Content: traffic.HARContent{
+						Size:     len(binBody),
+						MimeType: "application/octet-stream",
+						Text:     base64.StdEncoding.EncodeToString(binBody),
+						Encoding: "base64",
+					},
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.ImportHAR(rawSeed, traffic.HARImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	wExp := request(http.MethodGet, "/api/traffic/export/har?host=nearcap.example", "")
+	if wExp.Code != http.StatusOK {
+		t.Fatalf("export status=%d", wExp.Code)
+	}
+	if wExp.Header().Get("X-ARTEX-HAR-Truncated") != "false" {
+		t.Fatalf("expected non-truncated export, headers=%+v", wExp.Header())
+	}
+	if wExp.Body.Len() >= decodeMaxBytes {
+		t.Fatalf("exported HAR size=%d exceeds decodeMaxBytes=%d", wExp.Body.Len(), decodeMaxBytes)
+	}
+
+	// Re-import the exact exported bytes through the HTTP handler (including
+	// limitRequestBody 32 MiB middleware) — must answer 200, never 413.
+	wImp := request(http.MethodPost, "/api/traffic/import/har", wExp.Body.String())
+	if wImp.Code != http.StatusOK {
+		t.Fatalf("re-import near-cap export via HTTP status=%d body=%s, want 200", wImp.Code, wImp.Body.String())
+	}
+}

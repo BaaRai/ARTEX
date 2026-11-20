@@ -32,19 +32,28 @@ const (
 
 	// DefaultHARMaxExportEntries caps how many exchanges a single HAR export emits.
 	DefaultHARMaxExportEntries = 1000
-	// DefaultHARMaxExportBytes caps total raw request+response body bytes emitted
-	// in a single HAR export.
-	DefaultHARMaxExportBytes int64 = 32 << 20
+	// DefaultHARMaxExportBytes caps total raw header + body bytes emitted in a
+	// single HAR export. At 20 MiB raw, even pure binary payloads expand via
+	// base64 (4/3x ≈ 26.7 MiB) plus HAR JSON overhead safely below the 32 MiB
+	// HTTP import limit.
+	DefaultHARMaxExportBytes int64 = 20 << 20
+	// DefaultHARMaxExportJSONBytes backstops the marshaled JSON size of an export
+	// (31 MiB, leaving 1 MiB margin below the 32 MiB import HTTP body cap) so
+	// even pathological JSON-escaped control-character payloads cannot exceed
+	// the import limit.
+	DefaultHARMaxExportJSONBytes int64 = 31 << 20
 
 	maxHARImportErrors = 50
+	maxArtexIDLen      = 128
 )
 
 // ErrInvalidHAR marks a malformed or unsupported HAR document (mapped to HTTP 400).
 var ErrInvalidHAR = errors.New("invalid HAR")
 
-// HAR is a minimal HAR 1.2 envelope. Only fields backed by the traffic store
-// are populated on export; timings, serverIPAddress, and synthetic headers are
-// never invented.
+// HAR is a HAR 1.2 envelope. Required HAR 1.2 fields that the traffic store
+// does not record use explicit unknown placeholders (time: 0, cache: {},
+// timings: {send:-1, wait:-1, receive:-1}, cookies: [], queryString: [],
+// headersSize: -1, redirectURL: "") rather than fabricated measurements.
 type HAR struct {
 	Log *HARLog `json:"log"`
 }
@@ -63,39 +72,75 @@ type HARCreator struct {
 	Version string `json:"version"`
 }
 
+type HARCache struct{}
+
+type HARTimings struct {
+	Send    float64 `json:"send"`
+	Wait    float64 `json:"wait"`
+	Receive float64 `json:"receive"`
+}
+
 type HAREntry struct {
 	StartedDateTime string      `json:"startedDateTime"`
+	Time            float64     `json:"time"`
 	Request         HARRequest  `json:"request"`
 	Response        HARResponse `json:"response"`
+	Cache           HARCache    `json:"cache"`
+	Timings         HARTimings  `json:"timings"`
+	ArtexExchangeID string      `json:"_artexExchangeId,omitempty"`
 }
 
 type HARRequest struct {
 	Method      string       `json:"method"`
 	URL         string       `json:"url"`
-	HTTPVersion string       `json:"httpVersion,omitempty"`
+	HTTPVersion string       `json:"httpVersion"`
+	Cookies     []HARCookie  `json:"cookies"`
 	Headers     []HARHeader  `json:"headers"`
+	QueryString []HARParam   `json:"queryString"`
 	PostData    *HARPostData `json:"postData,omitempty"`
+	HeadersSize int          `json:"headersSize"`
 	BodySize    int          `json:"bodySize"`
 }
 
 type HARPostData struct {
-	MimeType string `json:"mimeType,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Encoding string `json:"encoding,omitempty"`
+	MimeType string     `json:"mimeType,omitempty"`
+	Params   []HARParam `json:"params,omitempty"`
+	Text     string     `json:"text,omitempty"`
+	Encoding string     `json:"encoding,omitempty"`
+}
+
+type HARParam struct {
+	Name        string `json:"name"`
+	Value       string `json:"value"`
+	FileName    string `json:"fileName,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
+}
+
+type HARCookie struct {
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	Path     string `json:"path,omitempty"`
+	Domain   string `json:"domain,omitempty"`
+	Expires  string `json:"expires,omitempty"`
+	HTTPOnly bool   `json:"httpOnly,omitempty"`
+	Secure   bool   `json:"secure,omitempty"`
 }
 
 type HARResponse struct {
 	Status      int         `json:"status"`
-	StatusText  string      `json:"statusText,omitempty"`
-	HTTPVersion string      `json:"httpVersion,omitempty"`
+	StatusText  string      `json:"statusText"`
+	HTTPVersion string      `json:"httpVersion"`
+	Cookies     []HARCookie `json:"cookies"`
 	Headers     []HARHeader `json:"headers"`
 	Content     HARContent  `json:"content"`
+	RedirectURL string      `json:"redirectURL"`
+	HeadersSize int         `json:"headersSize"`
 	BodySize    int         `json:"bodySize"`
 }
 
 type HARContent struct {
 	Size     int    `json:"size"`
-	MimeType string `json:"mimeType,omitempty"`
+	MimeType string `json:"mimeType"`
 	Text     string `json:"text,omitempty"`
 	Encoding string `json:"encoding,omitempty"`
 }
@@ -132,22 +177,27 @@ type HARImportResult struct {
 type HARExportOptions struct {
 	CreatorVersion string
 	MaxEntries     int
-	MaxTotalBytes  int64
+	MaxTotalBytes  int64 // raw header + body bytes cap
+	MaxJSONBytes   int64 // marshaled JSON cap (defaults to DefaultHARMaxExportJSONBytes)
 }
 
 // HARExportMeta reports export counts and whether a cap stopped the export.
 type HARExportMeta struct {
 	Exported        int
 	TotalMatched    int
-	TotalBytes      int64
+	TotalBytes      int64 // total raw header + body bytes exported
 	Truncated       bool
 	TruncatedReason string // "" | "max_entries" | "max_bytes"
 }
 
 // ImportHAR parses a HAR 1.2 JSON document and inserts valid entries into the
-// traffic store. Entries receive a deterministic ID so re-importing the same
-// HAR is idempotent and skips existing rows. Imported traffic is never passed
-// through capture rewrite rules and never gains exchange_rewrites rows.
+// traffic store. ARTEX-exported entries carrying a valid _artexExchangeId
+// preserve that ID so distinct exchanges within the same second round-trip
+// cleanly; external HAR entries receive a deterministic content-based har- ID
+// so re-importing the same HAR is idempotent and skips existing rows. URL
+// userinfo is stripped before storing, indexing, or reporting errors. Imported
+// traffic never passes through capture rewrite rules and never gains
+// exchange_rewrites rows.
 func (t *Traffic) ImportHAR(raw []byte, opts HARImportOptions) (HARImportResult, error) {
 	if t == nil {
 		return HARImportResult{}, errors.New("traffic store is not available")
@@ -170,7 +220,11 @@ func (t *Traffic) ImportHAR(raw []byte, opts HARImportOptions) (HARImportResult,
 	var res HARImportResult
 	addErr := func(idx int, rawURL, reason string) {
 		if len(res.Errors) < maxHARImportErrors {
-			res.Errors = append(res.Errors, HARImportError{Index: idx, URL: rawURL, Reason: reason})
+			res.Errors = append(res.Errors, HARImportError{
+				Index:  idx,
+				URL:    redactURLUserinfo(rawURL),
+				Reason: reason,
+			})
 		}
 	}
 
@@ -262,8 +316,12 @@ func parseHAREntry(entry HAREntry) (parsedHARExchange, error) {
 	rawURL := strings.TrimSpace(entry.Request.URL)
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return parsedHARExchange{}, fmt.Errorf("invalid request url %q", entry.Request.URL)
+		return parsedHARExchange{}, fmt.Errorf("invalid request url %q", redactURLUserinfo(entry.Request.URL))
 	}
+	// Strip URL userinfo (user:pass@) before storing, indexing, or exporting,
+	// matching the asset store.
+	u.User = nil
+
 	method := strings.ToUpper(strings.TrimSpace(entry.Request.Method))
 	if method == "" || !validHeaderName(method) {
 		return parsedHARExchange{}, fmt.Errorf("invalid request method %q", entry.Request.Method)
@@ -272,23 +330,48 @@ func parseHAREntry(entry HAREntry) (parsedHARExchange, error) {
 		return parsedHARExchange{}, fmt.Errorf("invalid response status %d", entry.Response.Status)
 	}
 
-	reqHeaderText, reqCT, err := formatHARHeaders(entry.Request.Headers)
+	reqHeaderText, reqCT, hasReqCookie, err := formatHARHeaders(entry.Request.Headers, "Cookie")
 	if err != nil {
 		return parsedHARExchange{}, fmt.Errorf("invalid request headers: %w", err)
 	}
-	respHeaderText, respHeaderCT, err := formatHARHeaders(entry.Response.Headers)
+	if !hasReqCookie && len(entry.Request.Cookies) > 0 {
+		cookieHeader, err := formatHARRequestCookies(entry.Request.Cookies)
+		if err != nil {
+			return parsedHARExchange{}, fmt.Errorf("invalid request cookies: %w", err)
+		}
+		reqHeaderText += cookieHeader
+	}
+
+	respHeaderText, respHeaderCT, hasRespSetCookie, err := formatHARHeaders(entry.Response.Headers, "Set-Cookie")
 	if err != nil {
 		return parsedHARExchange{}, fmt.Errorf("invalid response headers: %w", err)
+	}
+	if !hasRespSetCookie && len(entry.Response.Cookies) > 0 {
+		setCookies, err := formatHARResponseCookies(entry.Response.Cookies)
+		if err != nil {
+			return parsedHARExchange{}, fmt.Errorf("invalid response cookies: %w", err)
+		}
+		respHeaderText += setCookies
 	}
 
 	var reqBody []byte
 	if entry.Request.PostData != nil {
-		reqBody, err = decodeHARBody(entry.Request.PostData.Text, entry.Request.PostData.Encoding)
-		if err != nil {
-			return parsedHARExchange{}, fmt.Errorf("invalid request postData: %w", err)
-		}
-		if reqCT == "" {
-			reqCT = strings.TrimSpace(entry.Request.PostData.MimeType)
+		if entry.Request.PostData.Text != "" || len(entry.Request.PostData.Params) == 0 {
+			reqBody, err = decodeHARBody(entry.Request.PostData.Text, entry.Request.PostData.Encoding)
+			if err != nil {
+				return parsedHARExchange{}, fmt.Errorf("invalid request postData: %w", err)
+			}
+			if reqCT == "" {
+				reqCT = strings.TrimSpace(entry.Request.PostData.MimeType)
+			}
+		} else {
+			reqBody = encodeHARFormParams(entry.Request.PostData.Params)
+			if reqCT == "" {
+				reqCT = strings.TrimSpace(entry.Request.PostData.MimeType)
+				if reqCT == "" {
+					reqCT = "application/x-www-form-urlencoded"
+				}
+			}
 		}
 	}
 	respBody, err := decodeHARBody(entry.Response.Content.Text, entry.Response.Content.Encoding)
@@ -316,6 +399,9 @@ func parseHAREntry(entry HAREntry) (parsedHARExchange, error) {
 
 	canonicalURL := u.String()
 	id := harExchangeID(ts, method, canonicalURL, entry.Response.Status, reqBody, respBody)
+	if preserved := strings.TrimSpace(entry.ArtexExchangeID); validArtexExchangeID(preserved) {
+		id = preserved
+	}
 	return parsedHARExchange{
 		id:          id,
 		ts:          ts,
@@ -336,7 +422,7 @@ func parseHAREntry(entry HAREntry) (parsedHARExchange, error) {
 // harExchangeID derives a deterministic ID from the exchange's timestamp (Unix
 // seconds), method, canonical URL, status code, and SHA-256 digests of both
 // bodies. Using Unix seconds matches exchanges.ts so export -> re-import
-// produces the exact same ID.
+// produces the exact same ID for external HARs.
 func harExchangeID(ts int64, method, rawURL string, status int, reqBody, respBody []byte) string {
 	reqSum := sha256.Sum256(reqBody)
 	respSum := sha256.Sum256(respBody)
@@ -345,12 +431,56 @@ func harExchangeID(ts int64, method, rawURL string, status int, reqBody, respBod
 	return "har-" + hex.EncodeToString(h.Sum(nil))
 }
 
-func formatHARHeaders(headers []HARHeader) (formatted string, contentType string, err error) {
+func validArtexExchangeID(id string) bool {
+	if id == "" || len(id) > maxArtexIDLen {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == ':' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// redactURLUserinfo strips user:pass@ from both parseable and malformed URLs so
+// credentials never leak into stored URLs or import error details.
+func redactURLUserinfo(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if u, err := url.Parse(s); err == nil && u.User != nil {
+		u.User = nil
+		return u.String()
+	}
+	schemeEnd := strings.Index(s, "://")
+	if schemeEnd < 0 {
+		return s
+	}
+	rest := s[schemeEnd+3:]
+	authEnd := strings.IndexAny(rest, "/?#")
+	auth := rest
+	tail := ""
+	if authEnd >= 0 {
+		auth = rest[:authEnd]
+		tail = rest[authEnd:]
+	}
+	if at := strings.LastIndexByte(auth, '@'); at >= 0 {
+		return s[:schemeEnd+3] + auth[at+1:] + tail
+	}
+	return s
+}
+
+func formatHARHeaders(headers []HARHeader, checkHeader string) (formatted string, contentType string, hasChecked bool, err error) {
 	var b strings.Builder
 	for _, h := range headers {
 		name := strings.TrimSpace(h.Name)
 		if name == "" {
-			return "", "", errors.New("empty header name")
+			return "", "", false, errors.New("empty header name")
 		}
 		// Skip HTTP/2 pseudo-headers (:method, :authority, :scheme, :path, :status)
 		// emitted by browser DevTools HAR exports; their semantics live in the
@@ -359,20 +489,90 @@ func formatHARHeaders(headers []HARHeader) (formatted string, contentType string
 			continue
 		}
 		if !validHeaderName(name) {
-			return "", "", fmt.Errorf("invalid header name %q", h.Name)
+			return "", "", false, fmt.Errorf("invalid header name %q", h.Name)
 		}
 		if strings.ContainsAny(h.Value, "\r\n\x00") {
-			return "", "", fmt.Errorf("header %s contains a line break or NUL byte", name)
+			return "", "", false, fmt.Errorf("header %s contains a line break or NUL byte", name)
 		}
 		if contentType == "" && strings.EqualFold(name, "Content-Type") {
 			contentType = strings.TrimSpace(h.Value)
+		}
+		if checkHeader != "" && strings.EqualFold(name, checkHeader) {
+			hasChecked = true
 		}
 		b.WriteString(name)
 		b.WriteString(": ")
 		b.WriteString(h.Value)
 		b.WriteByte('\n')
 	}
-	return b.String(), contentType, nil
+	return b.String(), contentType, hasChecked, nil
+}
+
+func formatHARRequestCookies(cookies []HARCookie) (string, error) {
+	parts := make([]string, 0, len(cookies))
+	for _, c := range cookies {
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			return "", errors.New("empty cookie name")
+		}
+		if strings.ContainsAny(name, " \t;=\r\n\x00") || strings.ContainsAny(c.Value, "\r\n\x00") {
+			return "", fmt.Errorf("invalid cookie %q", name)
+		}
+		parts = append(parts, name+"="+c.Value)
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return "Cookie: " + strings.Join(parts, "; ") + "\n", nil
+}
+
+func formatHARResponseCookies(cookies []HARCookie) (string, error) {
+	var b strings.Builder
+	for _, c := range cookies {
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			return "", errors.New("empty cookie name")
+		}
+		if strings.ContainsAny(name, " \t;=\r\n\x00") ||
+			strings.ContainsAny(c.Value, "\r\n\x00") ||
+			strings.ContainsAny(c.Path, ";\r\n\x00") ||
+			strings.ContainsAny(c.Domain, ";\r\n\x00") ||
+			strings.ContainsAny(c.Expires, ";\r\n\x00") {
+			return "", fmt.Errorf("invalid response cookie %q", name)
+		}
+		b.WriteString("Set-Cookie: ")
+		b.WriteString(name)
+		b.WriteByte('=')
+		b.WriteString(c.Value)
+		if c.Path != "" {
+			b.WriteString("; Path=")
+			b.WriteString(c.Path)
+		}
+		if c.Domain != "" {
+			b.WriteString("; Domain=")
+			b.WriteString(c.Domain)
+		}
+		if c.Expires != "" {
+			b.WriteString("; Expires=")
+			b.WriteString(c.Expires)
+		}
+		if c.Secure {
+			b.WriteString("; Secure")
+		}
+		if c.HTTPOnly {
+			b.WriteString("; HttpOnly")
+		}
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
+}
+
+func encodeHARFormParams(params []HARParam) []byte {
+	parts := make([]string, 0, len(params))
+	for _, p := range params {
+		parts = append(parts, url.QueryEscape(p.Name)+"="+url.QueryEscape(p.Value))
+	}
+	return []byte(strings.Join(parts, "&"))
 }
 
 func decodeHARBody(text, encoding string) ([]byte, error) {
@@ -467,10 +667,11 @@ VALUES(?,?,?,?,?,?,?)`,
 	return true, nil
 }
 
-// ExportHAR exports exchanges matching f as a HAR 1.2 document in stable
-// chronological order (ts ASC, id ASC), capped by opts.MaxEntries and
-// opts.MaxTotalBytes. Truncation is reported in both HARExportMeta and the
-// HAR 1.2 custom fields _truncated / _truncatedReason / _totalMatched.
+// ExportHAR exports exchanges matching f as a valid HAR 1.2 document in stable
+// chronological order (ts ASC, id ASC), capped by opts.MaxEntries,
+// opts.MaxTotalBytes (raw headers + bodies), and opts.MaxJSONBytes (marshaled
+// JSON size). Truncation is reported in both HARExportMeta and the HAR 1.2
+// custom fields _truncated / _truncatedReason / _totalMatched.
 func (t *Traffic) ExportHAR(f PageQuery, opts HARExportOptions) (HAR, HARExportMeta, error) {
 	if t == nil {
 		return HAR{}, HARExportMeta{}, errors.New("traffic store is not available")
@@ -480,6 +681,9 @@ func (t *Traffic) ExportHAR(f PageQuery, opts HARExportOptions) (HAR, HARExportM
 	}
 	if opts.MaxTotalBytes <= 0 {
 		opts.MaxTotalBytes = DefaultHARMaxExportBytes
+	}
+	if opts.MaxJSONBytes <= 0 {
+		opts.MaxJSONBytes = DefaultHARMaxExportJSONBytes
 	}
 	creatorVer := strings.TrimSpace(opts.CreatorVersion)
 	if creatorVer == "" {
@@ -532,28 +736,34 @@ func (t *Traffic) ExportHAR(f PageQuery, opts HARExportOptions) (HAR, HARExportM
 		matched = matched[:opts.MaxEntries]
 	}
 
+	// Reserve envelope overhead (~512 bytes) for the outer log object + metadata.
+	const harEnvelopeMargin int64 = 512
+	var encodedJSONBytes int64 = harEnvelopeMargin
+
 	entries := make([]HAREntry, 0, len(matched))
 	for _, r := range matched {
 		reqHead, reqBytes, respHead, respBytes, err := t.loadFullExchange(r.id, r.legacyPath)
 		if err != nil {
 			return HAR{}, HARExportMeta{}, err
 		}
-		entryBytes := int64(len(reqBytes) + len(respBytes))
-		if meta.TotalBytes+entryBytes > opts.MaxTotalBytes {
+		entryRawBytes := int64(len(reqHead) + len(reqBytes) + len(respHead) + len(respBytes))
+		if meta.TotalBytes+entryRawBytes > opts.MaxTotalBytes {
 			meta.Truncated = true
 			meta.TruncatedReason = "max_bytes"
 			break
 		}
-		meta.TotalBytes += entryBytes
 
 		reqProto, reqHeaders := parseStoredRequestHead(reqHead)
 		respProto, respStatusText, respHeaders := parseStoredResponseHead(respHead)
 
 		harReq := HARRequest{
 			Method:      r.method,
-			URL:         r.rawURL,
+			URL:         redactURLUserinfo(r.rawURL),
 			HTTPVersion: reqProto,
+			Cookies:     []HARCookie{},
 			Headers:     reqHeaders,
+			QueryString: []HARParam{},
+			HeadersSize: -1,
 			BodySize:    len(reqBytes),
 		}
 		if len(reqBytes) > 0 {
@@ -577,16 +787,37 @@ func (t *Traffic) ExportHAR(f PageQuery, opts HARExportOptions) (HAR, HARExportM
 			Status:      r.status,
 			StatusText:  respStatusText,
 			HTTPVersion: respProto,
+			Cookies:     []HARCookie{},
 			Headers:     respHeaders,
 			Content:     harContent,
+			RedirectURL: "",
+			HeadersSize: -1,
 			BodySize:    len(respBytes),
 		}
 
-		entries = append(entries, HAREntry{
+		entry := HAREntry{
 			StartedDateTime: time.Unix(r.ts, 0).UTC().Format(time.RFC3339),
+			Time:            0,
 			Request:         harReq,
 			Response:        harResp,
-		})
+			Cache:           HARCache{},
+			Timings:         HARTimings{Send: -1, Wait: -1, Receive: -1},
+			ArtexExchangeID: r.id,
+		}
+
+		entryJSON, err := json.Marshal(entry)
+		if err != nil {
+			return HAR{}, HARExportMeta{}, err
+		}
+		// +1 for the separating comma inside the JSON array.
+		if encodedJSONBytes+int64(len(entryJSON))+1 > opts.MaxJSONBytes {
+			meta.Truncated = true
+			meta.TruncatedReason = "max_bytes"
+			break
+		}
+		encodedJSONBytes += int64(len(entryJSON)) + 1
+		meta.TotalBytes += entryRawBytes
+		entries = append(entries, entry)
 	}
 
 	if !meta.Truncated && hitEntryCap {
