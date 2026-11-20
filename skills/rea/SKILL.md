@@ -13,8 +13,8 @@ The rea MCP server runs on the host machine, not inside this container. Its tool
 rea opens files on the HOST filesystem, not inside the container. Only files under the bind-mounted data directory are visible to both sides; the exact host prefix is deployment-specific (check the compose file, or ask the operator via task chat when unknown).
 
 Rules:
-- Save or download every target file under the container data directory (for example `/app/data/tasks/<task_id>/rea/`) so both sides can see it. Files elsewhere in the container are invisible to rea.
-- Always pass the host-side path in rea tool parameters. If open_binary reports the path as missing, you passed a container path: retry with the host-side equivalent of the same mount.
+- Save or download every target file inside your run directory, with a relative path such as `rea/` (your working directory is the run directory, and it sits under the bind-mounted data directory, so both sides can see it). Do not save to an absolute path outside the run directory: the Write tool refuses it. Files elsewhere in the container are invisible to rea.
+- Always pass the host-side path in rea tool parameters: take the absolute container path of that directory (`pwd` in the run directory, plus `rea/`) and replace the container data directory prefix with the host prefix of the same mount. If open_binary reports the path as missing, you passed a container path: retry with the host-side equivalent of the same mount.
 - Verify the file exists on your side (ls) before opening it with rea.
 
 ## 2. Session lifecycle
