@@ -461,6 +461,7 @@ type sink struct {
 	t       *Traffic
 	paced   sync.Map // ClientConn.Id of a marked connection -> struct{}
 	streams sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
+	bypass  sync.Map // flowKey of a replay flow bypassing rewrite rules -> struct{}
 }
 
 // maybePassthrough marks a host to be tunneled transparently on the next

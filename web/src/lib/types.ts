@@ -905,6 +905,14 @@ export interface TrafficExchange {
   resp_len: number;
 }
 
+export interface TrafficRewriteStats {
+  large_responses: number;
+  capacity_refusals: number;
+  tombstone_drops: number;
+  conversions: number;
+  sweeps: number;
+}
+
 export interface TrafficResp {
   enabled: boolean;
   proxy?: string;
@@ -913,6 +921,7 @@ export interface TrafficResp {
   page?: number;
   size?: number;
   exchanges?: TrafficExchange[];
+  rewrite?: TrafficRewriteStats;
 }
 
 // Full raw request/response of one exchange (lazy-loaded on row select).
@@ -955,12 +964,14 @@ export interface TrafficReplayHeader {
 }
 
 // POST /api/traffic/replay. Host is not sent: the server takes it from url.
+// apply_rules defaults to false (bypasses capture rewrite rules).
 export interface TrafficReplayRequest {
   method: string;
   url: string;
   headers: TrafficReplayHeader[];
   body: string;
   body_base64: boolean;
+  apply_rules?: boolean;
 }
 
 export interface TrafficReplayResult {

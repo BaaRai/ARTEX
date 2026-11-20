@@ -4,8 +4,9 @@ A rewrite rule matches a request or a response that goes through the capture pro
 how to change it: the method, the path and query, headers, the body, the status code.
 
 **Status: the capture proxy applies enabled rules to HTTP traffic (request and response phases),
-and records what it did.** Not yet in this change: archive format, a per-replay rule toggle, the web UI,
-and the proof flag. See [Application in the capture proxy](#application-in-the-capture-proxy) for
+records what it did, tags bound evidence snapshots, supports per-replay rule opt-in, and exposes
+rewrite counters on `GET /api/traffic`.** Not yet in this change: archive format and the traffic-list /
+rule-management web UI. See [Application in the capture proxy](#application-in-the-capture-proxy) for
 what is covered and what is not.
 
 Rules are a convenience for the operator, not a security control: a rule that fails leaves the
@@ -207,5 +208,18 @@ the slot may be converted into a tombstone if a new reservation needs the room.
 
 ### Replay
 
-Replay goes through the recording proxy like any other traffic, so the enabled rules apply to a
-replay and the resulting exchange is traced like a captured one. There is no per-replay toggle yet.
+`POST /api/traffic/replay` sends the edited request through the recording proxy so the exchange is
+captured in Traffic, but **bypasses capture rewrite rules by default** (`apply_rules: false`). To
+run enabled capture rules against a replay and trace them like captured traffic, opt in with
+`"apply_rules": true` (or check **Apply capture rewrite rules** in the Replay panel).
+
+When `apply_rules` is false, `traffic.Replay` registers a single-use random 32-byte hex nonce in an
+in-memory registry, attaches the internal header `X-ARTEX-Replay-Nonce: <nonce>`, and removes the
+nonce when the call returns. The capture proxy strips `X-ARTEX-Replay-Nonce` unconditionally in the
+request hook so the target never sees it; only a value matching a registered nonce bypasses both
+request and response rule phases, while any forged header is stripped and ignored.
+
+### Stats
+
+`GET /api/traffic` includes a `rewrite` object exposing the proxy's `RewriteStats` counters since
+start: `large_responses`, `capacity_refusals`, `tombstone_drops`, `conversions`, and `sweeps`.

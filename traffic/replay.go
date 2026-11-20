@@ -3,8 +3,10 @@ package traffic
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +15,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,7 +31,60 @@ const (
 	maxReplayResponse = 2 * 1024 * 1024
 	// maxReplayHeaders bounds the number of request header lines.
 	maxReplayHeaders = 200
+	// replayNonceHeader is the internal header Replay attaches when ApplyRules
+	// is false (the default). The capture proxy strips it unconditionally
+	// before forwarding and bypasses rewrite rules only when the value matches
+	// a live registered nonce.
+	replayNonceHeader = "X-ARTEX-Replay-Nonce"
 )
+
+// replayNonces holds live single-use nonces for in-flight Replay calls that
+// bypass capture rewrite rules (ApplyRules == false).
+var replayNonces struct {
+	mu   sync.Mutex
+	live map[string]struct{}
+}
+
+func registerReplayNonce() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("replay nonce: %w", err)
+	}
+	nonce := hex.EncodeToString(raw[:])
+	replayNonces.mu.Lock()
+	if replayNonces.live == nil {
+		replayNonces.live = map[string]struct{}{}
+	}
+	replayNonces.live[nonce] = struct{}{}
+	replayNonces.mu.Unlock()
+	return nonce, nil
+}
+
+func deleteReplayNonce(nonce string) {
+	replayNonces.mu.Lock()
+	delete(replayNonces.live, nonce)
+	replayNonces.mu.Unlock()
+}
+
+func consumeReplayNonce(nonce string) bool {
+	if nonce == "" {
+		return false
+	}
+	replayNonces.mu.Lock()
+	_, ok := replayNonces.live[nonce]
+	if ok {
+		delete(replayNonces.live, nonce)
+	}
+	replayNonces.mu.Unlock()
+	return ok
+}
+
+func replayNonceCount() int {
+	replayNonces.mu.Lock()
+	n := len(replayNonces.live)
+	replayNonces.mu.Unlock()
+	return n
+}
 
 // ErrReplayInvalid marks a replay request rejected before anything is sent.
 var ErrReplayInvalid = errors.New("invalid replay request")
@@ -45,10 +101,11 @@ type ReplayHeader struct {
 
 // ReplayRequest is the edited request to send.
 type ReplayRequest struct {
-	Method  string
-	URL     string
-	Headers []ReplayHeader
-	Body    []byte
+	Method     string
+	URL        string
+	Headers    []ReplayHeader
+	Body       []byte
+	ApplyRules bool
 }
 
 // ReplayResult is the response as received by the client side of the proxy.
@@ -78,6 +135,7 @@ var replayDropped = map[string]bool{
 	"Te":                  true,
 	"Trailer":             true,
 	"Expect":              true,
+	http.CanonicalHeaderKey(replayNonceHeader): true,
 }
 
 // replayRecorded reports whether the proxy records a request to scheme://host:
@@ -215,6 +273,15 @@ func (t *Traffic) Replay(ctx context.Context, req ReplayRequest) (ReplayResult, 
 	httpReq.Header = header
 	if host != "" {
 		httpReq.Host = host
+	}
+
+	if !req.ApplyRules && t.replayRecorded(target.Scheme, target.Host) {
+		nonce, err := registerReplayNonce()
+		if err != nil {
+			return ReplayResult{}, err
+		}
+		defer deleteReplayNonce(nonce)
+		httpReq.Header.Set(replayNonceHeader, nonce)
 	}
 
 	start := time.Now()
