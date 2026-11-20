@@ -113,6 +113,29 @@ CREATE TABLE IF NOT EXISTS exchange_rewrites (
   after_blob    TEXT,
   PRIMARY KEY (exchange_id, seq)
 );
+
+-- Raw TCP streams relayed through the opt-in SOCKS5 CONNECT listener (P4.1a).
+-- Stored separately from HTTP exchanges: a raw TCP stream never creates a row
+-- in exchanges. Oversized directional payloads spill to _blobs/sha256 and
+-- register their hashes in blob_refs under the stream's tcp-* id.
+CREATE TABLE IF NOT EXISTS raw_tcp_streams (
+  id          TEXT PRIMARY KEY,
+  protocol    TEXT NOT NULL DEFAULT 'tcp',
+  host        TEXT NOT NULL,
+  port        INTEGER NOT NULL,
+  started_at  INTEGER NOT NULL,             -- unix milliseconds
+  ended_at    INTEGER NOT NULL,             -- unix milliseconds
+  duration_ms INTEGER NOT NULL,
+  c2s_bytes   INTEGER NOT NULL DEFAULT 0,
+  s2c_bytes   INTEGER NOT NULL DEFAULT 0,
+  truncated   INTEGER NOT NULL DEFAULT 0,
+  c2s_preview BLOB,
+  c2s_blob    TEXT,
+  s2c_preview BLOB,
+  s2c_blob    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_raw_tcp_host    ON raw_tcp_streams(host);
+CREATE INDEX IF NOT EXISTS idx_raw_tcp_started ON raw_tcp_streams(started_at DESC, id DESC);
 `
 
 // ftsSchema is applied separately from indexSchema: a driver build without FTS5

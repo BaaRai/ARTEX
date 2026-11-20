@@ -374,6 +374,11 @@ func (s *socks5Server) handleConn(client net.Conn) {
 }
 
 func (s *socks5Server) recordCapture(rec RawTCPCapture) {
+	if s.t != nil && s.t.db != nil {
+		if _, err := s.t.RecordRawTCPStream(rec, s.cfg.PreviewBytes); err != nil {
+			log.Printf("[traffic/socks5] failed to record raw tcp stream %s:%d: %v", rec.Host, rec.Port, err)
+		}
+	}
 	if s.cfg.OnRecord != nil {
 		s.cfg.OnRecord(rec)
 	}
