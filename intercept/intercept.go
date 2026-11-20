@@ -266,6 +266,10 @@ var defaultEnabledTools = []string{
 	"Bash", "WebFetch", "web_search",
 	"shell_open", "shell_send",
 	"Write", "Edit", "MultiEdit",
+	// ExecuteExtraTool dispatches MCP and deferred tools, and Monitor starts a
+	// background command; both execute third-party or shell commands, so they
+	// belong in the default gate with the rest.
+	"ExecuteExtraTool", "Monitor",
 }
 
 // New creates an Interceptor backed by d. The rule cache is lazy-loaded on
@@ -305,25 +309,30 @@ func (i *Interceptor) loadLocked() error {
 
 	// Load enabled-tools set from settings, falling back to hard-coded defaults.
 	val, ok, _ := i.db.GetSetting("intercept_enabled_tools")
-	if !ok {
-		m := make(map[string]bool, len(defaultEnabledTools))
-		for _, n := range defaultEnabledTools {
-			m[n] = true
-		}
-		i.enabledTools = m
-	} else {
-		var names []string
-		if json.Unmarshal([]byte(val), &names) != nil {
-			i.enabledTools = map[string]bool{}
-		} else {
-			m := make(map[string]bool, len(names))
-			for _, n := range names {
-				m[n] = true
-			}
-			i.enabledTools = m
-		}
-	}
+	i.enabledTools = enabledToolsFromSetting(val, ok)
 	return nil
+}
+
+// enabledToolsFromSetting maps the stored intercept_enabled_tools value to the
+// gate's set. A malformed value must not silently disable the gate, so it falls
+// back to the same defaults as an unset setting.
+func enabledToolsFromSetting(val string, ok bool) map[string]bool {
+	m := make(map[string]bool, len(defaultEnabledTools))
+	for _, n := range defaultEnabledTools {
+		m[n] = true
+	}
+	if !ok {
+		return m
+	}
+	var names []string
+	if json.Unmarshal([]byte(val), &names) != nil {
+		return m
+	}
+	m = make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
 }
 
 func (i *Interceptor) rules() ([]compiledRule, error) {
@@ -381,7 +390,7 @@ func (i *Interceptor) GetEnabledTools() ([]string, error) {
 	}
 	var names []string
 	if err := json.Unmarshal([]byte(val), &names); err != nil {
-		return []string{}, nil
+		return nil, fmt.Errorf("intercept_enabled_tools is not valid JSON: %w", err)
 	}
 	return names, nil
 }
