@@ -60,6 +60,18 @@ func TestSealedEnvironmentHandoff(t *testing.T) {
 		"ARTEX_ARCHIVE_S3_ACCESS_KEY_ID":     "AKIATESTONLY",
 		"ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY": "s3-secret-test",
 		"ARTEX_ARCHIVE_S3_SESSION_TOKEN":     "",
+		// Ambient AWS credentials the archive store reads when it has no override.
+		"AWS_ACCESS_KEY_ID":                      "AKIAAMBIENTTEST",
+		"AWS_ACCESS_KEY":                         "AKIAALTERNATETEST",
+		"AWS_SECRET_ACCESS_KEY":                  "ambient-secret-test",
+		"AWS_SECRET_KEY":                         "alternate-secret-test",
+		"AWS_SESSION_TOKEN":                      "",
+		"AWS_CONTAINER_CREDENTIALS_FULL_URI":     "http://127.0.0.1:8080/credentials?id=1",
+		"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "/v2/credentials/test",
+		"AWS_CONTAINER_AUTHORIZATION_TOKEN":      "container-token-test",
+		"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": "/var/run/secrets/token-file",
+		"AWS_WEB_IDENTITY_TOKEN_FILE":            "/var/run/secrets/token",
+		"AWS_ROLE_ARN":                           "arn:aws:iam::123456789012:role/test",
 	}
 	env := os.Environ()
 	for k, v := range want {
