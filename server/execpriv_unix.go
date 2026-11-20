@@ -132,9 +132,12 @@ func prepareExecScriptDir(p ExecPrivilege, dataDir string) (string, error) {
 // before that first session could create dir itself and place symlinks in it for
 // the server to write through. Created here, before any agent process starts, it is
 // root:root 0755. A symlink or a file in its place is refused. A directory that is
-// already there is used as found, and reported when root does not own it or others
-// can write in it: it may belong to another user of this host.
-func prepareNormaTaskDir(dir string) error {
+// already there and that the executor p can write in is refused too
+// (normaTaskDirExecWrite): the executor could have placed the symlinks before this
+// start, and can place them at any time. Any other directory already there is used
+// as found, and reported when root does not own it or others can write in it: it
+// may belong to another user of this host. It is never chowned or removed.
+func prepareNormaTaskDir(dir string, p ExecPrivilege) error {
 	if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
 	}
@@ -145,10 +148,33 @@ func prepareNormaTaskDir(dir string) error {
 	if !fi.IsDir() {
 		return fmt.Errorf("%s is not a directory", dir)
 	}
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok && (st.Uid != 0 || fi.Mode().Perm()&0o022 != 0) {
-		log.Printf("[exec] %s (uid %d, mode %v) is not a root-owned directory only root can write in: background-task output written there is not protected from its owner", dir, st.Uid, fi.Mode().Perm())
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	perm := fi.Mode().Perm()
+	if why := normaTaskDirExecWrite(perm, st.Uid, st.Gid, p.UID, p.GID); why != "" {
+		return fmt.Errorf("%s (uid %d, gid %d, mode %v) can be written by the executor: %s. Background-task output written there by the server would follow a symlink the executor places; remove the directory or make it root-owned with mode 0755, then start again", dir, st.Uid, st.Gid, perm, why)
+	}
+	if st.Uid != 0 || perm&0o022 != 0 {
+		log.Printf("[exec] %s (uid %d, mode %v) is not a root-owned directory only root can write in: background-task output written there is not protected from its owner", dir, st.Uid, perm)
 	}
 	return nil
+}
+
+// normaTaskDirExecWrite reports why the executor (execUID, execGID) can write in a
+// directory with the permission bits perm, the owner uid and the group gid, or ""
+// when it cannot. The owner counts whatever the bits say: it can change them.
+func normaTaskDirExecWrite(perm fs.FileMode, uid, gid, execUID, execGID uint32) string {
+	switch {
+	case uid == execUID:
+		return fmt.Sprintf("it is owned by the executor uid %d", execUID)
+	case gid == execGID && perm&0o020 != 0:
+		return fmt.Sprintf("its group is the executor gid %d and it is group-writable", execGID)
+	case perm&0o002 != 0:
+		return "it is writable by others"
+	}
+	return ""
 }
 
 // prepareExecScript lets the executor read a script the server wrote: the file stays
@@ -177,7 +203,8 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // else under the data directory changes; directories a
 // root-only path needs are left as they are. It sets p.ScriptDir to the script
 // directory it creates, and creates the directory of Norma's background-task output
-// under the temp directory (prepareNormaTaskDir).
+// under the temp directory (prepareNormaTaskDir); it fails when that directory is
+// already there and the executor can write in it.
 func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if !p.Enabled {
 		return nil
@@ -199,7 +226,7 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		return fmt.Errorf("prepare the executor script directory: %w", err)
 	}
 	p.ScriptDir = scriptDir
-	if err := prepareNormaTaskDir(filepath.Join(os.TempDir(), "norma")); err != nil {
+	if err := prepareNormaTaskDir(filepath.Join(os.TempDir(), "norma"), *p); err != nil {
 		return fmt.Errorf("prepare the background-task output directory: %w", err)
 	}
 	tasks := filepath.Join(dataDir, "tasks")

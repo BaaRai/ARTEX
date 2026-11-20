@@ -3,9 +3,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -249,8 +251,9 @@ func TestPrepareNormaTaskDir(t *testing.T) {
 	t.Cleanup(func() { syscall.Umask(old) })
 	base := t.TempDir()
 	dir := filepath.Join(base, "norma")
+	priv := ExecPrivilege{Enabled: true, UID: DefaultExecUID, GID: DefaultExecGID}
 	for _, state := range []string{"absent", "already there"} {
-		if err := prepareNormaTaskDir(dir); err != nil {
+		if err := prepareNormaTaskDir(dir, priv); err != nil {
 			t.Fatalf("%s: %v", state, err)
 		}
 		if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o755 {
@@ -262,7 +265,7 @@ func TestPrepareNormaTaskDir(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := prepareNormaTaskDir(link); err == nil {
+	if err := prepareNormaTaskDir(link, priv); err == nil {
 		t.Fatal("a symlink to a directory was accepted")
 	}
 	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
@@ -272,8 +275,101 @@ func TestPrepareNormaTaskDir(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := prepareNormaTaskDir(file); err == nil {
+	if err := prepareNormaTaskDir(file, priv); err == nil {
 		t.Fatal("a file was accepted")
+	}
+}
+
+// The executor can write in a directory it owns, in one its group can write in and
+// in one others can write in. No other directory counts. Runs without root.
+func TestNormaTaskDirExecWrite(t *testing.T) {
+	const execUID, execGID = 10001, 10002
+	for _, tc := range []struct {
+		name     string
+		perm     os.FileMode
+		uid, gid uint32
+		writable bool
+	}{
+		{"owned by the executor uid", 0o755, execUID, 0, true},
+		{"owned by the executor uid, no write bit", 0o555, execUID, 0, true},
+		{"group-writable for the executor gid", 0o775, 0, execGID, true},
+		{"other-writable", 0o757, 0, 0, true},
+		{"root-owned 0755", 0o755, 0, 0, false},
+		{"another user, not writable by the executor", 0o755, 1000, 1000, false},
+		{"group-writable for another gid", 0o775, 1000, 1000, false},
+		{"the executor gid without the group write bit", 0o755, 1000, execGID, false},
+	} {
+		why := normaTaskDirExecWrite(tc.perm, tc.uid, tc.gid, execUID, execGID)
+		if (why != "") != tc.writable {
+			t.Errorf("%s (mode %v, uid %d, gid %d): reason %q, want writable=%v", tc.name, tc.perm, tc.uid, tc.gid, why, tc.writable)
+		}
+	}
+}
+
+// prepareNormaTaskDir applies that decision to a directory that is already there:
+// one the executor can write in fails the start with its path in the error, and one
+// of another user that the executor cannot write in is used with a warning. Either
+// way the directory keeps its owner and mode. Runs with and without root: the
+// executor ids are chosen around the ids of the directory.
+func TestPrepareNormaTaskDirAlreadyThere(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		perm             os.FileMode
+		sameUID, sameGID bool // the executor id is the directory's
+		refused          bool
+	}{
+		{"owned by the executor uid", 0o755, true, false, true},
+		{"group-writable for the executor gid", 0o775, false, true, true},
+		{"other-writable", 0o757, false, false, true},
+		{"another user, not writable by the executor", 0o755, false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "norma")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if os.Geteuid() == 0 { // not root's: without root it is the test user's
+				if err := os.Lchown(dir, 20001, 20002); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Chmod(dir, tc.perm); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Lstat(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			st := before.Sys().(*syscall.Stat_t)
+			priv := ExecPrivilege{Enabled: true, UID: st.Uid + 1, GID: st.Gid + 1}
+			if tc.sameUID {
+				priv.UID = st.Uid
+			}
+			if tc.sameGID {
+				priv.GID = st.Gid
+			}
+			var logged bytes.Buffer
+			prev := log.Writer()
+			log.SetOutput(&logged)
+			err = prepareNormaTaskDir(dir, priv)
+			log.SetOutput(prev)
+			if tc.refused && (err == nil || !strings.Contains(err.Error(), dir)) {
+				t.Fatalf("err = %v, want a refusal that names %s", err, dir)
+			}
+			if !tc.refused && err != nil {
+				t.Fatalf("a directory the executor cannot write in was refused: %v", err)
+			}
+			if warned := strings.Contains(logged.String(), dir); warned == tc.refused {
+				t.Fatalf("warning logged = %v, want %v:\n%s", warned, !tc.refused, logged.String())
+			}
+			after, err := os.Lstat(dir)
+			if err != nil {
+				t.Fatalf("the directory is gone: %v", err)
+			}
+			if at := after.Sys().(*syscall.Stat_t); at.Uid != st.Uid || at.Gid != st.Gid || after.Mode() != before.Mode() {
+				t.Fatalf("the directory changed: uid %d gid %d mode %v, was uid %d gid %d mode %v", at.Uid, at.Gid, after.Mode(), st.Uid, st.Gid, before.Mode())
+			}
+		})
 	}
 }
 
