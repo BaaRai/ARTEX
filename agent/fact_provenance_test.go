@@ -237,3 +237,35 @@ func TestProveGoalRefusesTargetResponseFact(t *testing.T) {
 		t.Fatalf("proven finding: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goalB), tsx.GoalMet, res.Flatten())
 	}
 }
+
+// The triage check runs before the traffic proof check, and the finding that
+// does prove the goal carries verified bound traffic (P4.3).
+func TestProveGoalRefusesFalsePositiveFinding(t *testing.T) {
+	d := testDB(t)
+	t.Cleanup(func() { _ = d.Close() })
+	task, err := d.CreateTaskWithOptions("triage goal", "exercise the prove_goal triage gate", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	s := d.Exploration(task.ExplorationID)
+	goal := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "get admin"}, "open")
+	fp := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "banner said admin", "status": "false_positive"}, "confirmed")
+	ok := seedProvenFinding(t, d, task, "ex-triage-1", "https://triage.example.test/admin",
+		[]int64{seedFindingAsset(t, d, task, "https://triage.example.test/admin")}).NodeID
+	tsx := NewToolSet(s, "planner")
+	tsx.SetTrafficProofChecker(func(_ context.Context, id string) (bool, error) { return id == "ex-triage-1", nil })
+	prove := func(ev int64) actool.Result {
+		return callGuardTool(t, tsx.proveGoal(), `{"goal_id":`+strconv.FormatInt(goal, 10)+`,"evidence_id":`+strconv.FormatInt(ev, 10)+`,"reason":"x"}`)
+	}
+	res := prove(fp)
+	if !res.IsError || !strings.Contains(res.Flatten(), "false_positive") || !strings.Contains(res.Flatten(), "stays open") {
+		t.Fatalf("false_positive finding: want a refusal, got IsError=%v %q", res.IsError, res.Flatten())
+	}
+	if st := nodeState(t, s, goal); st != "open" || tsx.GoalMet {
+		t.Fatalf("false_positive finding: goal state %q GoalMet=%v, want open/false", st, tsx.GoalMet)
+	}
+	if res := prove(ok); res.IsError || nodeState(t, s, goal) != "met" {
+		t.Fatalf("confirmed finding: IsError=%v state=%q %q", res.IsError, nodeState(t, s, goal), res.Flatten())
+	}
+}

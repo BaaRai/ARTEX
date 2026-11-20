@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -70,6 +71,23 @@ func TestRenderLessonsUsageOmitsTruncated(t *testing.T) {
 	}
 	if len(ids) > 1 {
 		t.Fatalf("cap should have dropped the second lesson, got %v", ids)
+	}
+}
+
+func TestRenderLessonsCapsRunesNotBytes(t *testing.T) {
+	// 160 + 320 four-byte runes are 1920 bytes before the wrapper. A byte cap of
+	// 1800 renders nothing. A rune cap still fits one lesson.
+	lesson := Lesson{
+		ID: 1, Kind: "positive", Support: 1,
+		Cue:    strings.Repeat("𠀋", 160),
+		Action: strings.Repeat("𠀋", 320),
+	}
+	block, ids := RenderLessons([]Lesson{lesson}, 1800)
+	if block == "" || len(ids) != 1 || ids[0] != 1 {
+		t.Fatalf("rune cap dropped a lesson that fits in characters: bytes=%d ids=%v", len(block), ids)
+	}
+	if !utf8.ValidString(block) {
+		t.Fatal("rendered block is not valid UTF-8")
 	}
 }
 
@@ -153,11 +171,35 @@ func TestTaskLessonsUsesTaskScopeAndRanksCompanyFirst(t *testing.T) {
 			sawB = true
 		}
 	}
-	if !sawA || !sawGeneric {
-		t.Fatalf("task A should see its company lesson and generic, sawA=%v sawGeneric=%v", sawA, sawGeneric)
+	if !sawA || sawGeneric {
+		t.Fatalf("task A should see its company lesson only, sawA=%v sawGeneric=%v", sawA, sawGeneric)
 	}
 	if sawB {
 		t.Fatal("task A saw company B's lesson")
+	}
+
+	bare, err := d.CreateTaskWithOptions("lesson scope none", "goal", TaskCreateOptions{
+		Name: fmt.Sprintf("lesson-none-%d", stamp),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task none", d.DeleteTask(bare.ID)) })
+	gotNone, err := d.TaskLessons(t.Context(), bare.ID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawGeneric = false
+	for _, l := range gotNone {
+		switch l.ID {
+		case genericID:
+			sawGeneric = true
+		case aID, bID:
+			t.Fatalf("company-less task saw company lesson %d", l.ID)
+		}
+	}
+	if !sawGeneric {
+		t.Fatal("company-less task should see the generic lesson")
 	}
 
 	gotB, err := d.TaskLessons(t.Context(), taskB.ID, 8)
@@ -516,12 +558,20 @@ func TestExtractLessonsRetractsReversedDisposition(t *testing.T) {
 	var posStatus string
 	var posSupport int
 	if err := d.QueryRow(`SELECT status,
-		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id AND e.withdrawn_at IS NULL)
 		FROM rsi_lessons WHERE id=$1`, posID).Scan(&posStatus, &posSupport); err != nil {
 		t.Fatal(err)
 	}
 	if posStatus != "retired" || posSupport != 0 {
 		t.Fatalf("positive after FP: status=%s support=%d", posStatus, posSupport)
+	}
+	var withdrawn int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM rsi_lesson_evidence
+		WHERE lesson_id=$1 AND withdrawn_at IS NOT NULL`, posID).Scan(&withdrawn); err != nil {
+		t.Fatal(err)
+	}
+	if withdrawn != 1 {
+		t.Fatalf("withdrawn evidence rows=%d, want the finding kept on the lesson", withdrawn)
 	}
 
 	afterFP, err := d.TaskLessons(t.Context(), task.ID, 8)
@@ -550,7 +600,7 @@ func TestExtractLessonsRetractsReversedDisposition(t *testing.T) {
 	}
 
 	if err := d.QueryRow(`SELECT status,
-		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id AND e.withdrawn_at IS NULL)
 		FROM rsi_lessons WHERE id=$1`, posID).Scan(&posStatus, &posSupport); err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +611,7 @@ func TestExtractLessonsRetractsReversedDisposition(t *testing.T) {
 	var negStatus string
 	var negSupport int
 	if err := d.QueryRow(`SELECT status,
-		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id AND e.withdrawn_at IS NULL)
 		FROM rsi_lessons WHERE id=$1`, neg.ID).Scan(&negStatus, &negSupport); err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +684,7 @@ func TestExtractLessonsRetireOnlyWhenLastEvidence(t *testing.T) {
 	var status string
 	var support int
 	if err := d.QueryRow(`SELECT status,
-		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id AND e.withdrawn_at IS NULL)
 		FROM rsi_lessons WHERE id=$1`, pos.ID).Scan(&status, &support); err != nil {
 		t.Fatal(err)
 	}
@@ -870,6 +920,155 @@ func TestExtractLessonsReopenRetractsNothing(t *testing.T) {
 	}
 }
 
+func TestDispositionChangeExtractsLessons(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson on patch %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-patch-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	pos := findLessonByAction(t, d, task.ID, "positive", "Confirmed", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, pos.ID) })
+
+	if _, _, _, err := d.SetFindingStatusWithNotify(context.Background(), fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	status, support := lessonStatusSupport(t, d, pos.ID)
+	if status != "retired" || support != 0 {
+		t.Fatalf("status change did not retract: status=%s support=%d", status, support)
+	}
+	neg := findLessonByAction(t, d, task.ID, "negative", "Do not re-report", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, neg.ID) })
+	if !strings.Contains(neg.Action, "false_positive") {
+		t.Fatalf("negative action=%q", neg.Action)
+	}
+}
+
+func TestNegativeStatusReplacesPriorNegativeLesson(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson neg fork %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-neg-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','false_positive')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	first := findLessonByAction(t, d, task.ID, "negative", "false_positive", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, first.ID) })
+
+	if _, err := d.SetFindingStatus(fid, FindingDuplicate); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, support := lessonStatusSupport(t, d, first.ID)
+	if status != "retired" || support != 0 {
+		t.Fatalf("prior negative lesson: status=%s support=%d", status, support)
+	}
+	second := findLessonByAction(t, d, task.ID, "negative", "duplicate", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, second.ID) })
+	if second.ID == first.ID {
+		t.Fatal("status change inside the negative group reused the old lesson")
+	}
+}
+
+func TestMultiCompanyExtractStillRetracts(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	cs := d.Companies()
+	companyA, _, err := cs.UpsertCompany(fmt.Sprintf("LessonRetractA %d", stamp), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupCompany(d, companyA) })
+	companyB, _, err := cs.UpsertCompany(fmt.Sprintf("LessonRetractB %d", stamp), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupCompany(d, companyB) })
+	task, err := d.CreateTaskWithOptions("extract then multi", "goal", TaskCreateOptions{
+		Name: fmt.Sprintf("lesson-retract-multi-%d", stamp), CompanyIDs: []int64{companyA},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-multi-retract-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	pos := findLessonByAction(t, d, task.ID, "positive", "Confirmed", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, pos.ID) })
+
+	if _, err := d.Exec(`INSERT INTO task_scope(task_id, kind, company_id, source) VALUES ($1,'company',$2,'manual')`, task.ID, companyB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.SetFindingStatus(fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	n, err := d.ExtractLessonsForTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("multi-company extract wrote %d lessons", n)
+	}
+	status, support := lessonStatusSupport(t, d, pos.ID)
+	if status != "retired" || support != 0 {
+		t.Fatalf("lesson after the task gained a second company: status=%s support=%d", status, support)
+	}
+}
+
 func insertLessonRetest(t *testing.T, d *DB, findingID int64, verdict string) int64 {
 	t.Helper()
 	var id int64
@@ -904,7 +1103,8 @@ func positiveRetestEvidence(t *testing.T, d *DB, retestID int64) int {
 	if err := d.QueryRow(`
 		SELECT COUNT(*) FROM rsi_lesson_evidence e
 		JOIN rsi_lessons l ON l.id=e.lesson_id
-		WHERE e.source_kind='retest' AND e.source_id=$1 AND l.kind='positive'`, retestID).Scan(&n); err != nil {
+		WHERE e.source_kind='retest' AND e.source_id=$1 AND l.kind='positive'
+		  AND e.withdrawn_at IS NULL`, retestID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -913,7 +1113,7 @@ func positiveRetestEvidence(t *testing.T, d *DB, retestID int64) int {
 func lessonStatusSupport(t *testing.T, d *DB, lessonID int64) (status string, support int) {
 	t.Helper()
 	if err := d.QueryRow(`SELECT status,
-		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id)
+		(SELECT COUNT(*) FROM rsi_lesson_evidence e WHERE e.lesson_id=rsi_lessons.id AND e.withdrawn_at IS NULL)
 		FROM rsi_lessons WHERE id=$1`, lessonID).Scan(&status, &support); err != nil {
 		t.Fatal(err)
 	}

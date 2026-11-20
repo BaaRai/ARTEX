@@ -1562,13 +1562,17 @@ CREATE INDEX IF NOT EXISTS idx_rsi_lessons_kind  ON rsi_lessons(kind, updated_at
 
 -- One row per (lesson, source). The primary key makes extraction idempotent:
 -- a second run for the same task adds nothing and cannot inflate support.
+-- withdrawn_at keeps a retracted source on the row. Support and selection
+-- count only rows that are still live.
 CREATE TABLE IF NOT EXISTS rsi_lesson_evidence (
-    lesson_id   BIGINT NOT NULL REFERENCES rsi_lessons(id) ON DELETE CASCADE,
-    source_kind TEXT NOT NULL,
-    source_id   BIGINT NOT NULL,
-    detail      TEXT NOT NULL DEFAULT '',
+    lesson_id    BIGINT NOT NULL REFERENCES rsi_lessons(id) ON DELETE CASCADE,
+    source_kind  TEXT NOT NULL,
+    source_id    BIGINT NOT NULL,
+    detail       TEXT NOT NULL DEFAULT '',
+    withdrawn_at TIMESTAMPTZ,
     PRIMARY KEY (lesson_id, source_kind, source_id)
 );
+ALTER TABLE rsi_lesson_evidence ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMPTZ;
 
 -- What was shown to which task, and in which mode (shadow = logged but not
 -- injected; inject = appended to the planner/worker system prompt).

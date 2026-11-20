@@ -506,7 +506,13 @@ func (d *DB) SetFindingStatusWithNotify(ctx context.Context, id int64, status st
 		from, found, _, notified, txErr = SetFindingStatusTx(ctx, tx, id, status)
 		return txErr
 	})
-	return from, found, notified, err
+	if err != nil {
+		return from, found, notified, err
+	}
+	if found && from != status {
+		d.syncLessonsForFinding(ctx, id)
+	}
+	return from, found, notified, nil
 }
 
 // FindingStatusBatchResult is one id's outcome in a bulk status update.
@@ -538,6 +544,18 @@ func (d *DB) SetFindingStatusesWithNotify(ctx context.Context, ids []int64, stat
 	if err != nil {
 		return nil, err
 	}
+	taskIDs := make([]int64, 0, len(out))
+	for _, r := range out {
+		if !r.Changed {
+			continue
+		}
+		var taskID sql.NullInt64
+		if err := d.QueryRowContext(ctx, `SELECT task_id FROM findings WHERE id=$1`, r.ID).Scan(&taskID); err != nil || !taskID.Valid {
+			continue
+		}
+		taskIDs = append(taskIDs, taskID.Int64)
+	}
+	d.syncLessonsForTasks(ctx, taskIDs)
 	return out, nil
 }
 
