@@ -514,7 +514,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// wrap-up round. Its agent-reported gap lines are framed with this message's env.
 	budgetRound, _ := ctx.Value(budgetRoundKey{}).(BudgetRound)
 	situational += tsx.coverageLedgerBlock(tc.Final || budgetRound.WrapUp, env)
-	// This task's work dir <workDir>/tasks/<taskID>; create it first.
+	// The main run directory <workDir>/tasks/<taskID>/main; create it first.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
 	sysBody := plannerSystem(goal, p.workDir, taskDir) + frameLessonsBlock(p.lessonsBlock)
@@ -553,7 +553,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		DeepSeekSearchModel:   p.webSearch.DeepSeekModel,
 		WebSearchProxy:        p.webSearch.Proxy,
 		BashEnv:               proxyEnv(p.proxyAddr, p.proxyCACert), // Bash subcommands go through the proxy + trust its CA by default
-		WorkingDir:            taskDir,                              // this task's work dir <workDir>/tasks/<taskID>
+		WorkingDir:            taskDir,                              // the main run directory <workDir>/tasks/<taskID>/main
 		ToolOutputDir:         cmdOutDir(taskDir),
 		MaxTurns:              p.maxTurns, // 0 = unlimited (configurable in agent management)
 		MaxDuration:           maxDur,     // 0=unlimited; with a deadline = time remaining until it

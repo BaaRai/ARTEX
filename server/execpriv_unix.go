@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/Autumn-27/artex/agent"
 )
 
 // Environment names the shims read. They carry no secret: the executor id, the real
@@ -136,27 +138,24 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 }
 
 // PrepareExecPrivilege sets up the state the executor needs before the server opens
-// its stores. The task and chat workspace trees are shared with the executor group
-// (setgid, group read/write, umask 002) instead of chowned per directory: the
-// workspace is created in many places, and new subdirectories inherit the group. The key files and the
-// config file (which can hold the database DSN) are restricted to root. Nothing
-// else under the data directory changes; directories a root-only path needs are
-// left as they are. It sets p.ScriptDir to the script directory it creates.
+// its stores. Only the run directories are shared with the executor group (setgid,
+// group read/write, umask 002): tasks/<id>/main, tasks/<id>/i<N> and sessions/<id>.
+// Their parents (tasks/, sessions/ and tasks/<id>) are root:root 0755, so the
+// executor cannot create, rename or remove a run directory, and no run directory is
+// an ancestor of another. Inside a run directory new subdirectories inherit the
+// group. The key files and the config file (which can hold the database DSN) are
+// restricted to root. Nothing else under the data directory changes; directories a
+// root-only path needs are left as they are. It sets p.ScriptDir to the script
+// directory it creates.
 func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if !p.Enabled {
 		return nil
 	}
-	// tasks/ holds the run directories of the task agents, sessions/ the chat
-	// workspaces: the shell of each runs in one of them.
-	for _, sub := range []string{"tasks", "sessions"} {
-		root := filepath.Join(dataDir, sub)
-		if err := os.MkdirAll(root, 0o775); err != nil {
-			return fmt.Errorf("create %s workspace root: %w", sub, err)
-		}
-		if err := shareWithExecGroup(root, int(p.GID)); err != nil {
-			return fmt.Errorf("share %s workspace with the executor group: %w", sub, err)
-		}
+	gid := int(p.GID)
+	if err := shareRunDirs(dataDir, gid); err != nil {
+		return fmt.Errorf("share the run directories with the executor group: %w", err)
 	}
+	agent.SetRunDirMaker(func(base, leaf string) error { return makeRunDir(base, leaf, gid) })
 	if err := prepareExecHome(*p, dataDir); err != nil {
 		return fmt.Errorf("prepare the executor home: %w", err)
 	}
@@ -186,10 +185,133 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		}
 	}
 	// Files and directories the server creates from now on are group-writable, so
-	// the executor can write into the task workspace inside the shared tree.
+	// the executor can write what the server puts in a run directory.
 	syscall.Umask(0o002)
-	log.Printf("[exec] agent processes run as uid %d gid %d; task workspace %s is shared with that group", p.UID, p.GID, tasks)
+	log.Printf("[exec] agent processes run as uid %d gid %d; the run directories under %s are shared with that group", p.UID, p.GID, tasks)
 	return nil
+}
+
+// runDirMode is the mode of a run directory: group-writable, and setgid so what is
+// created in it keeps the executor group.
+const runDirMode = 0o775 | os.ModeSetgid
+
+// setDirOwner makes dir root:gid with mode. dir is opened without following a
+// symlink and changed through the descriptor, so a planted link is refused and
+// never changes another directory.
+func setDirOwner(dir string, gid int, mode os.FileMode) error {
+	f, err := os.OpenFile(dir, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Chown(0, gid); err != nil {
+		return err
+	}
+	return f.Chmod(mode)
+}
+
+// makeRunDir creates the run directory leaf below base. Every directory between
+// base and the leaf is root:root 0755, and the leaf alone is shared with the
+// executor group. A parent is set before the next level is touched: once it is
+// root-only, the executor cannot swap what is below it.
+func makeRunDir(base, leaf string, gid int) error {
+	rel, err := filepath.Rel(base, leaf)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return fmt.Errorf("%s is not below %s", leaf, base)
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	dir := base
+	for i, part := range parts {
+		dir = filepath.Join(dir, part)
+		group, mode := 0, os.FileMode(0o755)
+		if i == len(parts)-1 {
+			group, mode = gid, runDirMode
+		}
+		if err := os.Mkdir(dir, mode.Perm()); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		if err := setDirOwner(dir, group, mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// shareRunDirs applies the run-directory layout to what is on disk: tasks/ and
+// sessions/ become root:root 0755, each task directory too, and each run directory
+// (sessions/<id>, tasks/<id>/main, tasks/<id>/i<N>) is shared with the executor
+// group with what it holds.
+func shareRunDirs(dataDir string, gid int) error {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return err
+	}
+	for _, sub := range []string{"tasks", "sessions"} {
+		root := filepath.Join(dataDir, sub)
+		if err := os.Mkdir(root, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		if err := setDirOwner(root, 0, 0o755); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			dir := filepath.Join(root, e.Name())
+			if sub == "tasks" {
+				err = shareTaskDir(dir, gid)
+			} else {
+				err = shareRunDir(dir, gid)
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// shareTaskDir makes a task directory root:root 0755 and shares the run directories
+// in it. Its other entries are left as they are: a task whose main agent worked in
+// the task directory itself keeps its files there, with the owner and mode they had.
+func shareTaskDir(taskDir string, gid int) error {
+	if err := setDirOwner(taskDir, 0, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(taskDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !agent.IsRunDirName(e.Name()) {
+			continue
+		}
+		if err := shareRunDir(filepath.Join(taskDir, e.Name()), gid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// shareRunDir shares one run directory and what it holds with the executor group.
+func shareRunDir(leaf string, gid int) error {
+	if err := setDirOwner(leaf, gid, runDirMode); err != nil {
+		return err
+	}
+	return shareWithExecGroup(leaf, gid)
+}
+
+// shareRestoredTaskDir puts the run-directory layout back on a task directory that
+// was restored from an archive: the package keeps neither owners nor directory modes.
+func shareRestoredTaskDir(p ExecPrivilege, taskDir string) error {
+	if !p.Enabled {
+		return nil
+	}
+	return shareTaskDir(taskDir, int(p.GID))
 }
 
 // shareWithExecGroup gives the executor group the tree under root: the group owns

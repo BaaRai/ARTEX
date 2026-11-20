@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -314,20 +315,76 @@ func workerArtifactSpec(runDir string) string {
 	return "\n\n**Intermediate artifact output rules**: all intermediate artifacts — scripts, payloads, captured response bodies, temporary data — **must be written to this intent's dedicated work directory " + runDir + "** (already created automatically; just write with relative paths there — no manual mkdir needed) — **do NOT write to /tmp, do NOT use other absolute paths**."
 }
 
-// ensureRunDir builds and creates an agent's working directory under base:
-// <base>/tasks/<taskID> for planner/main; <base>/tasks/<taskID>/i<intentID> for a
-// worker (intentID<=0 → task dir only). The "tasks/" segment groups per-task dirs
-// symmetrically with the chat agent's "sessions/<sessionID>". Best-effort mkdir — on
-// failure, writes fail the same way an unwritable CWD would.
-func ensureRunDir(base string, taskID, intentID int64) string {
-	dir := filepath.Join(base, "tasks", strconv.FormatInt(taskID, 10))
-	if intentID > 0 {
-		dir = filepath.Join(dir, "i"+strconv.FormatInt(intentID, 10))
+// mainRunDirName is the run directory of a task's main agent and planner.
+const mainRunDirName = "main"
+
+// runDirMaker creates a run directory below the data directory with the ownership
+// the server wants. The server sets it when agent processes run as the executor
+// (server/execpriv_unix.go); nil keeps a plain MkdirAll.
+var runDirMaker func(base, leaf string) error
+
+// SetRunDirMaker sets how run directories are created. Call it before any agent runs.
+func SetRunDirMaker(f func(base, leaf string) error) { runDirMaker = f }
+
+// makeRunDir creates the run directory leaf below base. Best-effort — on failure,
+// writes fail the same way an unwritable CWD would.
+func makeRunDir(base, leaf string) {
+	if runDirMaker == nil {
+		// 0775: the umask of the server decides the final bits.
+		_ = os.MkdirAll(leaf, 0o775)
+		return
 	}
-	// 0775: with the executor group sharing the task tree (server/execpriv.go) the
-	// agent's shell must write here; the umask of the server decides the final bits.
-	_ = os.MkdirAll(dir, 0o775)
+	if err := runDirMaker(base, leaf); err != nil {
+		log.Printf("[agent] run directory %s: %v", leaf, err)
+	}
+}
+
+// ensureRunDir builds and creates an agent's working directory under base:
+// <base>/tasks/<taskID>/main for planner/main (intentID<=0);
+// <base>/tasks/<taskID>/i<intentID> for a worker. No run directory is an ancestor of
+// another: the task directory holds the leaves and is no agent's working directory.
+// The "tasks/" segment groups per-task dirs symmetrically with the chat agent's
+// "sessions/<sessionID>".
+func ensureRunDir(base string, taskID, intentID int64) string {
+	leaf := mainRunDirName
+	if intentID > 0 {
+		leaf = "i" + strconv.FormatInt(intentID, 10)
+	}
+	dir := filepath.Join(base, "tasks", strconv.FormatInt(taskID, 10), leaf)
+	makeRunDir(base, dir)
 	return dir
+}
+
+// EnsureRunDir is ensureRunDir for the server, which places the main agent's
+// uploads in its run directory.
+func EnsureRunDir(base string, taskID, intentID int64) string {
+	return ensureRunDir(base, taskID, intentID)
+}
+
+// EnsureSessionDir creates the chat run directory <base>/sessions/<sessionID> the
+// way ensureRunDir creates a task one, and returns it.
+func EnsureSessionDir(base, sessionID string) string {
+	dir := filepath.Join(base, "sessions", sessionID)
+	makeRunDir(base, dir)
+	return dir
+}
+
+// IsRunDirName reports whether name is a run directory inside a task directory:
+// main or i<intentID>.
+func IsRunDirName(name string) bool {
+	if name == mainRunDirName {
+		return true
+	}
+	digits, ok := strings.CutPrefix(name, "i")
+	if !ok || digits == "" {
+		return false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // cmdOutDir is the SDK large-tool-output spill dir under an agent's run dir.

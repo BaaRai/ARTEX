@@ -4343,9 +4343,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			maTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 			resume := func() { s.reviveTask(t) } // set_goals added a goal → pulls the task back to running
 			// Splice the list of [absolute paths] of uploaded attachments into the message sent to the agent; it uses them to open files via Read/Bash.
-			// taskDir = the agent's working directory (CWD), consistent with chatUpload's target dir and ensureRunDir.
-			taskDir := filepath.Join(s.m.dir, "tasks", t.ID)
-			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
+			// mainDir = the main agent's run directory (its CWD, tasks/<id>/main), the same call as chatUpload's target dir and the agent itself.
+			mainDir := agent.EnsureRunDir(s.m.dir, maTaskID, 0)
+			agentMsg := composeAgentMessage(agentMessage, req.Attachments, mainDir)
 			// Tag the turn for the target gate: the task, the "mainagent" lane and the approval scope.
 			gctx := intercept.WithTaskContext(ctx, t.ID, "mainagent", func(a db.Activity) {
 				a.Worker = "mainagent"

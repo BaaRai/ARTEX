@@ -152,8 +152,8 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	if !sessionDirInside(c.workDir, sessionWorkDir) {
 		return "", fmt.Errorf("invalid session id %q", sessionID)
 	}
-	// 0775 for the same reason as ensureRunDir: the executor group writes here.
-	_ = os.MkdirAll(sessionWorkDir, 0o775)
+	// A run directory like the task ones, created the same way (makeRunDir).
+	makeRunDir(c.workDir, sessionWorkDir)
 	ctx = intercept.WithReviewWorkingDirectory(ctx, sessionWorkDir)
 
 	// Pure assistant: DefaultTools as the base; AugmentTools layers in the key's

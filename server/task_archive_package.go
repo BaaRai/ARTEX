@@ -227,7 +227,10 @@ func (s *taskArchiveFileStage) commit() error {
 	return os.RemoveAll(s.root)
 }
 
-func installTaskArchiveFiles(dataDir, extractedDir, taskID string, archiveID int64) (*taskArchiveRestoreFiles, error) {
+// installTaskArchiveFiles moves the extracted workspace and transcripts back under
+// the data directory. The workspace is the whole task directory, run directories
+// (main/, i<N>/) included; priv puts their ownership back.
+func installTaskArchiveFiles(dataDir, extractedDir, taskID string, archiveID int64, priv ExecPrivilege) (*taskArchiveRestoreFiles, error) {
 	stage := &taskArchiveRestoreFiles{extracted: extractedDir}
 	numericTaskID, err := strconv.ParseInt(taskID, 10, 64)
 	if err != nil || numericTaskID <= 0 {
@@ -235,8 +238,11 @@ func installTaskArchiveFiles(dataDir, extractedDir, taskID string, archiveID int
 	}
 	sources := []restoredArchivePath{}
 	workspace := filepath.Join(extractedDir, "files", "tasks", taskID)
+	taskDir := filepath.Join(dataDir, "tasks", taskID)
+	hasWorkspace := false
 	if _, err := os.Lstat(workspace); err == nil {
-		sources = append(sources, restoredArchivePath{Source: workspace, Destination: filepath.Join(dataDir, "tasks", taskID)})
+		sources = append(sources, restoredArchivePath{Source: workspace, Destination: taskDir})
+		hasWorkspace = true
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -270,6 +276,12 @@ func installTaskArchiveFiles(dataDir, extractedDir, taskID string, archiveID int
 		if err := os.Rename(move.Source, move.Destination); err != nil {
 			_ = stage.rollback()
 			return nil, err
+		}
+	}
+	if hasWorkspace {
+		if err := shareRestoredTaskDir(priv, taskDir); err != nil {
+			_ = stage.rollback()
+			return nil, fmt.Errorf("restore the run directory ownership of %s: %w", taskDir, err)
 		}
 	}
 	return stage, nil

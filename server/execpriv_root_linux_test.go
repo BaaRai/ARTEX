@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Autumn-27/artex/agent"
 	actool "github.com/Autumn-27/norma/tool"
 )
 
@@ -24,8 +25,8 @@ import (
 // writable HOME and cache.
 
 type execRootFixture struct {
-	priv               ExecPrivilege
-	home, secret, work string
+	priv                     ExecPrivilege
+	data, home, secret, work string
 }
 
 func newExecRootFixture(t *testing.T) *execRootFixture {
@@ -53,6 +54,7 @@ func newExecRootFixture(t *testing.T) *execRootFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { agent.SetRunDirMaker(nil) }) // PrepareExecPrivilege sets it process-wide
 	if err := PrepareExecPrivilege(&priv, dataDir, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -63,11 +65,9 @@ func newExecRootFixture(t *testing.T) *execRootFixture {
 	if _, err := os.ReadFile(secret); err != nil {
 		t.Fatalf("root must read its own key: %v", err)
 	}
-	work := filepath.Join(dataDir, "tasks", "1")
-	if err := os.MkdirAll(work, 0o775); err != nil {
-		t.Fatal(err)
-	}
-	return &execRootFixture{priv: priv, home: filepath.Join(dataDir, execHomeDir), secret: secret, work: work}
+	// The run directory of task 1's main agent, created as the agent creates it.
+	work := agent.EnsureRunDir(dataDir, 1, 0)
+	return &execRootFixture{priv: priv, data: dataDir, home: filepath.Join(dataDir, execHomeDir), secret: secret, work: work}
 }
 
 // probe is the shell script each path runs as the executor.
