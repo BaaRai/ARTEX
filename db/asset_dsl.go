@@ -302,7 +302,11 @@ func (b *whereBuilder) build(node *astNode) (string, error) {
 			}
 			parts = append(parts, "("+clause+")")
 		}
-		return strings.Join(parts, " OR "), nil
+		// The whole disjunction must be parenthesised: callers append their own
+		// clauses with AND (the task scope in QueryDSLInScope, the type filter),
+		// and AND binds tighter than OR, so "(a) OR (b) AND scope" would let the
+		// first branch escape the scope.
+		return "(" + strings.Join(parts, " OR ") + ")", nil
 	case "leaf":
 		return b.buildLeaf(*node.expr)
 	}
