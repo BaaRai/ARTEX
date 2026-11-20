@@ -101,7 +101,10 @@ CREATE TABLE IF NOT EXISTS exchange_rewrites (
   exchange_id   TEXT NOT NULL,
   seq           INTEGER NOT NULL,
   phase         TEXT NOT NULL,              -- 'request' | 'response'
-  rule_id       INTEGER,                    -- NULL on a global line
+  source_kind   TEXT NOT NULL DEFAULT 'rule', -- 'rule' | 'hook'
+  rule_id       INTEGER,                    -- NULL on a global or hook line
+  hook_id       INTEGER,                    -- NULL on a rule or global line
+  hook_version  INTEGER,                    -- NULL on a rule or global line
   rule_snapshot TEXT,                       -- JSON, no sensitive action value
   action        TEXT,
   field         TEXT,                       -- 'method' | 'url' | 'header:<Name>' | 'body' | 'status'
@@ -271,6 +274,10 @@ type Traffic struct {
 	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
 	// whole by SetRewriteRules and applied by the sink (rewrite_flow.go).
 	rewriteRules atomic.Pointer[rewrite.Set]
+	// tamperHooks is the compiled snapshot of enabled Go tampering hooks (P4.2),
+	// replaced by SetTamperHooks. Nil when ARTEX_TAMPER_HOOKS_ENABLED is off or
+	// no hooks are enabled.
+	tamperHooks atomic.Pointer[HookSet]
 	// snaps keeps the original of each request a rule rewrote until its
 	// exchange is recorded (rewrite_flow.go). Nil on the zero value.
 	snaps *snapTable
@@ -405,11 +412,68 @@ func (t *Traffic) initIndex() error {
 	if _, err := conn.ExecContext(ctx, indexSchema); err != nil {
 		return err
 	}
+	if err := ensureExchangeRewritesHookColumns(ctx, conn); err != nil {
+		return err
+	}
 	if _, err := conn.ExecContext(ctx, ftsSchema); err != nil {
 		log.Printf("[traffic] full-text index unavailable; body search will be disabled (metadata search is unaffected): %v", err)
 		return nil
 	}
 	t.fts = true
+	return nil
+}
+
+// SetTamperHooks atomically swaps the compiled tampering-hook snapshot used by
+// the capture proxy. Passing nil disables hook execution (baseline fast path).
+func (t *Traffic) SetTamperHooks(hs *HookSet) {
+	if t == nil {
+		return
+	}
+	t.tamperHooks.Store(hs)
+}
+
+// TamperHooks returns the currently active HookSet, or nil when disabled.
+func (t *Traffic) TamperHooks() *HookSet {
+	if t == nil {
+		return nil
+	}
+	return t.tamperHooks.Load()
+}
+
+func ensureExchangeRewritesHookColumns(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `PRAGMA table_info(exchange_rewrites)`)
+	if err != nil {
+		return err
+	}
+	existing := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, col := range []struct{ name, ddl string }{
+		{"source_kind", `ALTER TABLE exchange_rewrites ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'rule'`},
+		{"hook_id", `ALTER TABLE exchange_rewrites ADD COLUMN hook_id INTEGER`},
+		{"hook_version", `ALTER TABLE exchange_rewrites ADD COLUMN hook_version INTEGER`},
+	} {
+		if existing[col.name] {
+			continue
+		}
+		if _, err := conn.ExecContext(ctx, col.ddl); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
