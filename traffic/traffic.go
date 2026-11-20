@@ -980,7 +980,7 @@ func clampBlobRange(offset, length, size int64) (off, n int64, empty bool) {
 	return offset, length, false
 }
 
-// ExchangeMeta is one row of the index (returned by Search).
+// ExchangeMeta is one row of the index (returned by Search and Page).
 type ExchangeMeta struct {
 	ID          string `json:"id"`
 	TS          int64  `json:"ts"`
@@ -992,14 +992,17 @@ type ExchangeMeta struct {
 	ContentType string `json:"content_type"`
 	RespLen     int    `json:"resp_len"`
 	Path        string `json:"path"`
+	Rewritten   bool   `json:"rewritten"`
 }
+
+const rewrittenExistsSQL = `EXISTS(SELECT 1 FROM exchange_rewrites r WHERE r.exchange_id=exchanges.id AND r.outcome='applied')`
 
 // Search returns paged exchange metadata (never bodies).
 func (t *Traffic) Search(host string, page, size int) ([]ExchangeMeta, error) {
 	if size <= 0 || size > 500 {
 		size = 100
 	}
-	q := `SELECT id,ts,host,method,url_template,url,status,content_type,resp_len,path FROM exchanges`
+	q := `SELECT id,ts,host,method,url_template,url,status,content_type,resp_len,path,` + rewrittenExistsSQL + ` FROM exchanges`
 	args := []any{}
 	if host != "" {
 		q += ` WHERE host=?`
@@ -1015,7 +1018,7 @@ func (t *Traffic) Search(host string, page, size int) ([]ExchangeMeta, error) {
 	var out []ExchangeMeta
 	for rows.Next() {
 		var m ExchangeMeta
-		if err := rows.Scan(&m.ID, &m.TS, &m.Host, &m.Method, &m.URLTemplate, &m.URL, &m.Status, &m.ContentType, &m.RespLen, &m.Path); err != nil {
+		if err := rows.Scan(&m.ID, &m.TS, &m.Host, &m.Method, &m.URLTemplate, &m.URL, &m.Status, &m.ContentType, &m.RespLen, &m.Path, &m.Rewritten); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -1042,21 +1045,41 @@ func ftsQuote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
+const (
+	RewriteFilterAll       = "all"
+	RewriteFilterRewritten = "rewritten"
+	RewriteFilterOriginal  = "original"
+)
+
 // PageQuery bundles the optional filters and sort order for Page. Every filter
 // is combined with AND; an empty string skips that filter, and RespMin/RespMax
 // of -1 skip the response-size bounds. An empty Sort/Order defaults to
 // newest-first by timestamp.
 type PageQuery struct {
-	Host    string // host substring
-	Method  string // exact method (case-insensitive)
-	Query   string // broad search box: metadata columns OR captured text
-	Body    string // content box: captured request/response text only (full-text)
-	Path    string // url_template substring — the vulnerability's path
-	Status  string // exact code ("404") or class bucket ("4xx")
-	RespMin int64  // minimum resp_len, or -1 when unset
-	RespMax int64  // maximum resp_len, or -1 when unset
-	Sort    string // ts | status | resp_len (default ts)
-	Order   string // asc | desc (default desc)
+	Host      string // host substring
+	Method    string // exact method (case-insensitive)
+	Query     string // broad search box: metadata columns OR captured text
+	Body      string // content box: captured request/response text only (full-text)
+	Path      string // url_template substring — the vulnerability's path
+	Status    string // exact code ("404") or class bucket ("4xx")
+	Rewritten string // all (default) | rewritten (or true) | original (or false)
+	RespMin   int64  // minimum resp_len, or -1 when unset
+	RespMax   int64  // maximum resp_len, or -1 when unset
+	Sort      string // ts | status | resp_len (default ts)
+	Order     string // asc | desc (default desc)
+}
+
+// rewriteFilterSQL turns a rewritten filter token into a SQL condition over
+// exchange_rewrites. Empty, "all", or unrecognized values default to no filter.
+func rewriteFilterSQL(s string) (cond string, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case RewriteFilterRewritten, "true", "1":
+		return rewrittenExistsSQL, true
+	case RewriteFilterOriginal, "false", "0":
+		return "NOT " + rewrittenExistsSQL, true
+	default:
+		return "", false
+	}
 }
 
 // sortColumns whitelists the columns Page may order by, so the caller-supplied
@@ -1118,6 +1141,9 @@ func (t *Traffic) Page(f PageQuery, page, size int) (rows []ExchangeMeta, total 
 	if cond, sargs, ok := statusFilter(f.Status); ok {
 		add(cond, sargs...)
 	}
+	if cond, ok := rewriteFilterSQL(f.Rewritten); ok {
+		add(cond)
+	}
 	if f.RespMin >= 0 {
 		add("resp_len>=?", f.RespMin)
 	}
@@ -1157,7 +1183,7 @@ func (t *Traffic) Page(f PageQuery, page, size int) (rows []ExchangeMeta, total 
 	}
 	// id embeds capture timestamp + sequence, so a trailing id DESC makes the order
 	// total and pagination stable even when the sort column has many ties.
-	sel := `SELECT id,ts,host,method,url_template,url,status,content_type,resp_len,path FROM exchanges` +
+	sel := `SELECT id,ts,host,method,url_template,url,status,content_type,resp_len,path,` + rewrittenExistsSQL + ` FROM exchanges` +
 		where + ` ORDER BY ` + col + ` ` + dir + `, id DESC LIMIT ? OFFSET ?`
 	qargs := append(append([]any{}, args...), size, page*size)
 	rs, err := t.db.Query(sel, qargs...)
@@ -1167,7 +1193,7 @@ func (t *Traffic) Page(f PageQuery, page, size int) (rows []ExchangeMeta, total 
 	defer rs.Close()
 	for rs.Next() {
 		var m ExchangeMeta
-		if err := rs.Scan(&m.ID, &m.TS, &m.Host, &m.Method, &m.URLTemplate, &m.URL, &m.Status, &m.ContentType, &m.RespLen, &m.Path); err != nil {
+		if err := rs.Scan(&m.ID, &m.TS, &m.Host, &m.Method, &m.URLTemplate, &m.URL, &m.Status, &m.ContentType, &m.RespLen, &m.Path, &m.Rewritten); err != nil {
 			return nil, 0, err
 		}
 		rows = append(rows, m)

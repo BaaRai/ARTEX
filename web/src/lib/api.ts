@@ -840,6 +840,7 @@ export const api = {
       body?: string;
       path?: string;
       status?: string;
+      rewritten?: string;
       respMin?: string;
       respMax?: string;
       sort?: string;
@@ -854,6 +855,7 @@ export const api = {
         (opts.body ? `&body=${encodeURIComponent(opts.body)}` : "") +
         (opts.path ? `&path=${encodeURIComponent(opts.path)}` : "") +
         (opts.status && opts.status !== "all" ? `&status=${encodeURIComponent(opts.status)}` : "") +
+        (opts.rewritten && opts.rewritten !== "all" ? `&rewritten=${encodeURIComponent(opts.rewritten)}` : "") +
         (opts.respMin ? `&resp_min=${encodeURIComponent(opts.respMin)}` : "") +
         (opts.respMax ? `&resp_max=${encodeURIComponent(opts.respMax)}` : "") +
         (opts.sort ? `&sort=${encodeURIComponent(opts.sort)}` : "") +

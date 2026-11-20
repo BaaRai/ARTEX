@@ -135,6 +135,7 @@ export default function TrafficPage() {
   const [path, setPath] = React.useState("");
   const [pathQ, setPathQ] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("all");
+  const [rewrittenFilter, setRewrittenFilter] = React.useState("all");
   const [respMin, setRespMin] = React.useState("");
   const [respMinQ, setRespMinQ] = React.useState("");
   const [respMax, setRespMax] = React.useState("");
@@ -184,13 +185,15 @@ export default function TrafficPage() {
     return () => clearTimeout(t);
   }, [respMax]);
 
-  const hasAdvancedFilter = Boolean(bodyQ || pathQ || respMinQ || respMaxQ) || statusFilter !== "all";
+  const hasAdvancedFilter =
+    Boolean(bodyQ || pathQ || respMinQ || respMaxQ) || statusFilter !== "all" || rewrittenFilter !== "all";
   const resetAdvancedFilters = () => {
     setBody("");
     setBodyQ("");
     setPath("");
     setPathQ("");
     setStatusFilter("all");
+    setRewrittenFilter("all");
     setRespMin("");
     setRespMinQ("");
     setRespMax("");
@@ -201,7 +204,7 @@ export default function TrafficPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: these values intentionally trigger a page reset.
   React.useEffect(() => {
     setPage(0);
-  }, [hostQ, queryQ, method, size, bodyQ, pathQ, statusFilter, respMinQ, respMaxQ, sort]);
+  }, [hostQ, queryQ, method, size, bodyQ, pathQ, statusFilter, rewrittenFilter, respMinQ, respMaxQ, sort]);
 
   // Load the current page. Auto-refresh only on page 0 (newest) so paging back
   // through history isn't yanked out from under the user.
@@ -214,6 +217,7 @@ export default function TrafficPage() {
           body: bodyQ,
           path: pathQ,
           status: statusFilter,
+          rewritten: rewrittenFilter,
           respMin: respMinQ,
           respMax: respMaxQ,
           sort: sort.field,
@@ -243,7 +247,21 @@ export default function TrafficPage() {
       alive = false;
       stopPolling();
     };
-  }, [page, size, hostQ, method, queryQ, bodyQ, pathQ, statusFilter, respMinQ, respMaxQ, sort, reloadTick]);
+  }, [
+    page,
+    size,
+    hostQ,
+    method,
+    queryQ,
+    bodyQ,
+    pathQ,
+    statusFilter,
+    rewrittenFilter,
+    respMinQ,
+    respMaxQ,
+    sort,
+    reloadTick,
+  ]);
 
   // Delete traffic for the current host filter (substring) or the checked
   // hosts (exact batch), then refetch.
@@ -598,6 +616,16 @@ export default function TrafficPage() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={rewrittenFilter} onValueChange={setRewrittenFilter}>
+          <SelectTrigger size="sm" className="w-32">
+            <SelectValue placeholder={t("Rewritten")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("All traffic")}</SelectItem>
+            <SelectItem value="rewritten">{t("Rewritten")}</SelectItem>
+            <SelectItem value="original">{t("Original")}</SelectItem>
+          </SelectContent>
+        </Select>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <span>{t("Response size")}</span>
           <Input
@@ -721,7 +749,17 @@ export default function TrafficPage() {
                       <MethodBadge method={e.method} />
                     </TableCell>
                     <TableCell className="max-w-0">
-                      <span className="block truncate font-mono text-xs">{e.url}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="min-w-0 truncate font-mono text-xs">{e.url}</span>
+                        {e.rewritten ? (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 border-amber-500/30 bg-amber-500/10 px-1.5 py-0 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                          >
+                            {t("Rewritten")}
+                          </Badge>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <span className={cn("font-mono text-xs font-semibold tabular-nums", statusTone(e.status))}>
@@ -762,6 +800,14 @@ export default function TrafficPage() {
                   <Badge variant="secondary" className={cn("font-mono tabular-nums", statusTone(selected.status))}>
                     {selected.status}
                   </Badge>
+                  {selected.rewritten ? (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    >
+                      {t("Rewritten")}
+                    </Badge>
+                  ) : null}
                   <span className="ml-auto text-xs text-muted-foreground tabular-nums">{fmtTime(selected.ts)}</span>
                 </div>
                 <SheetTitle className="break-all font-mono">{selected.host}</SheetTitle>
