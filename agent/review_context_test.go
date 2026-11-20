@@ -19,7 +19,7 @@ import (
 func TestWorkerReviewContextAcrossToolCalls(t *testing.T) {
 	dsn, _, err := db.DSN()
 	if err != nil {
-		t.Skip("no test database configured")
+		db.SkipPGUnavailable(t, err)
 	}
 	d, err := db.Open(dsn)
 	if err != nil {

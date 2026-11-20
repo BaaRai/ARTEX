@@ -11,7 +11,7 @@ import (
 func TestTaskCategoryCRUDAndTaskAssignment(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })
@@ -73,7 +73,7 @@ func TestTaskCategoryCRUDAndTaskAssignment(t *testing.T) {
 func TestCreateTaskRejectsMissingCategoryAtomically(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 
@@ -94,7 +94,7 @@ func TestCreateTaskRejectsMissingCategoryAtomically(t *testing.T) {
 func TestSetTasksCategoryBatch(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })
@@ -155,7 +155,7 @@ func TestSetTasksCategoryBatch(t *testing.T) {
 func TestSetTasksCategoryRejectsBadInputAtomically(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })

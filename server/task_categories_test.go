@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 // TestTaskCategoryBatchRoute pins the contract of the batch move endpoint: it is
@@ -16,7 +18,7 @@ import (
 func TestTaskCategoryBatchRoute(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 

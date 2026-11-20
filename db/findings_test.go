@@ -35,7 +35,7 @@ func TestValidFindingReportState(t *testing.T) {
 func TestDeleteFinding(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 
@@ -81,7 +81,7 @@ func TestDeleteFinding(t *testing.T) {
 func TestSetFindingStatusMirrorsNodePayload(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 
@@ -144,7 +144,7 @@ func TestSetFindingStatusMirrorsNodePayload(t *testing.T) {
 func TestFindingReportState(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 
@@ -256,7 +256,7 @@ func TestFindingReportState(t *testing.T) {
 func TestFindingsPageAndStats(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 
@@ -414,7 +414,7 @@ func TestFindingsPageAndStats(t *testing.T) {
 func TestListFindingsPageUsesStableIDTieBreaker(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 
@@ -462,7 +462,7 @@ func TestListFindingsPageUsesStableIDTieBreaker(t *testing.T) {
 func TestFindingGroupsAndUnassignedPaging(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 
@@ -606,7 +606,7 @@ func TestFindingGroupsAndUnassignedPaging(t *testing.T) {
 func TestAddFindingFollowUpIntent(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 

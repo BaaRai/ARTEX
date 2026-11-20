@@ -14,7 +14,7 @@ func testSetup(t *testing.T) (*DB, *AssetStore, *CompanyStore) {
 	t.Helper()
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		SkipPGUnavailable(t, err)
 	}
 	return d, d.Assets(), d.Companies()
 }

@@ -55,7 +55,7 @@ func targetTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	dsn, _, err := db.DSN()
 	if err != nil {
-		t.Skipf("no database config (%v) - skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	d, err := db.Open(dsn)
 	if err != nil {
