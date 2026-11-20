@@ -367,6 +367,7 @@
   "Balanced": "均衡",
   "Base URL (optional)": "Base URL（可选）",
   "Baseline": "正常对照",
+  "Bash reported exit code 127. Check whether the command or its interpreter is available in this runtime.": "Bash 报告了退出码 127。请检查该命令或其解释器在当前运行时中是否可用。",
   "Basics": "基本信息",
   "Batch delete by target": "按目标批量删除",
   "Before compression: {size}": "压缩前：{size}",
