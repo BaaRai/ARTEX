@@ -13,7 +13,7 @@ func TestTaskLLMSpendCountsJudgeNotChat(t *testing.T) {
 	if err != nil {
 		SkipPGUnavailable(t, err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { _ = d.Close() })
 
 	taskID := fmt.Sprintf("spend-%d", time.Now().UnixNano())
 	t.Cleanup(func() {

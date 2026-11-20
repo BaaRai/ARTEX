@@ -282,6 +282,7 @@ func TestFindingTrafficArchiveV3RoundTripAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer s.m.pg.DeleteFinding(shared.FindingID)
 	if _, err = s.m.traffic.DeleteHost("evidence.local"); err != nil {
 		t.Fatal(err)
 	}
