@@ -903,6 +903,7 @@ export interface TrafficExchange {
   status: number;
   content_type: string;
   resp_len: number;
+  rewritten?: boolean;
 }
 
 export interface TrafficRewriteStats {
