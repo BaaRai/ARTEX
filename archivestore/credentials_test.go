@@ -140,7 +140,7 @@ func TestArchiveIncompleteCredentialOverride(t *testing.T) {
 func TestReview318CredentialsSurviveEnvScrub(t *testing.T) {
 	scrubbed := []string{
 		"AWS_ACCESS_KEY_ID", "AWS_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY", "AWS_SECRET_KEY", "AWS_SESSION_TOKEN",
-		"AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+		"AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_AUTHORIZATION_TOKEN", "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
 		"AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN",
 	}
 	for _, mode := range []string{"environment", "environment-alternate-names", "container", "web-identity"} {

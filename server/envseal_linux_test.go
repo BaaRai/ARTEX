@@ -69,6 +69,7 @@ func TestSealedEnvironmentHandoff(t *testing.T) {
 		"AWS_CONTAINER_CREDENTIALS_FULL_URI":     "http://127.0.0.1:8080/credentials?id=1",
 		"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "/v2/credentials/test",
 		"AWS_CONTAINER_AUTHORIZATION_TOKEN":      "container-token-test",
+		"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": "/var/run/secrets/token-file",
 		"AWS_WEB_IDENTITY_TOKEN_FILE":            "/var/run/secrets/token",
 		"AWS_ROLE_ARN":                           "arn:aws:iam::123456789012:role/test",
 	}
