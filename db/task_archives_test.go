@@ -524,3 +524,45 @@ func TestFillArchiveDefaults(t *testing.T) {
 		t.Fatalf("activity changed: %s err=%v", out, err)
 	}
 }
+
+// FailTaskArchiveJob fails a job that is still running. A failure reported after
+// the archive committed (the worker recovers a panic in the cleanup that follows
+// the commit) must not turn a ready archive into archive_failed: it could then
+// be neither restored nor deleted.
+func TestFailTaskArchiveJobKeepsCommittedState(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	defer d.Close()
+	task, err := d.CreateTaskWithOptions("late archive failure", "must stay ready", TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = d.Exec(`DELETE FROM task_archives WHERE task_id=$1`, task.ID)
+		_ = d.DeleteTask(task.ID)
+	}()
+	if err := d.SetPaused(task.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := d.QueueTaskArchive(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ state, want string }{{Archiving, ArchiveFailed}, {ArchiveReady, ArchiveReady}} {
+		if _, err := d.Exec(`UPDATE task_archives SET state=$2,error='' WHERE id=$1`, queued.ID, c.state); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.FailTaskArchiveJob(queued.ID, Archiving, errors.New("late failure")); err != nil {
+			t.Fatal(err)
+		}
+		item, err := d.GetTaskArchive(queued.ID)
+		if err != nil || item == nil {
+			t.Fatalf("archive %d: %v", queued.ID, err)
+		}
+		if item.State != c.want || (c.want == ArchiveFailed) != (item.Error == "late failure") {
+			t.Fatalf("failing a job in state %s: state=%s error=%q, want state %s", c.state, item.State, item.Error, c.want)
+		}
+	}
+}

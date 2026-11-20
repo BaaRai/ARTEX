@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -114,18 +115,7 @@ func (s *Server) runOneTaskArchiveJob() error {
 	if err != nil || job == nil {
 		return err
 	}
-	var runErr error
-	switch job.State {
-	case pgdb.Archiving:
-		runErr = s.archiveTask(job)
-	case pgdb.Restoring:
-		runErr = s.restoreTaskArchive(job)
-	case pgdb.Deleting:
-		runErr = s.deleteTaskArchive(job)
-	default:
-		runErr = fmt.Errorf("unknown claimed archive state %q", job.State)
-	}
-	if runErr != nil {
+	if runErr := s.runClaimedTaskArchiveJob(job); runErr != nil {
 		if failErr := s.m.pg.FailTaskArchiveJob(job.ID, job.State, runErr); failErr != nil {
 			return errors.Join(runErr, failErr)
 		}
@@ -134,6 +124,31 @@ func (s *Server) runOneTaskArchiveJob() error {
 	// Drain another queued item without waiting for the periodic poll.
 	s.notifyTaskArchiveWorker()
 	return nil
+}
+
+// runClaimedTaskArchiveJob runs one claimed job and turns a panic below it into
+// an ordinary job failure. The worker goroutine has no other recover: a panic
+// there (the S3 upload manager dereferences a nil UploadId when an endpoint
+// answers CreateMultipartUpload without one) would end the whole server with the
+// job half done. The job's deferred rollbacks have already run when the panic is
+// recovered here, so the caller fails the job with its source data in place.
+func (s *Server) runClaimedTaskArchiveJob(job *pgdb.TaskArchive) (runErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[task-archive] archive job %d (%s) panicked: %v\n%s", job.ID, job.State, r, debug.Stack())
+			runErr = fmt.Errorf("archive worker panic: %v", r)
+		}
+	}()
+	switch job.State {
+	case pgdb.Archiving:
+		return s.archiveTask(job)
+	case pgdb.Restoring:
+		return s.restoreTaskArchive(job)
+	case pgdb.Deleting:
+		return s.deleteTaskArchive(job)
+	default:
+		return fmt.Errorf("unknown claimed archive state %q", job.State)
+	}
 }
 
 func (s *Server) archiveTask(job *pgdb.TaskArchive) (runErr error) {

@@ -456,7 +456,10 @@ func (d *DB) FailTaskArchiveJob(id int64, activeState string, cause error) error
 	if cause != nil {
 		message = cause.Error()
 	}
-	_, err := d.Exec(`UPDATE task_archives SET state=$2,phase='failed',error=$3 WHERE id=$1`, id, failed, message)
+	// Only a job still in its active state fails. The worker also reports a panic
+	// it recovered after the job committed: a ready archive marked archive_failed
+	// could be neither restored nor deleted.
+	_, err := d.Exec(`UPDATE task_archives SET state=$2,phase='failed',error=$3 WHERE id=$1 AND state=$4`, id, failed, message, activeState)
 	return err
 }
 
