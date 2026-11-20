@@ -39,8 +39,6 @@ jobs:
       # - TestGraphOverviewExpandsAssociatedCompanyScope,
       #   TestCaptureApprovalLifecycle: fail on unmodified upstream code with a
       #   fresh database.
-      # - TestSideUsageRecordedOnceOnConsumerCancellation: concurrency/cancellation
-      #   test that passes locally but is timing-sensitive on 2-core CI runners.
       # They now skip themselves in code (t.Skip with a pointer to the issue).
       - name: go test
         # -p 1: package test suites share the single postgres service; running

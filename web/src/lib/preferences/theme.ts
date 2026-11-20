@@ -30,6 +30,14 @@ export const THEME_PRESET_OPTIONS = [
     },
   },
   {
+    label: "Neon",
+    value: "neon",
+    primary: {
+      light: "#00685f",
+      dark: "#54eccd",
+    },
+  },
+  {
     label: "Soft Pop",
     value: "soft-pop",
     primary: {

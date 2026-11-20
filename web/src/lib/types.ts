@@ -903,6 +903,7 @@ export interface TrafficExchange {
   status: number;
   content_type: string;
   resp_len: number;
+  rewritten?: boolean;
 }
 
 export interface TrafficRewriteStats {
@@ -911,6 +912,27 @@ export interface TrafficRewriteStats {
   tombstone_drops: number;
   conversions: number;
   sweeps: number;
+}
+
+export interface TrafficHARImportError {
+  index: number;
+  url?: string;
+  reason: string;
+}
+
+export interface TrafficHARImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  truncated?: boolean;
+  errors?: TrafficHARImportError[];
+}
+
+export interface TrafficHARExportMeta {
+  exported: number;
+  matched: number;
+  truncated: boolean;
+  truncatedReason?: string;
 }
 
 export interface TrafficResp {

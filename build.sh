@@ -118,7 +118,7 @@ else
   command -v rsync >/dev/null 2>&1 || die "rsync not detected"
   info "Building frontend static assets"
   if [ "${ARTEX_SKIP_NPM_CI:-0}" != "1" ]; then
-    (cd web && npm ci)
+    (cd web && npm ci --ignore-scripts)
   fi
   (cd web && npm run build:static)
   info "Syncing frontend assets to server/webui/dist"
