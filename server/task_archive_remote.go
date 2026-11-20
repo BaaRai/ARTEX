@@ -67,19 +67,11 @@ func (s *Server) writeRemoteArchiveJournal(j remoteArchiveJournal) (string, erro
 		return "", err
 	}
 	// Persist the directory entry before an upload or database deletion starts.
-	d, err := os.Open(dir)
-	if err != nil {
-		return "", err
-	}
-	if err := errors.Join(d.Sync(), d.Close()); err != nil {
+	if err := syncDir(dir); err != nil {
 		return "", err
 	}
 	// The .remote directory itself may have just been created.
-	parent, err := os.Open(filepath.Dir(dir))
-	if err != nil {
-		return "", err
-	}
-	return name, errors.Join(parent.Sync(), parent.Close())
+	return name, syncDir(filepath.Dir(dir))
 }
 
 func (s *Server) recoverRemoteArchiveJournals() error {
