@@ -387,12 +387,57 @@ func IsRunDirName(name string) bool {
 	return true
 }
 
-func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
+// CachePrefixEnv is the opt-in environment flag enabling the worker system
+// prompt cache-prefix split (P3.5 phase C). Off by default: when unset/false,
+// worker system segments and DynamicBoundary are byte-identical to the legacy
+// layout. Planner, mainagent, chat, and goals are unaffected.
+const CachePrefixEnv = "ARTEX_CACHE_PREFIX"
+
+func cachePrefixEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(CachePrefixEnv))) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	return false
+}
+
+// workerSystemParts splits workerSystem at the first per-intent volatile
+// segment (workerArtifactSpec(runDir)) without reordering any text:
+//   - staticPart  = body + untrustedContentTail + workerTrafficBlock
+//   - dynamicHead = workerArtifactSpec(runDir) + noiseProfileBlock
+//
+// Custom DB prompts that reference {{.Now}} remain volatile inside staticPart.
+func workerSystemParts(proxyAddr, caCert, dataDir, runDir string) (staticPart, dynamicHead string) {
 	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr, DataDir: dataDir, Now: nowStr()})
 	// caCert is present only when the recording MITM is on, which is exactly when
 	// the traffic_* tools are registered — so it gates the traffic-tool note.
 	// Optional finding guidance is added for every role after tool resolution.
-	return body + untrustedContentTail(body) + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir) + noiseProfileBlock()
+	staticPart = body + untrustedContentTail(body) + workerTrafficBlock(caCert != "")
+	dynamicHead = workerArtifactSpec(runDir) + noiseProfileBlock()
+	return staticPart, dynamicHead
+}
+
+func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
+	staticPart, dynamicHead := workerSystemParts(proxyAddr, caCert, dataDir, runDir)
+	return staticPart + dynamicHead
+}
+
+// assembleWorkerSystem builds the worker's SystemPrompt segments and
+// DynamicBoundary. When split is false (default), it delegates directly to
+// deferredSystem(staticPart+dynamicTail, def). When split is true
+// (ARTEX_CACHE_PREFIX=1), it emits two segments [staticPart, dynamic] with
+// DynamicBoundary=1 so sibling workers in the same task share the cached static
+// prefix, absorbing the leading "\n\n" separator from workerArtifactSpec so
+// strings.Join(system, "\n\n") is byte-identical to the unsplit prompt.
+func assembleWorkerSystem(staticPart, dynamicTail string, def DeferredInfo, split bool) (system []string, boundary int) {
+	if !split {
+		return deferredSystem(staticPart+dynamicTail, def)
+	}
+	dyn := strings.TrimPrefix(dynamicTail+def.FindingGuidance, "\n\n")
+	if block := actool.RenderDeferredToolsBlock(def.GlobalNames); block != "" {
+		dyn += "\n\n" + block
+	}
+	return []string{staticPart, dyn}, 1
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:
@@ -524,18 +569,19 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), newDataEnvelope())
-	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir) + frameLessonsBlock(w.lessonsBlock)
+	staticPart, dynamicTail := workerSystemParts(w.proxyAddr, w.proxyCACert, w.workDir, runDir)
+	dynamicTail += frameLessonsBlock(w.lessonsBlock)
 	if w.wantConstraints() {
-		sysBody += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
+		dynamicTail += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
 	}
 	// intent block → intent-anchored assets block → launch instruction, appended to
 	// the system tail in that order (same append pattern as constraintBlock).
-	sysBody += renderIntentTask(intent)
+	dynamicTail += renderIntentTask(intent)
 	if as != nil {
 		if ids := intentAssetIDs(intent); len(ids) > 0 {
 			if assets, err := as.GetByIDs(ids); err == nil && len(assets) > 0 {
 				if b, err := json.Marshal(assets); err == nil {
-					sysBody += "\n\nThe target assets corresponding to this intent's asset_ids:\n" + string(b)
+					dynamicTail += "\n\nThe target assets corresponding to this intent's asset_ids:\n" + string(b)
 				}
 				// The assets this intent explicitly targets → automatically join the task's
 				// test scope (same conservative granularity as insertAssets). upsertTaskScope's
@@ -551,8 +597,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 			}
 		}
 	}
-	sysBody += "\n\nStart executing the intent above: do only it, produce only facts, assets, findings, stop when done."
-	system, boundary := deferredSystem(sysBody, def)
+	dynamicTail += "\n\nStart executing the intent above: do only it, produce only facts, assets, findings, stop when done."
+	system, boundary := assembleWorkerSystem(staticPart, dynamicTail, def, cachePrefixEnabled())
 	// The task-level deadline (injected via ctx) clamps this run's wall-clock budget +
 	// decides the wrap-up prompt (see taskclock.go).
 	tc := taskClockFrom(ctx)
