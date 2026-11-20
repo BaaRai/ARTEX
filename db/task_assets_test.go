@@ -10,7 +10,7 @@ import (
 func TestRegisterTaskAssetScopesCreatesAssetsAndPersistsTextScope(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })
@@ -93,7 +93,7 @@ func TestRegisterTaskAssetScopesCreatesAssetsAndPersistsTextScope(t *testing.T) 
 func TestTaskAssetAttachDetachPreservesGlobalAssetAndAnchors(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })
@@ -150,7 +150,7 @@ func TestTaskAssetAttachDetachPreservesGlobalAssetAndAnchors(t *testing.T) {
 func TestIntentAssetsIncludesDirectSourceProvenance(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })

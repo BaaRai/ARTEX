@@ -12,7 +12,7 @@ import (
 func TestTaskTemplateCRUDAndNormalizedUniqueness(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })
@@ -87,7 +87,7 @@ func TestTaskTemplateCRUDAndNormalizedUniqueness(t *testing.T) {
 func TestTaskTemplateDisjointPatchesCompose(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanup below.
 	t.Cleanup(func() { d.Close() })

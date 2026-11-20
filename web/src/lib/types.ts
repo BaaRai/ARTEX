@@ -904,6 +904,36 @@ export interface TrafficExchange {
   status: number;
   content_type: string;
   resp_len: number;
+  rewritten?: boolean;
+}
+
+export interface TrafficRewriteStats {
+  large_responses: number;
+  capacity_refusals: number;
+  tombstone_drops: number;
+  conversions: number;
+  sweeps: number;
+}
+
+export interface TrafficHARImportError {
+  index: number;
+  url?: string;
+  reason: string;
+}
+
+export interface TrafficHARImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  truncated?: boolean;
+  errors?: TrafficHARImportError[];
+}
+
+export interface TrafficHARExportMeta {
+  exported: number;
+  matched: number;
+  truncated: boolean;
+  truncatedReason?: string;
 }
 
 export interface TrafficResp {
@@ -914,6 +944,7 @@ export interface TrafficResp {
   page?: number;
   size?: number;
   exchanges?: TrafficExchange[];
+  rewrite?: TrafficRewriteStats;
 }
 
 // Full raw request/response of one exchange (lazy-loaded on row select).
@@ -956,12 +987,14 @@ export interface TrafficReplayHeader {
 }
 
 // POST /api/traffic/replay. Host is not sent: the server takes it from url.
+// apply_rules defaults to false (bypasses capture rewrite rules).
 export interface TrafficReplayRequest {
   method: string;
   url: string;
   headers: TrafficReplayHeader[];
   body: string;
   body_base64: boolean;
+  apply_rules?: boolean;
 }
 
 export interface TrafficReplayResult {
@@ -1677,6 +1710,8 @@ export interface TrafficEvidenceSnapshot {
   resp_hash: string;
   req_len: number;
   resp_len: number;
+  rewritten?: boolean;
+  rewrite_rule_ids?: number[];
 }
 export interface FindingTrafficBinding {
   id: string;

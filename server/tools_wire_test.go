@@ -24,11 +24,11 @@ func names(tools []actool.CoreTool) map[string]actool.CoreTool {
 func TestWireTools(t *testing.T) {
 	dsn, _, err := db.DSN()
 	if err != nil {
-		t.Skipf("no database config (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	pg, err := db.Open(dsn)
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer pg.Close()
 
@@ -109,11 +109,11 @@ func TestWireTools(t *testing.T) {
 func TestHealListTaskCredentialsSchema(t *testing.T) {
 	dsn, _, err := db.DSN()
 	if err != nil {
-		t.Skipf("no database config (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	pg, err := db.Open(dsn)
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { pg.Close() })
 	s := &Server{m: &Manager{pg: pg}}

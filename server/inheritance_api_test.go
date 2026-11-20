@@ -26,7 +26,7 @@ func TestInheritedActivityDetailAndRelationDeletion(t *testing.T) {
 	m, err := NewManager(dir, "")
 	if err != nil {
 		_ = os.RemoveAll(dir)
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() {
 		_ = m.Close()

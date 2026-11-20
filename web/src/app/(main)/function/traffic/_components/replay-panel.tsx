@@ -7,6 +7,7 @@ import { Loader2Icon, PlusIcon, SendIcon, XIcon } from "lucide-react";
 import { HttpCodeBlock, statusTone } from "@/components/http-code-block";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +24,7 @@ type ReplayForm = {
   url: string;
   rows: HeaderRow[];
   body: string;
+  applyRules: boolean;
   // Headers of the recorded request that the server would not send.
   dropped: string[];
   binary: boolean;
@@ -40,6 +42,7 @@ function initialForm(exchange: TrafficExchange, raw: string): ReplayForm {
     url: exchange.url,
     rows: toRows(sent),
     body: parsed.binary ? "" : parsed.body,
+    applyRules: false,
     dropped: notSent.filter((n) => n.toLowerCase() !== "host"),
     binary: parsed.binary,
     bodyPreviewOnly: parsed.bodyPreviewOnly,
@@ -83,6 +86,7 @@ export function ReplayPanel({
   // Answers for an older exchange are dropped.
   const generation = React.useRef(0);
   const methodListId = React.useId();
+  const applyRulesId = React.useId();
 
   React.useEffect(() => {
     generation.current++;
@@ -111,6 +115,7 @@ export function ReplayPanel({
         headers: splitReplayHeaders(form.rows).sent,
         body: form.body,
         body_base64: false,
+        apply_rules: form.applyRules,
       })
       .then((r) => {
         if (gen !== generation.current) return;
@@ -230,10 +235,20 @@ export function ReplayPanel({
         )}
       </div>
 
-      <Button onClick={send} disabled={!canSend}>
-        {sending ? <Loader2Icon className="animate-spin" /> : <SendIcon />}
-        {t("Send")}
-      </Button>
+      <div className="flex flex-wrap items-center gap-4">
+        <Button onClick={send} disabled={!canSend}>
+          {sending ? <Loader2Icon className="animate-spin" /> : <SendIcon />}
+          {t("Send")}
+        </Button>
+        <label htmlFor={applyRulesId} className="flex cursor-pointer items-center gap-2 text-xs select-none">
+          <Checkbox
+            id={applyRulesId}
+            checked={form.applyRules}
+            onCheckedChange={(checked) => update({ applyRules: checked === true })}
+          />
+          <span>{t("Apply capture rewrite rules")}</span>
+        </label>
+      </div>
 
       {error && (
         <div className="space-y-1 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs">

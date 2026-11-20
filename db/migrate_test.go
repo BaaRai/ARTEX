@@ -52,11 +52,11 @@ func scratchDSN(t *testing.T, suffix string) string {
 	admin.Path = "/postgres"
 	conn, err := sql.Open("pgx", admin.String())
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	if err := conn.Ping(); err != nil {
 		conn.Close()
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	drop := func() error {
 		_, err := conn.Exec(`DROP DATABASE IF EXISTS "` + name + `" WITH (FORCE)`)
@@ -137,9 +137,10 @@ func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 		version int
 		name    string
 	}{{1, llmRecordsMigration}, {2, llmUsageMigration}, {3, "0003_task_scope_icp_index.sql"}, {4, "0004_llm_usage_ts_index.sql"},
-		{5, "0005_traffic_rewrite_rules.sql"}, {6, "0006_activity_outbox.sql"}, {7, "0007_finding_report_state.sql"}}
+		{5, "0005_traffic_rewrite_rules.sql"}, {6, "0006_activity_outbox.sql"}, {7, "0007_finding_report_state.sql"},
+		{8, "0008_traffic_evidence_rewrite_flag.sql"}}
 	if len(applied) != len(want) {
-		t.Fatalf("schema_migrations = %+v, want versions 1 to 7", applied)
+		t.Fatalf("schema_migrations = %+v, want versions 1 to 8", applied)
 	}
 	for i, w := range want {
 		content, err := fs.ReadFile(migrationsFS(), w.name)
@@ -189,7 +190,7 @@ func TestOpenRecordsEmbeddedMigrations(t *testing.T) {
 	dsn := testDSN(t)
 	d, err := Open(dsn)
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	applied := assertEmbeddedApplied(t, d)
 	d.Close()

@@ -12,7 +12,7 @@ func TestCoverageEnabledWithoutTask(t *testing.T) {
 func TestCoverageEnabledMissingRowStaysOn(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 	on, err := d.Assets().CoverageEnabled(9_000_000_000_001)
@@ -24,7 +24,7 @@ func TestCoverageEnabledMissingRowStaysOn(t *testing.T) {
 func TestCoverageEnabledQueryErrorStaysOn(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		SkipPGUnavailable(t, err)
 	}
 	if err := d.Close(); err != nil {
 		t.Fatal(err)

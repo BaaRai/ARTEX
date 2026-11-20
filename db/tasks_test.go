@@ -11,7 +11,7 @@ import (
 func TestTaskLifecycleAndDeleteCascade(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() })
 
@@ -85,7 +85,7 @@ func TestTaskLifecycleAndDeleteCascade(t *testing.T) {
 func TestTaskDeleteCascadeAssets(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })
@@ -211,7 +211,7 @@ func TestTaskDeleteCascadeAssets(t *testing.T) {
 func TestTaskRelationsAndLLMFailoverChain(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })
@@ -470,7 +470,7 @@ func TestTaskRelationsAndLLMFailoverChain(t *testing.T) {
 func TestTaskContextRejectsDuplicatesAndAllowsTerminalLLMEdits(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })
@@ -525,7 +525,7 @@ func TestTaskContextRejectsDuplicatesAndAllowsTerminalLLMEdits(t *testing.T) {
 func TestCreateTaskWithCompanyScopes(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })
@@ -680,7 +680,7 @@ RETURNING id`, domainB, companyB).Scan(&companyAssetB); err != nil {
 func TestListTasksOrderByIDDesc(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	// Registered FIRST so it runs LAST, after the row cleanups below.
 	t.Cleanup(func() { d.Close() })

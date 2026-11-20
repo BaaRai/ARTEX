@@ -200,7 +200,7 @@ func assertPlainReads(t *testing.T, d *DB, r secretRows) {
 func TestSecretsAtRestWriteRead(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() }) // after the fixture cleanup
 	r := secretFixture(t, d, false)
@@ -214,7 +214,7 @@ func TestSecretsAtRestWriteRead(t *testing.T) {
 func TestSecretsBackfillLegacyAndKeyChecks(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { d.Close() }) // after the fixture cleanup
 	r := secretFixture(t, d, true)
@@ -287,7 +287,7 @@ func encryptedCount(t *testing.T, d *DB, dir string) int {
 func TestSecretSettingsEmptyAndClear(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() {
 		d.Exec(deleteSecretSettings)

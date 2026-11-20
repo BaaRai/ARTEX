@@ -142,7 +142,7 @@ func newSideHTTPFixture(t *testing.T) *sideHTTPFixture {
 	t.Helper()
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, jwtKey: []byte("btw-test-signing-key-only"), chatBusy: map[string]bool{}}

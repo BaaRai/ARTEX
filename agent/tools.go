@@ -149,6 +149,10 @@ type ToolSet struct {
 	// auto-scope hook (insertAssets) is skipped, and add_task_scope/list_untested_assets
 	// are filtered out of the agent's tool list. The scope field stays regardless.
 	coverageDisabled bool
+	// workBase is the data directory the run directories live in, the base of the
+	// file tools (defaultTools). ingest_bbot opens its file through the run's working
+	// directory below it; empty = the tool refuses every path.
+	workBase string
 	// ownerNode is the exploration node that writes attach to: assets this run
 	// touches get anchored to it as lineage/provenance (NOT visibility — the asset
 	// graph is global and shared). Worker = its claimed intent; planner = begin root.
@@ -312,6 +316,10 @@ func (t *ToolSet) SetEnrich(e EnrichTrigger) { t.enrich = e }
 // intent node; planner/main: the begin root). Assets created/referenced while
 // ownerNode is set are anchored to it as lineage (not visibility).
 func (t *ToolSet) SetOwnerNode(id int64) { t.ownerNode = id }
+
+// SetWorkBase sets the data directory the run directories live in (see
+// ToolSet.workBase): the same base the run's file tools are confined under.
+func (t *ToolSet) SetWorkBase(base string) { t.workBase = base }
 
 // anchorOwner records a lineage edge from this run's owner node to an asset
 // (no-op if unset). Provenance only — the asset graph is global and shared, so

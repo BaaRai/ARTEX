@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -174,14 +175,14 @@ func NewWorker(prov llm.Provider, model, workDir string, tx *transcript.Store, w
 	return &Worker{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, extraTools: extra}
 }
 
-// defaultToolsExcept returns actool.DefaultTools() minus the named tools (by
+// defaultToolsExcept returns defaultTools(base) minus the named tools (by
 // CoreTool.Name()). Used to trim SDK default tools an agent shouldn't have.
-func defaultToolsExcept(exclude ...string) []actool.CoreTool {
+func defaultToolsExcept(base string, exclude ...string) []actool.CoreTool {
 	drop := make(map[string]bool, len(exclude))
 	for _, n := range exclude {
 		drop[n] = true
 	}
-	all := actool.DefaultTools()
+	all := defaultTools(base)
 	out := make([]actool.CoreTool, 0, len(all))
 	for _, t := range all {
 		if !drop[t.Name()] {
@@ -314,22 +315,77 @@ func workerArtifactSpec(runDir string) string {
 	return "\n\n**Intermediate artifact output rules**: all intermediate artifacts — scripts, payloads, captured response bodies, temporary data — **must be written to this intent's dedicated work directory " + runDir + "** (already created automatically; just write with relative paths there — no manual mkdir needed) — **do NOT write to /tmp, do NOT use other absolute paths**."
 }
 
-// ensureRunDir builds and creates an agent's working directory under base:
-// <base>/tasks/<taskID> for planner/main; <base>/tasks/<taskID>/i<intentID> for a
-// worker (intentID<=0 → task dir only). The "tasks/" segment groups per-task dirs
-// symmetrically with the chat agent's "sessions/<sessionID>". Best-effort mkdir — on
-// failure, writes fail the same way an unwritable CWD would.
-func ensureRunDir(base string, taskID, intentID int64) string {
-	dir := filepath.Join(base, "tasks", strconv.FormatInt(taskID, 10))
-	if intentID > 0 {
-		dir = filepath.Join(dir, "i"+strconv.FormatInt(intentID, 10))
+// mainRunDirName is the run directory of a task's main agent and planner.
+const mainRunDirName = "main"
+
+// runDirMaker creates a run directory below the data directory with the ownership
+// the server wants. The server sets it when agent processes run as the executor
+// (server/execpriv_unix.go); nil keeps a plain MkdirAll.
+var runDirMaker func(base, leaf string) error
+
+// SetRunDirMaker sets how run directories are created. Call it before any agent runs.
+func SetRunDirMaker(f func(base, leaf string) error) { runDirMaker = f }
+
+// makeRunDir creates the run directory leaf below base. Best-effort — on failure,
+// writes fail the same way an unwritable CWD would.
+func makeRunDir(base, leaf string) {
+	if runDirMaker == nil {
+		// 0775: the umask of the server decides the final bits.
+		_ = os.MkdirAll(leaf, 0o775)
+		return
 	}
-	_ = os.MkdirAll(dir, 0o755)
+	if err := runDirMaker(base, leaf); err != nil {
+		log.Printf("[agent] run directory %s: %v", leaf, err)
+	}
+}
+
+// ensureRunDir builds and creates an agent's working directory under base:
+// <base>/tasks/<taskID>/main for planner/main (intentID<=0);
+// <base>/tasks/<taskID>/i<intentID> for a worker. No run directory is an ancestor of
+// another: the task directory holds the leaves and is no agent's working directory.
+// The "tasks/" segment groups per-task dirs symmetrically with the chat agent's
+// "sessions/<sessionID>".
+func ensureRunDir(base string, taskID, intentID int64) string {
+	leaf := mainRunDirName
+	if intentID > 0 {
+		leaf = "i" + strconv.FormatInt(intentID, 10)
+	}
+	dir := filepath.Join(base, "tasks", strconv.FormatInt(taskID, 10), leaf)
+	makeRunDir(base, dir)
 	return dir
 }
 
-// cmdOutDir is the SDK large-tool-output spill dir under an agent's run dir.
-func cmdOutDir(dir string) string { return filepath.Join(dir, "cmd-output") }
+// EnsureRunDir is ensureRunDir for the server, which places the main agent's
+// uploads in its run directory.
+func EnsureRunDir(base string, taskID, intentID int64) string {
+	return ensureRunDir(base, taskID, intentID)
+}
+
+// EnsureSessionDir creates the chat run directory <base>/sessions/<sessionID> the
+// way ensureRunDir creates a task one, and returns it.
+func EnsureSessionDir(base, sessionID string) string {
+	dir := filepath.Join(base, "sessions", sessionID)
+	makeRunDir(base, dir)
+	return dir
+}
+
+// IsRunDirName reports whether name is a run directory inside a task directory:
+// main or i<intentID>.
+func IsRunDirName(name string) bool {
+	if name == mainRunDirName {
+		return true
+	}
+	digits, ok := strings.CutPrefix(name, "i")
+	if !ok || digits == "" {
+		return false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
 
 func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
 	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr, DataDir: dataDir, Now: nowStr()})
@@ -432,6 +488,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
 	}
+	tsx.SetWorkBase(w.workDir)          // ingest_bbot reads its file under the same base as the file tools below
 	tsx.SetOwnerNode(intent.ID)         // assets this worker discovers anchor to its intent → visible to the task
 	tsx.SetEnrich(enr)                  // async DNS/HTTP auto-completion for assets this worker writes
 	tsx.SetNotifyFinding(notifyFinding) // when report_finding lands, wake the planner on the spot with "which intent + finding"
@@ -443,7 +500,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// searching goes through Bash(grep/find) — narrowing the tool surface and reducing
 	// low-value calls. The rest of the SDK default tools (Read/Write/Edit/LS/Bash/Sleep)
 	// are kept as usual.
-	base = append(base, defaultToolsExcept("MultiEdit", "Glob", "Grep")...)
+	base = append(base, defaultToolsExcept(w.workDir, "MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
 	tools, def, cleanup := AugmentTools(WithToolQuery(ctx, nodeSummary(intent)), "worker", base)
 	defer cleanup()
@@ -544,10 +601,10 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		// deadline → task-timeout prompt; turns = the turn budget ran out inside the
 		// clamped window → fall back to the per-run prompt. Non-clamped stays pure per-run.
 		Settlement: settle,
-		// large tool output spills to cmd-output/ with a head + pointer (SDK tool.Capture);
-		// full output preserved on disk. The truncation cap uses the SDK default (30000
-		// chars).
-		ToolOutputDir: cmdOutDir(runDir),
+		// large tool output spills to a file with a head + pointer (SDK tool.Capture);
+		// full output preserved on disk, in cmd-output/ or in the task's spill
+		// directory (spill.go). The truncation cap uses the SDK default (30000 chars).
+		ToolOutputDir: TaskToolOutputDir(w.workDir, taskID, runDir),
 		Compaction:    compactionConfig(w.compactionWindow()), // long tool-heavy runs stay within the window
 		Todos:         actool.NewTodoStore(),                  // session-level scratch todos (TodoWrite), pure planning, discarded on exit
 		NonStreaming:  w.nonStreaming(),                       // when this profile selects non-streaming, use Provider.Complete
@@ -559,6 +616,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	opts.Hooks = SpillHooks(opts.Hooks, opts.ToolOutputDir)
 	// The session id is the provider-side identity (session header, usage metering)
 	// with or without persistence; Norma only puts it on ctx when it writes a transcript.
 	opts.SessionID = WorkerSessionID(ts.ID(), intent.ID)

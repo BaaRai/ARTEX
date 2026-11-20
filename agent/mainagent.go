@@ -126,11 +126,11 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	tsx.steerWork = m.steerWork   // enable steer_work tool (nil = unavailable)
 	// domain tools + basic default toolset (Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash)
 	// when the asset coverage feature is off, drop add_task_scope/list_untested_assets (not in the prompt).
-	base := append(tsx.DropCoverageTools(tsx.MainAgentTools()), actool.DefaultTools()...)
+	base := append(tsx.DropCoverageTools(tsx.MainAgentTools()), defaultTools(m.workDir)...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts)})
 	tools, def, cleanup := AugmentTools(ctx, "mainagent", base)
 	defer cleanup()
-	// this task's working directory <workDir>/tasks/<taskID>, created up front.
+	// the main run directory <workDir>/tasks/<taskID>/main, created up front.
 	mainDir := ensureRunDir(m.workDir, taskID, 0)
 	ctx = intercept.WithReviewWorkingDirectory(ctx, mainDir)
 	system, boundary := deferredSystem(mainAgentSystem(goal, m.workDir, mainDir), def)
@@ -155,8 +155,8 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		DeepSeekSearchModel:   m.webSearch.DeepSeekModel,
 		WebSearchProxy:        m.webSearch.Proxy,
 		BashEnv:               proxyEnv(m.proxyAddr, m.proxyCACert), // Bash subcommands go through the proxy + trust the CA by default
-		WorkingDir:            mainDir,                              // this task's working directory <workDir>/tasks/<taskID>
-		ToolOutputDir:         cmdOutDir(mainDir),
+		WorkingDir:            mainDir,                              // the main run directory <workDir>/tasks/<taskID>/main
+		ToolOutputDir:         TaskToolOutputDir(m.workDir, taskID, mainDir),
 		MaxTurns:              m.maxTurns,                             // 0 = unlimited (configurable in agent management)
 		Compaction:            compactionConfig(m.compactionWindow()), // long chats stay within the window
 		Todos:                 actool.NewTodoStore(),                  // session-level temporary todos (TodoWrite), planning only, dropped on exit
@@ -171,6 +171,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	opts.Hooks = SpillHooks(opts.Hooks, opts.ToolOutputDir)
 	// Segment 0 keeps the legacy "exp%d-main" name so existing transcripts still
 	// load; each new session (seg>=1) gets its own file for a clean context. The id
 	// is the provider-side identity (session header, usage metering) with or without

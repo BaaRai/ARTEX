@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 func TestPasswordVersionClaim(t *testing.T) {
@@ -50,7 +52,7 @@ func TestPasswordVersionClaim(t *testing.T) {
 func TestChangePasswordRevokesOldTokenAndKeepsItWhenSaveFails(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 
@@ -150,7 +152,7 @@ func TestChangePasswordRevokesOldTokenAndKeepsItWhenSaveFails(t *testing.T) {
 func TestUnreadablePasswordVersionRejectsSessions(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	key := []byte("0123456789abcdef0123456789abcdef")
@@ -186,7 +188,7 @@ func TestUnreadablePasswordVersionRejectsSessions(t *testing.T) {
 func TestLoginRereadsPasswordVersionWhenUnreadable(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 
@@ -250,7 +252,7 @@ func TestLoginRereadsPasswordVersionWhenUnreadable(t *testing.T) {
 func TestAbsentPasswordVersionKeepsSessions(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v)", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	key := []byte("0123456789abcdef0123456789abcdef")

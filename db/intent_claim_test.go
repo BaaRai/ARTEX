@@ -16,7 +16,7 @@ func openClaimInstances(t *testing.T) (*DB, *ExplorationStore, *ExplorationStore
 	dsn := testDSN(t)
 	a, err := Open(dsn)
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { a.Close() })
 	b, err := Open(dsn)
@@ -341,7 +341,7 @@ func TestIntentClaimTakeoverRacesHeartbeatAtomically(t *testing.T) {
 func TestIntentClaimColumnsMigrateIdempotently(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
+		SkipPGUnavailable(t, err)
 	}
 	defer d.Close()
 

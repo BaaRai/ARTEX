@@ -10,12 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 func TestTaskMetadataPatchReturnsRenameAndPin(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	task, err := m.CreateTask("metadata patch", "goal", nil, 0, 0)
@@ -65,7 +67,7 @@ func TestTaskMetadataPatchReturnsRenameAndPin(t *testing.T) {
 func TestConversationBatchDeleteReportsMissing(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	ctx, cancel := context.WithCancel(context.Background())

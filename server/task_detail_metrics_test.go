@@ -7,12 +7,14 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 func TestTaskDetailReturnsListMetrics(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
+		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
 	task, err := m.CreateTask("detail metrics", "goal", nil, 0, 0)
