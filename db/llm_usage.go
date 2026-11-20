@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"sort"
 	"strconv"
 	"time"
@@ -71,14 +72,32 @@ VALUES (NULLIF($1,''),$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),$6,$7,$8,$9,$
 // Accurate even with per-agent model bindings, pool rotation/failover, and
 // interrupted runs, since every call (success or error) is metered.
 func (d *DB) TokenByModel(taskID string) ([]ModelTokenStat, error) {
-	rows, err := d.Query(`
+	// Keep the predicate sargable for non-empty task IDs so PostgreSQL can use
+	// idx_llm_usage_model(task_id, model) instead of sequentially scanning the
+	// table via COALESCE(task_id, '').
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if taskID == "" {
+		rows, err = d.Query(`
 SELECT COALESCE(NULLIF(model,''),'(unknown)') AS model, COUNT(*) AS calls,
        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
        COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0)
 FROM llm_usage
-WHERE COALESCE(task_id,'') = $1
+WHERE task_id IS NULL OR task_id = ''
+GROUP BY model
+ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, model`)
+	} else {
+		rows, err = d.Query(`
+SELECT COALESCE(NULLIF(model,''),'(unknown)') AS model, COUNT(*) AS calls,
+       COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+       COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0)
+FROM llm_usage
+WHERE task_id = $1
 GROUP BY model
 ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, model`, taskID)
+	}
 	if err != nil {
 		return nil, err
 	}

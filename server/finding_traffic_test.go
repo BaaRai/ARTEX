@@ -38,7 +38,11 @@ func trafficEvidenceServer(t *testing.T) (*Server, *db.RecordedFinding, func(str
 		t.Fatal(err)
 	}
 	tid, _ := strconv.ParseInt(task.ID, 10, 64)
-	t.Cleanup(func() { m.pg.Exec(`DELETE FROM task_archives WHERE task_id=$1`, tid); m.pg.DeleteTask(tid) })
+	t.Cleanup(func() {
+		_, _ = m.pg.DeleteFindingsByTask(tid)
+		_, _ = m.pg.Exec(`DELETE FROM task_archives WHERE task_id=$1`, tid)
+		_ = m.pg.DeleteTask(tid)
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
@@ -278,6 +282,7 @@ func TestFindingTrafficArchiveV3RoundTripAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer s.m.pg.DeleteFinding(shared.FindingID)
 	if _, err = s.m.traffic.DeleteHost("evidence.local"); err != nil {
 		t.Fatal(err)
 	}

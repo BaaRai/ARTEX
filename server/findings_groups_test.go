@@ -286,15 +286,19 @@ func TestDeepenAdmissionFailureDiscardsFollowUpIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	taskID, _ := strconv.ParseInt(task.ID, 10, 64)
+	var findingID int64
 	defer func() {
 		_, _ = m.pg.Exec(`UPDATE tasks SET deleted_at=NULL WHERE id=$1`, taskID)
+		if findingID > 0 {
+			_, _ = m.pg.DeleteFinding(findingID)
+		}
 		_, _ = m.DeleteTask(task.ID, DeleteTaskOptions{})
 	}()
 	findingNodeID, err := task.Store.AddNode(db.KindFinding, map[string]any{"summary": "source"}, 5, "confirmed", "worker", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	findingID, err := m.pg.AddFinding(taskID, findingNodeID, "test", "source", db.SeverityHigh, "source", "", "worker", nil)
+	findingID, err = m.pg.AddFinding(taskID, findingNodeID, "test", "source", db.SeverityHigh, "source", "", "worker", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

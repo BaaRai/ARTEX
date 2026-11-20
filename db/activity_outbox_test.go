@@ -22,7 +22,7 @@ func TestFlushActivityOutboxReplaysOnce(t *testing.T) {
 	if err != nil {
 		SkipPGUnavailable(t, err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { _ = d.Close() })
 	expID, err := d.CreateExploration("outbox", "replay")
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestFlushActivityOutboxDropsStuckRow(t *testing.T) {
 	if err != nil {
 		SkipPGUnavailable(t, err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { _ = d.Close() })
 	const missing = int64(9_000_000_000_001)
 	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM activity_outbox WHERE exploration_id=$1`, missing) })
 	es := d.Exploration(missing)
