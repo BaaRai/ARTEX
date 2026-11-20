@@ -6,6 +6,7 @@ package llmrec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"log"
 	"strings"
@@ -15,6 +16,11 @@ import (
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
 )
+
+// errStreamAbandoned marks a stream whose consumer stopped reading before
+// message_stop while its context was still live. The call did not complete,
+// so it is metered as an error rather than inferred from ctx.Err().
+var errStreamAbandoned = errors.New("llmrec: consumer stopped reading before message_stop")
 
 type taskIDContextKey struct{}
 type workerContextKey struct{}
@@ -184,6 +190,7 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 			usage       llm.Usage
 			stopReason  string
 			streamErr   error
+			complete    bool // message_stop was seen
 		)
 
 		finished := false
@@ -236,8 +243,21 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 					stopReason = ev.StopReason
 				}
 				usage.MergeEcho(ev.Usage)
+			case llm.SEMessageStop:
+				complete = true
 			}
 			if !yield(ev, err) {
+				// The consumer stopped early. Decide the status here from what
+				// is known, not later in the deferred finish: the call only
+				// counts as "ok" if message_stop arrived and ctx is live.
+				switch {
+				case ctx.Err() != nil:
+					finish(ctx.Err())
+				case !complete:
+					finish(errStreamAbandoned)
+				default:
+					finish(nil)
+				}
 				return
 			}
 		}

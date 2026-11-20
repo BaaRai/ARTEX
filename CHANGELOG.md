@@ -50,6 +50,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **LLM usage status on early stream exit**: when a consumer stops reading a stream before `message_stop`, the recorder now stores the `llm_usage` row as `error` at that point, whether or not the context was cancelled, instead of inferring the status from `ctx.Err()` in a deferred call. `TestSideUsageRecordedOnceOnConsumerCancellation` runs again (follow-up to #9).
 - **Workspace and skill symlink confinement**: workspace file operations, the skill file APIs and the skill loader resolve symlinks in every path component and refuse a target outside their root, so a link planted in the workspace or a skill directory cannot expose another file.
 - **Target gate behind proxies**: a target approval is name-only whenever a proxy is in the path, including the recording proxy, the global egress proxy and a custom tool's own proxy, so the gate never claims an IP binding the proxy does not enforce.
 - **Remote MCP response bound**: Streamable HTTP JSON-RPC bodies and SSE data payloads are refused above 8 MiB, so a remote MCP server cannot force an unbounded decode.
