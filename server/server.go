@@ -898,6 +898,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
 	mux.HandleFunc("POST /api/traffic/ingest", s.ingestTraffic)
 	mux.HandleFunc("POST /api/traffic/replay", s.replayTraffic)
+	mux.HandleFunc("POST /api/traffic/import/har", s.importTrafficHAR)
+	mux.HandleFunc("GET /api/traffic/export/har", s.exportTrafficHAR)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // aggregate call counts per tool
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
@@ -3541,19 +3543,7 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 0)
 	size := atoiDefault(q.Get("size"), 100)
-	ex, matched, _ := tr.Page(traffic.PageQuery{
-		Host:      q.Get("host"),
-		Method:    q.Get("method"),
-		Query:     q.Get("q"),
-		Body:      q.Get("body"),
-		Path:      q.Get("path"),
-		Status:    q.Get("status"),
-		Rewritten: q.Get("rewritten"),
-		RespMin:   int64(atoiDefault(q.Get("resp_min"), -1)),
-		RespMax:   int64(atoiDefault(q.Get("resp_max"), -1)),
-		Sort:      q.Get("sort"),
-		Order:     q.Get("order"),
-	}, page, size)
+	ex, matched, _ := tr.Page(parseTrafficPageQuery(q), page, size)
 	count, _ := tr.Count() // global total, for the stat card
 	writeJSON(w, 200, map[string]any{
 		"enabled":   s.m.TrafficEnabled(), // reflect the capture toggle
