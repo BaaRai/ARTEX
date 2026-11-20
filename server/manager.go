@@ -463,6 +463,14 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		if tr != nil {
 			m.traffic = tr
 			m.reloadRewriteRules() // in place before the proxy accepts a connection
+			if scfg, ok := traffic.SOCKS5ConfigFromEnv(); ok {
+				scfg.DialContext = m.interceptor.DialSOCKS5
+				if bound, serr := tr.StartSOCKS5(scfg); serr != nil {
+					log.Printf("[traffic/socks5] disabled: %v", serr)
+				} else {
+					log.Printf("[traffic/socks5] opt-in SOCKS5 CONNECT listener on %s", bound)
+				}
+			}
 			go func() {
 				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
 				if err := tr.Start(); err != nil {
