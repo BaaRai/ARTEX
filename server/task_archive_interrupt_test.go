@@ -149,7 +149,7 @@ func TestRemoteArchiveInterruptionRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 				if phase != "restore_download_before_install" {
-					if _, err := installTaskArchiveFiles(m.dir, extracted, task.ID, job.ID); err != nil {
+					if _, err := installTaskArchiveFiles(m.dir, extracted, task.ID, job.ID, s.execPriv); err != nil {
 						t.Fatal(err)
 					}
 				}

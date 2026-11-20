@@ -5,9 +5,9 @@ import "os"
 // secretEnv lists the credentials read from the environment only at startup:
 // ARTEX_PG_DSN and ARTEX_SECRET_KEY by NewManager, the API keys by agent.FromEnv inside New.
 // agent.FromEnv also reads ARTEX_LLM_PROXY and ARTEX_LLM_BASE_URL: both are URLs that
-// can carry credentials in their userinfo (http://user:pass@proxy:3128). The ARTEX_ARCHIVE_S3_*
-// keys are not read by the server, but the container may carry them and the agent's
-// shells would inherit them.
+// can carry credentials in their userinfo (http://user:pass@proxy:3128). The archive
+// store also captures ARTEX_ARCHIVE_S3_* credentials during New, before the scrub,
+// so the client can use them without passing them to agent child processes.
 var secretEnv = []string{
 	"ARTEX_PG_DSN", "ARTEX_SECRET_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 	"ARTEX_LLM_PROXY", "ARTEX_LLM_BASE_URL",

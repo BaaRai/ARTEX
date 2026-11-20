@@ -34,7 +34,8 @@ type archiveBatchItem struct {
 	Archive int64  `json:"archive_id,omitempty"`
 }
 
-func (s *Server) startTaskArchiveWorker() {
+// initTaskArchiveStore captures credentials before New scrubs the process environment.
+func (s *Server) initTaskArchiveStore() {
 	if s.m == nil || s.m.pg == nil {
 		return
 	}
@@ -43,6 +44,12 @@ func (s *Server) startTaskArchiveWorker() {
 		log.Printf("[task-archive] storage configuration: %v", s.archiveStoreErr)
 	} else if s.archiveStore != nil {
 		log.Printf("[task-archive] new archives use S3 object storage with full SHA-256 readback verification")
+	}
+}
+
+func (s *Server) startTaskArchiveWorker() {
+	if s.m == nil || s.m.pg == nil {
+		return
 	}
 	if err := s.m.pg.RecoverTaskArchiveJobs(); err != nil {
 		log.Printf("[task-archive] recover jobs: %v", err)

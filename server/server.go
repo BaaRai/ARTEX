@@ -305,8 +305,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	} else {
 		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
 	}
-	// Both env readers have now run (NewManager for the DSN, FromEnv above for the
-	// keys). Drop the secrets before anything below can spawn a child process:
+	s.initTaskArchiveStore()
+	// Startup env readers have now run (NewManager for the DSN, the LLM provider
+	// and archive store for their credentials). Drop the secrets before anything
+	// below can spawn a child process:
 	// restoring runtimes resumes workers that run shells, and MCP discovery starts
 	// stdio servers.
 	if s.scrubSecrets {
