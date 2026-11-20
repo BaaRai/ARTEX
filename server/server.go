@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -64,6 +65,14 @@ type Server struct {
 	// the production keys. Tests set unique keys so a shared database is left alone.
 	authHashKey    string
 	authVersionKey string
+
+	// Test-only seams for pgListModels SSRF checks. All remain zero/nil in
+	// production (strict public-only default; only exact host:port entries in
+	// ARTEX_LLM_PRIVATE_ENDPOINTS may resolve to private addresses).
+	allowLoopbackModels bool
+	modelLookupIP       func(ctx context.Context, host string) ([]netip.Addr, error)
+	modelDialContext    func(ctx context.Context, network, addr string) (net.Conn, error)
+	modelRootCAs        *x509.CertPool
 
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	pwdLimit       *loginLimiter  // attempt limit on POST /api/auth/change-password (IP + session token)
