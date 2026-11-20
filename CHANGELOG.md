@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- **Global company switcher**: the sidebar header carries a company picker (search, an explicit "all companies", the asset count) that narrows the findings list, the dashboard, the task list, the traffic list and the asset tabs to one target, and persists per browser. Findings with no live asset anchor stay visible under their company. The company now rides on the existing ownership column, so `GET /api/exploration/findings` and `GET /api/traffic` take a `company`/`asset_scope` filter and `GET /api/assets` takes `company_id` on both the plain and the DSL path (#425).
+
 ### Fixed
 
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
