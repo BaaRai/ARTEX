@@ -55,6 +55,7 @@ import type {
   VerificationStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useActiveCompanyScope } from "@/stores/company/company-store";
 
 import { AssetTree, assetPathOf } from "./_components/asset-tree";
 import {
@@ -141,6 +142,10 @@ const EMPTY_STATS: FindingStats = {
 };
 
 export default function FindingsPage() {
+  // The sidebar's company switcher narrows everything below to that company's
+  // asset subtree. It rides on asset_scope (node key c:<id>): the picked asset
+  // node wins, the company is the fallback, and an empty scope means everything.
+  const companyScope = useActiveCompanyScope();
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
@@ -185,6 +190,7 @@ export default function FindingsPage() {
     task,
     sort,
     query,
+    companyScope,
   ]);
   const activeFilterFingerprint = React.useRef(filterFingerprint);
   activeFilterFingerprint.current = filterFingerprint;
@@ -202,7 +208,8 @@ export default function FindingsPage() {
         setActiveRetests(Object.fromEntries(rows.map((item) => [item.finding_id, item])));
         failed = false;
       } catch (error) {
-        if (!disposed && !failed) toast.error(t("Failed to load retest status: {error}", { error: (error as Error).message }));
+        if (!disposed && !failed)
+          toast.error(t("Failed to load retest status: {error}", { error: (error as Error).message }));
         failed = true;
       } finally {
         if (!disposed) timer = setTimeout(() => void refreshRetests(), 3000);
@@ -321,7 +328,17 @@ export default function FindingsPage() {
       await api.exportFindings({
         format: exportFormat,
         scope: exportScope,
-        filters: { severity, status, reportState, verificationStatus, vulnclass, task, query, sort },
+        filters: {
+          severity,
+          status,
+          reportState,
+          verificationStatus,
+          vulnclass,
+          task,
+          query,
+          sort,
+          assetScope: activeAssetScope ?? undefined,
+        },
         ids: [...selectedIds],
       });
       setExportOpen(false);
@@ -346,8 +363,17 @@ export default function FindingsPage() {
   groupFindingsRef.current = groupFindings;
   visibleGroupKeysRef.current = new Set(groups.map(findingGroupKey));
 
+  // A company switch drops the picked asset node: the node may belong to the
+  // company we just left, and the tree is about to be reloaded under the new one.
+  React.useEffect(() => {
+    // companyScope is a trigger here, not a value the effect reads.
+    void companyScope;
+    setAssetScope(null);
+  }, [companyScope]);
+
   // The asset view's right-hand list = the flat list + a filter for the selected subtree, so both views share one list state.
-  const activeAssetScope = view === "asset" ? assetScope : null;
+  // Every view honours the active company; only the asset view narrows further.
+  const activeAssetScope = (view === "asset" ? assetScope : null) ?? companyScope;
 
   // loadFlat fetches the flat view's current page; the task filter goes to the backend, sharing the same filter set as the grouped view.
   const loadFlat = React.useCallback(async () => {
@@ -392,7 +418,7 @@ export default function FindingsPage() {
   ]);
 
   // loadAssetTree fetches the whole asset tree. The tree doesn't change with the selected node (otherwise
-  // picking one would collapse it into a single chain), so no assetScope here.
+  // picking one would collapse it into a single chain), so no picked node here — only the active company.
   const loadAssetTree = React.useCallback(async () => {
     const requestFilter = filterFingerprint;
     if (activeFilterFingerprint.current !== requestFilter) return;
@@ -408,6 +434,7 @@ export default function FindingsPage() {
         task,
         query,
         sort,
+        assetScope: companyScope,
       });
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree({
@@ -423,7 +450,18 @@ export default function FindingsPage() {
       setAssetTree((current) => ({ ...current, loading: false }));
       toast.error(t("Failed to load the asset tree: {error}", { error: (e as Error).message }));
     }
-  }, [filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, task, query, sort]);
+  }, [
+    companyScope,
+    filterFingerprint,
+    reportState,
+    severity,
+    status,
+    verificationStatus,
+    vulnclass,
+    task,
+    query,
+    sort,
+  ]);
 
   const refreshGroups = React.useCallback(async () => {
     const requestFilter = filterFingerprint;
@@ -449,7 +487,19 @@ export default function FindingsPage() {
     } catch {
       // Polling keeps the last successful snapshot visible.
     }
-  }, [filterFingerprint, page, pageSize, reportState, severity, status, verificationStatus, vulnclass, task, query, sort]);
+  }, [
+    filterFingerprint,
+    page,
+    pageSize,
+    reportState,
+    severity,
+    status,
+    verificationStatus,
+    vulnclass,
+    task,
+    query,
+    sort,
+  ]);
 
   const loadGroup = React.useCallback(
     async (key: string, groupPage: number, groupPageSize: number) => {
@@ -1159,7 +1209,11 @@ export default function FindingsPage() {
                   }}
                   disabled={bulkBusy}
                 >
-                  <SelectTrigger size="sm" className="w-44" aria-label={t("Set the report stage of the selected findings")}>
+                  <SelectTrigger
+                    size="sm"
+                    className="w-44"
+                    aria-label={t("Set the report stage of the selected findings")}
+                  >
                     <SelectValue placeholder={bulkBusy ? t("Updating…") : t("Set report stage")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1227,7 +1281,9 @@ export default function FindingsPage() {
                     </button>
                   </React.Fragment>
                 ))}
-                <span className="ml-auto shrink-0 text-xs tabular-nums">{t("{count} in total", { count: flat.total })}</span>
+                <span className="ml-auto shrink-0 text-xs tabular-nums">
+                  {t("{count} in total", { count: flat.total })}
+                </span>
               </div>
               {flatListCard}
             </div>
@@ -1333,7 +1389,9 @@ export default function FindingsPage() {
             })}
             {groups.length === 0 && (
               <Card>
-                <CardContent className="py-12 text-center text-sm text-muted-foreground">{t("No matching findings.")}</CardContent>
+                <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                  {t("No matching findings.")}
+                </CardContent>
               </Card>
             )}
             <TablePagination

@@ -2232,9 +2232,10 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	taskParam := q.Get("task")
 	if taskParam == "" {
 		// With page/limit → server-side pagination {items,total,...}; without → a bare array (for dashboard aggregation,
-		// same compat policy as the intents endpoint). Filtering/sorting is pushed down to SQL uniformly.
+		// same compat policy as the intents endpoint). Filtering/sorting is pushed down to SQL uniformly, and the bare
+		// array honours the filters too: the dashboard narrows by the active company through asset_scope.
 		if q.Get("page") == "" && q.Get("limit") == "" {
-			fs, _ := s.m.pg.ListFindings(500)
+			fs, _ := s.m.pg.ListFindingsFiltered(findingFilterFromQuery(q), 500)
 			assets := s.resolveFindingAssets(fs)
 			out := make([]FindingDTO, 0, len(fs))
 			for _, f := range fs {
@@ -3559,7 +3560,17 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 0)
 	size := atoiDefault(q.Get("size"), 100)
-	ex, matched, _ := tr.Page(parseTrafficPageQuery(q), page, size)
+	// company narrows the list to the hosts that company owns, so the page
+	// follows the sidebar switcher like every other asset-backed view.
+	hosts, err := s.companyHosts(int64(atoiDefault(q.Get("company"), 0)))
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	pq := parseTrafficPageQuery(q)
+	pq.Hosts = hosts
+	pq.MatchNone = q.Get("company") != "" && len(hosts) == 0 // a company owning no host matches nothing
+	ex, matched, _ := tr.Page(pq, page, size)
 	count, _ := tr.Count() // global total, for the stat card
 	writeJSON(w, 200, map[string]any{
 		"enabled":   s.m.TrafficEnabled(), // reflect the capture toggle
