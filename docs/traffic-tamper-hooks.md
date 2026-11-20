@@ -50,7 +50,7 @@ Hooks are parsed with Go's standard `go/parser` and must declare `package hook`.
   package hook
   func OnResponse(req *Request, resp *Response) error
   ```
-  In `OnResponse`, `req` is **read-only** and holds the request as sent to the target.
+  In `OnResponse`, `req` holds an isolated copy of the request as sent to the target: field assignments (`req.Method`, `req.Path`, `req.RawQuery`, `req.Body`, `req.Headers`) and mutator methods (`req.SetHeader`, `req.AddHeader`, `req.DelHeader`) fail with `forbidden_mutation`, while direct map/slice element writes (such as `req.Headers[k] = ...`, `delete(req.Headers, k)`, or `req.Body[0] = ...`) mutate only the VM copy and are discarded without affecting the wire exchange or trace.
 
 ### Allowed Syntax
 

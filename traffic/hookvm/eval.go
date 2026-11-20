@@ -825,6 +825,7 @@ func (e *vm) callBuiltin(name string, args []any) any {
 			e.failf("append expects >=2 args")
 		}
 		if s, ok := args[0].([]byte); ok {
+			e.alloc(int64(len(s)))
 			out := append([]byte(nil), s...)
 			for _, a := range args[1:] {
 				if b, ok := a.([]byte); ok {
@@ -838,7 +839,7 @@ func (e *vm) callBuiltin(name string, args []any) any {
 			return out
 		}
 		if s, ok := args[0].([]any); ok {
-			e.alloc(int64(len(args)-1) * 16)
+			e.alloc(int64(len(s)+len(args)-1) * 16)
 			return append(append([]any(nil), s...), args[1:]...)
 		}
 	case "delete":
@@ -1121,6 +1122,7 @@ func (e *vm) bytes(v any) []byte {
 		return b
 	}
 	if s, ok := v.(string); ok {
+		e.alloc(int64(len(s)))
 		return []byte(s)
 	}
 	e.failf("expected []byte or string, got %T", v)
@@ -1131,6 +1133,7 @@ func (e *vm) strSlice(v any) []string {
 		return ss
 	}
 	if sa, ok := v.([]any); ok {
+		e.alloc(int64(len(sa)) * 16)
 		out := make([]string, len(sa))
 		for i, el := range sa {
 			out[i] = e.str(el)

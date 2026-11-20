@@ -14,6 +14,8 @@ import (
 	"strings"
 )
 
+const regexpCompileCost = 32 << 10
+
 func (e *vm) checkRepeat(elemLen, cnt int64) int {
 	if cnt < 0 {
 		e.failf("Repeat: negative count")
@@ -203,6 +205,7 @@ func (e *vm) callPkg(pkg, fn string, args []any) any {
 		if len(pat) > DefaultMaxRegexBytes {
 			e.failf("regexp pattern exceeds %d bytes", DefaultMaxRegexBytes)
 		}
+		e.alloc(regexpCompileCost + int64(len(pat))*32)
 		re, err := regexp.Compile(pat)
 		if err != nil {
 			e.fail(err)

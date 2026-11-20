@@ -180,6 +180,27 @@ func OnResponse(req *Request, resp *Response) error {
 			t.Fatalf("err = %v, want ErrForbiddenMutation", err)
 		}
 	})
+
+	t.Run("response_phase_req_headers_index_only_mutates_vm_copy", func(t *testing.T) {
+		src := `package hook
+func OnResponse(req *Request, resp *Response) error {
+	req.Headers["X-Vm-Only"] = []any{"1"}
+	resp.SetHeader("X-Seen", req.GetHeader("X-Vm-Only"))
+	return nil
+}`
+		prog, err := Compile("response", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		vmReq := &Request{Headers: map[string][]string{"X-Orig": {"keep"}}}
+		resp := &Response{Status: 200, Headers: map[string][]string{}}
+		if err := prog.RunResponse(context.Background(), vmReq, resp, RunOptions{}); err != nil {
+			t.Fatalf("RunResponse: %v", err)
+		}
+		if len(resp.Headers["X-Seen"]) != 1 || resp.Headers["X-Seen"][0] != "1" {
+			t.Fatalf("expected VM-local mutation visible inside hook, got %v", resp.Headers)
+		}
+	})
 }
 
 func TestResourceBoundsMemoryStepTimeoutPanicAndRegexp(t *testing.T) {
@@ -213,6 +234,74 @@ func OnRequest(req *Request) error {
 			t.Fatal(err)
 		}
 		err = prog.RunRequest(context.Background(), &Request{}, RunOptions{MaxMemory: 1 << 20})
+		if !errors.Is(err, ErrMemoryLimit) {
+			t.Fatalf("err = %v, want ErrMemoryLimit", err)
+		}
+	})
+
+	t.Run("bytes_contains_string_loop_stopped_by_memory_budget", func(t *testing.T) {
+		src := `package hook
+import "bytes"
+func OnRequest(req *Request) error {
+	s := string(req.Body)
+	for i := 0; i < 1000; i++ {
+		if bytes.Contains(s, "needle") {
+			return nil
+		}
+	}
+	return nil
+}`
+		prog, err := Compile("request", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := &Request{Body: bytes.Repeat([]byte("A"), 1<<20)}
+		err = prog.RunRequest(context.Background(), req, RunOptions{})
+		if !errors.Is(err, ErrMemoryLimit) {
+			t.Fatalf("err = %v, want ErrMemoryLimit", err)
+		}
+	})
+
+	t.Run("regexp_compile_loop_stopped_by_memory_budget", func(t *testing.T) {
+		src := `package hook
+import "regexp"
+func OnRequest(req *Request) error {
+	for i := 0; i < 500; i++ {
+		_, err := regexp.MatchString("foo[0-9]+bar", "hello")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}`
+		prog, err := Compile("request", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = prog.RunRequest(context.Background(), &Request{}, RunOptions{})
+		if !errors.Is(err, ErrMemoryLimit) {
+			t.Fatalf("err = %v, want ErrMemoryLimit", err)
+		}
+	})
+
+	t.Run("strslice_join_loop_stopped_by_memory_budget", func(t *testing.T) {
+		src := `package hook
+import "strings"
+func OnRequest(req *Request) error {
+	items := make([]any, 1000)
+	for i := 0; i < 1000; i++ {
+		items[i] = ""
+	}
+	for i := 0; i < 1000; i++ {
+		_ = strings.Join(items, "")
+	}
+	return nil
+}`
+		prog, err := Compile("request", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = prog.RunRequest(context.Background(), &Request{}, RunOptions{MaxMemory: 256 << 10})
 		if !errors.Is(err, ErrMemoryLimit) {
 			t.Fatalf("err = %v, want ErrMemoryLimit", err)
 		}
