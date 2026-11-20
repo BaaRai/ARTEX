@@ -9,6 +9,7 @@ import { X } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { cn } from "@/lib/utils";
@@ -57,11 +58,11 @@ export function MainContent({ children }: { children: ReactNode }) {
   const updateBanner = latest ? (
     <div className="flex shrink-0 items-center justify-center gap-2 border-b bg-muted/50 px-4 py-1 text-xs">
       <a href={RELEASES_URL} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">
-        ARTEX {latest} is available. See the release notes.
+        {t("ARTEX {version} is available. See the release notes.", { version: latest })}
       </a>
       <button
         type="button"
-        aria-label="Dismiss update notice"
+        aria-label={t("Dismiss update notice")}
         className="text-muted-foreground hover:text-foreground"
         onClick={() => {
           setLocalStorageValue(UPDATE_DISMISSED_KEY, latest);
@@ -102,7 +103,7 @@ export function MainContent({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-2">
             {version && (
-              <span className="font-medium text-muted-foreground text-xs tabular-nums">Version · {version}</span>
+              <span className="font-medium text-muted-foreground text-xs tabular-nums">{t("Version · {version}", { version })}</span>
             )}
             <LayoutControls />
             <ThemeSwitcher />

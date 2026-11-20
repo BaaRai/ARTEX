@@ -23,23 +23,68 @@ const (
 	maxWorkspaceUpload = 512 << 20 // 512 MiB per upload request
 )
 
+// wsResolveConfined maps a user-supplied relative path to a canonicalized path
+// inside the work dir, resolving symlinks in every component and rejecting any
+// traversal, broken symlink, symlink loop, or target that escapes s.m.dir.
+func (s *Server) wsResolveConfined(rel string) (confinedPath, bool) {
+	cp, err := resolveWithinRoot(s.m.dir, rel, true)
+	if err != nil {
+		return confinedPath{}, false
+	}
+	if workspacePathDenied(cp.realRoot, cp.realPath) {
+		return confinedPath{}, false
+	}
+	return cp, true
+}
+
+// workspaceDeniedPrefixes are platform-internal subtrees under the data dir
+// that the workspace file manager must not expose. traffic/_ca holds the
+// capture proxy CA private key; traffic/_index holds the SQLite exchange index.
+var workspaceDeniedPrefixes = []string{"traffic/_ca", "traffic/_index"}
+
+// workspacePathDenied reports whether realPath lands in a platform-internal
+// subtree. It compares the canonicalized path relative to the real root, so a
+// symlink alias cannot reach a denied directory. Segments are lower-cased and
+// trailing dots/spaces are trimmed because Windows resolves those spellings to
+// the same directory.
+func workspacePathDenied(realRoot, realPath string) bool {
+	rel, err := filepath.Rel(realRoot, realPath)
+	if err != nil {
+		return true // fail closed
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") || strings.HasPrefix(rel, "/") {
+		return true // outside the root: fail closed
+	}
+	segs := strings.Split(rel, "/")
+	for i, seg := range segs {
+		segs[i] = strings.ToLower(strings.TrimRight(seg, ". "))
+	}
+	rel = strings.Join(segs, "/")
+	for _, prefix := range workspaceDeniedPrefixes {
+		if rel == prefix || strings.HasPrefix(rel, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // wsResolve maps a user-supplied relative path to an absolute path INSIDE the work
-// dir. It returns ok=false if the path would escape the root. filepath.Clean on a
-// rooted copy collapses any ".." so nothing can climb above the root.
+// dir. It returns ok=false if the path would escape the root (including via symlinks).
 func (s *Server) wsResolve(rel string) (string, bool) {
-	base := filepath.Clean(s.m.dir)
-	rel = strings.TrimPrefix(strings.TrimSpace(rel), "/")
-	clean := filepath.Clean("/" + rel) // e.g. "/a/../../etc" → "/etc" (still rooted at "/")
-	abs := filepath.Clean(filepath.Join(base, clean))
-	if abs != base && !strings.HasPrefix(abs, base+string(os.PathSeparator)) {
+	cp, ok := s.wsResolveConfined(rel)
+	if !ok {
 		return "", false
 	}
-	return abs, true
+	return cp.realPath, true
 }
 
 // wsRel renders an absolute path back as a workspace-relative path (forward slashes).
 func (s *Server) wsRel(abs string) string {
-	base := filepath.Clean(s.m.dir)
+	base, err := resolveRealRoot(s.m.dir)
+	if err != nil {
+		base = filepath.Clean(s.m.dir)
+	}
 	rel, err := filepath.Rel(base, abs)
 	if err != nil || rel == "." {
 		return ""
@@ -57,11 +102,12 @@ type wsEntry struct {
 
 // GET /api/workspace/list?path=<rel>
 func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
-	abs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	cp, ok := s.wsResolveConfined(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "invalid path")
 		return
 	}
+	abs := cp.realPath
 	fi, err := os.Stat(abs)
 	if err != nil {
 		writeErr(w, 404, "path does not exist")
@@ -73,7 +119,7 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 	}
 	ents, err := os.ReadDir(abs)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	out := make([]wsEntry, 0, len(ents))
@@ -103,11 +149,12 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 // GET /api/workspace/read?path=<rel> — inline text for view/edit. Binary or oversize
 // files return {binary:true}/{too_large:true} with no content (use download instead).
 func (s *Server) wsRead(w http.ResponseWriter, r *http.Request) {
-	abs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	cp, ok := s.wsResolveConfined(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "invalid path")
 		return
 	}
+	abs := cp.realPath
 	fi, err := os.Stat(abs)
 	if err != nil {
 		writeErr(w, 404, "file does not exist")
@@ -123,7 +170,7 @@ func (s *Server) wsRead(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
@@ -143,21 +190,22 @@ func (s *Server) wsWrite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	abs, ok := s.wsResolve(req.Path)
-	if !ok || abs == filepath.Clean(s.m.dir) {
+	cp, ok := s.wsResolveConfined(req.Path)
+	if !ok || cp.realPath == cp.realRoot {
 		writeErr(w, 400, "invalid path")
 		return
 	}
+	abs := cp.realPath
 	if fi, err := os.Stat(abs); err == nil && fi.IsDir() {
 		writeErr(w, 400, "target is a directory")
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	if err := os.WriteFile(abs, []byte(req.Content), 0o644); err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "path": s.wsRel(abs)})
@@ -172,13 +220,14 @@ func (s *Server) wsMkdir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	abs, ok := s.wsResolve(req.Path)
-	if !ok || abs == filepath.Clean(s.m.dir) {
+	cp, ok := s.wsResolveConfined(req.Path)
+	if !ok || cp.realPath == cp.realRoot {
 		writeErr(w, 400, "invalid path")
 		return
 	}
+	abs := cp.realPath
 	if err := os.MkdirAll(abs, 0o755); err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "path": s.wsRel(abs)})
@@ -187,21 +236,21 @@ func (s *Server) wsMkdir(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/workspace/delete?path=<rel> — removes a file or a directory tree
 // (confined to the work dir; the root itself can't be deleted).
 func (s *Server) wsDelete(w http.ResponseWriter, r *http.Request) {
-	abs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	cp, ok := s.wsResolveConfined(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "invalid path")
 		return
 	}
-	if abs == filepath.Clean(s.m.dir) {
+	if cp.realPath == cp.realRoot {
 		writeErr(w, 400, "cannot delete the workspace root directory")
 		return
 	}
-	if _, err := os.Stat(abs); err != nil {
+	if !cp.exists {
 		writeErr(w, 404, "path does not exist")
 		return
 	}
-	if err := os.RemoveAll(abs); err != nil {
-		writeErr(w, 500, err.Error())
+	if err := os.RemoveAll(cp.entryPath); err != nil {
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -209,17 +258,18 @@ func (s *Server) wsDelete(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/workspace/download?path=<rel> — stream a file as an attachment.
 func (s *Server) wsDownload(w http.ResponseWriter, r *http.Request) {
-	abs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	cp, ok := s.wsResolveConfined(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "invalid path")
 		return
 	}
+	abs := cp.realPath
 	fi, err := os.Stat(abs)
 	if err != nil || fi.IsDir() {
 		writeErr(w, 404, "file does not exist")
 		return
 	}
-	name := filepath.Base(abs)
+	name := filepath.Base(cp.entryPath)
 	// RFC 5987 filename* keeps non-ASCII names intact; plain filename is the fallback.
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+sanitizeFilename(name)+"\"; filename*=UTF-8''"+url.PathEscape(name))
 	http.ServeFile(w, r, abs)
@@ -227,12 +277,12 @@ func (s *Server) wsDownload(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/workspace/upload?path=<dir> — multipart form field "file" (one or more).
 func (s *Server) wsUpload(w http.ResponseWriter, r *http.Request) {
-	dirAbs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	dir, ok := s.wsResolveConfined(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "invalid path")
 		return
 	}
-	if fi, err := os.Stat(dirAbs); err != nil || !fi.IsDir() {
+	if fi, err := os.Stat(dir.realPath); err != nil || !fi.IsDir() {
 		writeErr(w, 400, "target directory does not exist")
 		return
 	}
@@ -246,18 +296,24 @@ func (s *Server) wsUpload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "missing upload file (form field file)")
 		return
 	}
+	dirRel := s.wsRel(dir.realPath)
 	saved := 0
 	for _, hdr := range files {
 		name := filepath.Base(hdr.Filename) // strip any path component
 		if name == "" || name == "." || name == ".." {
 			continue
 		}
-		destAbs, okd := s.wsResolve(filepath.Join(s.wsRel(dirAbs), name))
-		if !okd {
-			continue
+		destRel := name
+		if dirRel != "" {
+			destRel = dirRel + "/" + name
 		}
-		if err := saveUpload(hdr, destAbs); err != nil {
-			writeErr(w, 500, err.Error())
+		dest, okd := s.wsResolveConfined(destRel)
+		if !okd || dest.realPath == dest.realRoot {
+			writeErr(w, 400, "invalid path")
+			return
+		}
+		if err := saveUpload(hdr, dest.realPath); err != nil {
+			writeErr(w, 500, safeFSErr(err))
 			return
 		}
 		saved++

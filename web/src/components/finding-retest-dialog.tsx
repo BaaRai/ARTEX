@@ -19,6 +19,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { FindingRetest } from "@/lib/types";
+import { t } from "@/i18n";
 
 interface FindingRetestDialogProps {
   findingId: string;
@@ -42,9 +43,9 @@ export function FindingRetestDialog({ findingId, findingName, onClose, onStarted
       const result = await api.startFindingRetest(findingId, notes.trim());
       onStarted?.(result.retest);
       onClose();
-      toast.success(result.created ? "Retest started; click 'Retesting' to view the session" : "This vulnerability is already being retested; view the existing session");
+      toast.success(result.created ? t("Retest started; click 'Retesting' to view the session") : t("This vulnerability is already being retested; view the existing session"));
     } catch (e) {
-      toast.error(`Failed to start retest: ${(e as Error).message}`);
+      toast.error(t("Failed to start retest: {error}", { error: (e as Error).message }));
     } finally {
       submitLock.current = false;
       setSubmitting(false);
@@ -55,16 +56,15 @@ export function FindingRetestDialog({ findingId, findingName, onClose, onStarted
     <Dialog open onOpenChange={(open) => !open && !submitLock.current && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Retest vulnerability #{findingId}</DialogTitle>
+          <DialogTitle>{t("Retest vulnerability #{id}", { id: findingId })}</DialogTitle>
           <DialogDescription className="break-words">
             {findingName ? <span className="mb-2 block">{findingName}</span> : null}
-            Retest Agent
-            Reads the original evidence and test constraints, then runs targeted verification in a separate session. When the retest completes successfully and confirms the fix, the vulnerability status automatically becomes "Fixed"; other verdicts keep the current status.
+            {t('Retest Agent reads the original evidence and test constraints, then runs targeted verification in a separate session. When the retest completes successfully and confirms the fix, the vulnerability status automatically becomes "Fixed"; other verdicts keep the current status.')}
           </DialogDescription>
         </DialogHeader>
         <FieldGroup>
           <Field data-disabled={submitting}>
-            <FieldLabel htmlFor={notesId}>Notes (optional)</FieldLabel>
+            <FieldLabel htmlFor={notesId}>{t("Notes (optional)")}</FieldLabel>
             <Textarea
               id={notesId}
               value={notes}
@@ -72,18 +72,18 @@ export function FindingRetestDialog({ findingId, findingName, onClose, onStarted
               rows={4}
               disabled={submitting}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. verify the original endpoint with the original test account; fix version is v2."
+              placeholder={t("e.g. verify the original endpoint with the original test account; fix version is v2.")}
             />
-            <FieldDescription>Add the fix version, test conditions, or limitations of this run.</FieldDescription>
+            <FieldDescription>{t("Add the fix version, test conditions, or limitations of this run.")}</FieldDescription>
           </Field>
         </FieldGroup>
         <DialogFooter>
           <Button variant="outline" disabled={submitting} onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button disabled={submitting} onClick={() => void start()}>
             {submitting ? <Spinner data-icon="inline-start" /> : <RotateCcwIcon data-icon="inline-start" />}
-            {submitting ? "Creating…" : "Start retest"}
+            {submitting ? t("Creating…") : t("Start retest")}
           </Button>
         </DialogFooter>
       </DialogContent>

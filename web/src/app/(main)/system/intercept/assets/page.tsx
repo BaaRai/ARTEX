@@ -16,19 +16,20 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { AssetInterceptKind, AssetInterceptRule } from "@/lib/types";
 
 // ---- kind metadata ----
 
 const KIND_OPTIONS: { value: AssetInterceptKind; label: string; group: string; placeholder: string }[] = [
-  { value: "exact_domain", label: "Domain (exact)", group: "Exact match", placeholder: "example.gov.cn" },
-  { value: "exact_ip", label: "IP (exact)", group: "Exact match", placeholder: "203.0.113.10" },
-  { value: "exact_url", label: "URL (exact)", group: "Exact match", placeholder: "https://example.gov.cn/login" },
-  { value: "fuzzy_domain", label: "Domain (fuzzy)", group: "Fuzzy match", placeholder: ".gov.cn" },
-  { value: "fuzzy_ip", label: "IP (fuzzy)", group: "Fuzzy match", placeholder: "203.0.113." },
-  { value: "fuzzy_url", label: "URL (fuzzy)", group: "Fuzzy match", placeholder: "/admin" },
-  { value: "cidr", label: "CIDR network", group: "CIDR", placeholder: "192.168.0.0/16" },
+  { value: "exact_domain", label: t("Domain (exact)"), group: "Exact match", placeholder: "example.gov.cn" },
+  { value: "exact_ip", label: t("IP (exact)"), group: "Exact match", placeholder: "203.0.113.10" },
+  { value: "exact_url", label: t("URL (exact)"), group: "Exact match", placeholder: "https://example.gov.cn/login" },
+  { value: "fuzzy_domain", label: t("Domain (fuzzy)"), group: "Fuzzy match", placeholder: ".gov.cn" },
+  { value: "fuzzy_ip", label: t("IP (fuzzy)"), group: "Fuzzy match", placeholder: "203.0.113." },
+  { value: "fuzzy_url", label: t("URL (fuzzy)"), group: "Fuzzy match", placeholder: "/admin" },
+  { value: "cidr", label: t("CIDR network"), group: "CIDR", placeholder: "192.168.0.0/16" },
 ];
 
 const KIND_LABEL: Record<AssetInterceptKind, string> = Object.fromEntries(
@@ -80,9 +81,9 @@ const defaultForm = (): RuleForm => ({ enabled: true, kind: "fuzzy_domain", patt
 // Light frontend validation (matching the backend: only exact_ip / cidr get format checks, the rest is left to the backend).
 function frontValidate(form: RuleForm): string | null {
   const p = form.pattern.trim();
-  if (!p) return "Match content cannot be empty";
+  if (!p) return t("Match content cannot be empty");
   if (form.kind === "cidr" && !/^[0-9a-fA-F:.]+\/\d{1,3}$/.test(p)) {
-    return "Invalid CIDR format, e.g. 192.168.0.0/16";
+    return t("Invalid CIDR format, e.g. 192.168.0.0/16");
   }
   return null;
 }
@@ -101,7 +102,7 @@ export default function AssetInterceptPage() {
     try {
       setRules(await api.assetInterceptRules());
     } catch {
-      toast.error("Failed to load asset interception rules");
+      toast.error(t("Failed to load asset interception rules"));
     } finally {
       setLoading(false);
     }
@@ -138,10 +139,10 @@ export default function AssetInterceptPage() {
     try {
       if (editing) {
         await api.updateAssetInterceptRule(editing.id, payload);
-        toast.success("Rule updated");
+        toast.success(t("Rule updated"));
       } else {
         await api.createAssetInterceptRule(payload);
-        toast.success("Rule created");
+        toast.success(t("Rule created"));
       }
       setOpen(false);
       load();
@@ -153,10 +154,10 @@ export default function AssetInterceptPage() {
   }
 
   async function handleDelete(rule: AssetInterceptRule) {
-    if (!window.confirm(`Are you sure you want to delete asset interception rule "${rule.pattern}"?`)) return;
+    if (!window.confirm(t("Are you sure you want to delete asset interception rule \"{pattern}\"?", { pattern: rule.pattern }))) return;
     try {
       await api.deleteAssetInterceptRule(rule.id);
-      toast.success("Rule deleted");
+      toast.success(t("Rule deleted"));
       load();
     } catch (e) {
       toast.error((e as Error).message);
@@ -180,45 +181,44 @@ export default function AssetInterceptPage() {
       <div className="flex items-center gap-2.5">
         <BanIcon className="h-5 w-5 shrink-0" />
         <div>
-          <h1 className="text-lg font-semibold leading-tight">Asset interception</h1>
+          <h1 className="text-lg font-semibold leading-tight">{t("Asset interception")}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Global asset blocklist: matching domains / IPs / URLs / networks are intercepted; no operations run against them
+            {t("Global asset blocklist: matching domains / IPs / URLs / networks are intercepted; no operations run against them")}
           </p>
         </div>
       </div>
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          Supports exact and fuzzy matching for domains / IPs / URLs, plus CIDR networks; ships with built-in fuzzy blocks for government (.gov / .gov.cn) and education (.edu /
-          .edu.cn) sites
+          {t("Supports exact and fuzzy matching for domains / IPs / URLs, plus CIDR networks; ships with built-in fuzzy blocks for government (.gov / .gov.cn) and education (.edu / .edu.cn) sites")}
         </p>
         <Button onClick={openNew} size="sm" className="shrink-0">
           <PlusIcon className="h-4 w-4" />
-          Create rule
+          {t("Create rule")}
         </Button>
       </div>
 
       <Card>
         <CardContent className="p-0">
           {loading ? (
-            <p className="p-6 text-sm text-muted-foreground">Loading…</p>
+            <p className="p-6 text-sm text-muted-foreground">{t("Loading…")}</p>
           ) : rules.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
               <BanIcon className="h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">No asset interception rules yet</p>
+              <p className="text-sm text-muted-foreground">{t("No asset interception rules yet")}</p>
               <Button size="sm" variant="outline" onClick={openNew}>
                 <PlusIcon className="h-4 w-4" />
-                Create the first rule
+                {t("Create the first rule")}
               </Button>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[130px]">Type</TableHead>
-                  <TableHead>Match content</TableHead>
-                  <TableHead>Note</TableHead>
-                  <TableHead className="w-[64px] text-center">Enabled</TableHead>
+                  <TableHead className="w-[130px]">{t("Type")}</TableHead>
+                  <TableHead>{t("Match content")}</TableHead>
+                  <TableHead>{t("Note")}</TableHead>
+                  <TableHead className="w-[64px] text-center">{t("Enabled")}</TableHead>
                   <TableHead className="w-[80px]" />
                 </TableRow>
               </TableHeader>
@@ -237,7 +237,7 @@ export default function AssetInterceptPage() {
                       <div className="flex items-center gap-1.5">
                         {rule.builtin && (
                           <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px]">
-                            Built-in
+                            {t("Built-in")}
                           </Badge>
                         )}
                         <span className="truncate">{rule.note}</span>
@@ -273,12 +273,12 @@ export default function AssetInterceptPage() {
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="right" className="flex flex-col gap-0 p-0 sm:max-w-md">
           <SheetHeader className="border-b px-6 py-4">
-            <SheetTitle>{editing ? "Edit asset interception rule" : "Create asset interception rule"}</SheetTitle>
-            <SheetDescription className="text-xs">Target assets matching this rule are intercepted globally</SheetDescription>
+            <SheetTitle>{editing ? t("Edit asset interception rule") : t("Create asset interception rule")}</SheetTitle>
+            <SheetDescription className="text-xs">{t("Target assets matching this rule are intercepted globally")}</SheetDescription>
           </SheetHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
-            <Field label="Match type">
+            <Field label={t("Match type")}>
               <Select value={form.kind} onValueChange={(v) => set({ kind: v as AssetInterceptKind })}>
                 <SelectTrigger>
                   <SelectValue />
@@ -287,7 +287,7 @@ export default function AssetInterceptPage() {
                   {KIND_GROUPS.map((g) => (
                     <React.Fragment key={g}>
                       <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {g}
+                        {t(g)}
                       </div>
                       {KIND_OPTIONS.filter((o) => o.group === g).map((o) => (
                         <SelectItem key={o.value} value={o.value}>
@@ -301,13 +301,13 @@ export default function AssetInterceptPage() {
             </Field>
 
             <Field
-              label="Match content"
+              label={t("Match content")}
               hint={
                 form.kind === "cidr"
-                  ? "CIDR network, e.g. 192.168.0.0/16"
+                  ? t("CIDR network, e.g. 192.168.0.0/16")
                   : form.kind.startsWith("fuzzy_")
-                    ? "Fuzzy match: hits when the target contains this content"
-                    : "Exact match: the target must equal this content exactly"
+                    ? t("Fuzzy match: hits when the target contains this content")
+                    : t("Exact match: the target must equal this content exactly")
               }
             >
               <Input
@@ -317,9 +317,9 @@ export default function AssetInterceptPage() {
               />
             </Field>
 
-            <Field label="Note (optional)">
+            <Field label={t("Note (optional)")}>
               <Textarea
-                placeholder="Describe what this rule is for"
+                placeholder={t("Describe what this rule is for")}
                 value={form.note}
                 onChange={(e) => set({ note: e.target.value })}
                 rows={2}
@@ -332,17 +332,17 @@ export default function AssetInterceptPage() {
             <div className="flex items-center gap-3">
               <Switch id="asset-rule-enabled" checked={form.enabled} onCheckedChange={(v) => set({ enabled: v })} />
               <Label htmlFor="asset-rule-enabled" className="cursor-pointer">
-                Enable this rule
+                {t("Enable this rule")}
               </Label>
             </div>
           </div>
 
           <SheetFooter className="border-t px-6 py-4 flex-row justify-end gap-2">
             <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("Saving…") : t("Save")}
             </Button>
           </SheetFooter>
         </SheetContent>

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -209,16 +210,30 @@ func (d Database) buildDSN() string {
 	return u.String()
 }
 
-// String is a redacted view of the resolved DSN (password masked) for logging.
+// libpqPassword matches a libpq keyword DSN password field, including quoted
+// values. pgx accepts this form as well as the URL form.
+var libpqPassword = regexp.MustCompile(`(?i)\b(password)\s*=\s*(?:'[^']*'|"[^"]*"|\S*)`)
+
+// Redact is a log-safe view of a PostgreSQL DSN. It masks URL userinfo
+// passwords, `?password=` query values, and libpq `password=` keywords.
+// Unrecognised input still runs the keyword mask so a parse failure cannot
+// print the secret.
 func Redact(dsn string) string {
-	u, err := url.Parse(dsn)
-	if err != nil {
+	if dsn == "" {
 		return dsn
 	}
-	if u.User != nil {
-		if _, hasPw := u.User.Password(); hasPw {
-			u.User = url.UserPassword(u.User.Username(), "****")
+	if u, err := url.Parse(dsn); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
+		if u.User != nil {
+			if _, hasPw := u.User.Password(); hasPw {
+				u.User = url.UserPassword(u.User.Username(), "****")
+			}
 		}
+		q := u.Query()
+		if q.Has("password") {
+			q.Set("password", "****")
+			u.RawQuery = q.Encode()
+		}
+		return u.String()
 	}
-	return fmt.Sprintf("%s", u.String())
+	return libpqPassword.ReplaceAllString(dsn, `${1}=****`)
 }

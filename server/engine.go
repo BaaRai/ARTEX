@@ -1182,6 +1182,27 @@ func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker
 	return e.runIntent(ctx, t, name, worker, intent, token, "", "")
 }
 
+// intentWorkContext resolves the cached per-task exec context and returns a
+// per-intent child context with the rotated LLM profile pin attached (#85,
+// #376). Attaching the pin after execContextFor ensures a cached e.execCtx
+// does not drop it; attaching it after the paused/deleting check ensures a
+// rolled-back claim never advances the rotation counter.
+func (e *Engine) intentWorkContext(ctx context.Context, t *Task) (ectx, workCtx context.Context, workCancel context.CancelCauseFunc, ok bool) {
+	ectx = e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; carries the task deadline
+	if ectx.Err() != nil || e.IsDeleting(t.ID) {
+		return ectx, nil, nil, false
+	}
+	// per-work child context so the planner's kill_work can stop just this work.
+	workCtx, workCancel = context.WithCancelCause(ectx)
+	// Per-intent LLM rotation (#85): each claimed worker intent runs on the
+	// next chain head. The pin travels through the run context into the
+	// provider resolver; non-worker roles and failover keep the active head.
+	if head, pinned := t.nextRotatedProfile(); pinned {
+		workCtx = withLLMProfilePin(workCtx, head)
+	}
+	return ectx, workCtx, workCancel, true
+}
+
 // runIntent executes and fully settles one already-claimed (state=running) intent.
 // Both the pool worker loop (via runWorkerStep) and the human-message handler (via
 // runDetachedIntent, a dedicated goroutine outside the worker pool) call it, so the
@@ -1194,25 +1215,17 @@ func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker
 // while the worker is busy, and every intent state write below is fenced on it,
 // so a worker whose claim was taken over cannot overwrite the new claimer.
 func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *agent.Worker, intent *db.Node, token, requestID, message string) bool {
-	// Per-intent LLM rotation (#85): each claimed worker intent runs on the
-	// next chain head. The pin travels through the run context into the
-	// provider resolver; non-worker roles and failover keep the active head.
-	if head, ok := t.nextRotatedProfile(); ok {
-		ctx = withLLMProfilePin(ctx, head)
-	}
 	hasChatMessage := message != ""
 	e.stampFirstRun(t) // first real execution → stamp first_run_at + compute the deadline (only for tasks with a timeout)
 	e.touch(t.ID)
 	emit := func(r db.Activity) { e.emitActivity(t, r) }
-	ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; carries the task deadline
-	if ectx.Err() != nil || e.IsDeleting(t.ID) {
+	ectx, workCtx, workCancel, ok := e.intentWorkContext(ctx, t)
+	if !ok {
 		if err := t.Store.SettleIntentClaim(intent.ID, token, "open"); err != nil {
 			log.Printf("[worker %s] task %s intent #%d claim rollback failed: %v", name, t.ID, intent.ID, err)
 		}
 		return true
 	}
-	// per-work child context so the planner's kill_work can stop just this work.
-	workCtx, workCancel := context.WithCancelCause(ectx)
 	e.registerWork(intent.ID, workCancel)
 	stopHeartbeat := startClaimHeartbeat(t.Store, db.IntentClaimHeartbeatInterval, name, intent.ID, token, workCancel)
 	// wrap the guard hooks so steer_work can inject a mid-run course-correction

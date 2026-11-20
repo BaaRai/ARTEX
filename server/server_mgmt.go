@@ -4,13 +4,16 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -18,6 +21,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"text/template"
 	"text/template/parse"
 	"time"
@@ -26,6 +31,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/notify"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/skill"
@@ -1156,7 +1162,7 @@ type skillFileNode struct {
 
 func (s *Server) fsListSkills(w http.ResponseWriter, r *http.Request) {
 	_ = os.MkdirAll(s.skillDir, 0o755)
-	allReg, _ := skill.LoadDir(s.skillDir)
+	allReg, _ := loadSkillsConfined(s.skillDir)
 	metaByDir := map[string]skill.Skill{}
 	if allReg != nil {
 		for _, sk := range allReg.List() {
@@ -1167,7 +1173,7 @@ func (s *Server) fsListSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := os.ReadDir(s.skillDir)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	// Usage is best-effort decoration: a ledger read failure leaves the counts at
@@ -1275,13 +1281,18 @@ func (s *Server) fsCreateSkill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "description is required")
 		return
 	}
-	skillPath := filepath.Join(s.skillDir, body.Name)
-	if _, err := os.Stat(skillPath); err == nil {
+	dirCP, err := resolveSkillDir(s.skillDir, body.Name)
+	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if dirCP.exists {
 		writeErr(w, 409, "skill already exists")
 		return
 	}
+	skillPath := filepath.Join(s.skillDir, body.Name)
 	if err := os.MkdirAll(skillPath, 0o755); err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	// Build a spec-compliant SKILL.md (agentskills.io format):
@@ -1317,7 +1328,7 @@ func (s *Server) fsCreateSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := os.WriteFile(filepath.Join(skillPath, "SKILL.md"), []byte(sb.String()), 0o644); err != nil {
 		_ = os.RemoveAll(skillPath)
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	// Verify with the real parser: a description containing ": " (or any value that
@@ -1352,10 +1363,22 @@ func (s *Server) fsUpdateSkillMeta(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	skillMD := filepath.Join(s.skillDir, name, "SKILL.md")
-	raw, err := os.ReadFile(skillMD)
+	skillExists, cp, err := resolveSkillFile(s.skillDir, name, "SKILL.md")
 	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if !skillExists || !cp.exists {
 		writeErr(w, 404, "skill not found")
+		return
+	}
+	raw, err := os.ReadFile(cp.realPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeErr(w, 404, "skill not found")
+			return
+		}
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	updated, err := rewriteSkillFrontmatter(raw, body.MCPs, body.Description, body.License, body.Compatibility)
@@ -1363,8 +1386,8 @@ func (s *Server) fsUpdateSkillMeta(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if err := os.WriteFile(skillMD, updated, 0o644); err != nil {
-		writeErr(w, 500, err.Error())
+	if err := os.WriteFile(cp.realPath, updated, 0o644); err != nil {
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1383,9 +1406,9 @@ func yamlScalar(s string) string {
 // verifySkillFile re-loads a written SKILL.md with the real skill parser and
 // asserts the name and the mcps list survived the round trip.
 func verifySkillFile(skillPath, wantName string, wantMCPs []string) error {
-	reg, err := skill.LoadDir(skillPath)
+	reg, err := loadSkillsConfined(skillPath)
 	if err != nil {
-		return fmt.Errorf("load: %w", err)
+		return fmt.Errorf("load: %s", safeFSErr(err))
 	}
 	for _, s := range reg.List() {
 		if s.Dir == "" {
@@ -1399,14 +1422,14 @@ func verifySkillFile(skillPath, wantName string, wantMCPs []string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("no skill loaded from %s", skillPath)
+	return fmt.Errorf("no skill loaded from %s", filepath.Base(skillPath))
 }
 
 // warnBrokenSkills logs skills whose parsed name does not match their directory
 // name: the signature of frontmatter that failed to parse and silently fell back
 // (fields empty, mcps gate lost). Best-effort, startup only.
 func warnBrokenSkills(dir string) {
-	reg, err := skill.LoadDir(dir)
+	reg, err := loadSkillsConfined(dir)
 	if err != nil {
 		return
 	}
@@ -1601,9 +1624,14 @@ func (s *Server) fsUploadSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	dirCP, err := resolveSkillDir(s.skillDir, name)
+	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
 	skillPath := filepath.Join(s.skillDir, name)
 	overwrite := r.URL.Query().Get("overwrite") == "true"
-	if _, err := os.Stat(skillPath); err == nil && !overwrite {
+	if dirCP.exists && !overwrite {
 		writeErr(w, 409, "skill already exists: "+name+" (retry after confirming if you want to overwrite)")
 		return
 	}
@@ -1708,13 +1736,20 @@ func (s *Server) fsDeleteSkill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid skill name")
 		return
 	}
+	dirCP, err := resolveSkillDir(s.skillDir, name)
+	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
 	if err := pg.DeleteSkillVisibility(name); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if err := os.RemoveAll(filepath.Join(s.skillDir, name)); err != nil {
-		writeErr(w, 500, err.Error())
-		return
+	if dirCP.exists {
+		if err := os.RemoveAll(dirCP.entryPath); err != nil {
+			writeErr(w, 500, safeFSErr(err))
+			return
+		}
 	}
 	writeJSON(w, 200, map[string]any{"deleted": name})
 }
@@ -1816,14 +1851,23 @@ func (s *Server) fsListFiles(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid skill name")
 		return
 	}
-	dirPath := filepath.Join(s.skillDir, name)
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+	dirCP, err := resolveSkillDir(s.skillDir, name)
+	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if !dirCP.exists {
 		writeErr(w, 404, "skill not found")
 		return
 	}
-	files, err := walkSkillFiles(dirPath)
+	fi, err := os.Stat(dirCP.realPath)
+	if err != nil || !fi.IsDir() {
+		writeErr(w, 404, "skill not found")
+		return
+	}
+	files, err := walkSkillFiles(dirCP.realPath)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	if files == nil {
@@ -1843,13 +1887,22 @@ func (s *Server) fsReadFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errMsg)
 		return
 	}
-	data, err := os.ReadFile(filepath.Join(s.skillDir, name, file))
+	skillExists, cp, err := resolveSkillFile(s.skillDir, name, file)
+	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if !skillExists || !cp.exists {
+		writeErr(w, 404, "file not found")
+		return
+	}
+	data, err := os.ReadFile(cp.realPath)
 	if os.IsNotExist(err) {
 		writeErr(w, 404, "file not found")
 		return
 	}
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"content": string(data), "file": file})
@@ -1873,19 +1926,26 @@ func (s *Server) fsWriteFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	skillPath := filepath.Join(s.skillDir, name)
-	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+	skillExists, cp, err := resolveSkillFile(s.skillDir, name, file)
+	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if !skillExists {
 		writeErr(w, 404, "skill not found")
 		return
 	}
-	fullPath := filepath.Join(skillPath, file)
-	// create parent subdirectory if needed (e.g. scripts/, references/, assets/)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-		writeErr(w, 500, err.Error())
+	if cp.realPath == cp.realRoot {
+		writeErr(w, 400, "invalid path")
 		return
 	}
-	if err := os.WriteFile(fullPath, []byte(body.Content), 0o644); err != nil {
-		writeErr(w, 500, err.Error())
+	// create parent subdirectory if needed (e.g. scripts/, references/, assets/)
+	if err := os.MkdirAll(filepath.Dir(cp.realPath), 0o755); err != nil {
+		writeErr(w, 500, safeFSErr(err))
+		return
+	}
+	if err := os.WriteFile(cp.realPath, []byte(body.Content), 0o644); err != nil {
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1909,13 +1969,21 @@ func (s *Server) fsCreateDir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errMsg)
 		return
 	}
-	skillPath := filepath.Join(s.skillDir, name)
-	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+	skillExists, cp, err := resolveSkillFile(s.skillDir, name, dir)
+	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if !skillExists {
 		writeErr(w, 404, "skill not found")
 		return
 	}
-	if err := os.MkdirAll(filepath.Join(skillPath, dir), 0o755); err != nil {
-		writeErr(w, 500, err.Error())
+	if cp.realPath == cp.realRoot {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if err := os.MkdirAll(cp.realPath, 0o755); err != nil {
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	writeJSON(w, 201, map[string]any{"dir": dir})
@@ -1932,13 +2000,21 @@ func (s *Server) fsDeletePath(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errMsg)
 		return
 	}
-	fullPath := filepath.Join(s.skillDir, name, file)
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+	skillExists, cp, err := resolveSkillFile(s.skillDir, name, file)
+	if err != nil {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if !skillExists || !cp.exists {
 		writeErr(w, 404, "not found")
 		return
 	}
-	if err := os.RemoveAll(fullPath); err != nil {
-		writeErr(w, 500, err.Error())
+	if cp.realPath == cp.realRoot {
+		writeErr(w, 400, "invalid path")
+		return
+	}
+	if err := os.RemoveAll(cp.entryPath); err != nil {
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": file})
@@ -2236,6 +2312,224 @@ func (s *Server) pgLLMPoolReset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.llmPoolStatus())
 }
 
+const maxModelRedirects = 5
+
+// LLMPrivateEndpointsEnv is an opt-in comma-separated allow-list of exact
+// host:port entries (for example "127.0.0.1:11434,host.docker.internal:11434")
+// that POST /api/llm/models may contact on loopback or private addresses.
+// Unset or empty enforces the strict public-only policy.
+const LLMPrivateEndpointsEnv = "ARTEX_LLM_PRIVATE_ENDPOINTS"
+
+type modelURLRefusalError struct {
+	msg string
+}
+
+func (e *modelURLRefusalError) Error() string { return e.msg }
+
+func normalizeModelHost(host string) (kind, normalized string, ok bool) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", "", false
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return intercept.TargetIP, addr.Unmap().WithZone("").String(), true
+	}
+	t, ok := intercept.NormalizeTarget(host)
+	if !ok || t.Kind == intercept.TargetCIDR || t.Host == "" {
+		return "", "", false
+	}
+	return t.Kind, t.Host, true
+}
+
+func urlEffectivePort(u *url.URL) (int, bool) {
+	if p := u.Port(); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			return 0, false
+		}
+		return n, true
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return 80, true
+	case "https":
+		return 443, true
+	default:
+		return 0, false
+	}
+}
+
+func parsePrivateModelEndpoints(raw string) map[string]bool {
+	out := map[string]bool{}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		host, portStr, err := net.SplitHostPort(entry)
+		if err != nil {
+			continue
+		}
+		port, err := strconv.Atoi(portStr)
+		if err != nil || port < 1 || port > 65535 {
+			continue
+		}
+		_, normHost, ok := normalizeModelHost(host)
+		if !ok {
+			continue
+		}
+		out[net.JoinHostPort(normHost, strconv.Itoa(port))] = true
+	}
+	return out
+}
+
+func sameRedirectHost(a, b *url.URL) bool {
+	ha := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(a.Hostname())), ".")
+	hb := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(b.Hostname())), ".")
+	return ha != "" && ha == hb
+}
+
+func (s *Server) isBlockedModelAddr(addr netip.Addr, allowPrivate bool) bool {
+	if !addr.IsValid() {
+		return true
+	}
+	addr = addr.Unmap().WithZone("")
+	if s != nil && s.allowLoopbackModels && addr.IsLoopback() {
+		return false
+	}
+	if !intercept.IsNonPublicAddr(addr) {
+		return false
+	}
+	if allowPrivate {
+		// Allow-listed self-hosted endpoints may resolve to loopback or RFC1918 /
+		// unique-local private addresses, but never link-local, unspecified,
+		// multicast, or instance-metadata addresses (such as 169.254.169.254 or
+		// fd00:ec2::254).
+		if addr.IsLoopback() {
+			return false
+		}
+		if addr.IsPrivate() && intercept.ValidateExemptionHost(addr.String()) == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) lookupModelIPs(ctx context.Context, host string) ([]netip.Addr, error) {
+	if s != nil && s.modelLookupIP != nil {
+		return s.modelLookupIP(ctx, host)
+	}
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+}
+
+type modelURLGuard struct {
+	s                *Server
+	privateEndpoints map[string]bool
+	mu               sync.Mutex
+	allowedDialAddrs map[string]bool
+}
+
+func newModelURLGuard(s *Server) *modelURLGuard {
+	return &modelURLGuard{
+		s:                s,
+		privateEndpoints: parsePrivateModelEndpoints(os.Getenv(LLMPrivateEndpointsEnv)),
+	}
+}
+
+func (g *modelURLGuard) allowDialAddr(addr netip.Addr, port int) {
+	if !addr.IsValid() || port < 1 || port > 65535 {
+		return
+	}
+	key := net.JoinHostPort(addr.Unmap().WithZone("").String(), strconv.Itoa(port))
+	g.mu.Lock()
+	if g.allowedDialAddrs == nil {
+		g.allowedDialAddrs = map[string]bool{}
+	}
+	g.allowedDialAddrs[key] = true
+	g.mu.Unlock()
+}
+
+func (g *modelURLGuard) isAllowedDialAddr(addr netip.Addr, port string) bool {
+	key := net.JoinHostPort(addr.Unmap().WithZone("").String(), port)
+	g.mu.Lock()
+	ok := g.allowedDialAddrs[key]
+	g.mu.Unlock()
+	return ok
+}
+
+func (g *modelURLGuard) blockDial(_, address string, _ syscall.RawConn) error {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return &modelURLRefusalError{msg: "target address is not allowed"}
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return &modelURLRefusalError{msg: "target address is not allowed"}
+	}
+	allowPrivate := g.isAllowedDialAddr(addr, port)
+	if g.s.isBlockedModelAddr(addr, allowPrivate) {
+		return &modelURLRefusalError{msg: "target address is not allowed"}
+	}
+	return nil
+}
+
+// validateURL validates a base_url candidate, proxy URL, or redirect target for
+// POST /api/llm/models. Only http and https URLs are permitted; hosts must
+// resolve strictly to public addresses unless their exact host:port is listed
+// in ARTEX_LLM_PRIVATE_ENDPOINTS. Errors never include resolved IP addresses.
+func (g *modelURLGuard) validateURL(ctx context.Context, rawURL, role string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return nil, &modelURLRefusalError{msg: fmt.Sprintf("invalid %s URL", role)}
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return nil, &modelURLRefusalError{msg: fmt.Sprintf("%s URL must use http or https", role)}
+	}
+	if u.Opaque != "" {
+		return nil, &modelURLRefusalError{msg: fmt.Sprintf("invalid %s URL", role)}
+	}
+	port, ok := urlEffectivePort(u)
+	if !ok {
+		return nil, &modelURLRefusalError{msg: fmt.Sprintf("invalid %s URL", role)}
+	}
+	kind, normHost, ok := normalizeModelHost(u.Hostname())
+	if !ok {
+		return nil, &modelURLRefusalError{msg: fmt.Sprintf("invalid %s URL host", role)}
+	}
+	hostPort := net.JoinHostPort(normHost, strconv.Itoa(port))
+	allowPrivate := g.privateEndpoints[hostPort]
+
+	if kind == intercept.TargetIP {
+		addr, err := netip.ParseAddr(normHost)
+		if err != nil || g.s.isBlockedModelAddr(addr, allowPrivate) {
+			return nil, &modelURLRefusalError{msg: fmt.Sprintf("%s URL host is not allowed", role)}
+		}
+		if allowPrivate {
+			g.allowDialAddr(addr, port)
+		}
+		return u, nil
+	}
+	if !allowPrivate && !(g.s != nil && g.s.allowLoopbackModels) && (normHost == "localhost" || strings.HasSuffix(normHost, ".localhost")) {
+		return nil, &modelURLRefusalError{msg: fmt.Sprintf("%s URL host is not allowed", role)}
+	}
+	addrs, err := g.s.lookupModelIPs(ctx, normHost)
+	if err != nil || len(addrs) == 0 {
+		return nil, &modelURLRefusalError{msg: fmt.Sprintf("failed to resolve %s host", role)}
+	}
+	for _, addr := range addrs {
+		if g.s.isBlockedModelAddr(addr, allowPrivate) {
+			return nil, &modelURLRefusalError{msg: fmt.Sprintf("%s URL host is not allowed", role)}
+		}
+	}
+	if allowPrivate {
+		for _, addr := range addrs {
+			g.allowDialAddr(addr, port)
+		}
+	}
+	return u, nil
+}
+
 // pgListModels fetches available models from the provider's API endpoint.
 // Supports OpenAI-format (GET /models), Anthropic-format (GET /v1/models) and
 // Ollama (keyless OpenAI-compatible GET /v1/models on the local server); for
@@ -2285,7 +2579,9 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	rawBaseURL := strings.TrimSpace(req.BaseURL)
+	baseURL := strings.TrimRight(rawBaseURL, "/")
+	defaultOllama := provider == "ollama" && rawBaseURL == ""
 
 	// Candidate endpoints to try in order. Some Anthropic-compatible providers
 	// (e.g. DeepSeek) implement /v1/messages under an /anthropic path but expose
@@ -2349,19 +2645,98 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build HTTP client with optional proxy.
-	transport := &http.Transport{}
+	// Validate proxy and every candidate URL before sending any request.
+	// Pre-request validation is required in addition to the dial-time guard
+	// because a caller-supplied HTTP proxy fetches the target URL itself.
+	guard := newModelURLGuard(s)
+	var proxyURL *url.URL
 	if p := strings.TrimSpace(req.Proxy); p != "" {
-		if pu, err := url.Parse(p); err == nil {
-			transport.Proxy = http.ProxyURL(pu)
+		var err error
+		proxyURL, err = guard.validateURL(r.Context(), p, "proxy")
+		if err != nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+			return
 		}
 	}
-	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
+	if defaultOllama {
+		// The built-in Ollama default is code-owned, not caller input: allow
+		// dialing its exact host:port without relaxing caller-supplied URLs.
+		if du, err := url.Parse(agent.DefaultOllamaBaseURL); err == nil {
+			if addr, err := netip.ParseAddr(du.Hostname()); err == nil {
+				if port, ok := urlEffectivePort(du); ok {
+					guard.allowDialAddr(addr, port)
+				}
+			}
+		}
+	} else {
+		for _, c := range candidates {
+			if _, err := guard.validateURL(r.Context(), c.url, "endpoint"); err != nil {
+				writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+		}
+	}
+
+	// Build HTTP client with strict dial guard, redirect validation, and optional proxy.
+	var transport *http.Transport
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = base.Clone()
+	} else {
+		transport = &http.Transport{}
+	}
+	transport.Proxy = nil
+	if proxyURL != nil {
+		transport.Proxy = http.ProxyURL(proxyURL)
+	}
+	if s.modelRootCAs != nil {
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		} else {
+			transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+		}
+		transport.TLSClientConfig.RootCAs = s.modelRootCAs
+	}
+	dialCtx := (&net.Dialer{Timeout: 10 * time.Second, Control: guard.blockDial}).DialContext
+	if s.modelDialContext != nil {
+		dialCtx = s.modelDialContext
+	}
+	transport.DialContext = dialCtx
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxModelRedirects {
+				return &modelURLRefusalError{msg: "too many redirects"}
+			}
+			if len(via) > 0 {
+				prev := via[len(via)-1].URL
+				prevScheme := strings.ToLower(prev.Scheme)
+				nextScheme := strings.ToLower(req.URL.Scheme)
+				if nextScheme != prevScheme {
+					if !(prevScheme == "http" && nextScheme == "https" && sameRedirectHost(prev, req.URL)) {
+						return &modelURLRefusalError{msg: "redirect scheme change is not allowed"}
+					}
+				}
+			}
+			if _, err := guard.validateURL(req.Context(), req.URL.String(), "redirect"); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
 
 	// Try each candidate; return the first that yields a non-empty model list.
 	var lastErr string
 	emptyOK := false
-	for _, c := range candidates {
+	for i, c := range candidates {
+		if i > 0 && !defaultOllama {
+			if _, err := guard.validateURL(r.Context(), c.url, "endpoint"); err != nil {
+				writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+		}
 		httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, c.url, nil)
 		if err != nil {
 			lastErr = "failed to build request: " + err.Error()
@@ -2370,6 +2745,11 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		httpReq.Header = c.hdr
 		resp, err := client.Do(httpReq)
 		if err != nil {
+			var refusal *modelURLRefusalError
+			if errors.As(err, &refusal) {
+				writeJSON(w, 200, map[string]any{"ok": false, "error": refusal.Error()})
+				return
+			}
 			lastErr = "request failed: " + err.Error()
 			continue
 		}

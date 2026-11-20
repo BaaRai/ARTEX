@@ -211,6 +211,9 @@ type Interceptor struct {
 	// upstreamProxy reports whether target traffic leaves through an upstream
 	// egress proxy (nil = no). Injected by the server layer.
 	upstreamProxy func() bool
+	// toolProxy reports whether one tool's own configuration routes its traffic
+	// through a proxy (nil = no). Injected by the server layer.
+	toolProxy func(string) bool
 	// derivedExempt lists the endpoints of the platform's own services (nil =
 	// none). Injected by the server layer. See SetDerivedExemptions.
 	derivedExempt func() []string
@@ -234,6 +237,15 @@ func (i *Interceptor) SetUpstreamProxyCheck(f func() bool) {
 	i.mu.Unlock()
 }
 
+// SetToolProxyCheck installs the function that reports whether a tool sends its
+// own traffic through a proxy. The proxy then chooses the address it connects
+// to, so a target approval for that call is name-only. Passing nil disables it.
+func (i *Interceptor) SetToolProxyCheck(f func(string) bool) {
+	i.mu.Lock()
+	i.toolProxy = f
+	i.mu.Unlock()
+}
+
 // SetReviewer installs the LLM fallback judge callback. Passing nil disables it.
 func (i *Interceptor) SetReviewer(r Reviewer) {
 	i.mu.Lock()
@@ -254,6 +266,10 @@ var defaultEnabledTools = []string{
 	"Bash", "WebFetch", "web_search",
 	"shell_open", "shell_send",
 	"Write", "Edit", "MultiEdit",
+	// ExecuteExtraTool dispatches MCP and deferred tools, and Monitor starts a
+	// background command; both execute third-party or shell commands, so they
+	// belong in the default gate with the rest.
+	"ExecuteExtraTool", "Monitor",
 }
 
 // New creates an Interceptor backed by d. The rule cache is lazy-loaded on
@@ -293,25 +309,30 @@ func (i *Interceptor) loadLocked() error {
 
 	// Load enabled-tools set from settings, falling back to hard-coded defaults.
 	val, ok, _ := i.db.GetSetting("intercept_enabled_tools")
-	if !ok {
-		m := make(map[string]bool, len(defaultEnabledTools))
-		for _, n := range defaultEnabledTools {
-			m[n] = true
-		}
-		i.enabledTools = m
-	} else {
-		var names []string
-		if json.Unmarshal([]byte(val), &names) != nil {
-			i.enabledTools = map[string]bool{}
-		} else {
-			m := make(map[string]bool, len(names))
-			for _, n := range names {
-				m[n] = true
-			}
-			i.enabledTools = m
-		}
-	}
+	i.enabledTools = enabledToolsFromSetting(val, ok)
 	return nil
+}
+
+// enabledToolsFromSetting maps the stored intercept_enabled_tools value to the
+// gate's set. A malformed value must not silently disable the gate, so it falls
+// back to the same defaults as an unset setting.
+func enabledToolsFromSetting(val string, ok bool) map[string]bool {
+	m := make(map[string]bool, len(defaultEnabledTools))
+	for _, n := range defaultEnabledTools {
+		m[n] = true
+	}
+	if !ok {
+		return m
+	}
+	var names []string
+	if json.Unmarshal([]byte(val), &names) != nil {
+		return m
+	}
+	m = make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
 }
 
 func (i *Interceptor) rules() ([]compiledRule, error) {
@@ -369,7 +390,7 @@ func (i *Interceptor) GetEnabledTools() ([]string, error) {
 	}
 	var names []string
 	if err := json.Unmarshal([]byte(val), &names); err != nil {
-		return []string{}, nil
+		return nil, fmt.Errorf("intercept_enabled_tools is not valid JSON: %w", err)
 	}
 	return names, nil
 }
@@ -753,12 +774,20 @@ func (i *Interceptor) SetRulesForTest(rules []db.InterceptRule) {
 func ruleMatches(r compiledRule, toolName string, input []byte) bool {
 	if r.MatchType == "argv" {
 		// Bash only, on the parsed command; match_target is always tool_input.
-		// The denylist neutralises allow rules only: an argv deny or ask rule
-		// for a denylisted program still matches.
-		if r.Action == "allow" && CheckArgvAllow(r.argv) != nil {
-			return false
+		// Allow rules stay strictly limited to a single simple command with
+		// exact derived prefix and denylist enforcement. Deny and ask rules
+		// walk every call in a compound Bash command, stripping known wrappers
+		// and recursing into eval / shell -c payloads.
+		if r.Action == "allow" {
+			if CheckArgvAllow(r.argv) != nil {
+				return false
+			}
+			return r.MatchTarget == "tool_input" && argvRuleMatches(r.argv, toolName, input)
 		}
-		return r.MatchTarget == "tool_input" && argvRuleMatches(r.argv, toolName, input)
+		if r.Action == "deny" || r.Action == "ask" {
+			return r.MatchTarget == "tool_input" && argvCompoundMatches(r.argv, toolName, input)
+		}
+		return false
 	}
 	var subject string
 	switch r.MatchTarget {

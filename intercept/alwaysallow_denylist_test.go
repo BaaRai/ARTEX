@@ -13,12 +13,13 @@ func TestArgvAllowDenylist(t *testing.T) {
 		"python", "python3", "python3.11", "/usr/bin/python3.11", "php8.2", "ruby3.2", "perl5", "pip3",
 		"env", "/usr/bin/env", "bash", "/bin/sh", "find", "rm", "mkfs", "mkfs.ext4", "/sbin/mkfs.xfs",
 		"docker", "kubectl", "npm", "sudo", "xargs", "Rscript", ".",
+		"git", "/usr/bin/git", "cmake", "cmake3", "/usr/bin/cmake", "ctest", "cpack",
 	} {
 		if !ArgvAllowDenied(prog) {
 			t.Errorf("%q is not denied", prog)
 		}
 	}
-	for _, prog := range []string{"nmap", "git", "/usr/bin/git", "curl", "ls", "gh", "x", "7z", "pythonic"} {
+	for _, prog := range []string{"nmap", "curl", "ls", "gh", "x", "7z", "pythonic"} {
 		if ArgvAllowDenied(prog) {
 			t.Errorf("%q is denied, want allowable", prog)
 		}
@@ -30,8 +31,8 @@ func TestAlwaysAllowPrefix(t *testing.T) {
 		b, _ := json.Marshal(map[string]string{"command": cmd})
 		return b
 	}
-	if got, err := AlwaysAllowPrefix("Bash", bash("git push --force origin main")); err != nil || !slices.Equal(got, []string{"git", "push"}) {
-		t.Fatalf("git push: %q %v", got, err)
+	if got, err := AlwaysAllowPrefix("Bash", bash("gh pr list --limit 5")); err != nil || !slices.Equal(got, []string{"gh", "pr", "list"}) {
+		t.Fatalf("gh pr list: %q %v", got, err)
 	}
 	if got, err := AlwaysAllowPrefix("Bash", bash("nmap -p 80 10.0.0.1")); err != nil || !slices.Equal(got, []string{"nmap"}) {
 		t.Fatalf("nmap: %q %v", got, err)
@@ -40,10 +41,10 @@ func TestAlwaysAllowPrefix(t *testing.T) {
 		tool  string
 		input []byte
 	}{
-		"not Bash":       {"shell_open", bash("git push")},
-		"compound":       {"Bash", bash("git push; id")},
-		"substitution":   {"Bash", bash("git push $(id)")},
-		"redirection":    {"Bash", bash("git push > out")},
+		"not Bash":       {"shell_open", bash("gh pr list")},
+		"compound":       {"Bash", bash("gh pr list; id")},
+		"substitution":   {"Bash", bash("gh pr list $(id)")},
+		"redirection":    {"Bash", bash("gh pr list > out")},
 		"empty":          {"Bash", bash("")},
 		"no command":     {"Bash", []byte(`{}`)},
 		"not json":       {"Bash", []byte(`not json`)},
@@ -52,10 +53,29 @@ func TestAlwaysAllowPrefix(t *testing.T) {
 		"find":           {"Bash", bash("find . -exec sh -c id ;")},
 		"rm":             {"Bash", bash("rm -rf /")},
 		"docker":         {"Bash", bash("docker run --privileged x")},
+		"git":            {"Bash", bash("git status")},
+		"path to git":    {"Bash", bash("/usr/bin/git status")},
+		"git config":     {"Bash", bash("git config user.name x")},
+		"cmake":          {"Bash", bash("cmake --version")},
+		"ctest":          {"Bash", bash("ctest -N")},
 	} {
 		if got, err := AlwaysAllowPrefix(c.tool, c.input); err == nil {
 			t.Errorf("%s: prefix %q, want a refusal", name, got)
 		}
+	}
+}
+
+// The arity table is keyed by program name, so a path-qualified binary derives
+// the same prefix length as the bare name.
+func TestArgvPrefixLenUsesBasename(t *testing.T) {
+	if got := argvPrefixLen([]string{"/usr/bin/gh", "pr", "list"}); got != 3 {
+		t.Errorf("path-qualified gh prefix length = %d, want 3", got)
+	}
+	if got := argvPrefixLen([]string{"/usr/bin/git", "status"}); got != 2 {
+		t.Errorf("path-qualified git prefix length = %d, want 2", got)
+	}
+	if got, err := ArgvPrefix("/usr/bin/gh pr list"); err != nil || !slices.Equal(got, []string{"/usr/bin/gh", "pr", "list"}) {
+		t.Errorf("path-qualified gh prefix = %q, %v", got, err)
 	}
 }
 

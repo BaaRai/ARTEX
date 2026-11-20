@@ -41,6 +41,34 @@ func TestPreToolUsePassthrough(t *testing.T) {
 	}
 }
 
+// A deny must not leave a prior allow row in the audit ring.
+func TestPreToolUseAuditIsFinalDecision(t *testing.T) {
+	ic := intercept.New(nil)
+	ic.SetRulesForTest([]db.InterceptRule{{
+		ID: 1, Name: "deny nmap", Enabled: true, Priority: 10,
+		MatchTarget: "tool_input", MatchType: "string", Action: "deny",
+		Pattern: "nmap", Message: "no nmap",
+	}})
+	g := NewWithInterceptor(ic)
+	input, _ := json.Marshal(map[string]string{"command": "nmap -sV x"})
+	block, _, _ := g.Hooks().PreToolUse(context.Background(), "Bash", input)
+	if !block {
+		t.Fatal("expected block")
+	}
+	audit := g.Audit()
+	if len(audit) != 1 || audit[0].Action != "block" || audit[0].Tool != "Bash" {
+		t.Fatalf("audit=%+v, want a single block", audit)
+	}
+	if audit[0].Command != "nmap -sV x" {
+		t.Fatalf("block command=%q, want the denied command", audit[0].Command)
+	}
+	for _, e := range audit {
+		if e.Action == "allow" {
+			t.Fatalf("blocked call still has an allow row: %+v", audit)
+		}
+	}
+}
+
 // The target-only guard (planner, main agent) runs the built-in deny rules and
 // the target gate: no user intercept rule, no fallback judge, no audit-ring entry
 // for a call that passes (in production the built-in rules come from the store,

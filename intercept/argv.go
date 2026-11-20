@@ -25,9 +25,17 @@ var argvArity = map[string]int{
 }
 
 // argvPrefixLen returns the number of leading tokens that form the prefix.
+// The arity table is keyed by program name, so a path-qualified binary
+// (/usr/bin/git) uses the same arity as the bare name.
 func argvPrefixLen(tokens []string) int {
+	if len(tokens) == 0 {
+		return 0
+	}
+	key := make([]string, len(tokens))
+	copy(key, tokens)
+	key[0] = argvProgramName(tokens[0])
 	for n := len(tokens); n > 0; n-- {
-		if a, ok := argvArity[strings.Join(tokens[:n], " ")]; ok {
+		if a, ok := argvArity[strings.Join(key[:n], " ")]; ok {
 			return min(a, len(tokens))
 		}
 	}

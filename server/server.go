@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -66,6 +67,14 @@ type Server struct {
 	authHashKey    string
 	authVersionKey string
 
+	// Test-only seams for pgListModels SSRF checks. All remain zero/nil in
+	// production (strict public-only default; only exact host:port entries in
+	// ARTEX_LLM_PRIVATE_ENDPOINTS may resolve to private addresses).
+	allowLoopbackModels bool
+	modelLookupIP       func(ctx context.Context, host string) ([]netip.Addr, error)
+	modelDialContext    func(ctx context.Context, network, addr string) (net.Conn, error)
+	modelRootCAs        *x509.CertPool
+
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	pwdLimit       *loginLimiter  // attempt limit on POST /api/auth/change-password (IP + session token)
 	trustedProxies []netip.Prefix // ARTEX_TRUSTED_PROXIES; see clientIP
@@ -74,6 +83,8 @@ type Server struct {
 	// scheduler tick and an HTTP settings change / task creation can't both count
 	// free slots off the same snapshot and over-promote past the limit.
 	concMu sync.Mutex
+
+	readyPG readyCache
 
 	cfgMu     sync.Mutex
 	chatAgent *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
@@ -748,6 +759,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
 	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/ready", s.ready)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
@@ -1050,7 +1062,14 @@ func (s *Server) Handler() http.Handler {
 	api := cors(s.requireAuth(mux))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
-	root.Handle("/", s.webuiHandler())
+	webui := s.webuiHandler()
+	root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Keep the operator console out of cross-origin frames and referrers.
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		webui.ServeHTTP(w, r)
+	})
 	return limitRequestBody(root)
 }
 
@@ -3669,7 +3688,8 @@ func (s *Server) getTrafficExchange(w http.ResponseWriter, r *http.Request) {
 }
 
 // getTrafficStream returns one page of a WebSocket/SSE exchange's messages in
-// order (limit 1..200, default 50).
+// order (limit 1..200, default 50). direction=c2s or s2c keeps one side of the
+// conversation (plus the meta limit marker); any other non-empty value is a 400.
 func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
 	tr := s.m.Traffic()
 	if tr == nil {
@@ -3684,7 +3704,12 @@ func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
 	}
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	msgs, total, err := tr.StreamMessages(id, offset, limit)
+	direction := strings.ToLower(strings.TrimSpace(q.Get("direction")))
+	msgs, total, err := tr.StreamMessagesByDirection(id, direction, offset, limit)
+	if errors.Is(err, traffic.ErrBadStreamDirection) {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

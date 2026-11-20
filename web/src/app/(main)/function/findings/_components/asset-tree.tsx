@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import type { FindingAssetKind, FindingAssetNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { t } from "@/i18n";
 
 // Icons reuse the assets page's type mapping, so the same asset kind looks the same in both places.
 const KIND_ICON: Record<FindingAssetKind, LucideIcon> = {
@@ -34,14 +35,14 @@ const KIND_ICON: Record<FindingAssetKind, LucideIcon> = {
 };
 
 const KIND_LABEL: Record<FindingAssetKind, string> = {
-  company: "Company",
-  root_domain: "Root domain",
-  subdomain: "Subdomain",
+  company: t("Company"),
+  root_domain: t("Root domain"),
+  subdomain: t("Subdomain"),
   ip: "IP",
-  app: "App",
-  service: "Service",
-  endpoint: "Endpoint",
-  none: "Unlinked",
+  app: t("App"),
+  service: t("Service"),
+  endpoint: t("Endpoint"),
+  none: t("Unlinked"),
 };
 
 // TreeNode is the tree assembled from the node array. The backend already sorts by "most findings under the same parent first",
@@ -233,9 +234,9 @@ export function AssetTree({
     [isExpanded],
   );
 
-  let emptyHint = "No findings are linked to assets under the current filters.";
-  if (loading) emptyHint = "Loading…";
-  else if (searching) emptyHint = "No matching assets.";
+  let emptyHint = t("No findings are linked to assets under the current filters.");
+  if (loading) emptyHint = t("Loading…");
+  else if (searching) emptyHint = t("No matching assets.");
 
   const rows: React.ReactNode[] = [];
   const pushRows = (list: TreeNode[]) => {
@@ -264,8 +265,8 @@ export function AssetTree({
             type="search"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
-            placeholder="Filter assets"
-            aria-label="Filter assets"
+            placeholder={t("Filter assets")}
+            aria-label={t("Filter assets")}
           />
           <InputGroupAddon>
             <SearchIcon aria-hidden="true" />
@@ -278,8 +279,8 @@ export function AssetTree({
             className="size-8 shrink-0 text-muted-foreground"
             onClick={onRefresh}
             disabled={loading}
-            aria-label="Refresh asset tree"
-            title="Refresh asset tree"
+            aria-label={t("Refresh asset tree")}
+            title={t("Refresh asset tree")}
           >
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
           </Button>
@@ -294,7 +295,7 @@ export function AssetTree({
           selected === null ? "bg-accent font-medium" : "hover:bg-accent/50",
         )}
       >
-        <span>All assets</span>
+        <span>{t("All assets")}</span>
         <span className="text-xs tabular-nums text-muted-foreground">{findingTotal}</span>
       </button>
 
@@ -307,8 +308,10 @@ export function AssetTree({
 
       {truncated && (
         <p className="px-1 text-xs text-muted-foreground">
-          Too many assets; the {(droppedKinds ?? []).map((k) => KIND_LABEL[k as FindingAssetKind] ?? k).join(" / ")}
-          levels are hidden (their counts still roll up into the parents). Narrow with the filters or the filter box to see the full hierarchy.
+          {t(
+            "Too many assets; the {kinds} levels are hidden (their counts still roll up into the parents). Narrow with the filters or the filter box to see the full hierarchy.",
+            { kinds: (droppedKinds ?? []).map((k) => KIND_LABEL[k as FindingAssetKind] ?? k).join(" / ") },
+          )}
         </p>
       )}
     </div>
@@ -343,7 +346,7 @@ function AssetTreeRow({
           type="button"
           onClick={onToggle}
           className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-          aria-label={open ? "Collapse" : "Expand"}
+          aria-label={open ? t("Collapse") : t("Expand")}
           aria-expanded={open}
         >
           <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
@@ -362,16 +365,16 @@ function AssetTreeRow({
       </button>
       <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums">
         {node.critical > 0 && (
-          <span className="text-rose-600" title={`Critical ${node.critical}`}>
+          <span className="text-rose-600" title={t("Critical {count}", { count: node.critical })}>
             {node.critical}
           </span>
         )}
         {node.high > 0 && (
-          <span className="text-red-500" title={`High ${node.high}`}>
+          <span className="text-red-500" title={t("High {count}", { count: node.high })}>
             {node.high}
           </span>
         )}
-        <span className="text-muted-foreground" title={`${node.total} findings total`}>
+        <span className="text-muted-foreground" title={t("{count} findings total", { count: node.total })}>
           {node.total}
         </span>
       </span>

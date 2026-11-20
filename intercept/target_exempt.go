@@ -165,6 +165,18 @@ func (i *Interceptor) loadExemptions() (exemptions, error) {
 	return ex, nil
 }
 
+// IsNonPublicAddr reports whether addr is private (RFC1918, fc00::/7 unique
+// local), loopback, link-local (including 169.254.169.254 and fe80::/10),
+// unspecified, multicast, or a known instance-metadata address.
+// Invalid addresses are treated as non-public (fail closed).
+func IsNonPublicAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return true
+	}
+	addr = addr.Unmap().WithZone("")
+	return addr.IsPrivate() || ValidateExemptionHost(addr.String()) != nil
+}
+
 // voidsExemption reports whether one resolved address voids a stored
 // exemption on a name: a private address (10/8, 172.16/12, 192.168/16, the
 // unique local range fc00::/7), or one that is never exempt as a literal
@@ -175,6 +187,5 @@ func voidsExemption(ip string) bool {
 	if err != nil {
 		return true
 	}
-	a = a.Unmap().WithZone("")
-	return a.IsPrivate() || ValidateExemptionHost(a.String()) != nil
+	return IsNonPublicAddr(a)
 }

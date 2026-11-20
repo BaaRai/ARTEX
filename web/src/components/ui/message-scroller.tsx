@@ -9,6 +9,7 @@ import {
 } from "@shadcn/react/message-scroller"
 
 import { cn } from "@/lib/utils"
+import { t } from "@/i18n"
 import { Button } from "@/components/ui/button"
 import { ArrowDownIcon } from "lucide-react"
 
@@ -110,7 +111,7 @@ function MessageScrollerButton({
           <ArrowDownIcon
           />
           <span className="sr-only">
-            {direction === "end" ? "Scroll to end" : "Scroll to start"}
+            {direction === "end" ? t("Scroll to end") : t("Scroll to start")}
           </span>
         </>
       )}

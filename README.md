@@ -428,6 +428,14 @@ runtime supports it.
 `/chat/completions` (or `/responses` for `openai-responses`), so their base **does** end in `/v1`
 (for example `https://api.openai.com/v1`).
 
+**OpenAI-compatible gateways**: any provider that serves an OpenAI-style
+`/v1/chat/completions` endpoint works through the **OpenAI** format — no dedicated format
+needed. Create a profile with format **OpenAI**, set **Base URL** to the gateway's `/v1`
+root, paste the key, then click the **↻** button next to *Model* to load the provider's
+catalog (`GET /v1/models`) and pick a model; models the provider adds later appear on the
+next refresh. For example, [NotHoly](https://notholy.com) (offensive-security models) uses
+base URL `https://api.notholy.com/v1` with an API key from its console.
+
 **Concurrency**: work agents per task, in "System Settings" (default 3).
 
 **Untrusted-output boundary (on by default)**: tool results for the worker, planner, chat and main

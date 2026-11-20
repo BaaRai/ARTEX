@@ -17,6 +17,7 @@ import {
   mentionToken,
   selectedMentions,
 } from "@/lib/chat-mentions";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 type Props = Omit<React.ComponentProps<"textarea">, "value" | "onChange" | "ref"> & {
@@ -198,7 +199,7 @@ export function MentionTextarea({ value, onValueChange, onKeyDown, className, in
               value={value}
               disabled={disabled}
               className={className}
-              aria-label={props["aria-label"] ?? "Message, type @ to reference records"}
+              aria-label={props["aria-label"] ?? t("Message, type @ to reference records")}
               aria-autocomplete="list"
               aria-controls={open ? listId : undefined}
               aria-expanded={open}
@@ -230,20 +231,22 @@ export function MentionTextarea({ value, onValueChange, onKeyDown, className, in
           onInteractOutside={(event) => {
             if (event.target === textarea.current) event.preventDefault();
           }}
-          aria-label="Choose a reference record"
+          aria-label={t("Choose a reference record")}
         >
           <div className="flex items-center justify-between px-2 py-1 text-muted-foreground text-xs">
             <span>
               {categories.length
-                ? "Choose a reference type"
-                : `Search ${mentionKinds.find((kind) => kind.kind === search.kind)?.label ?? "all records"}`}
+                ? t("Choose a reference type")
+                : t("Search {kind}", {
+                    kind: mentionKinds.find((kind) => kind.kind === search.kind)?.label ?? t("all records"),
+                  })}
             </span>
-            <span>↑↓ Select · Enter Confirm · Esc Close</span>
+            <span>{t("↑↓ Select · Enter Confirm · Esc Close")}</span>
           </div>
           <div
             id={listId}
             role="listbox"
-            aria-label="Reference candidates"
+            aria-label={t("Reference candidates")}
             className="max-h-60 overflow-y-auto"
             onScroll={(event) => {
               const list = event.currentTarget;
@@ -272,17 +275,17 @@ export function MentionTextarea({ value, onValueChange, onKeyDown, className, in
             {!categories.length && loading && (
               <div role="status" className="flex items-center gap-2 p-3 text-muted-foreground text-sm">
                 <Loader2Icon className="size-4 animate-spin" />
-                Searching…
+                {t("Searching…")}
               </div>
             )}
             {!categories.length && !loading && error && (
               <div role="alert" className="p-3 text-destructive text-sm">
-                Search failed: {error}. Please retype and try again.
+                {t("Search failed: {error}. Please retype and try again.", { error })}
               </div>
             )}
             {!categories.length && !loading && !error && !items.length && (
               <div role="status" className="p-3 text-muted-foreground text-sm">
-                No matching records; try a different name, address, or ID
+                {t("No matching records; try a different name, address, or ID")}
               </div>
             )}
             {items.map((item, index) => (
@@ -310,17 +313,19 @@ export function MentionTextarea({ value, onValueChange, onKeyDown, className, in
           </div>
           {!categories.length && (
             <p className="px-2 py-1 text-muted-foreground text-xs">
-              {loadingMore && <span role="status">Loading more…</span>}
+              {loadingMore && <span role="status">{t("Loading more…")}</span>}
               {!loadingMore && nextCursor && (
                 <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={loadMore}>
-                  {pageError ? "Failed to load, click to retry" : `Showing ${items.length}, scroll down for more`}
+                  {pageError
+                    ? t("Failed to load, click to retry")
+                    : t("Showing {count}, scroll down for more", { count: items.length })}
                 </button>
               )}
-              {!loadingMore && !nextCursor && !loading && !error && items.length > 0 && `All ${items.length} shown`}
+              {!loadingMore && !nextCursor && !loading && !error && items.length > 0 && t("All {count} shown", { count: items.length })}
               {!loadingMore &&
                 !nextCursor &&
                 (loading || !!error || items.length === 0) &&
-                "Type a name, address, or ID to search records"}
+                t("Type a name, address, or ID to search records")}
             </p>
           )}
         </PopoverContent>
@@ -335,7 +340,7 @@ export function MentionTextarea({ value, onValueChange, onKeyDown, className, in
               <button
                 type="button"
                 disabled={disabled}
-                aria-label={`Remove reference ${item.label}`}
+                aria-label={t("Remove reference {label}", { label: item.label })}
                 onClick={() => {
                   onValueChange(value.slice(0, item.start) + value.slice(item.start + item.token.length));
                   setCursor(null);
@@ -345,7 +350,7 @@ export function MentionTextarea({ value, onValueChange, onKeyDown, className, in
               </button>
             </Badge>
           ))}
-          <span className="text-muted-foreground text-xs">Latest details read on send · Up to 10 records</span>
+          <span className="text-muted-foreground text-xs">{t("Latest details read on send · Up to 10 records")}</span>
         </div>
       )}
     </div>
