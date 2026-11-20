@@ -366,6 +366,7 @@
   "Balanced": "Dengeli",
   "Base URL (optional)": "Base URL (isteğe bağlı)",
   "Baseline": "Referans",
+  "Bash reported exit code 127. Check whether the command or its interpreter is available in this runtime.": "Bash, 127 çıkış kodunu bildirdi. Komutun veya yorumlayıcısının bu çalışma ortamında kullanılabilir olup olmadığını kontrol edin.",
   "Basics": "Temel bilgiler",
   "Batch delete by target": "Hedefe göre toplu silme",
   "Before compression: {size}": "Sıkıştırma öncesi: {size}",
