@@ -116,10 +116,24 @@ func (i *Interceptor) dialTarget(ctx context.Context, scope TargetScope, toolNam
 // the URL.
 func addrTarget(network, addr string) (Target, error) {
 	switch network {
-	case "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6":
+	case "tcp", "tcp4", "tcp6":
+		return parseTargetAddr(addr)
 	default:
-		return Target{}, fmt.Errorf("network %q is not tcp or udp", network)
+		return Target{}, fmt.Errorf("network %q is not tcp", network)
 	}
+}
+
+// addrTargetUDP reads the address a UDP relay datagram names.
+func addrTargetUDP(network, addr string) (Target, error) {
+	switch network {
+	case "udp", "udp4", "udp6":
+		return parseTargetAddr(addr)
+	default:
+		return Target{}, fmt.Errorf("network %q is not udp", network)
+	}
+}
+
+func parseTargetAddr(addr string) (Target, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return Target{}, err
@@ -273,7 +287,7 @@ func (i *Interceptor) ResolveUDP4(ctx context.Context, addr string) (*net.UDPAdd
 	if scope, ok := TargetScopeFromContext(ctx); ok && scope.Enabled != nil && scope.Enabled() {
 		return i.resolveTargetUDP4(ctx, scope, "socks5-udp", addr)
 	}
-	t, err := addrTarget("udp4", addr)
+	t, err := addrTargetUDP("udp4", addr)
 	if err != nil {
 		return nil, &dialError{code: TargetGateUnavailable, target: addr, reason: "the address of the datagram could not be read (" + err.Error() + ")"}
 	}
@@ -307,7 +321,7 @@ func (i *Interceptor) ResolveUDP4(ctx context.Context, addr string) (*net.UDPAdd
 func (i *Interceptor) resolveTargetUDP4(ctx context.Context, scope TargetScope, toolName, addr string) (*net.UDPAddr, error) {
 	input, _ := json.Marshal(map[string]string{"udp": addr})
 	ctx = WithCall(ctx, toolName, input)
-	t, err := addrTarget("udp4", addr)
+	t, err := addrTargetUDP("udp4", addr)
 	if err != nil {
 		res := undeterminedTarget(ctx, scope, toolName, input, "the address of the datagram could not be read ("+err.Error()+")")
 		return nil, &dialError{code: res.Code, target: addr, reason: res.Reason}
