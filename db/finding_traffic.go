@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,6 +87,8 @@ type TrafficEvidenceSnapshot struct {
 	RespHash        string    `json:"resp_hash"`
 	ReqLen          int64     `json:"req_len"`
 	RespLen         int64     `json:"resp_len"`
+	Rewritten       bool      `json:"rewritten,omitempty"`
+	RewriteRuleIDs  []int64   `json:"rewrite_rule_ids,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 
@@ -131,9 +135,32 @@ func TrafficSnapshotID(snapshot TrafficEvidenceSnapshot) string {
 	snapshot = snapshot.Normalize()
 	snapshot.ID = ""
 	snapshot.CreatedAt = time.Time{}
+	snapshot.Rewritten = false
+	snapshot.RewriteRuleIDs = nil
 	raw, _ := json.Marshal(snapshot)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+func sortedUniqueInt64(ids []int64) []int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+func formatBigintArray(ids []int64) string {
+	ids = sortedUniqueInt64(ids)
+	if len(ids) == 0 {
+		return "{}"
+	}
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	return "{" + strings.Join(parts, ",") + "}"
 }
 
 // LockTaskEvidenceTx serializes writes with archive queueing (which locks the
@@ -205,9 +232,9 @@ func InsertEvidenceSnapshotTx(tx *sql.Tx, s TrafficEvidenceSnapshot) error {
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO traffic_evidence_snapshots
-(id,source_traffic_id,captured_at,url,method,status,content_type,req_head,resp_head,req_hash,resp_hash,req_len,resp_len,created_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(id) DO NOTHING`,
-		s.ID, s.SourceTrafficID, s.CapturedAt, s.URL, s.Method, s.Status, s.ContentType, reqHead, respHead, s.ReqHash, s.RespHash, s.ReqLen, s.RespLen, s.CreatedAt)
+(id,source_traffic_id,captured_at,url,method,status,content_type,req_head,resp_head,req_hash,resp_hash,req_len,resp_len,created_at,rewritten,rewrite_rule_ids)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::bigint[]) ON CONFLICT(id) DO NOTHING`,
+		s.ID, s.SourceTrafficID, s.CapturedAt, s.URL, s.Method, s.Status, s.ContentType, reqHead, respHead, s.ReqHash, s.RespHash, s.ReqLen, s.RespLen, s.CreatedAt, s.Rewritten, formatBigintArray(s.RewriteRuleIDs))
 	return err
 }
 

@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -176,7 +177,26 @@ func (s *Store) prepare(ctx context.Context, refs []db.TrafficRef) ([]db.Prepare
 		out = append(out, db.PreparedTrafficEvidence{Ref: byID[e.ID], Snapshot: v})
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	// Enrich after ReadEvidence returns so RewriteInfo is never called while
+	// ReadEvidence holds the traffic writer lock.
+	for i := range out {
+		rewritten, ruleIDs, err := s.Traffic.RewriteInfo(out[i].Snapshot.SourceTrafficID)
+		if err != nil {
+			return nil, fmt.Errorf("read rewrite provenance for %s: %w", out[i].Snapshot.SourceTrafficID, err)
+		}
+		if rewritten {
+			out[i].Snapshot.Rewritten = true
+			if len(ruleIDs) > 0 {
+				ids := slices.Clone(ruleIDs)
+				slices.Sort(ids)
+				out[i].Snapshot.RewriteRuleIDs = slices.Compact(ids)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) Record(ctx context.Context, in db.RecordFindingInput, refs []db.TrafficRef) (out *db.RecordedFinding, err error) {

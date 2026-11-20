@@ -1904,6 +1904,8 @@
   "Revoked Skill \"{name}\" visibility": "\"{name}\" becerisinin görünürlüğü kaldırıldı",
   "Revoked visibility from \"{agent}\"": "\"{agent}\" için görünürlük kaldırıldı",
   "Revoked visibility to \"{name}\"": "\"{name}\" için görünürlük kaldırıldı",
+  "Rewritten by capture rules": "Yakalama kuralları tarafından yeniden yazıldı",
+  "Rewritten by capture rules: {ids}": "Yakalama kuralları tarafından yeniden yazıldı: {ids}",
   "Risk": "Risk",
   "Risk accepted": "Risk kabul edildi",
   "Risk score {score}/100": "Risk puanı {score}/100",
