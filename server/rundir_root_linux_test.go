@@ -177,7 +177,7 @@ attempt("chmod_worker", lambda: os.chmod(worker, 0o777))
 
 // A data directory written before this layout: the task directory was the main
 // agent's working directory and was shared with the executor group. The start-up
-// pass takes the task directory back, shares its run directories and leaves the
+// pass takes the task directory back, shares its run directories and shares the
 // files of the task directory where they are. A symlink planted where a run
 // directory goes is refused and its target is not changed.
 func TestRunDirLayoutOnExistingTreeAsRoot(t *testing.T) {
@@ -223,7 +223,6 @@ func TestRunDirLayoutOnExistingTreeAsRoot(t *testing.T) {
 		}
 		return fi.Mode(), fi.Sys().(*syscall.Stat_t).Gid
 	}
-	oldMode, oldGid := stat(oldFile)
 
 	if err := PrepareExecPrivilege(&f.priv, f.data, "", ""); err != nil {
 		t.Fatal(err)
@@ -231,12 +230,11 @@ func TestRunDirLayoutOnExistingTreeAsRoot(t *testing.T) {
 	checkDir(t, task, 0, parentDirMode)
 	checkDir(t, oldWorker, DefaultExecGID, leafDirMode)
 	checkDir(t, nested, DefaultExecGID, 0o770|os.ModeSetgid)
-	if mode, g := stat(workerFile); mode.Perm() != 0o660 || g != DefaultExecGID {
-		t.Errorf("%s: %v gid %d, want 0660 with gid %d", workerFile, mode, g, DefaultExecGID)
-	}
-	// The file of the task directory is not moved and keeps its mode and group.
-	if mode, g := stat(oldFile); mode != oldMode || g != oldGid {
-		t.Errorf("%s: %v gid %d, want it left %v gid %d", oldFile, mode, g, oldMode, oldGid)
+	// The file of the task directory is not moved and is shared like the worker's.
+	for _, file := range []string{workerFile, oldFile} {
+		if mode, g := stat(file); mode.Perm() != 0o660 || g != DefaultExecGID {
+			t.Errorf("%s: %v gid %d, want 0660 with gid %d", file, mode, g, DefaultExecGID)
+		}
 	}
 	// The planted link is still a link; creating the main run directory through it
 	// fails, and the directory it points to keeps its owner and mode.
@@ -264,6 +262,8 @@ func TestTaskArchiveRestoreRunDirOwnershipAsRoot(t *testing.T) {
 	files := map[string]string{
 		filepath.Join(f.work, "uploads", "evidence.txt"): "task evidence",
 		filepath.Join(worker, "notes.txt"):               "worker notes",
+		// An entry from before the layout, directly in the task directory.
+		filepath.Join(task, "uploads", "old.txt"): "old upload",
 	}
 	for path, body := range files {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -345,4 +345,115 @@ func TestTaskArchiveRestoreRunDirOwnershipAsRoot(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(out)) != fmt.Sprint(DefaultExecUID) {
 		t.Fatalf("executor write in the restored run directory: %v\n%s", err, out)
 	}
+}
+
+// A task directory holds entries from before this layout: uploads/ and a file the
+// main agent wrote, here root-only as an archive restore leaves them. shareTaskDir
+// shares them with the executor group again and keeps the task directory root-only:
+// the executor works inside the old entries and cannot move a run directory. A
+// symlink among the old entries is not followed.
+func TestShareTaskDirLegacyEntriesAsRoot(t *testing.T) {
+	f := newExecRootFixture(t)
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatalf("python3 is needed for the executor probe: %v", err)
+	}
+	task := filepath.Join(f.data, "tasks", "3")
+	uploads := filepath.Join(task, "uploads")
+	worker := filepath.Join(task, "i4")
+	trap := filepath.Join(f.data, "trap")
+	for _, dir := range []string{task, uploads, worker, trap} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	upload := filepath.Join(uploads, "x.txt")
+	notes := filepath.Join(task, "notes.txt")
+	trapped := filepath.Join(trap, "inside.txt")
+	for _, file := range []string{upload, notes, trapped} {
+		if err := os.WriteFile(file, []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Links planted directly in the task directory, to a root-only directory and to
+	// a root-only file.
+	links := map[string]string{filepath.Join(task, "old-dir"): trap, filepath.Join(task, "old-key"): f.secret}
+	for link, target := range links {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := shareTaskDir(task, int(DefaultExecGID)); err != nil {
+		t.Fatal(err)
+	}
+	checkDir(t, task, 0, parentDirMode)
+	checkDir(t, worker, DefaultExecGID, leafDirMode)
+	checkDir(t, uploads, DefaultExecGID, 0o770|os.ModeSetgid)
+	checkFile := func(path string, gid uint32, mode os.FileMode) {
+		t.Helper()
+		fi, err := os.Lstat(path)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if st := fi.Sys().(*syscall.Stat_t); fi.Mode() != mode || st.Uid != 0 || st.Gid != gid {
+			t.Errorf("%s: %v uid %d gid %d, want %v root:%d", path, fi.Mode(), st.Uid, st.Gid, mode, gid)
+		}
+	}
+	checkFile(upload, DefaultExecGID, 0o660)
+	checkFile(notes, DefaultExecGID, 0o660)
+	// The links are still links and what they point to is unchanged.
+	for link := range links {
+		if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s: %v %v, want the symlink left in place", link, fi, err)
+		}
+	}
+	checkDir(t, trap, 0, 0o700)
+	checkFile(trapped, 0, 0o600)
+	checkFile(f.secret, 0, 0o600)
+
+	code := `import errno, os
+task = os.environ["TASK"]
+worker = os.path.join(task, "i4")
+print("uid=%d gid=%d" % (os.getuid(), os.getgid()))
+def attempt(name, fn):
+    try:
+        fn()
+        print(name + "=done")
+    except OSError as e:
+        print(name + "=" + errno.errorcode.get(e.errno, str(e.errno)))
+attempt("write_in_uploads", lambda: open(os.path.join(task, "uploads", "y.txt"), "w").close())
+attempt("append_upload", lambda: open(os.path.join(task, "uploads", "x.txt"), "a").close())
+attempt("read_notes", lambda: print("notes=" + open(os.path.join(task, "notes.txt")).read()))
+attempt("rename_worker", lambda: os.rename(worker, os.path.join(task, "i4.moved")))
+attempt("rmdir_worker", lambda: os.rmdir(worker))
+attempt("unlink_worker", lambda: os.unlink(worker))
+attempt("rename_uploads", lambda: os.rename(os.path.join(task, "uploads"), os.path.join(task, "uploads.moved")))
+attempt("unlink_notes", lambda: os.unlink(os.path.join(task, "notes.txt")))
+attempt("create_in_task", lambda: open(os.path.join(task, "planted"), "w").close())
+attempt("read_trap", lambda: open(os.path.join(task, "old-dir", "inside.txt")).close())
+attempt("read_key", lambda: open(os.path.join(task, "old-key")).close())
+`
+	out, err := execPython(context.Background(), py, "probe", code, nil, f.work, []string{"TASK=" + task}, 30*time.Second, f.priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("executor probe output:\n%s", out)
+	for _, want := range []string{
+		fmt.Sprintf("uid=%d gid=%d\n", DefaultExecUID, DefaultExecGID),
+		"write_in_uploads=done\n", "append_upload=done\n", "notes=old\n", "read_notes=done\n",
+		"rename_worker=EACCES\n", "rmdir_worker=EACCES\n", "unlink_worker=EACCES\n",
+		"rename_uploads=EACCES\n", "unlink_notes=EACCES\n", "create_in_task=EACCES\n",
+		"read_trap=EACCES\n", "read_key=EACCES\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("want %q in the probe output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "[exit:") {
+		t.Errorf("the probe failed:\n%s", out)
+	}
+	checkDir(t, task, 0, parentDirMode)
+	checkDir(t, worker, DefaultExecGID, leafDirMode)
 }

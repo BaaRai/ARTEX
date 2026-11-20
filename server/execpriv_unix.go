@@ -143,7 +143,9 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // Their parents (tasks/, sessions/ and tasks/<id>) are root:root 0755, so the
 // executor cannot create, rename or remove a run directory, and no run directory is
 // an ancestor of another. Inside a run directory new subdirectories inherit the
-// group. Command-output spills leave the run directories for <data>/spill, which the
+// group. The entries a task directory held before this layout are shared with the
+// group too (shareTaskDir). Command-output spills leave the run directories for
+// <data>/spill, which the
 // executor group reads and cannot change (makeSpillDir). The key files and the
 // config file (which can hold the database DSN) are restricted to root. Nothing
 // else under the data directory changes; directories a
@@ -306,7 +308,7 @@ func makeLeafDir(base, leaf string, gid int, leafMode os.FileMode) error {
 // shareRunDirs applies the run-directory layout to what is on disk: tasks/ and
 // sessions/ become root:root 0755, each task directory too, and each run directory
 // (sessions/<id>, tasks/<id>/main, tasks/<id>/i<N>) is shared with the executor
-// group with what it holds.
+// group with what it holds, like the older entries of a task directory.
 func shareRunDirs(dataDir string, gid int) error {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return err
@@ -342,8 +344,12 @@ func shareRunDirs(dataDir string, gid int) error {
 }
 
 // shareTaskDir makes a task directory root:root 0755 and shares the run directories
-// in it. Its other entries are left as they are: a task whose main agent worked in
-// the task directory itself keeps its files there, with the owner and mode they had.
+// in it. Its other entries date from before this layout, when the task directory was
+// the main agent's working directory (uploads/, files the agent wrote there): they
+// stay where they are and are shared with the executor group again, as the whole
+// tree was. The task directory itself stays root-only, so the executor can change
+// what is inside such an entry and cannot rename, remove or add one. A symlink
+// among them is not followed.
 func shareTaskDir(taskDir string, gid int) error {
 	if err := setDirOwner(taskDir, 0, 0o755); err != nil {
 		return err
@@ -353,10 +359,13 @@ func shareTaskDir(taskDir string, gid int) error {
 		return err
 	}
 	for _, e := range entries {
-		if !e.IsDir() || !agent.IsRunDirName(e.Name()) {
-			continue
+		path := filepath.Join(taskDir, e.Name())
+		if !agent.IsRunDirName(e.Name()) {
+			err = shareWithExecGroup(path, gid)
+		} else if e.IsDir() {
+			err = shareRunDir(path, gid)
 		}
-		if err := shareRunDir(filepath.Join(taskDir, e.Name()), gid); err != nil {
+		if err != nil {
 			return err
 		}
 	}
