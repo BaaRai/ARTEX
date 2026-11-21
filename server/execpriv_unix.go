@@ -608,10 +608,14 @@ func runBashShim(argv []string) {
 }
 
 // enterExecutor drops to uid and gid. When this call performs the switch (not in a
-// nested shell already running as the executor, whose HOME the agent may have set),
-// HOME and XDG_CACHE_HOME move to the executor's home first.
+// nested shell already running as the executor, whose environment the agent may
+// have set), the environment is first rebuilt from the allowlist (execenv_unix.go)
+// and HOME and XDG_CACHE_HOME move to the executor's home.
 func enterExecutor(uid, gid int) error {
 	if os.Getuid() != uid || os.Getgid() != gid {
+		if err := sealExecutorEnv(); err != nil {
+			return err
+		}
 		for _, kv := range execHomeEnv() {
 			k, v, _ := strings.Cut(kv, "=")
 			if err := os.Setenv(k, v); err != nil {

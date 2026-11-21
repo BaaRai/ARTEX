@@ -525,8 +525,9 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 	defer cancel()
 	c := exec.CommandContext(runCtx, interp, tmp)
 	c.Dir = workDir
-	c.Env = append(os.Environ(), sessionEnv...) // session proxy env
-	for k, v := range params {                  // scalar params mirrored as TOOL_<NAME>
+	// The allowlist as the executor (execenv_unix.go), then the session proxy env.
+	c.Env = append(agentProcessEnv(priv), sessionEnv...)
+	for k, v := range params { // scalar params mirrored as TOOL_<NAME>
 		if sv, ok := scalarStr(v); ok {
 			c.Env = append(c.Env, "TOOL_"+strings.ToUpper(k)+"="+sv)
 		}
