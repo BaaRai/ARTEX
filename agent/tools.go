@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
 	acperm "github.com/Autumn-27/norma/permission"
@@ -145,6 +146,7 @@ type ToolSet struct {
 	as                  *db.AssetStore   // asset store (optional; nil = asset tools not available)
 	cs                  *db.CompanyStore // company store (optional)
 	ts                  *db.ExplorationStore
+	factTraffic         FactTrafficLookup // proxy capture store for fact classification; nil = activity-only
 	worker              string
 	taskID              int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
 	// coverageDisabled mirrors tasks.coverage_enabled=false. Stored inverted so the
@@ -259,6 +261,11 @@ func (t *ToolSet) Writes() WriteCounts { return t.writes }
 func NewToolSet(ts *db.ExplorationStore, worker string) *ToolSet {
 	return &ToolSet{ts: ts, worker: worker}
 }
+
+// SetFactTraffic wires the proxy capture store used to relabel facts whose
+// evidence came back from the target (#124 row 1, step 3). Callers pass the
+// process traffic store; nil leaves classification activity-only.
+func (t *ToolSet) SetFactTraffic(l FactTrafficLookup) { t.factTraffic = l }
 
 // SetTaskID sets the PG task id on this ToolSet so that report_finding can
 // dual-write to the standalone findings table (which survives task deletion).
@@ -1052,6 +1059,15 @@ func compactNode(n *db.Node) map[string]any {
 	if s, ok := p["source"].(string); ok && s != "" {
 		m["source"] = s
 	}
+	if prov, ok := p["provenance"].(string); ok && prov != "" {
+		m["provenance"] = prov
+		if id, ok := p["provenance_activity_id"]; ok && id != nil {
+			m["provenance_activity_id"] = id
+		}
+		if tid, ok := p["provenance_traffic_id"].(string); ok && tid != "" {
+			m["provenance_traffic_id"] = tid
+		}
+	}
 	if n.Inherited {
 		inheritedMap(m, n.SourceTaskID)
 	}
@@ -1409,6 +1425,17 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 			if evidenceNode.Kind == db.KindFact {
 				var fp map[string]any
 				_ = json.Unmarshal(evidenceNode.Payload, &fp)
+				// A fact the server could not tie to recorded work is not authority
+				// (#124 row 1): the declared source alone does not make it one. Legacy
+				// facts written before provenance existed carry no key and keep their
+				// old behaviour; every new fact carries one.
+				if prov, ok := fp["provenance"].(string); ok && prov == factProvenanceUnverified {
+					note, _ := fp["provenance_note"].(string)
+					if note == "" {
+						note = "its evidence is not tied to a recorded activity"
+					}
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d is unverified (%s). Goal %d stays open: prove it with a finding or with a fact whose evidence quotes this intent's recorded activity.", ev, note, goal)), nil
+				}
 				confidence, _ := fp["confidence"].(string)
 				if strings.ToLower(strings.TrimSpace(confidence)) != "observed" {
 					if confidence == "" {
@@ -1608,6 +1635,95 @@ const (
 
 var factSources = []string{factSourceTargetResponse, factSourceToolOutput, factSourceThirdPartyIntel, factSourceOperatorInput, factSourceInference}
 
+// Fact provenance (#124, row 1): the source above is declared by the agent, so
+// on its own it cannot distinguish an observation from a claim. The server ties
+// each fact to a recorded activity of its intent and stores the result beside
+// the payload; only a tie (or an explicit operator statement) is authoritative.
+const (
+	factProvenanceRecorded   = "recorded_activity" // evidence quoted from this intent's activity
+	factProvenanceCaptured   = "captured_traffic"  // the quoted bytes came back from the target through the proxy
+	factProvenanceOperator   = "operator_input"    // told to the agent by the human operator
+	factProvenanceUnverified = "unverified"        // no recorded activity carries the evidence
+)
+
+// factCaptureWindowBefore/After bound the proxy captures considered part of one
+// recorded activity. The activity row is written when the tool call returns, so
+// the matching response lands just before it; the margins absorb slow calls and
+// small clock differences between the two stores.
+const (
+	factCaptureWindowBefore = 10 * time.Minute
+	factCaptureWindowAfter  = 2 * time.Minute
+)
+
+// FactTrafficLookup is the proxy capture store seen from the fact layer. Kept as
+// an interface so the agent does not depend on the traffic package. nil = no
+// capture available, and facts keep the activity-only classification.
+type FactTrafficLookup interface {
+	ResponseContaining(lines []string, fromTS, toTS int64) (id string, ok bool, err error)
+}
+
+// factEvidenceMinRunes keeps trivial fragments (a bare tool name, "200 OK")
+// from tying a fact to unrelated activity. A real evidence line quotes the
+// output; a paraphrase matches nothing, which fails safe (unverified, not
+// authoritative).
+const factEvidenceMinRunes = 12
+
+// factEvidenceMaxLines bounds the lookup cost of one record_fact item.
+const factEvidenceMaxLines = 20
+
+// factEvidenceLines splits a fact's one-line evidence into the substantive lines
+// the server can look for verbatim in the intent's recorded activity.
+func factEvidenceLines(evidence string) []string {
+	out := make([]string, 0, 4)
+	seen := map[string]bool{}
+	for _, raw := range strings.Split(evidence, "\n") {
+		line := strings.TrimSpace(raw)
+		if len([]rune(line)) < factEvidenceMinRunes || seen[line] {
+			continue
+		}
+		seen[line] = true
+		out = append(out, line)
+		if len(out) == factEvidenceMaxLines {
+			break
+		}
+	}
+	return out
+} // factProvenance classifies one fact against the intent's recorded activity.
+// Beyond the activity tie it checks whether the quoted bytes were captured
+// coming back from the target through the proxy, in which case the target
+// authored them and the fact is classified target_response even when the model
+// wrote tool_output (#124 row 1, step 3). A database error keeps the fact
+// (writes must not fail on the check) but marks it unverified, so the
+// conservative outcome is the one that survives.
+func (t *ToolSet) factProvenance(source, evidence string, intent int64) (status string, activityID int64, trafficID string, note string) {
+	if source == factSourceOperatorInput {
+		return factProvenanceOperator, 0, "", ""
+	}
+	if intent <= 0 || t.ts == nil {
+		return factProvenanceUnverified, 0, "", "no intent was recorded, so no activity could corroborate the evidence"
+	}
+	lines := factEvidenceLines(evidence)
+	if len(lines) == 0 {
+		return factProvenanceUnverified, 0, "", "evidence is missing or too short to quote a recorded activity; a fact proves a goal only when its evidence is tied to one"
+	}
+	id, at, ok, err := t.ts.ActivityContainingEvidence(intent, lines)
+	if err != nil {
+		return factProvenanceUnverified, 0, "", "the recorded activity could not be read, so the evidence is unverified"
+	}
+	if !ok {
+		return factProvenanceUnverified, 0, "", "evidence does not quote any line of this intent's recorded activity; quote the output verbatim instead of paraphrasing it"
+	}
+	if t.factTraffic != nil && !at.IsZero() {
+		from, to := at.Add(-factCaptureWindowBefore).Unix(), at.Add(factCaptureWindowAfter).Unix()
+		// A capture miss or an unreadable capture store is not a write failure:
+		// the activity tie stands and the fact stays classified as tool output.
+		if tid, hit, _ := t.factTraffic.ResponseContaining(lines, from, to); hit && tid != "" {
+			return factProvenanceCaptured, id, tid, ""
+		}
+	}
+	return factProvenanceRecorded, id, "", ""
+}
+
 // normalizeFactSource returns the stored source for a record_fact input: empty
 // means inference, a value outside factSources is an error.
 func normalizeFactSource(s string) (string, error) {
@@ -1638,16 +1754,6 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	payload := map[string]any{"summary": it.Summary, "source": source}
-	if it.Detail != "" {
-		payload["detail"] = it.Detail
-	}
-	if e := strings.TrimSpace(it.Evidence); e != "" {
-		payload["evidence"] = e
-	}
-	if c := strings.TrimSpace(it.Confidence); c != "" {
-		payload["confidence"] = c
-	}
 	intent := pid(it.IntentID)
 	if intent <= 0 {
 		intent = defaultIntent
@@ -1657,6 +1763,44 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 		if err != nil || node == nil || node.Kind != db.KindIntent {
 			return 0, fmt.Errorf("intent_id must be an intent of this task (related-task intents are read-only)")
 		}
+	}
+	// Tie the claim to recorded work before storing it (#124 row 1). A fact the
+	// server cannot corroborate loses the authority its declared source and
+	// confidence imply: it is stored as inference/inferred and marked unverified,
+	// so prove_goal refuses it even if the model labelled it observed.
+	confidence := strings.TrimSpace(it.Confidence)
+	prov, provActivity, provTraffic, provNote := t.factProvenance(source, it.Evidence, intent)
+	if prov == factProvenanceUnverified {
+		if source == factSourceTargetResponse || source == factSourceToolOutput {
+			source = factSourceInference
+		}
+		if strings.EqualFold(confidence, "observed") {
+			confidence = "inferred"
+		}
+	}
+	if prov == factProvenanceCaptured {
+		// The matched bytes came back from the target, whichever tool carried
+		// them: relabel from the capture rather than trusting the declaration.
+		source = factSourceTargetResponse
+	}
+	payload := map[string]any{"summary": it.Summary, "source": source, "provenance": prov}
+	if it.Detail != "" {
+		payload["detail"] = it.Detail
+	}
+	if e := strings.TrimSpace(it.Evidence); e != "" {
+		payload["evidence"] = e
+	}
+	if confidence != "" {
+		payload["confidence"] = confidence
+	}
+	if provActivity > 0 {
+		payload["provenance_activity_id"] = provActivity
+	}
+	if provTraffic != "" {
+		payload["provenance_traffic_id"] = provTraffic
+	}
+	if provNote != "" {
+		payload["provenance_note"] = provNote
 	}
 	// a fact is its OWN node kind (distinct from a vuln finding).
 	id, err := t.ts.AddNode(db.KindFact, payload, 5, "confirmed", t.worker, anchors)
@@ -1691,7 +1835,8 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 		"⚠️Write only conclusions you [actually saw] in tool output — don't extrapolate. evidence and confidence keep inaccurate conclusions from polluting the graph:\n"+
 		"  · evidence = [one line] of key evidence supporting this conclusion (the command + the one or two most proving output lines), **keep it brief** — details belong in detail; don't paste large output blocks here.\n"+
 		"  · confidence = observed (seen directly in output) | inferred (inferred from phenomena).\n"+
-		"  · source = where the content came from: target_response (content the target itself returned: page bodies, headers, error messages, banners, even when a tool fetched it) | tool_output (a tool's own result about the target: port states, scanner verdicts, status codes, timings) | third_party_intel (OSINT, CVE databases, public reports) | operator_input (given by the human operator) | inference (your own reasoning; the default when omitted). Any other value is refused.\n"+
+		"  · source = where the content came from: target_response (content the target itself returned: page bodies, headers, error messages, banners, even when a tool fetched it) | tool_output (a tool's own result about the target: port states, scanner verdicts, status codes, timings) | third_party_intel (OSINT, CVE databases, public reports) | operator_input (given by the human operator) |       inference (your own reasoning; the default when omitted). Any other value is refused.\n"+
+		"  · **evidence is checked against this intent's recorded activity**: quote the output verbatim rather than paraphrasing it. A fact whose evidence matches no recorded activity is stored as provenance=unverified, its source is downgraded to inference, an observed confidence becomes inferred, and prove_goal refuses it. If the quoted bytes were also captured coming back from the target through the proxy, the server stores source=target_response (provenance=captured_traffic) regardless of the source you declared, because the target authored them.\n"+
 		"  · **Negative conclusions** (not injectable / port closed / no entry found, etc.) state only \"observation + tentative reading\" — state what you actually saw; whether to abandon the direction is for the planner to decide globally; always provide evidence, mark inferred when the means weren't exhausted or the evidence is weak (including probed only once, looks-like), and mark observed only when truly exhausted and directly seen."+
 		recordFactContractNote,
 		recordFactSchema(),

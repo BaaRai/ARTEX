@@ -33,6 +33,7 @@ type Planner struct {
 	steerWork         func(intentID int64, msg string) error // engine callback to steer a running work mid-run (nil = off)
 	proxyAddr         string                                 // recording proxy for WebFetch (empty = direct)
 	proxyCACert       string                                 // recording proxy's CA cert path (HTTPS verify)
+	factTraffic       FactTrafficLookup                      // proxy captures for fact provenance (nil = activity-only)
 	webSearch         WebSearchOpts                          // web_search tool backend selection (off by default)
 	workDir           string                                 // shared work dir (surfaced in prompt as artifact-output target)
 	injectConstraints func() bool                            // resolver: inject task operation constraints into system prompt? (nil = yes)
@@ -96,6 +97,10 @@ func (p *Planner) compactionWindow() int {
 // SetProxy points the planner's WebFetch at the recording proxy plus the CA cert
 // it trusts to verify HTTPS through it (empty addr = direct).
 func (p *Planner) SetProxy(addr, caCert string) { p.proxyAddr, p.proxyCACert = addr, caCert }
+
+// SetFactTraffic wires the proxy capture store used to classify recorded facts
+// (#124 row 1). nil keeps the activity-only classification.
+func (p *Planner) SetFactTraffic(l FactTrafficLookup) { p.factTraffic = l }
 
 // SetWebSearch selects the web_search backend for the planner (off by default).
 func (p *Planner) SetWebSearch(o WebSearchOpts) { p.webSearch = o }
@@ -482,6 +487,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if c, ok := p.findingRecorder.(TrafficCaptureChecker); ok {
 		tsx.SetTrafficProofChecker(c.TrafficExists)
 	}
+	tsx.SetFactTraffic(p.factTraffic)
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
 	}
