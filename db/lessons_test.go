@@ -1511,6 +1511,9 @@ func TestReconfirmingFindingPreservesWithdrawalHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	fid := rec.FindingID
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM rsi_lessons WHERE id IN (SELECT lesson_id FROM rsi_lesson_evidence WHERE source_kind='finding' AND source_id=$1)`, fid)
+	})
 
 	// 1. Confirm -> positive lesson created with 1 live evidence row.
 	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingConfirmed); err != nil {
@@ -1603,6 +1606,9 @@ func TestLessonExtractionFailureRollsBackStatusAndRetest(t *testing.T) {
 		t.Fatal(err)
 	}
 	fid := rec.FindingID
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM rsi_lessons WHERE id IN (SELECT lesson_id FROM rsi_lesson_evidence WHERE source_kind='finding' AND source_id=$1)`, fid)
+	})
 
 	// Seed a confirmed finding and its positive lesson.
 	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingConfirmed); err != nil {

@@ -33,6 +33,9 @@ func TestFindingStatusReopensProvedGoals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() {
+			_, _ = d.Exec(`DELETE FROM rsi_lessons WHERE id IN (SELECT lesson_id FROM rsi_lesson_evidence WHERE source_kind='finding' AND source_id=$1)`, rec.FindingID)
+		})
 		if err := es.Link(rec.NodeID, RelProves, goalID); err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +101,10 @@ func TestFindingStatusReopensProvedGoals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = d.DeleteConversation(conv.ID) })
+		t.Cleanup(func() {
+			_, _ = d.Exec(`DELETE FROM rsi_lessons WHERE id IN (SELECT lesson_id FROM rsi_lesson_evidence WHERE source_kind='retest' AND source_id=$1)`, rt.ID)
+			_ = d.DeleteConversation(conv.ID)
+		})
 		if _, err := d.StartFindingRetest(ctx, rt.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -148,10 +154,22 @@ func TestFindingStatusReopensProvedGoals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() {
+			_, _ = d.Exec(`DELETE FROM rsi_lessons WHERE id IN (SELECT lesson_id FROM rsi_lesson_evidence WHERE source_kind='finding' AND source_id=$1)`, rec2.FindingID)
+		})
 		if _, found, _, err := d.SetFindingStatusWithNotify(ctx, rec2.FindingID, FindingFalsePositive); err != nil || !found {
 			t.Fatalf("SetFindingStatusWithNotify(unlinked): found=%v err=%v", found, err)
 		}
 		assertGoalState(t, es, gid1, "met")
 		assertProvesEdgeKept(t, fnid1, gid1)
+	})
+
+	t.Run("risk_accepted_keeps_proved_goal_met", func(t *testing.T) {
+		_, es, fid, fnid, gid := newTaskWithProvedGoal(t, "risk-accepted")
+		if _, found, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingRiskAccepted); err != nil || !found {
+			t.Fatalf("SetFindingStatusWithNotify(risk_accepted): found=%v err=%v", found, err)
+		}
+		assertGoalState(t, es, gid, "met")
+		assertProvesEdgeKept(t, fnid, gid)
 	})
 }

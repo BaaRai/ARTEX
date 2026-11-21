@@ -277,6 +277,34 @@ func TestProveGoalRefusesFalsePositiveFinding(t *testing.T) {
 	}
 }
 
+// risk_accepted means a real finding with accepted risk, not an invalid one:
+// it must remain eligible to prove a goal (#269).
+func TestProveGoalAllowsRiskAcceptedFinding(t *testing.T) {
+	if findingTriageBlocksGoal(db.FindingRiskAccepted) {
+		t.Fatalf("findingTriageBlocksGoal(%q) = true, want false", db.FindingRiskAccepted)
+	}
+	d := testDB(t)
+	t.Cleanup(func() { _ = d.Close() })
+	task, err := d.CreateTaskWithOptions("risk-accepted goal", "verify risk_accepted finding may prove a goal", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	s := d.Exploration(task.ExplorationID)
+	goal := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "prove auth bypass"}, "open")
+	rec := seedProvenFinding(t, d, task, "ex-risk-1", "https://risk.example.test/admin",
+		[]int64{seedFindingAsset(t, d, task, "https://risk.example.test/admin")})
+	if _, _, _, err := d.SetFindingStatusWithNotify(context.Background(), rec.FindingID, db.FindingRiskAccepted); err != nil {
+		t.Fatal(err)
+	}
+	tsx := NewToolSet(s, "planner")
+	tsx.SetTrafficProofChecker(func(_ context.Context, id string) (bool, error) { return id == "ex-risk-1", nil })
+	res := callGuardTool(t, tsx.proveGoal(), `{"goal_id":`+strconv.FormatInt(goal, 10)+`,"evidence_id":`+strconv.FormatInt(rec.NodeID, 10)+`,"reason":"accepted risk real finding"}`)
+	if res.IsError || nodeState(t, s, goal) != "met" || !tsx.GoalMet {
+		t.Fatalf("risk_accepted finding: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goal), tsx.GoalMet, res.Flatten())
+	}
+}
+
 // factEvidenceLines keeps only substantive lines: a bare tool name or a short
 // status fragment cannot tie a claim to an activity, and duplicates cost a
 // lookup without adding a candidate.
