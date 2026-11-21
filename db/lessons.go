@@ -196,15 +196,14 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 			}
 		case "false_positive", "duplicate", "ignored", "risk_accepted":
 			// The action text names the status, so a change inside this group is a
-			// different lesson. Withdraw this finding from every other negative
-			// lesson, and leave the lesson we are about to write alone so an
-			// adopted row is not retired and restored on a repeat run.
+			// different lesson. Withdraw this finding from every negative lesson
+			// with another action, and leave lessons with this action alone so an
+			// adopted row is not retired and restored on a repeat run. The match is
+			// on the action, not the dedupe key: the key carries the company, and a
+			// task with several companies cannot rebuild the key it was written
+			// under, though its disposition is unchanged.
 			action := "Do not re-report without new mechanics: " + label + " (prior " + status + ")"
-			keepKey := ""
-			if write {
-				keepKey = lessonDedupeKey("negative", categoryID, companyID, cue, lessonText(action, lessonActionMax))
-			}
-			if err := d.retractLessonEvidence(ctx, "finding", findingID, "negative", keepKey); err != nil {
+			if err := d.retractLessonEvidence(ctx, "finding", findingID, "negative", lessonText(action, lessonActionMax)); err != nil {
 				return 0, err
 			}
 			if write {
@@ -252,8 +251,10 @@ func (d *DB) upsertLesson(ctx context.Context, key, kind, cue, action string, ca
 // retractLessonEvidence withdraws this source from lessons of fromKind and
 // retires any of those lessons that now have zero live evidence. The row stays,
 // with withdrawn_at set, so the lesson still names what it rested on. Shared
-// lessons that still have other live evidence stay active.
-func (d *DB) retractLessonEvidence(ctx context.Context, sourceKind string, sourceID int64, fromKind, keepKey string) error {
+// lessons that still have other live evidence stay active. A non-empty
+// keepAction spares lessons with that action, compared without case as the
+// dedupe key does.
+func (d *DB) retractLessonEvidence(ctx context.Context, sourceKind string, sourceID int64, fromKind, keepAction string) error {
 	rows, err := d.QueryContext(ctx, `
 		UPDATE rsi_lesson_evidence e
 		SET withdrawn_at=now()
@@ -263,8 +264,8 @@ func (d *DB) retractLessonEvidence(ctx context.Context, sourceKind string, sourc
 		  AND l.kind=$1
 		  AND e.source_kind=$2
 		  AND e.source_id=$3
-		  AND ($4 = '' OR l.dedupe_key <> $4)
-		RETURNING e.lesson_id`, fromKind, sourceKind, sourceID, keepKey)
+		  AND ($4 = '' OR lower(l.action) <> lower($4))
+		RETURNING e.lesson_id`, fromKind, sourceKind, sourceID, keepAction)
 	if err != nil {
 		return err
 	}

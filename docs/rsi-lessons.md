@@ -67,8 +67,9 @@ stopped retest produces nothing.
 
 A task with more than one company in `task_scope` does not gain a new lesson.
 Retraction still runs, so a lesson written while the task had one company can
-be withdrawn after a second company is added. Per-finding company attribution
-is a later change.
+be withdrawn after a second company is added. It withdraws only on a changed
+disposition: a finding whose status did not move keeps its evidence. Per-finding
+company attribution is a later change.
 
 ## Selection
 

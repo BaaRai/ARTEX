@@ -1069,6 +1069,82 @@ func TestMultiCompanyExtractStillRetracts(t *testing.T) {
 	}
 }
 
+// A second company stops new writes, but the disposition did not change: the
+// negative lesson written while the task had one company keeps its evidence.
+func TestMultiCompanyExtractKeepsUnchangedNegative(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	cs := d.Companies()
+	companyA, _, err := cs.UpsertCompany(fmt.Sprintf("LessonKeepNegA %d", stamp), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupCompany(d, companyA) })
+	companyB, _, err := cs.UpsertCompany(fmt.Sprintf("LessonKeepNegB %d", stamp), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupCompany(d, companyB) })
+	task, err := d.CreateTaskWithOptions("negative then multi", "goal", TaskCreateOptions{
+		Name: fmt.Sprintf("lesson-keep-neg-%d", stamp), CompanyIDs: []int64{companyA},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-keep-neg-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE cue=$1`, cue) })
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','false_positive')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	neg := findLessonByAction(t, d, task.ID, "negative", "false_positive", label)
+	if _, err := d.Exec(`UPDATE rsi_lessons SET status='adopted' WHERE id=$1`, neg.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := d.Exec(`INSERT INTO task_scope(task_id, kind, company_id, source) VALUES ($1,'company',$2,'manual')`, task.ID, companyB); err != nil {
+		t.Fatal(err)
+	}
+	n, err := d.ExtractLessonsForTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("multi-company extract wrote %d lessons", n)
+	}
+	status, support := lessonStatusSupport(t, d, neg.ID)
+	if status != "adopted" || support != 1 {
+		t.Fatalf("unchanged negative after a second company: status=%s support=%d, want adopted 1", status, support)
+	}
+
+	// A status change inside the negative group still withdraws it.
+	if _, err := d.SetFindingStatus(fid, FindingDuplicate); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, support = lessonStatusSupport(t, d, neg.ID)
+	if status != "retired" || support != 0 {
+		t.Fatalf("negative after false_positive -> duplicate: status=%s support=%d, want retired 0", status, support)
+	}
+}
+
 func insertLessonRetest(t *testing.T, d *DB, findingID int64, verdict string) int64 {
 	t.Helper()
 	var id int64
