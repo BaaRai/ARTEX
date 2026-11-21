@@ -520,7 +520,8 @@ type FindingProofCheck struct {
 
 // VerifyFindingProofForNode recomputes from current finding_traffic_bindings
 // whether the finding for nodeID has at least one real bound traffic_ref whose
-// host matches the finding's linked assets (when asset_ids are present).
+// host matches the finding's linked assets. A finding without linked assets (or
+// whose assets carry no host) is never proven.
 // When exchangeExists is non-nil it additionally verifies that the referenced
 // source_traffic_id exists in the live capture store; any lookup error fails
 // closed by returning an error.
@@ -581,6 +582,16 @@ ORDER BY b.position, b.id`, findingID)
 			Reason:    "finding has no bound traffic_ref",
 		}, nil
 	}
+	// Without a linked asset there is no target to match the bound traffic
+	// against, so any traffic would prove the finding. Fail closed: the finding
+	// stays recorded and visible but cannot close a goal.
+	if len(assetIDs) == 0 {
+		return &FindingProofCheck{
+			Proven:    false,
+			FindingID: findingID,
+			Reason:    "finding has no linked asset (asset_ids is empty), so its bound traffic cannot be matched to a target",
+		}, nil
+	}
 
 	var assetHosts []string
 	var assetRootDomains []string
@@ -611,11 +622,15 @@ ORDER BY b.position, b.id`, findingID)
 			}
 		}
 	}
+	if len(assetHosts) == 0 && len(assetRootDomains) == 0 {
+		return &FindingProofCheck{
+			Proven:    false,
+			FindingID: findingID,
+			Reason:    "finding's linked assets have no host to match its bound traffic against",
+		}, nil
+	}
 
 	hostMatchesFinding := func(snapHost string) bool {
-		if len(assetIDs) == 0 || (len(assetHosts) == 0 && len(assetRootDomains) == 0) {
-			return snapHost != ""
-		}
 		for _, h := range assetHosts {
 			if snapHost == h {
 				return true

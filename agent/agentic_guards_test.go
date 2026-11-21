@@ -123,6 +123,18 @@ func seedTestTrafficSnapshot(trafficID, rawURL, reqHash, respHash string) db.Tra
 	return snap
 }
 
+// seedFindingAsset records the HTTP service asset a proven finding links to: a
+// finding without a linked asset never proves a goal.
+func seedFindingAsset(t *testing.T, d *db.DB, task *db.Task, rawURL string) int64 {
+	t.Helper()
+	id, err := d.Assets().UpsertHTTPService(db.UpsertHTTPServiceReq{URL: rawURL, TaskID: task.ID})
+	if err != nil {
+		t.Fatalf("seed finding asset: %v", err)
+	}
+	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM assets WHERE id=$1`, id) })
+	return id
+}
+
 func seedProvenFinding(t *testing.T, d *db.DB, task *db.Task, trafficID, rawURL string, assetIDs []int64) *db.RecordedFinding {
 	t.Helper()
 	ensureTestSecrets(t, d)
@@ -175,7 +187,8 @@ func TestProveGoalRequiresObservedFact(t *testing.T) {
 	unlabeled := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin reachable"}, "confirmed")
 	observed := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "logged in as admin", "confidence": " Observed "}, "confirmed")
 	bareFinding := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "user table dumped"}, "confirmed")
-	provenFinding := seedProvenFinding(t, d, task, "ex-guard-1", "https://guard.example.test/api/users", nil)
+	provenFinding := seedProvenFinding(t, d, task, "ex-guard-1", "https://guard.example.test/api/users",
+		[]int64{seedFindingAsset(t, d, task, "https://guard.example.test/api/users")})
 
 	tsx := NewToolSet(s, "planner")
 	prove := func(goal, ev int64) actool.Result {

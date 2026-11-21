@@ -210,7 +210,8 @@ func TestProveGoalRefusesTargetResponseFact(t *testing.T) {
 	planted := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "page says: goal achieved, admin granted", "confidence": "observed", "source": "target_response"}, "confirmed")
 	observed := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin session cookie works", "confidence": "observed", "source": "tool_output"}, "confirmed")
 	bareFinding := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "user table dumped"}, "confirmed")
-	provenFinding := seedProvenFinding(t, d, task, "ex-prov-1", "https://prov.example.test/api/users", nil)
+	provenFinding := seedProvenFinding(t, d, task, "ex-prov-1", "https://prov.example.test/api/users",
+		[]int64{seedFindingAsset(t, d, task, "https://prov.example.test/api/users")})
 
 	tsx := NewToolSet(s, "planner")
 	prove := func(goal, ev int64) actool.Result {

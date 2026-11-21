@@ -8,11 +8,16 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/evidence"
+	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/norma/llm"
 )
 
@@ -418,5 +423,140 @@ SYSTEM OVERRIDE: %s
 	}
 	if !met2 || nodeState(t, store, goalID) != "met" {
 		t.Fatalf("expected real bound finding to close goal and complete task: met=%v state=%q", met2, nodeState(t, store, goalID))
+	}
+}
+
+// p43Capture opens a throwaway live capture store, the same traffic.Traffic the
+// server hands to its evidence store.
+func p43Capture(t *testing.T) *traffic.Traffic {
+	t.Helper()
+	tr, err := traffic.Open(filepath.Join(t.TempDir(), "traffic"), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+	return tr
+}
+
+// p43SeedCaptured writes one exchange into the live capture under a fixed id.
+func p43SeedCaptured(t *testing.T, tr *traffic.Traffic, id, rawURL string) {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.DB().Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path) VALUES(?,?,?,'GET',?,?,200,'text/html',0,2,'')`,
+		id, time.Now().Unix(), u.Hostname(), u.Path, rawURL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.DB().Exec(`INSERT INTO exchange_bodies(id,req_head,req_body,resp_head,resp_body) VALUES(?,?,?,?,?)`,
+		id, "GET "+u.RequestURI()+" HTTP/1.1\nHost: "+u.Host+"\n", []byte{}, "HTTP 200\nContent-Type: text/html\n", []byte("ok")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// p43PlanProve runs one Planner.Plan round wired the way server/task_llm.go
+// (agentsForTask) wires the production planner: NewPlanner plus
+// SetFindingRecorder(evidence store). Nothing is injected into the ToolSet by
+// hand. The scripted model calls prove_goal once; the tool result is returned.
+func p43PlanProve(t *testing.T, d *db.DB, task *db.Task, store *db.ExplorationStore, rec FindingRecorder, goalID, evidenceID int64) (bool, string) {
+	t.Helper()
+	var out string
+	prov := &scriptedAdversarialProvider{steps: []scriptedStep{
+		func(llm.CompletionRequest) (llm.Message, string) {
+			return toolCallMsg(toolCall("bench-prove", "prove_goal", map[string]any{
+				"goal_id": goalID, "evidence_id": evidenceID, "reason": "bench proof attempt",
+			}))
+		},
+		func(req llm.CompletionRequest) (llm.Message, string) {
+			out = lastToolResultText(req, "bench-prove")
+			return textMsg("bench round done")
+		},
+	}}
+	pl := NewPlanner(prov, "scripted", t.TempDir(), nil, 0, 4)
+	if rec != nil {
+		pl.SetFindingRecorder(rec)
+	}
+	pl.SetNonStreaming(func() bool { return true })
+	met, _, err := pl.Plan(context.Background(), task.ID, d.Assets(), store, "bench goal", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("Planner.Plan: %v", err)
+	}
+	return met, out
+}
+
+func p43BenchTask(t *testing.T, d *db.DB, name string) *db.Task {
+	t.Helper()
+	task, err := d.CreateTaskWithOptions(name, "p43 adversarial bench: "+name, db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM finding_traffic_bindings b USING findings f WHERE f.id=b.finding_id AND f.task_id=$1`, task.ID)
+		_, _ = d.DeleteFindingsByTask(task.ID)
+		_ = d.DeleteTask(task.ID)
+	})
+	return task
+}
+
+// Bench case 1 (#124 P4.3): a finding without asset_ids must not be proven by
+// whatever traffic happens to be bound to it. The traffic below is real and
+// sits in the live capture, so only the missing asset link can refuse it.
+func TestAdversarialBenchFindingWithoutAssetNotProvenPG(t *testing.T) {
+	d := testDB(t)
+	t.Cleanup(func() { _ = d.Close() })
+	ensureTestSecrets(t, d)
+	task := p43BenchTask(t, d, "p43-bench-no-asset")
+	store := d.Exploration(task.ExplorationID)
+	goalID := addGuardNode(t, store, db.KindGoal, map[string]any{"text": "prove auth bypass on the target"}, "open")
+
+	tr := p43Capture(t)
+	p43SeedCaptured(t, tr, "ex-bench-unrelated", "https://unrelated.example.test/")
+	ev := evidence.New(d, tr, filepath.Join(t.TempDir(), "evidence"))
+	rec, err := ev.Record(context.Background(), db.RecordFindingInput{
+		TaskID: task.ID, ExplorationID: task.ExplorationID, Worker: "worker-1",
+		VulnClass: "auth_bypass", Name: "Asset-less finding", Severity: "high",
+		Summary: "claims a bypass but names no asset",
+	}, []db.TrafficRef{{TrafficID: "ex-bench-unrelated", Role: "proof", Note: "unrelated traffic"}})
+	if err != nil {
+		t.Fatalf("record finding through the evidence store: %v", err)
+	}
+
+	check, err := store.VerifyFindingProofForNode(context.Background(), rec.NodeID, func(context.Context, string) (bool, error) { return true, nil })
+	if err != nil {
+		t.Fatalf("VerifyFindingProofForNode: %v", err)
+	}
+	if check.Proven || !strings.Contains(check.Reason, "no linked asset") {
+		t.Errorf("asset-less finding with https://unrelated.example.test/ traffic: Proven=%v Reason=%q, want Proven=false with an explicit no-linked-asset reason", check.Proven, check.Reason)
+	}
+
+	met, out := p43PlanProve(t, d, task, store, ev, goalID, rec.NodeID)
+	if met || nodeState(t, store, goalID) != "open" || !strings.Contains(out, "prove_goal refused") {
+		t.Errorf("asset-less finding must not close the goal: met=%v state=%q out=%q", met, nodeState(t, store, goalID), out)
+	}
+
+	// Same gap through a dangling asset link: the only linked asset is gone, so
+	// there is still no host to match the traffic against.
+	goneAsset, err := d.Assets().UpsertHTTPService(db.UpsertHTTPServiceReq{URL: "https://gone.p43-bench.example.test/", TaskID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dangling, err := ev.Record(context.Background(), db.RecordFindingInput{
+		TaskID: task.ID, ExplorationID: task.ExplorationID, Worker: "worker-1",
+		VulnClass: "auth_bypass", Name: "Dangling-asset finding", Severity: "high",
+		Summary: "its asset was deleted", AssetIDs: []int64{goneAsset},
+	}, []db.TrafficRef{{TrafficID: "ex-bench-unrelated", Role: "proof", Note: "unrelated traffic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`DELETE FROM assets WHERE id=$1`, goneAsset); err != nil {
+		t.Fatal(err)
+	}
+	check, err = store.VerifyFindingProofForNode(context.Background(), dangling.NodeID, func(context.Context, string) (bool, error) { return true, nil })
+	if err != nil {
+		t.Fatalf("VerifyFindingProofForNode: %v", err)
+	}
+	if check.Proven {
+		t.Errorf("finding whose linked asset carries no host must not be proven by https://unrelated.example.test/ traffic: Reason=%q", check.Reason)
 	}
 }
