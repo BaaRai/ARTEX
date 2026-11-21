@@ -559,6 +559,36 @@ func (d *DB) SetFindingStatusesWithNotify(ctx context.Context, ids []int64, stat
 	return out, nil
 }
 
+// findingStatusInvalidatesGoal reports whether a finding disposition means the
+// finding is not a valid vulnerability and therefore cannot keep a goal met.
+// FindingRiskAccepted is deliberately excluded: it represents a real finding
+// whose risk is accepted, not an invalid one, so it must never reopen a goal.
+func findingStatusInvalidatesGoal(status string) bool {
+	switch status {
+	case FindingFalsePositive, FindingDuplicate, FindingIgnored:
+		return true
+	default:
+		return false
+	}
+}
+
+// reopenGoalsProvedByNodeTx resets any goal node proved by nodeID back to open
+// inside the caller's transaction. The proves edge is preserved for history;
+// only the goal node's state changes.
+func reopenGoalsProvedByNodeTx(ctx context.Context, tx *sql.Tx, nodeID int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE exploration_nodes g
+		SET state = 'open'
+		FROM exploration_edges e
+		WHERE e.src_id = $1
+		  AND e.rel = $2
+		  AND g.id = e.dst_id
+		  AND g.kind = $3
+		  AND g.state = 'met'`,
+		nodeID, RelProves, KindGoal)
+	return err
+}
+
 // SetFindingStatusTx updates a finding's status and registers a status-change delivery
 // event inside the **caller's transaction**.
 //
@@ -601,6 +631,11 @@ FROM findings WHERE id=$1 FOR UPDATE`, id).
 			SET payload = jsonb_set(payload, '{status}', to_jsonb($1::text))
 			WHERE id = $2`, status, nodeID.Int64); err != nil {
 			return from, true, false, false, err
+		}
+		if findingStatusInvalidatesGoal(status) {
+			if err := reopenGoalsProvedByNodeTx(ctx, tx, nodeID.Int64); err != nil {
+				return from, true, false, false, err
+			}
 		}
 	}
 	var assets []int64
