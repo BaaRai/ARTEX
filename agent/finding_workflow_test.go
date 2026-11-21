@@ -39,6 +39,29 @@ func TestFindingWorkflowSharedAssemblyAndSwitch(t *testing.T) {
 			if strings.Contains(system[0], "traffic_refs") != on {
 				t.Fatalf("%s: guidance ignored switch: %v", role, on)
 			}
+			if !on {
+				// The switch strips the tool and the schema, so the tool descriptions
+				// must say so: otherwise the agent chases bind_finding_traffic, which
+				// is not in its toolset, and burns turns on it.
+				if def.FindingGuidance != "" {
+					t.Fatalf("%s: disabled deployment must keep the standing guidance empty, got %q", role, def.FindingGuidance)
+				}
+				noted := false
+				for _, tool := range out {
+					if !strings.Contains(tool.Description(), "automatic traffic binding is OFF") {
+						continue
+					}
+					noted = true
+					// The tool that carries traffic parameters is the one whose
+					// schema lost them, so it must name the absent tool.
+					if tool.Name() == "report_finding" && !strings.Contains(tool.Description(), "bind_finding_traffic") {
+						t.Fatalf("%s: report_finding note must name the absent tool", role)
+					}
+				}
+				if !noted {
+					t.Fatalf("%s: disabled deployment must state on the tools that binding is off", role)
+				}
+			}
 			if on && (!strings.Contains(system[0], "TCP") || !strings.Contains(system[0], "evidence_hint_id")) {
 				t.Fatal("missing optional/handoff contract")
 			}

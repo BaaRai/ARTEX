@@ -87,6 +87,33 @@ func trafficCaptureOffToolNote(toolName string, captureOff bool) string {
 	}
 }
 
+// Automatic traffic binding off is a DIFFERENT switch from capture off: capture
+// can be on while binding is off, and then the disabled branch below strips
+// bind_finding_traffic and every traffic parameter from the schemas while the
+// tool descriptions keep promising the binding path. An agent then chases a tool
+// that is not in its toolset (observed: "the tool bind_finding_traffic must be
+// invoked as a tool", a bare Bash true, then grepping the transcripts and the
+// binary). These notes ride on the tool descriptions, exactly like the capture
+// notes above, so the standing guidance stays empty when the feature is off.
+const (
+	findingBindingOffProveGoalNote     = "\nNote: automatic traffic binding is OFF on this server, so a finding cannot be bound to captured traffic here and cannot close an HTTP goal. Recorded findings stay visible; non-HTTP goals still close with an observed tool_output fact. An operator can enable binding (System settings) or bind captured traffic manually on the finding page, after which a bound finding closes the goal."
+	findingBindingOffReportFindingNote = "\nNote: automatic traffic binding is OFF on this server, so report_finding carries no traffic parameters and the bind_finding_traffic tool is not in your toolset. Findings still save with their evidence, but stay unverified and cannot prove a goal. Register a reproducible PoC in evidence as usual; do not guess traffic IDs and do not re-probe only to capture packets."
+	findingBindingOffHintNote          = "\nNote: automatic traffic binding is OFF on this server, so hint traffic parameters are not in this schema. Keep the verified evidence and the known real traffic IDs in the hint text; the receiving task registers the finding and the operator can bind captured traffic later."
+)
+
+func findingBindingOffToolNote(toolName string) string {
+	switch toolName {
+	case "prove_goal":
+		return findingBindingOffProveGoalNote
+	case "report_finding":
+		return findingBindingOffReportFindingNote
+	case "add_hint", "add_task_hint":
+		return findingBindingOffHintNote
+	default:
+		return ""
+	}
+}
+
 // Applied after ToolResolve: user descriptions and prompts remain intact, while
 // all actual reporters (including Planner and custom chat agents) see the same
 // API contract. Disabled/unbound tools are never reintroduced here.
@@ -119,11 +146,18 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 				desc += note
 				decorated = true
 			}
+			if note := findingBindingOffToolNote(tool.Name()); note != "" {
+				desc += note
+				decorated = true
+			}
 			if decorated {
 				tool = DecorateTool(tool, desc, schema)
 			}
 			out = append(out, tool)
 		}
+		// The standing guidance stays empty: the binding-off notes ride on the
+		// tool descriptions, so a disabled deployment keeps the same contract the
+		// PG test asserts (def.FindingGuidance == "").
 		return out, ""
 	}
 	out := append([]actool.CoreTool(nil), tools...)
