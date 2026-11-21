@@ -16,11 +16,19 @@ const fileIdentitySupported = true
 // the thread: setfsuid, setfsgid and the raw setgroups of x/sys/unix change the
 // calling thread only (the syscall package's Setgroups changes every thread and is
 // not used). The thread is locked to its goroutine and never unlocked, so the Go
-// runtime ends it when the goroutine returns: no other goroutine ever runs with the
-// changed ids, and nothing has to be restored. A file system uid other than 0 also
+// runtime ends it when the goroutine returns, on a panic or runtime.Goexit in fn
+// too (the process's main thread is parked for good instead): no other goroutine
+// ever runs with the changed ids, and nothing has to be restored. While it is
+// locked the runtime never clones a new thread from it (the template thread does
+// that), so no thread inherits the ids. A file system uid other than 0 also
 // clears the file capabilities of the thread (CAP_DAC_OVERRIDE, CAP_DAC_READ_SEARCH,
 // CAP_FOWNER, CAP_CHOWN and the others of capabilities(7)), so root's override does
 // not apply to fn. A panic in fn is raised again in the caller.
+//
+// The ids cover fn's own goroutine only: a goroutine fn starts runs on another
+// thread with the server's ids, and a program fn would start gets its file system
+// ids reset to root's by execve. fn must open everything itself, and start nothing.
+// The scope is tested in filetools_identity_scope_root_linux_test.go.
 func runWithFileIdentity(id FileToolIdentity, fn func()) error {
 	done := make(chan error, 1)
 	var panicked any
