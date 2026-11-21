@@ -9,6 +9,25 @@ human operator must approve it. A rejected or timed-out request means **do not r
 by another route** (wget instead of curl, python requests, WebFetch, copy-paste into a heredoc, a
 different mirror). Treat a rejection as final for that code and move on to another approach.
 
+## What the gate does and does not do
+
+The gate is a **best-effort tripwire on the command text, not a security boundary.** Follow this
+skill even when no approval prompt appears — the prompt is a backstop, not the control.
+
+- **Known bypasses (no prompt will fire):** tabs or `\t`/`\n` JSON escapes between words, a download
+  tool the pattern does not list, splitting `base64 -d > f` from running `f`, writing the URL into a
+  variable first. If you are fetching or running code you did not write, the obligations below apply
+  whether or not you were stopped.
+- **Known false positive:** a command that merely mentions an install string (e.g. `grep 'npm
+  install' docs/`) can trigger an approval. If you are stopped for something harmless, say so to the
+  operator instead of working around it.
+- **Target-only runs:** when the task runs in target-only tool mode, only the built-in rules are
+  consulted and these approval rules are **not** — a `git clone` will pass with no prompt. The
+  obligations in this skill still bind you.
+- **Enforced, not advisory:** reading `/app/keys/*`, `/proc/<pid>/environ`, or the database DSN from
+  the shell is blocked by a `deny` rule. The SHA-256 blocklist and the rest of this skill are agent
+  discipline — nothing outside your own compliance enforces them.
+
 ## Before requesting the download
 1. Prefer approaches that need no third-party code (the tools already in the image: nuclei, httpx,
    ffuf, sqlmap, katana, dalfox, bbot, playwright; or a short script you write yourself).
