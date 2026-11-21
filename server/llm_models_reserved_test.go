@@ -13,15 +13,15 @@ import (
 
 // Ranges that are not public Internet addresses but are neither RFC 1918 nor
 // loopback: carrier-grade NAT, the benchmarking range, the IETF protocol
-// assignments, the reserved class E block, and the two IPv6 prefixes that
-// embed an IPv4 address (NAT64, 6to4).
+// assignments, the reserved class E block, and NAT64 and 6to4 addresses that
+// embed a non-public IPv4 address.
 var reservedModelAddrs = map[string][]string{
 	"cgnat":         {"100.64.0.1", "100.127.255.254", "::ffff:100.64.0.1"},
 	"benchmark":     {"198.18.0.1", "198.19.255.254"},
 	"ietf_protocol": {"192.0.0.1", "192.0.0.170"},
 	"reserved":      {"240.0.0.1", "250.1.2.3", "255.255.255.255"},
-	"nat64":         {"64:ff9b::a9fe:a9fe", "64:ff9b::7f00:1", "64:ff9b::5db8:d822"},
-	"six_to_four":   {"2002:a9fe:a9fe::1", "2002:7f00:1::1", "2002:5db8:d822::1"},
+	"nat64":         {"64:ff9b::a9fe:a9fe", "64:ff9b::7f00:1"},
+	"six_to_four":   {"2002:a9fe:a9fe::1", "2002:7f00:1::1"},
 }
 
 func TestLLMModelsRefusesReservedRanges(t *testing.T) {

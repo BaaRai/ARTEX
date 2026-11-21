@@ -2401,10 +2401,25 @@ var (
 	modelReservedPrefixes = []netip.Prefix{
 		netip.MustParsePrefix("192.0.0.0/24"), // IETF protocol assignments (RFC 6890)
 		netip.MustParsePrefix("240.0.0.0/4"),  // reserved, and the limited broadcast address
-		netip.MustParsePrefix("64:ff9b::/96"), // NAT64: the low 32 bits name an IPv4 host
-		netip.MustParsePrefix("2002::/16"),    // 6to4: bits 16 to 47 name an IPv4 host
 	}
+	// IPv6 prefixes whose addresses reach the IPv4 host they embed. A DNS64
+	// resolver answers with NAT64 addresses for every IPv4-only name, so the
+	// prefixes are not blocked as a whole: the embedded address is judged.
+	modelNAT64Prefix = netip.MustParsePrefix("64:ff9b::/96") // the low 32 bits name an IPv4 host
+	model6to4Prefix  = netip.MustParsePrefix("2002::/16")    // bits 16 to 47 name an IPv4 host
 )
+
+// modelEmbeddedIPv4 returns the IPv4 address a NAT64 or 6to4 address embeds.
+func modelEmbeddedIPv4(addr netip.Addr) (netip.Addr, bool) {
+	b := addr.As16()
+	switch {
+	case modelNAT64Prefix.Contains(addr):
+		return netip.AddrFrom4([4]byte(b[12:16])), true
+	case model6to4Prefix.Contains(addr):
+		return netip.AddrFrom4([4]byte(b[2:6])), true
+	}
+	return netip.Addr{}, false
+}
 
 func prefixesContain(prefixes []netip.Prefix, addr netip.Addr) bool {
 	for _, p := range prefixes {
@@ -2420,6 +2435,9 @@ func (s *Server) isBlockedModelAddr(addr netip.Addr, allowPrivate bool) bool {
 		return true
 	}
 	addr = addr.Unmap().WithZone("")
+	if v4, ok := modelEmbeddedIPv4(addr); ok {
+		addr = v4
+	}
 	if s != nil && s.allowLoopbackModels && addr.IsLoopback() {
 		return false
 	}
