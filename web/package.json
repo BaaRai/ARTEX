@@ -15,6 +15,7 @@
     "generate:presets": "ts-node -P tsconfig.scripts.json src/scripts/generate-theme-presets.ts",
     "test:polling": "node --test scripts/polling.test.mjs",
     "test:replay": "node --test scripts/replay.test.mjs",
+    "test:tamper-hooks": "node --test scripts/tamper-hooks.test.mjs",
     "test:upload": "node --test scripts/upload.test.mjs",
     "test:i18n": "node scripts/check-i18n.mjs && node --test scripts/i18n.test.mjs",
     "test:bash": "node --test src/lib/bash-exit-status.test.mjs"
