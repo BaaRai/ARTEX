@@ -438,7 +438,7 @@ func assembleWorkerSystem(staticPart, dynamicTail string, def DeferredInfo, spli
 	if !split {
 		return deferredSystem(staticPart+dynamicTail, def)
 	}
-	dyn := strings.TrimPrefix(dynamicTail+def.FindingGuidance, "\n\n")
+	dyn := strings.TrimPrefix(dynamicTail+def.FindingGuidance+def.SkillIndex, "\n\n")
 	if block := actool.RenderDeferredToolsBlock(def.GlobalNames); block != "" {
 		dyn += "\n\n" + block
 	}
