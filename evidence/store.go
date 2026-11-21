@@ -199,6 +199,17 @@ func (s *Store) prepare(ctx context.Context, refs []db.TrafficRef) ([]db.Prepare
 	return out, nil
 }
 
+// TrafficExists reports whether a bound snapshot's source exchange is still in
+// the live capture this store binds from. prove_goal uses it through the
+// planner's finding recorder; a missing capture store is an error, so the
+// proof is refused rather than accepted.
+func (s *Store) TrafficExists(ctx context.Context, trafficID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("evidence store unavailable")
+	}
+	return s.Traffic.ExchangeExists(ctx, trafficID)
+}
+
 func (s *Store) Record(ctx context.Context, in db.RecordFindingInput, refs []db.TrafficRef) (out *db.RecordedFinding, err error) {
 	err = s.DB.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
 		if err := db.LockTaskEvidenceTx(tx, in.TaskID); err != nil {

@@ -26,6 +26,23 @@ type EvidenceExchange struct {
 	Request, Response            io.Reader
 }
 
+// ExchangeExists reports whether id is an exchange in this capture store. A nil
+// store or a failed lookup is an error, never a silent false or true.
+func (t *Traffic) ExchangeExists(ctx context.Context, id string) (bool, error) {
+	if t == nil {
+		return false, errors.New("traffic recording store unavailable")
+	}
+	var one int
+	err := t.db.QueryRowContext(ctx, `SELECT 1 FROM exchanges WHERE id=?`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (t *Traffic) ReadEvidence(ctx context.Context, ids []string, consume func(EvidenceExchange) error) error {
 	if t == nil {
 		return errors.New("traffic recording store unavailable")

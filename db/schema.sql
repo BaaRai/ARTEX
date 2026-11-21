@@ -771,8 +771,10 @@ CREATE TABLE IF NOT EXISTS task_scope (
     value       TEXT,          -- icp / keyword
     source      TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto','agent','manual')),
     reason      TEXT,
+    expanded    BOOLEAN NOT NULL DEFAULT FALSE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE task_scope ADD COLUMN IF NOT EXISTS expanded BOOLEAN NOT NULL DEFAULT FALSE;
 -- Old database upgrade: expand task scope to match the company scope's single-textbox recognition capability.
 ALTER TABLE task_scope ADD COLUMN IF NOT EXISTS value TEXT;
 ALTER TABLE task_scope DROP CONSTRAINT IF EXISTS task_scope_kind_check;

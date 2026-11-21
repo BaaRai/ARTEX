@@ -30,6 +30,7 @@ type TaskScope struct {
 	Value       string `json:"value,omitempty"`
 	Source      string `json:"source"`
 	Reason      string `json:"reason,omitempty"`
+	Expanded    bool   `json:"expanded,omitempty"`
 }
 
 // stripHostPort drops a trailing :port from a host:port / ip:port / [ipv6]:port
@@ -82,17 +83,17 @@ func (s *AssetStore) upsertTaskScopeResult(ts TaskScope) (bool, error) {
 		src = "auto"
 	}
 	query := `
-INSERT INTO task_scope(task_id, kind, company_id, domain, net, value, source, reason)
-VALUES ($1,$2,$3,$4,$5::cidr,$6,$7,NULLIF($8,''))
+INSERT INTO task_scope(task_id, kind, company_id, domain, net, value, source, reason, expanded)
+VALUES ($1,$2,$3,$4,$5::cidr,$6,$7,NULLIF($8,''),$9)
 ON CONFLICT DO NOTHING`
 	var (
 		result sql.Result
 		err    error
 	)
 	if s.tx != nil {
-		result, err = s.tx.Exec(query, ts.TaskID, ts.Kind, companyVal, domainVal, netVal, valueVal, src, ts.Reason)
+		result, err = s.tx.Exec(query, ts.TaskID, ts.Kind, companyVal, domainVal, netVal, valueVal, src, ts.Reason, ts.Expanded)
 	} else {
-		result, err = s.db.Exec(query, ts.TaskID, ts.Kind, companyVal, domainVal, netVal, valueVal, src, ts.Reason)
+		result, err = s.db.Exec(query, ts.TaskID, ts.Kind, companyVal, domainVal, netVal, valueVal, src, ts.Reason, ts.Expanded)
 	}
 	if err != nil {
 		return false, err
@@ -221,10 +222,92 @@ func (s *AssetStore) AddAgentScope(taskID int64, kind, value, reason, source str
 	default:
 		return ts, fmt.Errorf("unsupported kind: %s (company/root_domain/subdomain/ip/cidr/icp/keyword)", kind)
 	}
+	if source == "agent" {
+		expanded, err := s.isScopeExpansion(taskID, ts)
+		if err != nil {
+			// The declared scope could not be read, so coverage is unknown:
+			// record the addition as an expansion rather than as in-scope.
+			expanded = true
+		}
+		ts.Expanded = expanded
+	}
 	if err := s.upsertTaskScope(ts); err != nil {
 		return ts, err
 	}
 	return ts, nil
+}
+
+// isScopeExpansion reports whether adding candidate widens an already-declared
+// task scope. When the task has no declared scope yet (initial goal registration)
+// it returns false. When covered by an existing declared root_domain, company,
+// cidr/ip, or exact entry it returns false; otherwise true.
+func (s *AssetStore) isScopeExpansion(taskID int64, candidate TaskScope) (bool, error) {
+	existing, err := s.ListTaskScope(taskID)
+	if err != nil {
+		return false, err
+	}
+	var declared []TaskScope
+	for _, r := range existing {
+		if r.Source != "auto" {
+			declared = append(declared, r)
+		}
+	}
+	if len(declared) == 0 {
+		return false, nil
+	}
+	for _, r := range declared {
+		if scopeRowCovers(r, candidate) {
+			return false, nil
+		}
+	}
+	// Also check if candidate's domain is owned by an already-declared company scope.
+	if candidate.Domain != "" && s.company != nil {
+		for _, r := range declared {
+			if r.Kind == "company" && r.CompanyID != nil && *r.CompanyID > 0 {
+				var matched int
+				err := s.db.QueryRow(
+					`SELECT 1 FROM company_scope WHERE company_id=$1 AND kind IN ('root_domain','subdomain') AND ($2 = value OR $2 LIKE '%.' || value) LIMIT 1`,
+					*r.CompanyID, candidate.Domain,
+				).Scan(&matched)
+				if err == nil && matched == 1 {
+					return false, nil
+				}
+			}
+		}
+	}
+	return true, nil
+}
+
+func scopeRowCovers(existing, cand TaskScope) bool {
+	switch cand.Kind {
+	case "root_domain", "subdomain":
+		if existing.Domain == "" || cand.Domain == "" {
+			return false
+		}
+		if existing.Kind == "root_domain" {
+			return cand.Domain == existing.Domain || strings.HasSuffix(cand.Domain, "."+existing.Domain)
+		}
+		if existing.Kind == "subdomain" {
+			return cand.Domain == existing.Domain
+		}
+	case "ip", "cidr":
+		if existing.Net == "" || cand.Net == "" {
+			return false
+		}
+		_, eNet, eErr := net.ParseCIDR(existing.Net)
+		cIP, cNet, cErr := net.ParseCIDR(cand.Net)
+		if eErr != nil || cErr != nil {
+			return false
+		}
+		eOnes, eBits := eNet.Mask.Size()
+		cOnes, cBits := cNet.Mask.Size()
+		return eBits == cBits && eOnes <= cOnes && eNet.Contains(cIP)
+	case "company":
+		return existing.Kind == "company" && existing.CompanyID != nil && cand.CompanyID != nil && *existing.CompanyID == *cand.CompanyID
+	case "icp", "keyword":
+		return existing.Kind == cand.Kind && strings.EqualFold(existing.Value, cand.Value)
+	}
+	return false
 }
 
 // DeleteTaskScope removes a single scope row by id, scoped to the given task.
@@ -242,7 +325,7 @@ func (s *AssetStore) DeleteTaskScope(taskID, scopeID int64) (bool, error) {
 func (s *AssetStore) ListTaskScope(taskID int64) ([]TaskScope, error) {
 	rows, err := s.db.Query(`
 SELECT ts.id, ts.kind, COALESCE(ts.company_id,0), COALESCE(c.name,''), COALESCE(ts.domain,''),
-       COALESCE(ts.net::text,''), COALESCE(ts.value,''), ts.source, COALESCE(ts.reason,'')
+       COALESCE(ts.net::text,''), COALESCE(ts.value,''), ts.source, COALESCE(ts.reason,''), COALESCE(ts.expanded,false)
 FROM task_scope ts
 LEFT JOIN companies c ON c.id=ts.company_id
 WHERE ts.task_id=$1 ORDER BY ts.id`, taskID)
@@ -254,7 +337,7 @@ WHERE ts.task_id=$1 ORDER BY ts.id`, taskID)
 	for rows.Next() {
 		var t TaskScope
 		var cid int64
-		if err := rows.Scan(&t.ID, &t.Kind, &cid, &t.CompanyName, &t.Domain, &t.Net, &t.Value, &t.Source, &t.Reason); err != nil {
+		if err := rows.Scan(&t.ID, &t.Kind, &cid, &t.CompanyName, &t.Domain, &t.Net, &t.Value, &t.Source, &t.Reason, &t.Expanded); err != nil {
 			return nil, err
 		}
 		t.TaskID = taskID
