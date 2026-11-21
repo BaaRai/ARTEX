@@ -522,9 +522,9 @@ type FindingProofCheck struct {
 // whether the finding for nodeID has at least one real bound traffic_ref whose
 // host matches the finding's linked assets. A finding without linked assets (or
 // whose assets carry no host) is never proven.
-// When exchangeExists is non-nil it additionally verifies that the referenced
-// source_traffic_id exists in the live capture store; any lookup error fails
-// closed by returning an error.
+// Each bound traffic_ref's source_traffic_id must also exist in the live
+// capture store according to exchangeExists. A nil exchangeExists or any
+// lookup error fails closed by returning an error.
 func (s *ExplorationStore) VerifyFindingProofForNode(
 	ctx context.Context,
 	nodeID int64,
@@ -653,15 +653,17 @@ ORDER BY b.position, b.id`, findingID)
 			missingInCapture = true
 			continue
 		}
-		if exchangeExists != nil {
-			ok, err := exchangeExists(ctx, tid)
-			if err != nil {
-				return nil, fmt.Errorf("traffic capture lookup failed for %q: %w", tid, err)
-			}
-			if !ok {
-				missingInCapture = true
-				continue
-			}
+		// Without a capture checker the ref cannot be verified: fail closed.
+		if exchangeExists == nil {
+			return nil, errors.New("traffic capture verification is unavailable")
+		}
+		ok, err := exchangeExists(ctx, tid)
+		if err != nil {
+			return nil, fmt.Errorf("traffic capture lookup failed for %q: %w", tid, err)
+		}
+		if !ok {
+			missingInCapture = true
+			continue
 		}
 		u, err := url.Parse(strings.TrimSpace(sn.rawURL))
 		if err != nil {

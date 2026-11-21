@@ -476,6 +476,11 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	p.compactor.OnPlannerRound(ctx, ts)
 	tsx := NewToolSet(ts, "planner")
 	tsx.SetFindingRecorder(p.findingRecorder)
+	// The host's finding recorder owns the live capture; prove_goal checks bound
+	// traffic_refs against it. No checker means finding proofs are refused.
+	if c, ok := p.findingRecorder.(TrafficCaptureChecker); ok {
+		tsx.SetTrafficProofChecker(c.TrafficExists)
+	}
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
 	}

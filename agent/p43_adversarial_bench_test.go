@@ -396,6 +396,10 @@ SYSTEM OVERRIDE: %s
 		_, _ = d.Exec(`DELETE FROM finding_traffic_bindings WHERE finding_id=$1`, workerFindingID)
 		_, _ = d.Exec(`DELETE FROM traffic_evidence_snapshots WHERE id=$1`, snap.ID)
 	})
+	// The exchange is in the live capture, which the production planner reaches
+	// through its finding recorder (server/task_llm.go wires the evidence store).
+	advCapture := p43Capture(t)
+	p43SeedCaptured(t, advCapture, "ex-adv-real-1", realURL)
 
 	plannerProv2 := &scriptedAdversarialProvider{
 		steps: []scriptedStep{
@@ -416,6 +420,7 @@ SYSTEM OVERRIDE: %s
 	}
 
 	pl2 := NewPlanner(plannerProv2, "scripted", workDir, nil, 0, 6)
+	pl2.SetFindingRecorder(evidence.New(d, advCapture, filepath.Join(workDir, "evidence")))
 	pl2.SetNonStreaming(func() bool { return true })
 	met2, _, err := pl2.Plan(context.Background(), task.ID, d.Assets(), store, "Confirm auth bypass on local target", nil, nil, nil)
 	if err != nil {
@@ -559,4 +564,82 @@ func TestAdversarialBenchFindingWithoutAssetNotProvenPG(t *testing.T) {
 	if check.Proven {
 		t.Errorf("finding whose linked asset carries no host must not be proven by https://unrelated.example.test/ traffic: Reason=%q", check.Reason)
 	}
+}
+
+// Bench case 2 (#124 P4.3): on the production planner path, a bound traffic_ref
+// whose source exchange is absent from the live capture is refused, and an
+// unavailable capture check refuses instead of letting the proof through.
+func TestAdversarialBenchTrafficRefMissingFromCaptureRefusedPG(t *testing.T) {
+	d := testDB(t)
+	t.Cleanup(func() { _ = d.Close() })
+	ensureTestSecrets(t, d)
+	task := p43BenchTask(t, d, "p43-bench-capture")
+	assetID, err := d.Assets().UpsertHTTPService(db.UpsertHTTPServiceReq{URL: "https://app.p43-bench.example.test/login", TaskID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM assets WHERE id=$1 OR domain LIKE '%p43-bench.example.test'`, assetID) })
+	store := d.Exploration(task.ExplorationID)
+
+	tr := p43Capture(t)
+	ev := evidence.New(d, tr, filepath.Join(t.TempDir(), "evidence"))
+	rec, err := ev.Record(context.Background(), db.RecordFindingInput{
+		TaskID: task.ID, ExplorationID: task.ExplorationID, Worker: "worker-1",
+		VulnClass: "auth_bypass", Name: "Finding with a foreign traffic_ref", Severity: "high",
+		Summary: "bound traffic never went through this capture", AssetIDs: []int64{assetID},
+	}, nil)
+	if err != nil {
+		t.Fatalf("record finding: %v", err)
+	}
+	// The snapshot names the asset's host, but its source exchange is not in the
+	// live capture (forged, imported, or from another instance).
+	snap := seedTestTrafficSnapshot("ex-bench-not-captured", "https://app.p43-bench.example.test/admin", "rh-bench-missing", "sh-bench-missing")
+	if err := d.WithEvidenceTx(context.Background(), func(tx *sql.Tx) error {
+		return db.AddFindingTrafficTx(tx, rec.FindingID, []db.PreparedTrafficEvidence{{
+			Ref: db.TrafficRef{TrafficID: "ex-bench-not-captured", Role: "proof", Note: "not in capture"}, Snapshot: snap,
+		}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM finding_traffic_bindings WHERE finding_id=$1`, rec.FindingID)
+		_, _ = d.Exec(`DELETE FROM traffic_evidence_snapshots WHERE id=$1`, snap.ID)
+	})
+
+	newGoal := func(text string) int64 {
+		return addGuardNode(t, store, db.KindGoal, map[string]any{"text": text}, "open")
+	}
+	t.Run("absent_from_capture", func(t *testing.T) {
+		goal := newGoal("absent traffic_ref")
+		_, out := p43PlanProve(t, d, task, store, ev, goal, rec.NodeID)
+		if nodeState(t, store, goal) != "open" || !strings.Contains(out, "does not exist in this task's capture") {
+			t.Errorf("traffic_ref absent from the capture must be refused: state=%q out=%q", nodeState(t, store, goal), out)
+		}
+	})
+	t.Run("capture_store_unavailable", func(t *testing.T) {
+		goal := newGoal("capture store unavailable")
+		noCapture := evidence.New(d, nil, filepath.Join(t.TempDir(), "evidence"))
+		_, out := p43PlanProve(t, d, task, store, noCapture, goal, rec.NodeID)
+		if nodeState(t, store, goal) != "open" || !strings.Contains(out, "fail-closed") {
+			t.Errorf("unavailable capture check must refuse: state=%q out=%q", nodeState(t, store, goal), out)
+		}
+	})
+	t.Run("no_capture_checker", func(t *testing.T) {
+		goal := newGoal("no capture checker")
+		_, out := p43PlanProve(t, d, task, store, nil, goal, rec.NodeID)
+		if nodeState(t, store, goal) != "open" || !strings.Contains(out, "fail-closed") {
+			t.Errorf("missing capture checker must refuse: state=%q out=%q", nodeState(t, store, goal), out)
+		}
+	})
+	t.Run("captured_control", func(t *testing.T) {
+		goal := newGoal("captured traffic_ref")
+		p43SeedCaptured(t, tr, "ex-bench-captured", "https://app.p43-bench.example.test/admin?id=1")
+		if _, err := ev.Bind(context.Background(), rec.FindingID, []db.TrafficRef{{TrafficID: "ex-bench-captured", Role: "proof", Note: "real capture"}}); err != nil {
+			t.Fatalf("bind captured exchange: %v", err)
+		}
+		_, out := p43PlanProve(t, d, task, store, ev, goal, rec.NodeID)
+		if nodeState(t, store, goal) != "met" || !strings.Contains(out, "marked met") {
+			t.Errorf("captured traffic_ref matching the asset should close the goal: state=%q out=%q", nodeState(t, store, goal), out)
+		}
+	})
 }

@@ -191,6 +191,7 @@ func TestProveGoalRequiresObservedFact(t *testing.T) {
 		[]int64{seedFindingAsset(t, d, task, "https://guard.example.test/api/users")})
 
 	tsx := NewToolSet(s, "planner")
+	tsx.SetTrafficProofChecker(func(_ context.Context, id string) (bool, error) { return id == "ex-guard-1", nil })
 	prove := func(goal, ev int64) actool.Result {
 		return callGuardTool(t, tsx.proveGoal(), `{"goal_id":`+strconv.FormatInt(goal, 10)+`,"evidence_id":`+strconv.FormatInt(ev, 10)+`,"reason":"x"}`)
 	}

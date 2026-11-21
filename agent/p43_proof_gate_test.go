@@ -88,6 +88,10 @@ func TestProveGoalFindingProofGatePG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The exchange is in the capture, so only the host mismatch refuses it.
+	planner.SetTrafficProofChecker(func(_ context.Context, tid string) (bool, error) {
+		return tid == "ex-wrong-host", nil
+	})
 	if isErr, msg := prove(goalHTTP, rec.NodeID); !isErr || !strings.Contains(msg, "does not match any asset") {
 		t.Fatalf("wrong-host finding must be refused: isErr=%v msg=%q", isErr, msg)
 	}

@@ -138,8 +138,9 @@ func compactIntents(ns []*db.Node, parentsOf, yieldsOf map[int64][]int64) []map[
 // One ToolSet is created per planner/worker run; per-run signals live here.
 type ToolSet struct {
 	findingRecorder FindingRecorder
-	// trafficProofChecker, if set, verifies that a bound snapshot's source_traffic_id
-	// exists in the live capture store during prove_goal. Any error fails closed.
+	// trafficProofChecker verifies that a bound snapshot's source_traffic_id
+	// exists in the live capture store during prove_goal. Planner.Plan wires it
+	// from the finding recorder; nil or any error fails closed.
 	trafficProofChecker func(ctx context.Context, trafficID string) (bool, error)
 	as                  *db.AssetStore   // asset store (optional; nil = asset tools not available)
 	cs                  *db.CompanyStore // company store (optional)
