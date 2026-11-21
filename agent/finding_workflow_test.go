@@ -87,9 +87,16 @@ func TestFindingWorkflowToolsTrafficCaptureOffNotice(t *testing.T) {
 	for _, binding := range []bool{false, true} {
 		SetFindingTrafficBindingEnabled(func() bool { return binding })
 
-		SetTrafficCaptureEnabled(func() bool { return false })
+		calls := 0
+		SetTrafficCaptureEnabled(func() bool {
+			calls++
+			return false
+		})
 		outOff, _, clOff := AugmentTools(t.Context(), "planner", base)
 		clOff()
+		if calls != 1 {
+			t.Fatalf("binding=%v: capture hook called %d times for %d tools, want 1", binding, calls, len(base))
+		}
 		for _, tool := range outOff {
 			desc := tool.Description()
 			switch tool.Name() {

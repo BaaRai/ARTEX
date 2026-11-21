@@ -73,8 +73,8 @@ const (
 	trafficCaptureOffReportFindingNote = "\nNote: traffic capture is currently OFF on this server, so no HTTP traffic is being recorded. Findings still save with textual/command evidence, but cannot prove goals via prove_goal until traffic capture is enabled in System settings and verified traffic is bound."
 )
 
-func trafficCaptureOffToolNote(toolName string) string {
-	if !trafficCaptureExplicitlyOff() {
+func trafficCaptureOffToolNote(toolName string, captureOff bool) string {
+	if !captureOff {
 		return ""
 	}
 	switch toolName {
@@ -91,6 +91,7 @@ func trafficCaptureOffToolNote(toolName string) string {
 // all actual reporters (including Planner and custom chat agents) see the same
 // API contract. Disabled/unbound tools are never reintroduced here.
 func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.CoreTool, string) {
+	captureOff := trafficCaptureExplicitlyOff()
 	if !findingTrafficBindingEnabled() {
 		out := make([]actool.CoreTool, 0, len(tools))
 		for _, tool := range tools {
@@ -114,7 +115,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 					decorated = true
 				}
 			}
-			if note := trafficCaptureOffToolNote(tool.Name()); note != "" {
+			if note := trafficCaptureOffToolNote(tool.Name(), captureOff); note != "" {
 				desc += note
 				decorated = true
 			}
@@ -138,7 +139,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 		case "get_finding_traffic", "bind_finding_traffic", "list_findings", "list_task_findings", "node_detail", "get_task_node_detail", "update_finding_report":
 			note = findingIDGuidance
 		}
-		if capNote := trafficCaptureOffToolNote(tool.Name()); capNote != "" {
+		if capNote := trafficCaptureOffToolNote(tool.Name(), captureOff); capNote != "" {
 			note += capNote
 		}
 		if note != "" {
