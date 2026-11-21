@@ -83,6 +83,12 @@ import type {
   SSProject,
   SSTask,
   Stats,
+  TamperDryRunRequest,
+  TamperDryRunResult,
+  TamperHook,
+  TamperHookInput,
+  TamperHooksListResp,
+  TamperHookVersion,
   Task,
   TaskArchive,
   TaskArchivePage,
@@ -965,6 +971,16 @@ export const api = {
   // Purges every exchange and compacts the index; `reclaimed` is the bytes of
   // index handed back to the filesystem. Evidence bound to findings is kept.
   trafficDeleteAll: () => del<{ deleted: number; reclaimed: number }>(`/traffic/all`),
+
+  // ---- capture-proxy constrained Go tampering hooks (P4.2, admin-only) ----
+  trafficHooks: () => get<TamperHooksListResp>(`/traffic/hooks`),
+  createTrafficHook: (body: TamperHookInput) => post<TamperHook>(`/traffic/hooks`, { ...body, enabled: false }),
+  updateTrafficHook: (id: number, body: TamperHookInput) => put<TamperHook>(`/traffic/hooks/${id}`, body),
+  deleteTrafficHook: (id: number) => del<{ deleted: boolean }>(`/traffic/hooks/${id}`),
+  toggleTrafficHook: (id: number, enabled: boolean) => post<TamperHook>(`/traffic/hooks/${id}/toggle`, { enabled }),
+  trafficHookVersions: (id: number) => get<{ versions: TamperHookVersion[] }>(`/traffic/hooks/${id}/versions`),
+  rollbackTrafficHook: (id: number, version: number) => post<TamperHook>(`/traffic/hooks/${id}/rollback`, { version }),
+  dryRunTrafficHook: (body: TamperDryRunRequest) => post<TamperDryRunResult>(`/traffic/hooks/dry-run`, body),
 
   // ---- app settings (runtime toggles) ----
   settings: () => get<Settings>(`/settings`),
