@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"net/http"
@@ -376,9 +377,15 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"initialized": hash != ""})
 }
 
+// setupTokenOut is where the setup token is printed: the stderr of the process.
+// It is a variable so that tests can capture it.
+var setupTokenOut io.Writer = os.Stderr
+
 // initSetupToken generates the one-time setup token when no admin password is set
-// and writes it to the server log. Without it, anyone who can reach the port
+// and prints it on the server console. Without it, anyone who can reach the port
 // before the operator could claim the instance through POST /api/auth/init.
+// The token goes to stderr directly, not through the standard logger: the log
+// sink keeps every line for /api/logs and persists it.
 func (s *Server) initSetupToken() {
 	if s.m == nil || s.m.pg == nil {
 		return
@@ -411,7 +418,8 @@ func (s *Server) initSetupToken() {
 	s.setupMu.Lock()
 	s.setupToken = token
 	s.setupMu.Unlock()
-	log.Printf("[auth] no admin password is set. Setup token for the /setup page: %s", token)
+	fmt.Fprintln(setupTokenOut, time.Now().Format("2006/01/02 15:04:05"), "[auth] no admin password is set. Setup token for the /setup page:", token)
+	log.Printf("[auth] no admin password is set. The setup token for the /setup page was printed on the server console (stderr); it is not kept in this log")
 }
 
 // loadPasswordVersion reads auth.password_version. A missing key leaves the

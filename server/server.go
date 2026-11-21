@@ -3347,7 +3347,7 @@ func (s *Server) getLogsHistory(w http.ResponseWriter, r *http.Request) {
 			TS:    r.CreatedAt.Format(time.RFC3339),
 			Level: r.Level,
 			Tag:   r.Tag,
-			Text:  r.Text,
+			Text:  maskURLCredentials(r.Text), // rows written before the sink masked them
 		})
 	}
 	writeJSON(w, 200, map[string]any{"items": items, "has_more": len(rows) == limit})
