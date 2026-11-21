@@ -74,7 +74,7 @@ func newExecRootFixture(t *testing.T) *execRootFixture {
 		t.Fatal(err)
 	}
 	// PrepareExecPrivilege sets them process-wide.
-	t.Cleanup(func() { agent.SetRunDirMaker(nil); agent.SetSpillDirMaker(nil, nil) })
+	t.Cleanup(func() { agent.SetRunDirMaker(nil); agent.SetSpillDirMaker(nil, nil); agent.SetFileToolIdentity(nil) })
 	if err := PrepareExecPrivilege(&priv, dataDir, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -735,6 +735,22 @@ func TestNormaTaskDirPlantedByExecutorAsRoot(t *testing.T) {
 	}
 	if after := treeDigest(t, dir); after != before {
 		t.Fatalf("the directory or what it holds changed: digest %s, was %s", after, before)
+	}
+}
+
+// PrepareExecPrivilege gives the agent's file tools the executor identity: through
+// it, a root-only file is refused by the kernel.
+func TestPrepareExecPrivilegeSetsFileToolIdentityAsRoot(t *testing.T) {
+	f := newExecRootFixture(t)
+	var readErr error
+	if err := agent.RunAsFileToolIdentity(func() { _, readErr = os.ReadFile(f.secret) }); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(readErr, fs.ErrPermission) {
+		t.Fatalf("read of a root-only file with the file tool identity: %v, want permission denied", readErr)
+	}
+	if _, err := os.ReadFile(f.secret); err != nil {
+		t.Fatalf("the server itself must still read the file: %v", err)
 	}
 }
 

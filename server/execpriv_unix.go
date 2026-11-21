@@ -277,6 +277,13 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		func(base, dir string) error { return makeSpillDir(base, dir, gid) },
 		func(dir string) error { return shareSpillFiles(dir, gid) },
 	)
+	// The file tools open the paths the agent names inside the server: they do it as
+	// the executor too (agent/filetools_identity.go).
+	if agent.FileToolIdentitySupported() {
+		agent.SetFileToolIdentity(&agent.FileToolIdentity{UID: p.UID, GID: p.GID})
+	} else {
+		log.Printf("[exec] the agent's file tools keep the server's identity on this platform: only their path confinement applies")
+	}
 	if err := prepareExecHome(*p, dataDir); err != nil {
 		return fmt.Errorf("prepare the executor home: %w", err)
 	}
