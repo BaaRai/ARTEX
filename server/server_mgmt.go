@@ -2389,26 +2389,71 @@ func sameRedirectHost(a, b *url.URL) bool {
 	return ha != "" && ha == hb
 }
 
+// Ranges that are not public Internet addresses and that
+// intercept.IsNonPublicAddr does not cover. The shared ones are in use on
+// private networks (overlay networks, fake-IP resolvers), so an allow-listed
+// endpoint may sit there; the reserved ones are never a model endpoint.
+var (
+	modelSharedPrefixes = []netip.Prefix{
+		netip.MustParsePrefix("100.64.0.0/10"), // carrier-grade NAT (RFC 6598)
+		netip.MustParsePrefix("198.18.0.0/15"), // benchmarking (RFC 2544)
+	}
+	modelReservedPrefixes = []netip.Prefix{
+		netip.MustParsePrefix("192.0.0.0/24"), // IETF protocol assignments (RFC 6890)
+		netip.MustParsePrefix("240.0.0.0/4"),  // reserved, and the limited broadcast address
+	}
+	// IPv6 prefixes whose addresses reach the IPv4 host they embed. A DNS64
+	// resolver answers with NAT64 addresses for every IPv4-only name, so the
+	// prefixes are not blocked as a whole: the embedded address is judged.
+	modelNAT64Prefix = netip.MustParsePrefix("64:ff9b::/96") // the low 32 bits name an IPv4 host
+	model6to4Prefix  = netip.MustParsePrefix("2002::/16")    // bits 16 to 47 name an IPv4 host
+)
+
+// modelEmbeddedIPv4 returns the IPv4 address a NAT64 or 6to4 address embeds.
+func modelEmbeddedIPv4(addr netip.Addr) (netip.Addr, bool) {
+	b := addr.As16()
+	switch {
+	case modelNAT64Prefix.Contains(addr):
+		return netip.AddrFrom4([4]byte(b[12:16])), true
+	case model6to4Prefix.Contains(addr):
+		return netip.AddrFrom4([4]byte(b[2:6])), true
+	}
+	return netip.Addr{}, false
+}
+
+func prefixesContain(prefixes []netip.Prefix, addr netip.Addr) bool {
+	for _, p := range prefixes {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) isBlockedModelAddr(addr netip.Addr, allowPrivate bool) bool {
 	if !addr.IsValid() {
 		return true
 	}
 	addr = addr.Unmap().WithZone("")
+	if v4, ok := modelEmbeddedIPv4(addr); ok {
+		addr = v4
+	}
 	if s != nil && s.allowLoopbackModels && addr.IsLoopback() {
 		return false
 	}
-	if !intercept.IsNonPublicAddr(addr) {
+	shared := prefixesContain(modelSharedPrefixes, addr)
+	if !intercept.IsNonPublicAddr(addr) && !shared && !prefixesContain(modelReservedPrefixes, addr) {
 		return false
 	}
 	if allowPrivate {
-		// Allow-listed self-hosted endpoints may resolve to loopback or RFC1918 /
-		// unique-local private addresses, but never link-local, unspecified,
-		// multicast, or instance-metadata addresses (such as 169.254.169.254 or
-		// fd00:ec2::254).
+		// Allow-listed self-hosted endpoints may resolve to loopback, RFC1918 /
+		// unique-local private addresses, or the shared ranges above, but never
+		// link-local, unspecified, multicast, reserved, or instance-metadata
+		// addresses (such as 169.254.169.254, 100.100.100.200 or fd00:ec2::254).
 		if addr.IsLoopback() {
 			return false
 		}
-		if addr.IsPrivate() && intercept.ValidateExemptionHost(addr.String()) == nil {
+		if (addr.IsPrivate() || shared) && intercept.ValidateExemptionHost(addr.String()) == nil {
 			return false
 		}
 	}
@@ -2756,7 +2801,9 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body[:min(len(body), 512)]))
+			// The status only: echoing the body would let the caller read what
+			// any host this endpoint can reach answers.
+			lastErr = fmt.Sprintf("API returned %d %s (the response body is not shown)", resp.StatusCode, http.StatusText(resp.StatusCode))
 			continue
 		}
 		// Both OpenAI and Anthropic return {"data": [{"id": "..."},...]}.
