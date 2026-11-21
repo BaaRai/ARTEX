@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **False-positive reopens the goal it proved**: marking a finding `false_positive` sets back to open each met goal that finding proved, unless another prover still reaches that goal. `duplicate`, `ignored` and `risk_accepted` leave the goal met. A finished task is not restarted.
+- **Lesson withdrawal history**: confirming a finding again still clears `withdrawn_at` and restores the evidence, and appends that timestamp to `withdrawn_history` on the same row (migration `0013_lesson_withdrawn_history.sql`).
+- **Lesson extraction commits with the disposition**: a status change and a completed retest run extraction in the same transaction. If extraction fails, the status change rolls back, so the new disposition cannot keep the previous lesson selectable.
+
 ## [0.7.0] - 2026-11-21
 
 Agent-driven traffic capture (SOCKS5, transparent TCP and raw UDP), operator tampering hooks with their admin panel, the agentic injection and proof hardening from the #124 audit, LLM context telemetry and the worker cache-prefix split, capture-proxy rewrite rules, HAR import and export, and a large security batch across the interception gate, sessions, logs, the workspace file API and the model endpoint probe.

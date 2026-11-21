@@ -38,17 +38,25 @@ no evidence and cannot inflate support. A later extract after a reversed
 disposition withdraws that finding's evidence from the opposite-kind lesson,
 including every retest of the finding, and retires the lesson when its live
 support hits zero. The evidence row stays, with `withdrawn_at` set. Confirming
-again clears that timestamp and restores the evidence; a retired lesson is
-un-retired only when it has no remaining live evidence. A negative disposition
+again clears that timestamp, appends it to `withdrawn_history`, and restores
+the evidence; a retired lesson is un-retired only when it has no remaining
+live evidence. A negative disposition
 also withdraws the cautions written from the finding's retests. A change inside
 the negative group (`false_positive`, `duplicate`, `ignored`, `risk_accepted`)
 withdraws the finding from the previous negative lesson before writing the
 new action text.
 
-Extraction also runs after a disposition change (`SetFindingStatusWithNotify`,
-including bulk) and after a completed retest, in addition to terminal status
-and `POST /api/tasks/{id}/lessons/extract`. Reopening a finding
+Extraction also runs in the same transaction as a disposition change
+(`SetFindingStatusWithNotify`, including bulk) and a completed retest. If it
+fails, that status change rolls back. Terminal status and
+`POST /api/tasks/{id}/lessons/extract` still extract afterwards, and a failure
+there does not undo the task status. Reopening a finding
 (`pending` / `in_progress`) produces nothing and retracts nothing.
+
+A goal a finding proved goes back to `open` when that finding is later marked
+`false_positive`, unless another prover still reaches the goal. `duplicate`,
+`ignored` and `risk_accepted` do not reopen it. `risk_accepted` still counts
+as a finding and can still prove a goal. A finished task is not restarted.
 
 Rules:
 

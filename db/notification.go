@@ -500,19 +500,19 @@ func assetDisplayName(typ, domain, ip, url, appName, bundleID string) string {
 //   - A failed event registration does not affect the status update (see the savepoint
 //     notes on RecordNotificationEventTx), so when notified=false the status change has
 //     already succeeded and the caller must not report an error for it.
+//   - Lesson extraction runs in this same transaction. If it fails, the status
+//     change rolls back with it.
 func (d *DB) SetFindingStatusWithNotify(ctx context.Context, id int64, status string) (from string, found bool, notified bool, err error) {
 	err = d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
+		var changed bool
 		var txErr error
-		from, found, _, notified, txErr = SetFindingStatusTx(ctx, tx, id, status)
-		return txErr
+		from, found, changed, notified, txErr = SetFindingStatusTx(ctx, tx, id, status)
+		if txErr != nil || !changed {
+			return txErr
+		}
+		return extractLessonsForFindingTx(ctx, tx, id)
 	})
-	if err != nil {
-		return from, found, notified, err
-	}
-	if found && from != status {
-		d.syncLessonsForFinding(ctx, id)
-	}
-	return from, found, notified, nil
+	return from, found, notified, err
 }
 
 // FindingStatusBatchResult is one id's outcome in a bulk status update.
@@ -532,30 +532,40 @@ type FindingStatusBatchResult struct {
 func (d *DB) SetFindingStatusesWithNotify(ctx context.Context, ids []int64, status string) ([]FindingStatusBatchResult, error) {
 	out := make([]FindingStatusBatchResult, 0, len(ids))
 	err := d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
+		seen := map[int64]struct{}{}
+		var taskIDs []int64
 		for _, id := range ids {
 			from, found, changed, notified, err := SetFindingStatusTx(ctx, tx, id, status)
 			if err != nil {
 				return err
 			}
 			out = append(out, FindingStatusBatchResult{ID: id, From: from, Found: found, Changed: changed, Notified: notified})
+			if !changed {
+				continue
+			}
+			var taskID sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `SELECT task_id FROM findings WHERE id=$1`, id).Scan(&taskID); err != nil {
+				return err
+			}
+			if !taskID.Valid || taskID.Int64 == 0 {
+				continue
+			}
+			if _, ok := seen[taskID.Int64]; ok {
+				continue
+			}
+			seen[taskID.Int64] = struct{}{}
+			taskIDs = append(taskIDs, taskID.Int64)
+		}
+		for _, taskID := range taskIDs {
+			if _, err := extractLessons(ctx, tx, taskID); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	taskIDs := make([]int64, 0, len(out))
-	for _, r := range out {
-		if !r.Changed {
-			continue
-		}
-		var taskID sql.NullInt64
-		if err := d.QueryRowContext(ctx, `SELECT task_id FROM findings WHERE id=$1`, r.ID).Scan(&taskID); err != nil || !taskID.Valid {
-			continue
-		}
-		taskIDs = append(taskIDs, taskID.Int64)
-	}
-	d.syncLessonsForTasks(ctx, taskIDs)
 	return out, nil
 }
 
@@ -603,6 +613,14 @@ FROM findings WHERE id=$1 FOR UPDATE`, id).
 			return from, true, false, false, err
 		}
 	}
+	// A false positive that proved a goal leaves that goal met unless something
+	// else still proves it. duplicate, ignored and risk_accepted do not reopen:
+	// risk_accepted is a real finding, and the other two were not the gap.
+	if status == FindingFalsePositive && nodeID.Valid {
+		if err := reopenGoalsDisproved(ctx, tx, nodeID.Int64); err != nil {
+			return from, true, false, false, err
+		}
+	}
 	var assets []int64
 	_ = json.Unmarshal(assetIDs, &assets)
 	notified = RecordNotificationEventTx(ctx, tx, notify.EventFindingStatusChanged, id, notify.Snapshot{
@@ -618,6 +636,35 @@ FROM findings WHERE id=$1 FOR UPDATE`, id).
 		ToStatus:   status,
 	})
 	return from, true, true, notified, nil
+}
+
+// reopenGoalsDisproved sets back to open every met goal this finding node
+// proves, when no other prover remains. Another prover keeps the goal met
+// unless that prover is itself a false_positive finding. A done task is not
+// restarted: only the goal node changes.
+func reopenGoalsDisproved(ctx context.Context, tx *sql.Tx, findingNodeID int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE exploration_nodes AS g
+		SET state='open', blocked_reason=NULL, content_version=content_version+1
+		WHERE g.kind='goal'
+		  AND g.state='met'
+		  AND g.id IN (
+		      SELECT e.dst_id FROM exploration_edges e
+		      WHERE e.src_id=$1 AND e.rel='proves'
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM exploration_edges o
+		      JOIN exploration_nodes src ON src.id=o.src_id
+		      WHERE o.dst_id=g.id
+		        AND o.rel='proves'
+		        AND o.src_id<>$1
+		        AND NOT (
+		            src.kind='finding'
+		            AND lower(btrim(coalesce(src.payload->>'status','')))='false_positive'
+		        )
+		  )`, findingNodeID)
+	return err
 }
 
 // NotificationStats is the overview counter row at the top of the notification page.

@@ -963,6 +963,69 @@ func TestDispositionChangeExtractsLessons(t *testing.T) {
 	}
 }
 
+func TestReconfirmKeepsWithdrawnHistory(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson withdraw history %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-history-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	pos := findLessonByAction(t, d, task.ID, "positive", "Confirmed", label)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, pos.ID) })
+
+	live, n := lessonWithdrawnHistory(t, d, pos.ID, fid)
+	if !live || n != 0 {
+		t.Fatalf("before reversal: live=%v history=%d", live, n)
+	}
+	if _, _, _, err := d.SetFindingStatusWithNotify(context.Background(), fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	live, n = lessonWithdrawnHistory(t, d, pos.ID, fid)
+	if live || n != 0 {
+		t.Fatalf("after false_positive: live=%v history=%d, want withdrawn with empty history", live, n)
+	}
+	if _, _, _, err := d.SetFindingStatusWithNotify(context.Background(), fid, FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	live, n = lessonWithdrawnHistory(t, d, pos.ID, fid)
+	if !live || n != 1 {
+		t.Fatalf("after re-confirm: live=%v history=%d, want live with one prior withdrawal", live, n)
+	}
+	if status, support := lessonStatusSupport(t, d, pos.ID); status != "candidate" || support != 1 {
+		t.Fatalf("restored lesson: status=%s support=%d", status, support)
+	}
+}
+
+func lessonWithdrawnHistory(t *testing.T, d *DB, lessonID, findingID int64) (live bool, n int) {
+	t.Helper()
+	if err := d.QueryRow(`
+		SELECT withdrawn_at IS NULL, cardinality(withdrawn_history)
+		FROM rsi_lesson_evidence
+		WHERE lesson_id=$1 AND source_kind='finding' AND source_id=$2`, lessonID, findingID).Scan(&live, &n); err != nil {
+		t.Fatal(err)
+	}
+	return live, n
+}
+
 func TestNegativeStatusReplacesPriorNegativeLesson(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {

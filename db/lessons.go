@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"unicode/utf8"
 )
@@ -63,9 +62,17 @@ func lessonDedupeKey(kind string, categoryID, companyID int64, cue, action strin
 	return hex.EncodeToString(sum[:])
 }
 
-func taskLessonScope(ctx context.Context, d *DB, taskID int64) (categoryID int64, companyIDs []int64, err error) {
+// lessonSQL is the subset of *sql.DB and *sql.Tx that lesson extraction uses,
+// so a disposition change can run extraction on the same transaction.
+type lessonSQL interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func taskLessonScope(ctx context.Context, q lessonSQL, taskID int64) (categoryID int64, companyIDs []int64, err error) {
 	var cat sql.NullInt64
-	err = d.QueryRowContext(ctx,
+	err = q.QueryRowContext(ctx,
 		`SELECT category_id FROM tasks WHERE id=$1 AND deleted_at IS NULL`, taskID).
 		Scan(&cat)
 	if err != nil {
@@ -74,12 +81,24 @@ func taskLessonScope(ctx context.Context, d *DB, taskID int64) (categoryID int64
 	if cat.Valid {
 		categoryID = cat.Int64
 	}
-	companyIDs, err = d.TaskCompanyIDsContext(ctx, taskID)
+	rows, err := q.QueryContext(ctx, `
+		SELECT company_id FROM task_scope
+		WHERE task_id=$1 AND kind='company' AND company_id IS NOT NULL
+		ORDER BY id`, taskID)
 	if err != nil {
 		return 0, nil, err
 	}
-	if companyIDs == nil {
-		companyIDs = []int64{}
+	defer rows.Close()
+	companyIDs = []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return 0, nil, err
+		}
+		companyIDs = append(companyIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, nil, err
 	}
 	return categoryID, companyIDs, nil
 }
@@ -102,12 +121,18 @@ func lessonExtractCompanyID(companyIDs []int64) int64 {
 // every retest of the finding (a negative disposition also withdraws its
 // retest cautions), and retires the lesson when nothing else
 // supports it. Confirming again restores the evidence; a retired lesson is
-// un-retired only when it has no remaining live evidence. Pending and in_progress
-// produce nothing and retract nothing. A task with more than one company does
-// not gain a lesson, but a reversed disposition still withdraws evidence written
-// while it had one company. Returns the number of distinct lessons written.
+// un-retired only when it has no remaining live evidence. Confirming again
+// clears withdrawn_at and appends that timestamp to withdrawn_history, so the
+// earlier withdrawal stays on the row. Pending and in_progress produce nothing
+// and retract nothing. A task with more than one company does not gain a
+// lesson, but a reversed disposition still withdraws evidence written while it
+// had one company. Returns the number of distinct lessons written.
 func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, error) {
-	categoryID, companyIDs, err := taskLessonScope(ctx, d, taskID)
+	return extractLessons(ctx, d, taskID)
+}
+
+func extractLessons(ctx context.Context, q lessonSQL, taskID int64) (int, error) {
+	categoryID, companyIDs, err := taskLessonScope(ctx, q, taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -117,7 +142,7 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 	companyID := lessonExtractCompanyID(companyIDs)
 	// Only a completed retest with a verdict is an outcome. A pending, running,
 	// failed or stopped retest can carry a staged verdict that never finished.
-	rows, err := d.QueryContext(ctx, `
+	rows, err := q.QueryContext(ctx, `
 		SELECT f.id, f.vulnclass, f.name, f.summary, f.severity, f.status,
 		       COALESCE(r.id,0), COALESCE(r.verdict,'')
 		FROM findings f
@@ -162,16 +187,23 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 			if cue == "" || action == "" || sourceID == 0 {
 				return nil // evidence gate: no write without cue + action + source
 			}
-			id, err := d.upsertLesson(ctx, lessonDedupeKey(kind, categoryID, companyID, cue, action),
+			id, err := upsertLesson(ctx, q, lessonDedupeKey(kind, categoryID, companyID, cue, action),
 				kind, cue, action, categoryID, companyID)
 			if err != nil {
 				return err
 			}
-			if _, err := d.ExecContext(ctx, `
+			// A re-confirm restores the row. The previous withdrawn_at is appended
+			// to withdrawn_history first, so the withdrawal is still on the row.
+			if _, err := q.ExecContext(ctx, `
 				INSERT INTO rsi_lesson_evidence(lesson_id,source_kind,source_id,detail)
 				VALUES($1,$2,$3,$4)
 				ON CONFLICT (lesson_id, source_kind, source_id) DO UPDATE SET
 					detail=EXCLUDED.detail,
+					withdrawn_history=CASE
+						WHEN rsi_lesson_evidence.withdrawn_at IS NOT NULL
+						THEN rsi_lesson_evidence.withdrawn_history || ARRAY[rsi_lesson_evidence.withdrawn_at]
+						ELSE rsi_lesson_evidence.withdrawn_history
+					END,
 					withdrawn_at=NULL`,
 				id, sourceKind, sourceID, lessonText(detail, lessonDetailMax)); err != nil {
 				return err
@@ -200,7 +232,7 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 					}
 				}
 			}
-			if err := d.retractLessonEvidence(ctx, "finding", findingID, "negative", ""); err != nil {
+			if err := retractLessonEvidence(ctx, q, "finding", findingID, "negative", ""); err != nil {
 				return 0, err
 			}
 		case "false_positive", "duplicate", "ignored", "risk_accepted":
@@ -218,7 +250,7 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 			suffix := " (prior " + status + ")"
 			room := lessonActionMax - utf8.RuneCountInString(prefix) - utf8.RuneCountInString(suffix)
 			action := prefix + lessonText(label, room) + suffix
-			if err := d.retractLessonEvidence(ctx, "finding", findingID, "negative", lessonText(action, lessonActionMax)); err != nil {
+			if err := retractLessonEvidence(ctx, q, "finding", findingID, "negative", lessonText(action, lessonActionMax)); err != nil {
 				return 0, err
 			}
 			if write {
@@ -226,13 +258,13 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 					return 0, err
 				}
 			}
-			if err := d.retractLessonEvidence(ctx, "finding", findingID, "positive", ""); err != nil {
+			if err := retractLessonEvidence(ctx, q, "finding", findingID, "positive", ""); err != nil {
 				return 0, err
 			}
-			if err := d.retractFindingRetestEvidence(ctx, findingID, "positive"); err != nil {
+			if err := retractFindingRetestEvidence(ctx, q, findingID, "positive"); err != nil {
 				return 0, err
 			}
-			if err := d.retractFindingRetestEvidence(ctx, findingID, "caution"); err != nil {
+			if err := retractFindingRetestEvidence(ctx, q, findingID, "caution"); err != nil {
 				return 0, err
 			}
 		}
@@ -240,9 +272,9 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 	return len(touched), rows.Err()
 }
 
-func (d *DB) upsertLesson(ctx context.Context, key, kind, cue, action string, categoryID, companyID int64) (int64, error) {
+func upsertLesson(ctx context.Context, q lessonSQL, key, kind, cue, action string, categoryID, companyID int64) (int64, error) {
 	var id int64
-	err := d.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,category_id,company_id)
 		VALUES($1,$2,$3,$4,NULLIF($5,0),NULLIF($6,0))
 		ON CONFLICT (dedupe_key) DO UPDATE SET
@@ -266,8 +298,8 @@ func (d *DB) upsertLesson(ctx context.Context, key, kind, cue, action string, ca
 // lessons that still have other live evidence stay active. A non-empty
 // keepAction spares lessons with that action, compared without case as the
 // dedupe key does.
-func (d *DB) retractLessonEvidence(ctx context.Context, sourceKind string, sourceID int64, fromKind, keepAction string) error {
-	rows, err := d.QueryContext(ctx, `
+func retractLessonEvidence(ctx context.Context, q lessonSQL, sourceKind string, sourceID int64, fromKind, keepAction string) error {
+	rows, err := q.QueryContext(ctx, `
 		UPDATE rsi_lesson_evidence e
 		SET withdrawn_at=now()
 		FROM rsi_lessons l
@@ -285,13 +317,13 @@ func (d *DB) retractLessonEvidence(ctx context.Context, sourceKind string, sourc
 	if err != nil {
 		return err
 	}
-	return d.retireLessonsIfEmpty(ctx, ids)
+	return retireLessonsIfEmpty(ctx, q, ids)
 }
 
 // retractFindingRetestEvidence withdraws every retest of this finding from
 // lessons of fromKind, not only the latest row.
-func (d *DB) retractFindingRetestEvidence(ctx context.Context, findingID int64, fromKind string) error {
-	rows, err := d.QueryContext(ctx, `
+func retractFindingRetestEvidence(ctx context.Context, q lessonSQL, findingID int64, fromKind string) error {
+	rows, err := q.QueryContext(ctx, `
 		UPDATE rsi_lesson_evidence e
 		SET withdrawn_at=now()
 		FROM rsi_lessons l, finding_retests r
@@ -309,7 +341,7 @@ func (d *DB) retractFindingRetestEvidence(ctx context.Context, findingID int64, 
 	if err != nil {
 		return err
 	}
-	return d.retireLessonsIfEmpty(ctx, ids)
+	return retireLessonsIfEmpty(ctx, q, ids)
 }
 
 func collectLessonIDs(rows *sql.Rows) ([]int64, error) {
@@ -332,11 +364,11 @@ func collectLessonIDs(rows *sql.Rows) ([]int64, error) {
 	return ids, nil
 }
 
-func (d *DB) retireLessonsIfEmpty(ctx context.Context, ids []int64) error {
+func retireLessonsIfEmpty(ctx context.Context, q lessonSQL, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := d.ExecContext(ctx, `
+	_, err := q.ExecContext(ctx, `
 		UPDATE rsi_lessons l
 		SET status='retired', updated_at=now()
 		WHERE l.id=ANY($1::bigint[])
@@ -424,32 +456,17 @@ func (d *DB) LogLessonUsage(ctx context.Context, taskID int64, lessonIDs []int64
 	return nil
 }
 
-// syncLessonsForFinding re-runs extraction for the finding's task after a
-// disposition or retest has committed. A failure is logged and does not undo
-// the status change. Terminal-status extraction still runs later.
-func (d *DB) syncLessonsForFinding(ctx context.Context, findingID int64) {
+// extractLessonsForFindingTx re-runs extraction for the finding's task on the
+// same transaction as the disposition change. A failure rolls the status
+// change back, so a new status cannot keep the previous lesson selectable.
+func extractLessonsForFindingTx(ctx context.Context, tx *sql.Tx, findingID int64) error {
 	var taskID sql.NullInt64
-	err := d.QueryRowContext(ctx, `SELECT task_id FROM findings WHERE id=$1`, findingID).Scan(&taskID)
+	err := tx.QueryRowContext(ctx, `SELECT task_id FROM findings WHERE id=$1`, findingID).Scan(&taskID)
 	if err != nil || !taskID.Valid || taskID.Int64 == 0 {
-		return
+		return err
 	}
-	if _, err := d.ExtractLessonsForTask(ctx, taskID.Int64); err != nil {
-		log.Printf("[rsi] lesson extraction failed for task %d: %v", taskID.Int64, err)
-	}
-}
-
-// syncLessonsForTasks re-runs extraction once per task.
-func (d *DB) syncLessonsForTasks(ctx context.Context, taskIDs []int64) {
-	seen := map[int64]bool{}
-	for _, taskID := range taskIDs {
-		if taskID == 0 || seen[taskID] {
-			continue
-		}
-		seen[taskID] = true
-		if _, err := d.ExtractLessonsForTask(ctx, taskID); err != nil {
-			log.Printf("[rsi] lesson extraction failed for task %d: %v", taskID, err)
-		}
-	}
+	_, err = extractLessons(ctx, tx, taskID.Int64)
+	return err
 }
 
 // RenderLessons builds the prompt block. The text is data, not instructions:

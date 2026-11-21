@@ -142,6 +142,107 @@ func TestSetFindingStatusMirrorsNodePayload(t *testing.T) {
 	}
 }
 
+func TestFalsePositiveReopensProvedGoal(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	tk, err := d.CreateTask("reopen proved goal", "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(tk.ID) })
+	es := d.Exploration(tk.ExplorationID)
+	goalID, err := es.AddNode(KindGoal, map[string]any{"text": "prove xss"}, 0, "met", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findingNode, err := es.AddNode(KindFinding, map[string]any{"summary": "x"}, 0, "confirmed", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid, err := d.AddFinding(tk.ID, findingNode, "XSS", "reflected XSS", "high", "summary", "poc", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := es.Link(findingNode, RelProves, goalID); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	for _, status := range []string{FindingRiskAccepted, FindingDuplicate, FindingIgnored} {
+		if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, status); err != nil {
+			t.Fatal(err)
+		}
+		if got := goalNodeState(t, d, goalID); got != "met" {
+			t.Fatalf("%s reopened the goal: %s", status, got)
+		}
+		if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingConfirmed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	if got := goalNodeState(t, d, goalID); got != "open" {
+		t.Fatalf("false_positive left the goal %s", got)
+	}
+}
+
+func TestFalsePositiveKeepsGoalWhenAnotherProverRemains(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	tk, err := d.CreateTask("goal kept by fact", "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(tk.ID) })
+	es := d.Exploration(tk.ExplorationID)
+	goalID, err := es.AddNode(KindGoal, map[string]any{"text": "prove xss"}, 0, "met", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findingNode, err := es.AddNode(KindFinding, map[string]any{"summary": "x"}, 0, "confirmed", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	factNode, err := es.AddNode(KindFact, map[string]any{"summary": "seen", "confidence": "observed"}, 0, "confirmed", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid, err := d.AddFinding(tk.ID, findingNode, "XSS", "reflected XSS", "high", "summary", "poc", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := es.Link(findingNode, RelProves, goalID); err != nil {
+		t.Fatal(err)
+	}
+	if err := es.Link(factNode, RelProves, goalID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := d.SetFindingStatusWithNotify(context.Background(), fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	if got := goalNodeState(t, d, goalID); got != "met" {
+		t.Fatalf("goal with a remaining fact prover is %s", got)
+	}
+}
+
+func goalNodeState(t *testing.T, d *DB, id int64) string {
+	t.Helper()
+	var state string
+	if err := d.QueryRow(`SELECT state FROM exploration_nodes WHERE id=$1`, id).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
 func TestFindingReportState(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
