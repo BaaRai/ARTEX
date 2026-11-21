@@ -22,9 +22,16 @@ edits the host firewall, so read this before enabling it.
 ## Modes (`EGRESS_MODE` in `.env`)
 | Mode | Effect |
 |---|---|
-| `monitor` (default) | only logs what would be blocked |
-| `enforce` | blocks |
-| `off` | no rules; DNS only |
+| `monitor` (default) | **observe only** — logs what would be blocked, blocks nothing |
+| `enforce` | the allowlist actually blocks |
+| `off` | no firewall rules; DNS redirect only |
+
+**The allowlist only restricts egress in `enforce`.** The default `monitor` is a
+dry run for calibration — it protects nothing. Set `EGRESS_MODE=enforce` (and
+bring the service up again) for the guard to have any effect. In `enforce`,
+setup is **fail-closed**: a blanket deny is installed before the allowlist is
+built, so if setup fails the ARTEX container loses outbound connectivity (except
+DNS) until the guard restarts cleanly.
 
 ## Operation
 - New engagement: edit `lists/scope-domains.txt` and `lists/scope-cidrs.txt`, then
@@ -36,6 +43,17 @@ edits the host firewall, so read this before enabling it.
   (fail-closed).
 
 ## Known gaps
+- **IPv6 is not filtered.** The allowlist is IPv4-only (ipset `hash:ip`/`hash:net`).
+  Keep the ARTEX network IPv4-only (do not set `enable_ipv6` on it) — then the
+  container has no IPv6 address and the gap is latent. If you do enable IPv6, set
+  `ARTEX_SUBNET6` so `enforce` installs an `ip6tables` deny for it; the guard logs
+  a warning when IPv6 is left unfiltered.
+- **Traffic to the host/gateway bypasses the filter.** Container→gateway traffic
+  goes through the host `INPUT` chain, not `DOCKER-USER` (`FORWARD`), so a proxy
+  bound on the gateway IP is reachable. Don't run a forward proxy on the gateway,
+  or set `EGRESS_FILTER_GATEWAY=1` to have `enforce` add an `INPUT` rule that drops
+  everything from the subnet to the gateway except DNS (off by default — it edits
+  the host `INPUT` chain).
 - Exfiltration through an allowed destination (a GitHub gist, OAST servers, an
   in-scope host the attacker controls).
 - Data hidden in DNS queries (slow; visible in `logs/dnsmasq.log`).
