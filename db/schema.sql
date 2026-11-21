@@ -1560,19 +1560,21 @@ CREATE TABLE IF NOT EXISTS rsi_lessons (
 CREATE INDEX IF NOT EXISTS idx_rsi_lessons_scope ON rsi_lessons(company_id, category_id, status);
 CREATE INDEX IF NOT EXISTS idx_rsi_lessons_kind  ON rsi_lessons(kind, updated_at DESC);
 
--- One row per (lesson, source). The primary key makes extraction idempotent:
--- a second run for the same task adds nothing and cannot inflate support.
--- withdrawn_at keeps a retracted source on the row. Support and selection
--- count only rows that are still live.
+-- Live evidence is unique per (lesson, source) via uq_rsi_lesson_evidence_live,
+-- making repeated extraction idempotent without inflating support. Withdrawn
+-- rows keep withdrawn_at set for history; re-confirming inserts a new live row.
 CREATE TABLE IF NOT EXISTS rsi_lesson_evidence (
+    id           BIGSERIAL PRIMARY KEY,
     lesson_id    BIGINT NOT NULL REFERENCES rsi_lessons(id) ON DELETE CASCADE,
     source_kind  TEXT NOT NULL,
     source_id    BIGINT NOT NULL,
     detail       TEXT NOT NULL DEFAULT '',
-    withdrawn_at TIMESTAMPTZ,
-    PRIMARY KEY (lesson_id, source_kind, source_id)
+    withdrawn_at TIMESTAMPTZ
 );
 ALTER TABLE rsi_lesson_evidence ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_rsi_lesson_evidence_live
+    ON rsi_lesson_evidence(lesson_id, source_kind, source_id)
+    WHERE withdrawn_at IS NULL;
 
 -- What was shown to which task, and in which mode (shadow = logged but not
 -- injected; inject = appended to the planner/worker system prompt).

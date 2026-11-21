@@ -1103,14 +1103,10 @@ func findingPayloadStatus(n *db.Node) string {
 }
 
 // findingTriageBlocksGoal is true when the finding's triage label says it is
-// not a vulnerability to close a goal on.
+// not a vulnerability to close a goal on. Delegates to db.FindingStatusInvalidatesGoal
+// so prove_goal and DB goal-reopen logic share one list and cannot drift (#269).
 func findingTriageBlocksGoal(status string) bool {
-	switch status {
-	case db.FindingFalsePositive, db.FindingDuplicate, db.FindingIgnored:
-		return true
-	default:
-		return false
-	}
+	return db.FindingStatusInvalidatesGoal(status)
 }
 
 func countActionableFindings(nodes []*db.Node) int {

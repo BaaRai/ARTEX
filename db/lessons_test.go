@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -1481,4 +1483,224 @@ func lessonStatusSupport(t *testing.T, d *DB, lessonID int64) (status string, su
 		t.Fatal(err)
 	}
 	return status, support
+}
+
+// Re-confirming a previously withdrawn finding must NOT clear withdrawn_at on
+// the old evidence row: the withdrawal row stays for history and re-confirmation
+// inserts a new live row (#269).
+func TestReconfirmingFindingPreservesWithdrawalHistory(t *testing.T) {
+	d := notifyTestDB(t)
+	ctx := context.Background()
+
+	task, err := d.CreateTaskWithOptions("withdraw-history", "test withdrawal history", TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	es := d.Exploration(task.ExplorationID)
+	rec, err := es.RecordFinding(ctx, RecordFindingInput{
+		TaskID:        task.ID,
+		ExplorationID: task.ExplorationID,
+		VulnClass:     "ssrf",
+		Name:          "SSRF on webhook",
+		Severity:      "high",
+		Summary:       "SSRF on webhook endpoint",
+		Worker:        "worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid := rec.FindingID
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM rsi_lessons WHERE id IN (SELECT lesson_id FROM rsi_lesson_evidence WHERE source_kind='finding' AND source_id=$1)`, fid)
+	})
+
+	// 1. Confirm -> positive lesson created with 1 live evidence row.
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	var lessonID, firstRowID int64
+	if err := d.QueryRow(`SELECT e.lesson_id, e.id
+		FROM rsi_lesson_evidence e JOIN rsi_lessons l ON l.id=e.lesson_id
+		WHERE l.kind='positive' AND e.source_kind='finding' AND e.source_id=$1 AND e.withdrawn_at IS NULL`,
+		fid).Scan(&lessonID, &firstRowID); err != nil {
+		t.Fatalf("positive evidence row: %v", err)
+	}
+
+	// 2. Flip to false_positive -> firstRowID gets withdrawn_at set.
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	var withdrawnAt1 sql.NullTime
+	if err := d.QueryRow(`SELECT withdrawn_at FROM rsi_lesson_evidence WHERE id=$1`, firstRowID).Scan(&withdrawnAt1); err != nil {
+		t.Fatal(err)
+	}
+	if !withdrawnAt1.Valid {
+		t.Fatalf("expected firstRowID=%d to have withdrawn_at set after false_positive", firstRowID)
+	}
+
+	// 3. Re-confirm -> old withdrawal row stays untouched, new live row is inserted.
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	var withdrawnAt2 sql.NullTime
+	if err := d.QueryRow(`SELECT withdrawn_at FROM rsi_lesson_evidence WHERE id=$1`, firstRowID).Scan(&withdrawnAt2); err != nil {
+		t.Fatal(err)
+	}
+	if !withdrawnAt2.Valid || !withdrawnAt2.Time.Equal(withdrawnAt1.Time) {
+		t.Fatalf("old withdrawal row %d was altered: got %v, want %v", firstRowID, withdrawnAt2, withdrawnAt1)
+	}
+
+	var secondRowID int64
+	if err := d.QueryRow(`SELECT id FROM rsi_lesson_evidence
+		WHERE lesson_id=$1 AND source_kind='finding' AND source_id=$2 AND withdrawn_at IS NULL`,
+		lessonID, fid).Scan(&secondRowID); err != nil {
+		t.Fatalf("new live evidence row missing after re-confirm: %v", err)
+	}
+	if secondRowID == firstRowID {
+		t.Fatalf("re-confirm reused old row %d instead of inserting a new live row", firstRowID)
+	}
+
+	// 4. Repeat extraction is idempotent: still 1 live + 1 withdrawn row.
+	if _, err := d.ExtractLessonsForTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	var totalRows, liveRows, withdrawnRows int
+	if err := d.QueryRow(`SELECT COUNT(*), COUNT(*) FILTER (WHERE withdrawn_at IS NULL), COUNT(*) FILTER (WHERE withdrawn_at IS NOT NULL)
+		FROM rsi_lesson_evidence WHERE lesson_id=$1 AND source_kind='finding' AND source_id=$2`,
+		lessonID, fid).Scan(&totalRows, &liveRows, &withdrawnRows); err != nil {
+		t.Fatal(err)
+	}
+	if totalRows != 2 || liveRows != 1 || withdrawnRows != 1 {
+		t.Fatalf("evidence rows = total %d live %d withdrawn %d, want 2 / 1 / 1", totalRows, liveRows, withdrawnRows)
+	}
+	if status, support := lessonStatusSupport(t, d, lessonID); status != "candidate" || support != 1 {
+		t.Fatalf("lesson status=%s support=%d, want candidate / 1", status, support)
+	}
+}
+
+// Lesson extraction now runs inside the same transaction as status changes and
+// retest completion (#269). If extraction fails, the status / retest write
+// rolls back atomically so the DB never ends up with a flipped finding status
+// and a stale selectable lesson.
+func TestLessonExtractionFailureRollsBackStatusAndRetest(t *testing.T) {
+	d := notifyTestDB(t)
+	ctx := context.Background()
+
+	task, err := d.CreateTaskWithOptions("lesson-tx-rollback", "test lesson extraction tx rollback", TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	es := d.Exploration(task.ExplorationID)
+	rec, err := es.RecordFinding(ctx, RecordFindingInput{
+		TaskID:        task.ID,
+		ExplorationID: task.ExplorationID,
+		VulnClass:     "sqli",
+		Name:          "SQLi in filter",
+		Severity:      "high",
+		Summary:       "Boolean SQLi in filter param",
+		Worker:        "worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid := rec.FindingID
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM rsi_lessons WHERE id IN (SELECT lesson_id FROM rsi_lesson_evidence WHERE source_kind='finding' AND source_id=$1)`, fid)
+	})
+
+	// Seed a confirmed finding and its positive lesson.
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	var posLessonID int64
+	if err := d.QueryRow(`SELECT e.lesson_id
+		FROM rsi_lesson_evidence e JOIN rsi_lessons l ON l.id=e.lesson_id
+		WHERE l.kind='positive' AND e.source_kind='finding' AND e.source_id=$1 AND e.withdrawn_at IS NULL`,
+		fid).Scan(&posLessonID); err != nil {
+		t.Fatalf("positive lesson missing: %v", err)
+	}
+
+	injected := errors.New("injected lesson extraction failure")
+	prevHook := lessonSyncTxTestHook
+	t.Cleanup(func() { lessonSyncTxTestHook = prevHook })
+
+	// 1. Single status path: failure during lesson extraction rolls back status.
+	lessonSyncTxTestHook = func(ctx context.Context, tx *sql.Tx, taskID int64) error { return injected }
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingFalsePositive); !errors.Is(err, injected) {
+		t.Fatalf("single status err=%v, want %v", err, injected)
+	}
+	f, err := d.GetFinding(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != FindingConfirmed {
+		t.Fatalf("single status leaked %q after rollback, want %q", f.Status, FindingConfirmed)
+	}
+	if status, support := lessonStatusSupport(t, d, posLessonID); status != "candidate" || support != 1 {
+		t.Fatalf("positive lesson after single rollback: status=%s support=%d, want candidate / 1", status, support)
+	}
+
+	// 2. Bulk status path: failure during lesson extraction rolls back status.
+	if _, err := d.SetFindingStatusesWithNotify(ctx, []int64{fid}, FindingFalsePositive); !errors.Is(err, injected) {
+		t.Fatalf("bulk status err=%v, want %v", err, injected)
+	}
+	f, err = d.GetFinding(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != FindingConfirmed {
+		t.Fatalf("bulk status leaked %q after rollback, want %q", f.Status, FindingConfirmed)
+	}
+
+	// 3. Retest path: failure during lesson extraction rolls back both retest
+	// completion and the finding status transition.
+	lessonSyncTxTestHook = nil
+	retest, conv, _, err := d.CreateFindingRetest(ctx, fid, "verify fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteConversation(conv.ID) })
+	if _, err := d.StartFindingRetest(ctx, retest.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RecordFindingRetestResult(ctx, conv.ID, "fixed", "patched", "verified 400 on payload"); err != nil {
+		t.Fatal(err)
+	}
+
+	lessonSyncTxTestHook = func(ctx context.Context, tx *sql.Tx, taskID int64) error { return injected }
+	if err := d.FinishFindingRetest(retest.ID, "completed", ""); !errors.Is(err, injected) {
+		t.Fatalf("FinishFindingRetest err=%v, want %v", err, injected)
+	}
+	f, err = d.GetFinding(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != FindingConfirmed {
+		t.Fatalf("retest status leaked %q after rollback, want %q", f.Status, FindingConfirmed)
+	}
+	var retestStatus string
+	if err := d.QueryRow(`SELECT status FROM finding_retests WHERE id=$1`, retest.ID).Scan(&retestStatus); err != nil {
+		t.Fatal(err)
+	}
+	if retestStatus == "completed" {
+		t.Fatalf("retest status committed %q despite lesson extraction rollback", retestStatus)
+	}
+
+	// 4. Once extraction succeeds, the status flip and lesson retirement commit together.
+	lessonSyncTxTestHook = nil
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	f, err = d.GetFinding(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != FindingFalsePositive {
+		t.Fatalf("status=%q after retry, want %q", f.Status, FindingFalsePositive)
+	}
+	if status, support := lessonStatusSupport(t, d, posLessonID); status != "retired" || support != 0 {
+		t.Fatalf("positive lesson after FP commit: status=%s support=%d, want retired / 0", status, support)
+	}
 }
