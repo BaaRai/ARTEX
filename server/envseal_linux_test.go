@@ -51,6 +51,7 @@ func TestSealedEnvironmentHandoff(t *testing.T) {
 	}
 	want := map[string]string{
 		"ARTEX_PG_DSN":      "postgres://artex:p@ss@db.internal/artex?sslmode=disable\nsecond line\twith tab",
+		"ARTEX_PG_PASSWORD": "p/ss w@rd?#%",
 		"ARTEX_SECRET_KEY":  "",
 		"ANTHROPIC_API_KEY": "sk-ant-test",
 		"OPENAI_API_KEY":    "=leading-equals",

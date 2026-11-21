@@ -341,6 +341,10 @@ docker compose up -d --build
 # → http://localhost:8787
 ```
 
+`POSTGRES_PASSWORD` is passed to ARTEX as its own variable. The server percent-encodes it into
+the connection URL, so a password may contain `/`, `?`, `%`, `@`, `:` or spaces. In `.env`, quote
+a value that contains `#`, and write `$$` for a literal `$`.
+
 The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
 `sqlmap`, `ripgrep`, `curl`, `npm`, …); `./skills` and `./data` are persisted via bind mounts.
 

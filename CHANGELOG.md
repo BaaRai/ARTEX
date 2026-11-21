@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Docker Compose database passwords with URL-special characters**: `docker-compose.yml` no longer pastes `POSTGRES_PASSWORD` into `ARTEX_PG_DSN`. The server builds the URL from `ARTEX_PG_HOST`, `ARTEX_PG_PORT`, `ARTEX_PG_USER`, `ARTEX_PG_PASSWORD`, `ARTEX_PG_DBNAME` and `ARTEX_PG_SSLMODE`, percent-encoding the user and password, so `/`, `?`, `%`, `@`, `:` and spaces connect. An explicit `ARTEX_PG_DSN` still wins and is not rewritten. `ARTEX_PG_PASSWORD` is removed from the environment with the other startup secrets (#450).
+
 ## [0.7.0] - 2026-11-21
 
 Agent-driven traffic capture (SOCKS5, transparent TCP and raw UDP), operator tampering hooks with their admin panel, the agentic injection and proof hardening from the #124 audit, LLM context telemetry and the worker cache-prefix split, capture-proxy rewrite rules, HAR import and export, and a large security batch across the interception gate, sessions, logs, the workspace file API and the model endpoint probe.
