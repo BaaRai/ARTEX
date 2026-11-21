@@ -590,7 +590,9 @@ func FindingStatusInvalidatesGoal(status string) bool {
 func reopenGoalsProvedByNodeTx(ctx context.Context, tx *sql.Tx, nodeID int64) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE exploration_nodes g
-		SET state = 'open'
+		SET state = 'open',
+		    blocked_reason = NULL,
+		    content_version = content_version + 1
 		FROM exploration_edges e
 		WHERE e.src_id = $1
 		  AND e.rel = $2

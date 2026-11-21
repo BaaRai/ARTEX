@@ -67,15 +67,28 @@ func TestFindingStatusReopensProvedGoals(t *testing.T) {
 		}
 	}
 
+	goalContentVersion := func(t *testing.T, goalID int64) int {
+		t.Helper()
+		var v int
+		if err := d.QueryRow(`SELECT content_version FROM exploration_nodes WHERE id=$1`, goalID).Scan(&v); err != nil {
+			t.Fatalf("SELECT content_version(%d): %v", goalID, err)
+		}
+		return v
+	}
+
 	t.Run("single_status_path_reopens_for_fp_duplicate_ignored", func(t *testing.T) {
 		for _, status := range []string{FindingFalsePositive, FindingDuplicate, FindingIgnored} {
 			t.Run(status, func(t *testing.T) {
 				_, es, fid, fnid, gid := newTaskWithProvedGoal(t, "single-"+status)
+				vBefore := goalContentVersion(t, gid)
 				_, found, _, err := d.SetFindingStatusWithNotify(ctx, fid, status)
 				if err != nil || !found {
 					t.Fatalf("SetFindingStatusWithNotify(%s): found=%v err=%v", status, found, err)
 				}
 				assertGoalState(t, es, gid, "open")
+				if vAfter := goalContentVersion(t, gid); vAfter != vBefore+1 {
+					t.Fatalf("goal %d content_version = %d, want %d (bumped on reopen)", gid, vAfter, vBefore+1)
+				}
 				assertProvesEdgeKept(t, fnid, gid)
 			})
 		}
