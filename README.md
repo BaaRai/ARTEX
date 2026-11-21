@@ -341,6 +341,10 @@ docker compose up -d --build
 # → http://localhost:8787
 ```
 
+`POSTGRES_PASSWORD` is placed into the database URL as is, so use a password made of letters and
+digits (for example `openssl rand -hex 24`). Characters such as `/`, `#`, `?`, `%` or a space break
+the connection string.
+
 The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
 `sqlmap`, `ripgrep`, `curl`, `npm`, …); `./skills` and `./data` are persisted via bind mounts.
 
