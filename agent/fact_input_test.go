@@ -240,7 +240,9 @@ func TestRecordFactRefusesTopLevelCopiesBesideFacts(t *testing.T) {
 	}
 	var payload map[string]any
 	_ = json.Unmarshal(node.Payload, &payload)
-	if payload["summary"] != "TLS 1.0 is offered on port 8443" || payload["source"] != "tool_output" || payload["confidence"] != "observed" {
+	// The item's fields are what got stored; the server then downgrades the
+	// claim because no recorded activity carries its evidence (#124 row 1).
+	if payload["summary"] != "TLS 1.0 is offered on port 8443" || payload["source"] != "inference" || payload["confidence"] != "inferred" || payload["provenance"] != factProvenanceUnverified {
 		t.Fatalf("fact payload: %s", node.Payload)
 	}
 }

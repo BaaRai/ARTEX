@@ -223,10 +223,13 @@ func (t *ToolSet) runScanIngest(ctx context.Context, in json.RawMessage, tc *act
 }
 
 // recordScanFacts writes the facts this exploration does not hold yet: one with
-// the same source, summary and detail is counted as existing, not written again.
+// the same summary and detail is counted as existing, not written again. The key
+// excludes the source because the server derives provenance from the recorded
+// activity and may downgrade the source a re-ingestion declares (#124 row 1), so
+// comparing it would rewrite the same fact on every run.
 func (t *ToolSet) recordScanFacts(facts []factItem) (written, existing int, errs []string, err error) {
 	seen := map[string]bool{}
-	key := func(source, summary, detail string) string { return source + "\x00" + summary + "\x00" + detail }
+	key := func(summary, detail string) string { return summary + "\x00" + detail }
 	for before, more := int64(0), true; more; {
 		var nodes []*db.Node
 		if nodes, more, err = t.ts.ListByKindPage(db.KindFact, before, 500); err != nil {
@@ -239,13 +242,13 @@ func (t *ToolSet) recordScanFacts(facts []factItem) (written, existing int, errs
 				Source  string `json:"source"`
 			}
 			if json.Unmarshal(n.Payload, &p) == nil {
-				seen[key(p.Source, p.Summary, p.Detail)] = true
+				seen[key(p.Summary, p.Detail)] = true
 			}
 			before = n.ID
 		}
 	}
 	for _, f := range facts {
-		k := key(f.Source, f.Summary, f.Detail)
+		k := key(f.Summary, f.Detail)
 		if seen[k] {
 			existing++
 			continue

@@ -1156,6 +1156,51 @@ func (t *Traffic) Search(host string, page, size int) ([]ExchangeMeta, error) {
 	return out, rows.Err()
 }
 
+// ResponseContaining reports the newest capture recorded in [fromTS,toTS]
+// (unix seconds) whose response side contains one of lines. Request-side matches
+// are ignored after the index lookup: what classifies a fact is what came back
+// from the target. ok is false when no capture matches, when this build has no
+// full-text index, or when the store is unavailable; callers keep the
+// activity-only classification in that case.
+func (t *Traffic) ResponseContaining(lines []string, fromTS, toTS int64) (id string, ok bool, err error) {
+	if t == nil || len(lines) == 0 {
+		return "", false, nil
+	}
+	for _, line := range lines {
+		cond, arg, hasFTS := t.ftsFilter(line)
+		if !hasFTS {
+			return "", false, nil
+		}
+		rows, qerr := t.db.Query(`SELECT id FROM exchanges
+WHERE ts>=? AND ts<=? AND `+cond+`
+ORDER BY ts DESC LIMIT 8`, fromTS, toTS, arg)
+		if qerr != nil {
+			return "", false, qerr
+		}
+		ids := make([]string, 0, 8)
+		for rows.Next() {
+			var cand string
+			if serr := rows.Scan(&cand); serr != nil {
+				rows.Close()
+				return "", false, serr
+			}
+			ids = append(ids, cand)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return "", false, err
+		}
+		for _, cand := range ids {
+			_, resp, gerr := t.Get(cand)
+			if gerr != nil || !strings.Contains(resp, line) {
+				continue
+			}
+			return cand, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // ftsFilter builds the SQL condition restricting rows to those whose indexed
 // text matches term. ok is false when full-text search cannot serve the term —
 // no FTS index on this build, or fewer than three characters, which the trigram
