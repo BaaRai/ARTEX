@@ -105,6 +105,8 @@ func run() int {
 		// A negative uid turns the drop off; 0 (root) is refused.
 		execUID = flag.Int("exec-uid", server.DefaultExecUID, "uid that agent processes run as (Bash, shell, custom tools, MCP stdio); -1 turns the drop off")
 		execGID = flag.Int("exec-gid", server.DefaultExecGID, "gid that agent processes run as")
+		// Development escape of the isolation self-test, off by default.
+		devNoIsolation = flag.Bool(server.DevNoIsolationFlag, false, "DEVELOPMENT ONLY: start even when the agent isolation self-test fails; agent processes and file tools may then read the server's keys, config and database credentials")
 	)
 	flag.Parse()
 
@@ -184,6 +186,15 @@ func run() int {
 		return 1
 	}
 	if err := server.InstallBashShim(priv); err != nil {
+		log.Printf("[config] %v", err)
+		return 1
+	}
+	// Before the stores open and any agent runs: check that the isolation above holds
+	// (server/isolation.go). A failure stops the start unless the escape is set.
+	selfTest := server.IsolationSelfTest(priv, server.IsolationTargets{
+		DataDir: *dataDir, KeyDir: keyDir, ConfigPath: cfgPath, SkillDir: skillDir, DSN: dsn,
+	})
+	if err := server.EnforceIsolation(selfTest, *devNoIsolation); err != nil {
 		log.Printf("[config] %v", err)
 		return 1
 	}

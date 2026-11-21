@@ -583,7 +583,8 @@ func InstallBashShim(p ExecPrivilege) error {
 
 // RunExecShimIfRequested makes the process a privilege-drop shim when it was started
 // as one: as bash through the PATH shim, or as artex __artex-exec-drop for an MCP
-// stdio command. It exits or execs the target; it returns only for an ordinary start.
+// stdio command; or the isolation self-test probe (isolation_unix.go). It exits or
+// execs the target; it returns only for an ordinary start.
 func RunExecShimIfRequested(argv []string) {
 	if len(argv) == 0 {
 		return
@@ -593,6 +594,9 @@ func RunExecShimIfRequested(argv []string) {
 	}
 	if len(argv) >= 2 && argv[1] == execDropArg {
 		runDropShim(argv[2:])
+	}
+	if len(argv) >= 2 && argv[1] == isolationProbeArg {
+		runIsolationProbeMain()
 	}
 }
 
