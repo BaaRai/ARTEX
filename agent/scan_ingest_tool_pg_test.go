@@ -22,7 +22,7 @@ func TestIngestScanOutputPG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const assetsWhere = `ip IN ('198.51.100.77','2001:db8::77') OR domain LIKE '%scan-ingest.example.com' OR url LIKE '%198.51.100.77%' OR url LIKE '%2001:db8::77%'`
+	const assetsWhere = `ip IN ('198.51.100.77','2001:db8::77') OR domain IN ('198.51.100.77','2001:db8::77','example.com') OR domain LIKE '%scan-ingest.example.com' OR url LIKE '%198.51.100.77%' OR url LIKE '%2001:db8::77%'`
 	t.Cleanup(func() {
 		_ = d.DeleteTask(task.ID)
 		_, _ = d.Exec(`DELETE FROM assets WHERE ` + assetsWhere)
@@ -127,7 +127,7 @@ func TestIngestScanOutputJSONPG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const assetsWhere = `domain LIKE '%scan-ingest.example.com' OR url LIKE '%scan-ingest.example.com%'`
+	const assetsWhere = `ip IN ('198.51.100.77','2001:db8::77') OR domain IN ('198.51.100.77','2001:db8::77','example.com') OR domain LIKE '%scan-ingest.example.com' OR url LIKE '%scan-ingest.example.com%'`
 	t.Cleanup(func() {
 		_ = d.DeleteTask(task.ID)
 		_, _ = d.Exec(`DELETE FROM assets WHERE ` + assetsWhere)
@@ -210,7 +210,7 @@ func TestIngestScanOutputUserinfoPG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const assetsWhere = `domain LIKE '%scan-ingest.example.com' OR url LIKE '%scan-ingest.example.com%'`
+	const assetsWhere = `ip IN ('198.51.100.77','2001:db8::77') OR domain IN ('198.51.100.77','2001:db8::77','example.com') OR domain LIKE '%scan-ingest.example.com' OR url LIKE '%scan-ingest.example.com%'`
 	t.Cleanup(func() {
 		_ = d.DeleteTask(task.ID)
 		_, _ = d.Exec(`DELETE FROM assets WHERE ` + assetsWhere)

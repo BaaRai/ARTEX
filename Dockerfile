@@ -14,6 +14,7 @@
 # Pinned to the Node 22 line the CI/release workflows use. On the build platform
 # only; the frontend static export is architecture-independent.
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
+ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --ignore-scripts
@@ -47,19 +48,44 @@ RUN ARTEX_SKIP_FRONTEND=1 \
 # Web-recon toolbox (drost-community take 1, #100): pinned release binaries, staged
 # on the build platform and copied into /usr/local/bin of the runtime image so hunt
 # workers can run them directly through their Bash tool. Versions pinned per tool;
-# upgrade deliberately. Each archive is verified against the checksums file of its
-# own GitHub release (exact asset name, sha256). That file comes from the same
-# release channel as the archive, so it catches corrupted or swapped downloads and
-# moved tags, not a compromised publisher. sqlmap has no release binaries: it is a
-# shallow clone of a pinned tag, checked against the expected commit.
+# upgrade deliberately.
+#
+# Every archive is verified against a SHA-256 written down here, per asset and per
+# architecture, not against the *_checksums.txt of its own GitHub release. Checking
+# against that file catches a corrupted or swapped download and a moved tag, but the
+# digest and the artifact it describes come from the same publisher and the same
+# release: a replacement asset and a replacement checksums file agree with each
+# other and the build passes. Pinning the digest here moves that decision out of the
+# build, so a swapped asset fails unless the diff that swaps it also changes the
+# digest a reviewer reads.
+#
+# Cost: a version bump is now three edits (the version ARG and the two digests), and
+# a publisher re-uploading an asset under the same tag breaks the build until the
+# digest is bumped on purpose. That is the trade: the build stops trusting the
+# channel it downloads from.
+#
+# sqlmap has no release binaries: it is a shallow clone of a pinned tag, checked
+# against the expected commit, which is the same idea.
 FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS tools
 ARG TARGETARCH
 ARG NUCLEI_VERSION=v3.11.1
+ARG NUCLEI_SHA256_AMD64=ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6
+ARG NUCLEI_SHA256_ARM64=8044e3d9768ba0a744b2872c1a87e813006f013da97ca9f50f7661a4203bec07
 ARG HTTPX_VERSION=v1.12.0
+ARG HTTPX_SHA256_AMD64=9d8439e8b6c9aa7d1e2314817a392e00d5178da3af5652f7475f88868f418f76
+ARG HTTPX_SHA256_ARM64=fd7b123c1dfbc3d69f19f524e4eebcd6ec06b9a6cbd56813c76f11645197331e
 ARG SUBFINDER_VERSION=v2.17.0
+ARG SUBFINDER_SHA256_AMD64=a39c3e5c7a26ef3c430915c4d6cbf7716a00f26769a75e9405aba796142eba37
+ARG SUBFINDER_SHA256_ARM64=24913d49dddc1d3a5e99a4a7580da5be980959b9415b96f52c4f7f4124392190
 ARG KATANA_VERSION=v1.8.0
+ARG KATANA_SHA256_AMD64=cb027ae99d0757061b70c07a15c7a80f62c5a535ab52c4a329f80c4b0a7309d2
+ARG KATANA_SHA256_ARM64=80e269210727a855511ffac8dfb01297b2344742acec71a35e8ba4a67a90f0f2
 ARG FFUF_VERSION=v2.3.0
+ARG FFUF_SHA256_AMD64=b2a3c725fcb9da175159682f54d6e9149f2905b00d84d155e7efc5d599975ceb
+ARG FFUF_SHA256_ARM64=e2d712615d53da797ee929006e41f2df5a7960a5353133db9c150ddaa22ae4e8
 ARG DALFOX_VERSION=v3.2.4
+ARG DALFOX_SHA256_AMD64=c11cfd2f8261973f0a2a2a1eba5a147ce77712a29acfa6343f9847fb8bb7eca2
+ARG DALFOX_SHA256_ARM64=fd56b0b7da2d06868cd73b504f41d21314629feffcd5bdc97718db1c9dd2fa70
 ARG SQLMAP_VERSION=1.9.9
 ARG SQLMAP_COMMIT=cceda39208b5aad478de2c3f731df4239d9881f6
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -67,17 +93,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
-      amd64) PD_ARCH=amd64; FFUF_ARCH=amd64; DALFOX_ARCH=x86_64 ;; \
-      arm64) PD_ARCH=arm64; FFUF_ARCH=arm64; DALFOX_ARCH=aarch64 ;; \
+      amd64) PD_ARCH=amd64; FFUF_ARCH=amd64; DALFOX_ARCH=x86_64; \
+             NUCLEI_SUM="$NUCLEI_SHA256_AMD64"; HTTPX_SUM="$HTTPX_SHA256_AMD64"; \
+             SUBFINDER_SUM="$SUBFINDER_SHA256_AMD64"; KATANA_SUM="$KATANA_SHA256_AMD64"; \
+             FFUF_SUM="$FFUF_SHA256_AMD64"; DALFOX_SUM="$DALFOX_SHA256_AMD64" ;; \
+      arm64) PD_ARCH=arm64; FFUF_ARCH=arm64; DALFOX_ARCH=aarch64; \
+             NUCLEI_SUM="$NUCLEI_SHA256_ARM64"; HTTPX_SUM="$HTTPX_SHA256_ARM64"; \
+             SUBFINDER_SUM="$SUBFINDER_SHA256_ARM64"; KATANA_SUM="$KATANA_SHA256_ARM64"; \
+             FFUF_SUM="$FFUF_SHA256_ARM64"; DALFOX_SUM="$DALFOX_SHA256_ARM64" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     mkdir -p /out; \
-    fetch() { base="$1"; asset="$2"; sums="$3"; name="$4"; \
+    fetch() { base="$1"; asset="$2"; want="$3"; name="$4"; \
       rm -rf /tmp/t; mkdir -p /tmp/t/x; \
       curl -fsSL "$base/$asset" -o "/tmp/t/$asset"; \
-      curl -fsSL "$base/$sums" -o /tmp/t/sums.txt; \
-      want="$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1 }' /tmp/t/sums.txt)"; \
-      if [ -z "$want" ]; then echo "no checksum entry for $asset" >&2; exit 1; fi; \
+      if [ -z "$want" ]; then echo "no pinned digest for $asset" >&2; exit 1; fi; \
       got="$(sha256sum "/tmp/t/$asset" | cut -d' ' -f1)"; \
       if [ "$want" != "$got" ]; then echo "checksum mismatch for $asset: want $want got $got" >&2; exit 1; fi; \
       case "$asset" in *.zip) unzip -q "/tmp/t/$asset" -d /tmp/t/x ;; *) tar -xzf "/tmp/t/$asset" -C /tmp/t/x ;; esac; \
@@ -86,17 +116,17 @@ RUN set -eux; \
       rm -rf /tmp/t; }; \
     gh="https://github.com"; \
     fetch "$gh/projectdiscovery/nuclei/releases/download/$NUCLEI_VERSION" \
-      "nuclei_${NUCLEI_VERSION#v}_linux_${PD_ARCH}.zip" "nuclei_${NUCLEI_VERSION#v}_checksums.txt" nuclei; \
+      "nuclei_${NUCLEI_VERSION#v}_linux_${PD_ARCH}.zip" "$NUCLEI_SUM" nuclei; \
     fetch "$gh/projectdiscovery/httpx/releases/download/$HTTPX_VERSION" \
-      "httpx_${HTTPX_VERSION#v}_linux_${PD_ARCH}.zip" "httpx_${HTTPX_VERSION#v}_checksums.txt" httpx; \
+      "httpx_${HTTPX_VERSION#v}_linux_${PD_ARCH}.zip" "$HTTPX_SUM" httpx; \
     fetch "$gh/projectdiscovery/subfinder/releases/download/$SUBFINDER_VERSION" \
-      "subfinder_${SUBFINDER_VERSION#v}_linux_${PD_ARCH}.zip" "subfinder_${SUBFINDER_VERSION#v}_checksums.txt" subfinder; \
+      "subfinder_${SUBFINDER_VERSION#v}_linux_${PD_ARCH}.zip" "$SUBFINDER_SUM" subfinder; \
     fetch "$gh/projectdiscovery/katana/releases/download/$KATANA_VERSION" \
-      "katana_${KATANA_VERSION#v}_linux_${PD_ARCH}.zip" "katana-${KATANA_VERSION#v}-checksums.txt" katana; \
+      "katana_${KATANA_VERSION#v}_linux_${PD_ARCH}.zip" "$KATANA_SUM" katana; \
     fetch "$gh/ffuf/ffuf/releases/download/$FFUF_VERSION" \
-      "ffuf_${FFUF_VERSION#v}_linux_${FFUF_ARCH}.tar.gz" "ffuf_${FFUF_VERSION#v}_checksums.txt" ffuf; \
+      "ffuf_${FFUF_VERSION#v}_linux_${FFUF_ARCH}.tar.gz" "$FFUF_SUM" ffuf; \
     fetch "$gh/hahwul/dalfox/releases/download/$DALFOX_VERSION" \
-      "dalfox-${DALFOX_VERSION}-linux-${DALFOX_ARCH}-musl.tar.gz" "dalfox-${DALFOX_VERSION}-linux-${DALFOX_ARCH}-musl.tar.gz.sha256" dalfox; \
+      "dalfox-${DALFOX_VERSION}-linux-${DALFOX_ARCH}-musl.tar.gz" "$DALFOX_SUM" dalfox; \
     git clone --quiet --depth 1 --branch "$SQLMAP_VERSION" https://github.com/sqlmapproject/sqlmap /opt/sqlmap; \
     commit="$(git -C /opt/sqlmap rev-parse HEAD)"; \
     if [ "$commit" != "$SQLMAP_COMMIT" ]; then echo "sqlmap commit mismatch: want $SQLMAP_COMMIT got $commit" >&2; exit 1; fi; \
@@ -110,26 +140,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
     && rm -rf /var/lib/apt/lists/*
-# Node 22 from the official nodejs.org tarball, verified against its SHASUMS256.txt:
-# bookworm's apt nodejs is 18, Playwright requires >=20, and 20 is end-of-life.
-# 22 matches the CI and release workflows.
+# Node 22 from the official nodejs.org tarball: bookworm's apt nodejs is 18,
+# Playwright requires >=20, and 20 is end-of-life. 22 matches the CI and release
+# workflows. Verified against a digest pinned here rather than against the fetched
+# SHASUMS256.txt, for the reason given at the tools stage.
 ARG NODE_VERSION=22.23.4
+ARG NODE_SHA256_AMD64=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
+ARG NODE_SHA256_ARM64=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
-      amd64) NODE_ARCH=x64 ;; \
-      arm64) NODE_ARCH=arm64 ;; \
+      amd64) NODE_ARCH=x64; want="$NODE_SHA256_AMD64" ;; \
+      arm64) NODE_ARCH=arm64; want="$NODE_SHA256_ARM64" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     base="https://nodejs.org/dist/v${NODE_VERSION}"; \
     asset="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz"; \
     curl -fsSL "$base/$asset" -o "/tmp/$asset"; \
-    curl -fsSL "$base/SHASUMS256.txt" -o /tmp/SHASUMS256.txt; \
-    want="$(awk -v a="$asset" '$2 == a { print $1 }' /tmp/SHASUMS256.txt)"; \
-    if [ -z "$want" ]; then echo "no checksum entry for $asset" >&2; exit 1; fi; \
+    [ -n "$want" ] || { echo "no pinned digest for $asset" >&2; exit 1; }; \
     got="$(sha256sum "/tmp/$asset" | cut -d' ' -f1)"; \
     if [ "$want" != "$got" ]; then echo "checksum mismatch for $asset: want $want got $got" >&2; exit 1; fi; \
     tar -xJf "/tmp/$asset" -C /usr/local --strip-components=1 --no-same-owner; \
-    rm -f "/tmp/$asset" /tmp/SHASUMS256.txt; \
+    rm -f "/tmp/$asset"; \
     node --version; npm --version
 # Pinned, checksum-verified recon binaries and the sqlmap checkout from the tools stage.
 COPY --from=tools /out/ /usr/local/bin/

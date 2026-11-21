@@ -16,7 +16,7 @@ import (
 // write happens even when the stored flag is off, which is the outage behaviour.
 func TestCoverageReadFailureKeepsToolsAndWritesAutoScope(t *testing.T) {
 	d := testDB(t)
-	defer d.Close()
+	t.Cleanup(func() { _ = d.Close() })
 	off := false
 	task, err := d.CreateTaskWithOptions("coverage outage", "goal", db.TaskCreateOptions{CoverageEnabled: &off})
 	if err != nil {

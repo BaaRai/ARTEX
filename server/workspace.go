@@ -69,16 +69,6 @@ func workspacePathDenied(realRoot, realPath string) bool {
 	return false
 }
 
-// wsResolve maps a user-supplied relative path to an absolute path INSIDE the work
-// dir. It returns ok=false if the path would escape the root (including via symlinks).
-func (s *Server) wsResolve(rel string) (string, bool) {
-	cp, ok := s.wsResolveConfined(rel)
-	if !ok {
-		return "", false
-	}
-	return cp.realPath, true
-}
-
 // wsRel renders an absolute path back as a workspace-relative path (forward slashes).
 func (s *Server) wsRel(abs string) string {
 	base, err := resolveRealRoot(s.m.dir)

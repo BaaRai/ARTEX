@@ -35,13 +35,21 @@ const (
 	ErrClassTransport = "transport_error"
 )
 
+// Source kinds of a trace line in exchange_rewrites.
+const (
+	SourceKindRule = "rule"
+	SourceKindHook = "hook"
+)
+
 // TraceLine is one row of an exchange's rewrite trace, in order. An exchange is
 // rewritten when it has at least one applied line.
 type TraceLine struct {
-	Phase  Phase
-	RuleID int64 // 0 on a global line
-	// RuleSnapshot is the rule as JSON, on its first line in the exchange only:
-	// matchers in clear, sensitive action values left out, longer values summarized.
+	Phase       Phase
+	SourceKind  string // "rule" (default when empty) | "hook"
+	RuleID      int64  // 0 on a global or hook line
+	HookID      int64  // 0 on a rule or global line
+	HookVersion int    // 0 on a rule or global line
+	// RuleSnapshot is the rule or hook metadata as JSON, on its first line in the exchange only.
 	RuleSnapshot string
 	Action       string
 	Field        string // "method", "url", "header:<Name>", "body" or "status"

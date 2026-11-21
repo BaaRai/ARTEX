@@ -106,7 +106,7 @@ JSON
   # embedding the frontend requires node to produce the static assets
   if command -v npm >/dev/null 2>&1; then
     info "building frontend static assets..."
-    ( cd web && npm ci && npm run build:static )
+    ( cd web && npm ci --ignore-scripts && npm run build:static )
     rm -rf server/webui/dist && cp -r web/out server/webui/dist
     info "compiling embedded single binary..."
     CGO_ENABLED=0 go build -tags embedui -trimpath -o artex ./cmd/artex

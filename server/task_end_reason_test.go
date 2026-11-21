@@ -21,7 +21,7 @@ func TestReviveClearsBudgetEndReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pg.Exec(`DELETE FROM tasks WHERE id=$1`, id) })
+	t.Cleanup(func() { _ = pg.DeleteTask(id) })
 	endReason := func() string {
 		t.Helper()
 		var r string

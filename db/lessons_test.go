@@ -191,11 +191,14 @@ func TestExtractLessonsScopesSingleCompanyFromTaskScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupErr(t, "extract task", d.DeleteTask(task.ID)) })
-	if _, err := d.Exec(`
+	var extractedFID int64
+	if err := d.QueryRow(`
 		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
-		VALUES ($1,'xss','Reflected XSS','reflected in search','high','confirmed')`, task.ID); err != nil {
+		VALUES ($1,'xss','Reflected XSS','reflected in search','high','confirmed')
+		RETURNING id`, task.ID).Scan(&extractedFID); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, extractedFID) })
 	n, err := d.ExtractLessonsForTask(t.Context(), task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -477,6 +480,7 @@ func TestExtractLessonsRetractsReversedDisposition(t *testing.T) {
 		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
 
 	n, err := d.ExtractLessonsForTask(t.Context(), task.ID)
 	if err != nil {
@@ -589,12 +593,14 @@ func TestExtractLessonsRetireOnlyWhenLastEvidence(t *testing.T) {
 		RETURNING id`, task.ID, cue, label).Scan(&aID); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, aID) })
 	if err := d.QueryRow(`
 		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
 		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
 		RETURNING id`, task.ID, cue, label).Scan(&bID); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, bID) })
 
 	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
 		t.Fatal(err)
@@ -681,6 +687,7 @@ func TestExtractLessonsRetractsAllRetests(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
 
 	r1 := insertLessonRetest(t, d, fid, "reproduced")
 	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
@@ -752,6 +759,7 @@ func TestExtractLessonsDoesNotUnretireWithEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
 
 	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
 		t.Fatal(err)
@@ -798,6 +806,7 @@ func TestExtractLessonsLeavesAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
 
 	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
 		t.Fatal(err)
@@ -840,6 +849,7 @@ func TestExtractLessonsReopenRetractsNothing(t *testing.T) {
 		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
 
 	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {

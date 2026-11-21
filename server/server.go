@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/archivestore"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
@@ -158,9 +159,11 @@ type Server struct {
 
 	// Cold task archives run through one persistent FIFO worker. The buffered wake
 	// channel coalesces enqueue bursts; the database remains the source of truth.
-	archiveWake chan struct{}
-	archiveWG   sync.WaitGroup
-	side        *sideQuestionState
+	archiveWake     chan struct{}
+	archiveWG       sync.WaitGroup
+	archiveStore    *archivestore.Store
+	archiveStoreErr error
+	side            *sideQuestionState
 }
 
 // provEntry is a cached provider + its config for one LLM profile id.
@@ -302,8 +305,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	} else {
 		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
 	}
-	// Both env readers have now run (NewManager for the DSN, FromEnv above for the
-	// keys). Drop the secrets before anything below can spawn a child process:
+	s.initTaskArchiveStore()
+	// Startup env readers have now run (NewManager for the DSN, the LLM provider
+	// and archive store for their credentials). Drop the secrets before anything
+	// below can spawn a child process:
 	// restoring runtimes resumes workers that run shells, and MCP discovery starts
 	// stdio servers.
 	if s.scrubSecrets {
@@ -903,6 +908,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // aggregate call counts per tool
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
+	mux.HandleFunc("GET /api/llm/context/summary", s.pgLLMContextSummary)
 	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
 	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)
 	mux.HandleFunc("GET /api/llm/records/by-model", s.pgTokenByModel) // aggregate this task's token usage by model
@@ -1031,6 +1037,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/traffic/rewrite-rules/{id}", s.rewriteUpdateRule)
 	mux.HandleFunc("DELETE /api/traffic/rewrite-rules/{id}", s.rewriteDeleteRule)
 	mux.HandleFunc("POST /api/traffic/rewrite-rules/{id}/toggle", s.rewriteToggleRule)
+
+	// capture-proxy constrained Go tampering hooks (P4.2, operator-only, opt-in via ARTEX_TAMPER_HOOKS_ENABLED)
+	mux.HandleFunc("GET /api/traffic/hooks", s.tamperListHooks)
+	mux.HandleFunc("POST /api/traffic/hooks", s.tamperCreateHook)
+	mux.HandleFunc("PUT /api/traffic/hooks/{id}", s.tamperUpdateHook)
+	mux.HandleFunc("DELETE /api/traffic/hooks/{id}", s.tamperDeleteHook)
+	mux.HandleFunc("POST /api/traffic/hooks/{id}/toggle", s.tamperToggleHook)
+	mux.HandleFunc("GET /api/traffic/hooks/{id}/versions", s.tamperListHookVersions)
+	mux.HandleFunc("POST /api/traffic/hooks/{id}/rollback", s.tamperRollbackHook)
+	mux.HandleFunc("POST /api/traffic/hooks/dry-run", s.tamperDryRunHook)
 
 	// asset interception rule management (global blocklist: domains/IPs/URLs/CIDRs)
 	mux.HandleFunc("GET /api/asset-intercept/rules", s.assetInterceptListRules)

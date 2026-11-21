@@ -266,6 +266,10 @@ type Manager struct {
 	rewriteMu     sync.Mutex
 	rewriteSet    atomic.Pointer[rewrite.Set]
 	rewriteErrors rewrite.ErrorLog
+	// Capture-proxy constrained Go tampering hooks (P4.2), behind ARTEX_TAMPER_HOOKS_ENABLED.
+	hookMu       sync.Mutex
+	hookSet      atomic.Pointer[traffic.HookSet]
+	hookLoadErrs map[int64]string
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
@@ -463,6 +467,26 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		if tr != nil {
 			m.traffic = tr
 			m.reloadRewriteRules() // in place before the proxy accepts a connection
+			m.reloadTamperHooks()  // opt-in behind ARTEX_TAMPER_HOOKS_ENABLED=1
+			if scfg, ok := traffic.SOCKS5ConfigFromEnv(); ok {
+				scfg.DialContext = m.interceptor.DialSOCKS5
+				scfg.ResolveUDP4 = m.interceptor.ResolveUDP4
+				if bound, serr := tr.StartSOCKS5(scfg); serr != nil {
+					log.Printf("[traffic/socks5] disabled: %v", serr)
+				} else if scfg.EnableUDP {
+					log.Printf("[traffic/socks5] opt-in SOCKS5 CONNECT + UDP ASSOCIATE listener on %s", bound)
+				} else {
+					log.Printf("[traffic/socks5] opt-in SOCKS5 CONNECT listener on %s", bound)
+				}
+			}
+			if tcfg, ok := traffic.TransparentTCPConfigFromEnv(); ok {
+				tcfg.DialContext = m.interceptor.DialSOCKS5
+				if bound, terr := tr.StartTransparentTCP(tcfg); terr != nil {
+					log.Printf("[traffic/transparent] disabled: %v", terr)
+				} else {
+					log.Printf("[traffic/transparent] opt-in transparent TCP listener on %s (Linux IPv4 SO_ORIGINAL_DST)", bound)
+				}
+			}
 			go func() {
 				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
 				if err := tr.Start(); err != nil {

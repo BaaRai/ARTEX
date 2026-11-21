@@ -28,6 +28,7 @@ func TestFindingQualityByNodeID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer d.DeleteFinding(rec.FindingID)
 	if err := d.SetFindingVerification(rec.FindingID, VerificationVerified, 3, "reproduced twice on staging"); err != nil {
 		t.Fatal(err)
 	}

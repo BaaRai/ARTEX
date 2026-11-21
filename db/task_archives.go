@@ -60,6 +60,7 @@ type TaskArchive struct {
 	Warnings                json.RawMessage `json:"warnings"`
 	FormatVersion           int             `json:"format_version"`
 	ArchivePath             string          `json:"-"`
+	Storage                 string          `json:"storage,omitempty"`
 	SHA256                  string          `json:"sha256,omitempty"`
 	OriginalSize            int64           `json:"original_size"`
 	CompressedSize          int64           `json:"compressed_size"`
@@ -160,6 +161,12 @@ func scanTaskArchive(sc interface{ Scan(...any) error }) (*TaskArchive, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if item.ArchivePath != "" {
+		item.Storage = "local"
+		if strings.HasPrefix(item.ArchivePath, "s3://") {
+			item.Storage = "s3"
+		}
 	}
 	if err := json.Unmarshal([]byte(sources), &item.SourceTaskIDs); err != nil {
 		return nil, err
@@ -449,7 +456,10 @@ func (d *DB) FailTaskArchiveJob(id int64, activeState string, cause error) error
 	if cause != nil {
 		message = cause.Error()
 	}
-	_, err := d.Exec(`UPDATE task_archives SET state=$2,phase='failed',error=$3 WHERE id=$1`, id, failed, message)
+	// Only a job still in its active state fails. The worker also reports a panic
+	// it recovered after the job committed: a ready archive marked archive_failed
+	// could be neither restored nor deleted.
+	_, err := d.Exec(`UPDATE task_archives SET state=$2,phase='failed',error=$3 WHERE id=$1 AND state=$4`, id, failed, message, activeState)
 	return err
 }
 

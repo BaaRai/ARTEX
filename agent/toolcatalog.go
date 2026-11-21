@@ -180,6 +180,14 @@ type overriddenTool struct {
 func (o *overriddenTool) Description() string         { return o.desc }
 func (o *overriddenTool) InputSchema() map[string]any { return o.schema }
 
+// AcceptsRawInput forwards the wrapped tool's opt-out of the harness schema
+// check (record_fact validates its own input); the embedded interface alone
+// would hide it from the harness's type assertion.
+func (o *overriddenTool) AcceptsRawInput() bool {
+	r, ok := o.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && r.AcceptsRawInput()
+}
+
 func (o *overriddenTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 	return o.CoreTool.Call(ctx, injectDefaults(in, o.schema), tc)
 }
