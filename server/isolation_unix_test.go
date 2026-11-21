@@ -3,7 +3,9 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
@@ -91,7 +93,7 @@ func TestCheckIsolationReportsEachExposure(t *testing.T) {
 		UID: 10001, GID: 10001, ServerPID: os.Getpid(),
 		Unreadable: []string{secret, filepath.Join(dir, "absent.key")},
 		Unwritable: []string{dir},
-		DB:         &isolationProbeDB{Host: host, Port: port, User: "artex", Database: "artex"},
+		DB:         []isolationProbeDB{{Host: host, Port: port, User: "artex", Database: "artex"}},
 	})
 	for _, want := range []string{
 		"not the executor uid 10001",
@@ -133,15 +135,48 @@ func TestConnectWithoutPasswordRealPG(t *testing.T) {
 		t.Skip("ARTEX_PG_DSN not set")
 	}
 	spec := isolationSpec(ExecPrivilege{Enabled: true, UID: 10001, GID: 10001}, IsolationTargets{DSN: dsn})
-	if spec.DB == nil {
+	if len(spec.DB) == 0 {
 		t.Fatal("no database in the spec")
 	}
-	err := connectWithoutPassword(spec.DB)
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || (pgErr.Code != "28P01" && pgErr.Code != "28000") {
-		t.Fatalf("connection without password: %v, want an authentication failure (28P01/28000)", err)
+	for i := range spec.DB {
+		err := connectWithoutPassword(&spec.DB[i])
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || (pgErr.Code != "28P01" && pgErr.Code != "28000") {
+			t.Fatalf("connection without password to %s:%d: %v, want an authentication failure (28P01/28000)", spec.DB[i].Host, spec.DB[i].Port, err)
+		}
+		t.Logf("%s:%d refused as expected: SQLSTATE %s", spec.DB[i].Host, spec.DB[i].Port, pgErr.Code)
 	}
-	t.Logf("refused as expected: SQLSTATE %s", pgErr.Code)
+}
+
+// The probe tries the hosts the DSN names, every one of them, and nothing else: no
+// loopback of its own. A DSN it cannot use fails the self-test instead of skipping
+// the database check.
+func TestIsolationSpecUsesTheDSNHosts(t *testing.T) {
+	p := ExecPrivilege{Enabled: true, UID: 10001, GID: 10001}
+	for _, c := range []struct {
+		dsn  string
+		want string
+	}{
+		{"postgres://artex:pw@db.internal:6543/artex?sslmode=disable", "db.internal:6543"},
+		{"postgres://artex:pw@db1.internal:6543,db2.internal:6544/artex?sslmode=prefer", "db1.internal:6543 db2.internal:6544"},
+		{"host=10.20.30.40 port=5433 user=artex password=pw dbname=artex", "10.20.30.40:5433"},
+		{"host=/var/run/postgresql user=artex dbname=artex", "/var/run/postgresql:5432"},
+	} {
+		var got []string
+		for _, db := range isolationSpec(p, IsolationTargets{DSN: c.dsn}).DB {
+			got = append(got, fmt.Sprintf("%s:%d", db.Host, db.Port))
+			if db.User != "artex" || db.Database != "artex" {
+				t.Errorf("%s: user %q database %q", c.dsn, db.User, db.Database)
+			}
+		}
+		if strings.Join(got, " ") != c.want {
+			t.Errorf("%s: probe hosts %v, want %s", c.dsn, got, c.want)
+		}
+	}
+	err := IsolationSelfTest(p, IsolationTargets{DSN: "postgres://%zz"})
+	if err == nil || !strings.Contains(err.Error(), "names no host the self-test can check") {
+		t.Fatalf("self-test with an unusable DSN: %v", err)
+	}
 }
 
 // The parent rule: owned by the executor, or writable by it without the sticky bit,
@@ -236,13 +271,13 @@ func TestIsolationSpecHasNoPassword(t *testing.T) {
 			t.Errorf("%s missing from the unreadable files %v", want, spec.Unreadable)
 		}
 	}
-	if spec.DB == nil || spec.DB.Host != "postgres" || spec.DB.Port != 5432 || spec.DB.User != "artex" || spec.DB.Database != "artex" {
+	if len(spec.DB) != 1 || spec.DB[0].Host != "postgres" || spec.DB[0].Port != 5432 || spec.DB[0].User != "artex" || spec.DB[0].Database != "artex" {
 		t.Fatalf("db = %+v", spec.DB)
 	}
 	if spec.UID != 10001 || spec.GID != 10002 || spec.ServerPID != os.Getpid() {
 		t.Fatalf("ids = %d:%d pid %d", spec.UID, spec.GID, spec.ServerPID)
 	}
-	if b := strings.Join(append(spec.Unreadable, spec.DB.Host, spec.DB.User), " "); strings.Contains(b, "s3cr3t") {
+	if b, _ := json.Marshal(spec); strings.Contains(string(b), "s3cr3t") {
 		t.Fatal("the password reached the spec")
 	}
 }

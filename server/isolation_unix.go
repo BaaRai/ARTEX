@@ -39,8 +39,10 @@ type isolationProbeSpec struct {
 	Unreadable []string `json:"unreadable,omitempty"`
 	// Unwritable are directories no agent process may create an entry in.
 	Unwritable []string `json:"unwritable,omitempty"`
-	// DB names the server's database; the probe connects without a password.
-	DB *isolationProbeDB `json:"db,omitempty"`
+	// DB names the server's database at each host its DSN lists, fallbacks included:
+	// the real address the server connects to, never one the self-test picks. The
+	// probe connects to each without a password.
+	DB []isolationProbeDB `json:"db,omitempty"`
 }
 
 type isolationProbeDB struct {
@@ -65,6 +67,9 @@ func IsolationSelfTest(p ExecPrivilege, t IsolationTargets) error {
 	}
 	spec := isolationSpec(p, t)
 	failures := fileToolIsolationFailures(spec.Unreadable)
+	if t.DSN != "" && len(spec.DB) == 0 {
+		failures = append(failures, "the database DSN names no host the self-test can check")
+	}
 	failures = append(failures, replaceableDirFailures(spec.Unwritable, p.UID, p.GID)...)
 	failures = append(failures, skillTreeFailures(t.SkillDir, p.UID, p.GID)...)
 	rep, err := runIsolationProbe(spec)
@@ -103,10 +108,32 @@ func isolationSpec(p ExecPrivilege, t IsolationTargets) isolationProbeSpec {
 	}
 	if t.DSN != "" {
 		if cfg, err := pgx.ParseConfig(t.DSN); err == nil {
-			spec.DB = &isolationProbeDB{Host: cfg.Host, Port: cfg.Port, User: cfg.User, Database: cfg.Database}
+			spec.DB = dsnProbeHosts(cfg)
 		}
 	}
 	return spec
+}
+
+// dsnProbeHosts lists each distinct host and port of a parsed DSN, the first one
+// and its fallbacks (pgx adds a fallback per TLS attempt, so hosts repeat).
+func dsnProbeHosts(cfg *pgx.ConnConfig) []isolationProbeDB {
+	var out []isolationProbeDB
+	add := func(host string, port uint16) {
+		if host == "" {
+			return
+		}
+		for _, db := range out {
+			if db.Host == host && db.Port == port {
+				return
+			}
+		}
+		out = append(out, isolationProbeDB{Host: host, Port: port, User: cfg.User, Database: cfg.Database})
+	}
+	add(cfg.Host, cfg.Port)
+	for _, fb := range cfg.Fallbacks {
+		add(fb.Host, fb.Port)
+	}
+	return out
 }
 
 func configDir(configPath string) string {
@@ -321,9 +348,10 @@ func checkIsolationAsExecutor(spec isolationProbeSpec) []string {
 			fail("the variable %s reached Bash: it is not on the agent environment allowlist", name)
 		}
 	}
-	if spec.DB != nil {
-		if err := connectWithoutPassword(spec.DB); err == nil {
-			fail("Bash opened a database session as %q on %s without the server's password", spec.DB.User, spec.DB.Host)
+	for i := range spec.DB {
+		db := &spec.DB[i]
+		if err := connectWithoutPassword(db); err == nil {
+			fail("Bash opened a database session as %q on %s:%d without the server's password", db.User, db.Host, db.Port)
 		}
 	}
 	return failures

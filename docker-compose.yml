@@ -5,6 +5,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-artex}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Please set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-artex}
+      # Password (SCRAM) for every TCP connection from another container, artex's
+      # included; the server's isolation self-test checks that the agent cannot
+      # connect without it. Applied when the database is first initialised (a new
+      # pgdata volume); the image keeps trust for connections from inside this
+      # container only, which no agent process reaches.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
