@@ -2,10 +2,18 @@
 
 All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.7.0] - 2026-11-21
+
+Agent-driven traffic capture (SOCKS5, transparent TCP and raw UDP), operator tampering hooks with their admin panel, the agentic injection and proof hardening from the #124 audit, LLM context telemetry and the worker cache-prefix split, capture-proxy rewrite rules, HAR import and export, and a large security batch across the interception gate, sessions, logs, the workspace file API and the model endpoint probe.
 
 ### Added
 
+- **Traffic > Hooks admin panel (P4.2 PR2)**: the Traffic page gains an operator-only Hooks tab for the constrained Go tampering hooks: list, create (always created disabled), edit, delete, toggle, version history with rollback, and a dry-run against a captured exchange or a synthetic input. A dry-run shows the mutated request or response, the fields the hook changed, and the per-line trace, with masked fields shown as their keyed HMAC. Binary and compressed bodies are flagged and skipped, bodies over 1 MiB are flagged, and the UI never renders hook or exchange text as HTML (#435).
+- **Concurrent multi-LLM worker rotation** (#270): a task can rotate several bound LLM profiles across its workers, with per-lane exhaustion tracked and shown on the task controls.
+- **Encrypted S3 archive storage** (#285, #318): an optional S3 backend stores task archives encrypted, connects with the existing archive lifecycle, and lets an interrupted archive job be recovered on the next start.
+- **Turkish and Simplified Chinese UI, optional Neon theme** (#346, #413, #401): the web console gains a translation layer with a Turkish and a Simplified Chinese locale, and an opt-in Neon theme preset in Settings.
+- **Readiness probe** (#363): `GET /api/ready` checks PostgreSQL and reports readiness separately from the health route.
+- **Operator console browser protections** (#349): the embedded console restricts framing to the same origin and keeps referrer information on the same origin.
 - **Target noise governor**: one shared egress governor paces ARTEX's own HTTP requests (WebFetch, the http custom tools and the enrich probe) against a noise profile (`off` by default, `quiet`, `balanced`, `aggressive`): a per-host token bucket with jitter, per-host and global in-flight caps, 429/503 backoff, GET deduplication with a short cache, and a configurable target User-Agent (`ARTEX_TARGET_USER_AGENT`). Off is a strict passthrough (#205).
 - **Low-and-slow prompt block**: when a noise profile is set, the planner, worker, main agent and chat prompts carry the per-host limits of the profile and the exact rate or delay flags for nmap, nuclei, httpx, katana, ffuf, dalfox and sqlmap; with the profile off the prompts are unchanged (#212).
 - **Noise profile at runtime**: System settings has a **Target noise** card. It sets the profile (`off`, `quiet`, `balanced`, `aggressive`) through the `noise_profile` setting, which takes precedence over `ARTEX_NOISE_PROFILE`. The change applies to the next WebFetch, http custom tool and enrich request, and to the next agent prompt, without a restart. The card also shows the per-host counters, which `GET /api/settings/noise` returns (#233).
@@ -43,6 +51,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed
 
+- **`record_fact` is facts-only** (#410, #282): the tool publishes and accepts facts only; asset writes go through `insert_assets`.
+- **Web dependency lockfile** (#438): `source-map-js` 1.2.4 and `baseline-browser-mapping` 2.11.39, past their denial-of-service advisories; `npm audit --omit=dev` is clean.
+- **Build and supply-chain hardening** (#408, #416, #419, #420): tool and Node digests are pinned instead of fetching their checksums, `npm ci` runs with `--ignore-scripts` in the build, install and update stages, the web build disables Next.js telemetry, and the api-recon skill lockfile points at the public npm registry.
 - **Password changes revoke sessions**: a password change stores a monotonic `auth.password_version` in the same transaction as the hash. Tokens carry that version, so a token from an older version is rejected, including when two changes land in the same second. `reset-password.sh` writes the same counter and requires an ARTEX restart, because the process reads the version at startup. A failed write leaves the previous session valid. Log, activity, and side-question streams re-check the token and close after the version moves. If the version cannot be read at startup, sessions are rejected until the next login reads it.
 - **Task budgets survive a restart**: planner, worker, judge, and compactor rows in `llm_usage` are counted back into `ARTEX_TASK_BUDGET_*`. A restored task already inside the wrap-up reserve only has that reserve left, so the run wraps up instead of starting another worker. The per-worker estimate is not restored and starts from the defaults (50,000 tokens and 10 turns) until a worker finishes in this process. Chat, goal decomposition, and side questions stay outside the cap.
 - **Untrusted-output boundary is now on by default**: Norma frames tool results for the worker, planner, chat and main agent unless `ARTEX_UNTRUSTED_BOUNDARY` is set to `0`, `false`, `off` or `no`. It was opt-in via `ARTEX_UNTRUSTED_BOUNDARY=1` in 0.6.0 (#166); the default flips here (#203).
@@ -57,6 +68,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Compose private model endpoints** (#406): `ARTEX_LLM_PRIVATE_ENDPOINTS` is passed to the artex container, so the private endpoint allow-list works in the Compose deployment.
+- **Bash exit 127 in transcripts** (#398): the session transcript explains a 127 exit as a missing command and shows the matching hint.
 - **LLM usage status on early stream exit**: when a consumer stops reading a stream before `message_stop`, the recorder now stores the `llm_usage` row as `error` at that point, whether or not the context was cancelled, instead of inferring the status from `ctx.Err()` in a deferred call. `TestSideUsageRecordedOnceOnConsumerCancellation` runs again (follow-up to #9).
 - **RSI lesson trust**: the planner overview carries each finding's triage status, and `prove_goal` refuses a `false_positive`, `duplicate`, or `ignored` finding. A lesson with no company is visible only to tasks that also have no company. Retracted evidence stays on the row with `withdrawn_at` set, extraction runs when a disposition changes or a retest completes, and it still withdraws evidence after a task gains a second company. The rendered lesson block is capped in characters, not bytes.
 - **Workspace and skill symlink confinement**: workspace file operations, the skill file APIs and the skill loader resolve symlinks in every path component and refuse a target outside their root, so a link planted in the workspace or a skill directory cannot expose another file.
@@ -103,6 +116,17 @@ All notable changes to this project are documented in this file. The format is b
 
 - **Secrets at rest**: the credential-bearing columns and settings (LLM API keys and proxy, task credentials, MCP server env, notification channel config, search and proxy settings), the exec spec of custom tools and the evidence snapshot heads are encrypted in PostgreSQL with AES-256-GCM (`enc:v1:`) using `ARTEX_SECRET_KEY`, else `keys/secret.key`; existing plaintext rows are backfilled once at startup, and a missing or wrong key while encrypted data exists refuses to start. This protects database dumps and backups, not a running instance (#213, #216, #217, #218).
 - **URL credentials are dropped before storage**: scan and bbot ingestion, the asset store and archive restore strip URL userinfo, so `https://user:pass@host/app` is stored and matched as `https://host/app` (#222, #223, #224).
+- **Agentic injection and proof hardening** (#437): the four surfaces that still carried target or agent text outside the per-message data envelope now go through it: the worker intent assets move out of the system prompt into the framed user message, and the planner stagnation warning, agent-written task credentials and planner todos are framed. Scanner output is opened with `os.Root` and every symlink and hard-linked file is refused. `prove_goal` closes a goal with a finding only when a bound `traffic_ref` still exists in the live capture and its host matches the finding's linked asset, and refuses fail-closed when that check is unavailable, so a planted or unbound finding stays recorded but cannot close a goal. An agent scope addition outside the declared scope, or one whose classification read fails, is recorded as `expanded` with its source and reason. A deterministic adversarial bench runs in CI against a hostile local target.
+- **Interception, session, log and endpoint hardening** (#436): when the interception rules cannot be read, tool calls are blocked instead of allowed, and a rule whose pattern does not compile blocks the calls it would target. A cookie-authenticated POST, PUT, PATCH or DELETE must carry a same-origin `Origin` or `Sec-Fetch-Site`, otherwise it answers 403; bearer tokens, GET and HEAD are unaffected. The one-time setup token is no longer written to the log the API exposes, and proxy credentials are masked at write time, on stderr and on read-back. The workspace refuses the capture CA, index and blob store for read and write, and refuses a delete that would remove them. `POST /api/llm/models` refuses carrier-grade NAT, benchmark, IETF protocol and reserved ranges for literal hosts, resolved names, redirects and at dial time, judges NAT64 and 6to4 addresses by the IPv4 they embed, and no longer echoes an upstream error body.
+
+### Thanks
+
+Thanks to the contributors whose work is in this release:
+
+- Security and core reliability: @Coff0xc, @Protonmatter, @liuxiaobo0920, @cyberd4ch, @Dev-next-gen, @Michael-JRead, @anqorithm, @renaesop, @tglemser, @adam-33-pixel
+- Features, UI and locales: @Toys0125, @cocodedk, @BlackGownQ, @Amineharrabi, @chetanvhsk-wq, @YunzhouLi-hub, @mervedalgin
+- Build, packaging and tests: @ldevbr, @Lusitaniae, @mp-web3, @Alexandre200-lab, @maheshBawa
+- Documentation: @err0rgod, @yeting1107, @henefesto, @mathkartel
 
 ## [0.6.0] - 2026-11-12
 
@@ -1177,7 +1201,8 @@ First release of this fork. The engine underneath is still upstream's, but this 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
 
-[Unreleased]: https://github.com/BaaRai/ARTEX/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/BaaRai/ARTEX/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/BaaRai/ARTEX/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/BaaRai/ARTEX/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/BaaRai/ARTEX/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/BaaRai/ARTEX/compare/v0.4.0...v0.5.0
