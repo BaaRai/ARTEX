@@ -4,9 +4,11 @@ package server
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -34,11 +36,11 @@ func newIsolationRootFixture(t *testing.T) *isolationRootFixture {
 			t.Fatal(err)
 		}
 	}
-	config := filepath.Join(keyDir, "..", filepath.Base(f.data)+"-config.json")
+	// The config file lives in a root-only directory too (/app in the image).
+	config := filepath.Join(keyDir, "config.json")
 	if err := os.WriteFile(config, []byte(`{"database":{"dsn":"postgres://u:pw@h/db"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(config) })
 	return &isolationRootFixture{execRootFixture: f, keyDir: keyDir, config: config}
 }
 
@@ -84,6 +86,100 @@ func TestIsolationSelfTestDetectsMissingShimAsRoot(t *testing.T) {
 	err := IsolationSelfTest(f.priv, IsolationTargets{DataDir: f.data})
 	if err == nil || !strings.Contains(err.Error(), "Bash runs as uid 0") {
 		t.Fatalf("self-test without the Bash shim: %v", err)
+	}
+}
+
+// A key file and a config file owned by the executor uid stay readable by it after a
+// chmod 0600: PrepareExecPrivilege makes root their owner, and the executor can then
+// read neither (the self-test passes, and a direct read as the executor is denied).
+func TestPrepareExecPrivilegeOwnsKeysAndConfigAsRoot(t *testing.T) {
+	f := newExecRootFixture(t)
+	keyDir := filepath.Join(f.tmp, "keys")
+	if err := os.Mkdir(keyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	key, config := filepath.Join(keyDir, "jwt.key"), filepath.Join(keyDir, "config.json")
+	for _, p := range []string{key, config} {
+		if err := os.WriteFile(p, []byte("secret-"+filepath.Base(p)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chown(p, DefaultExecUID, DefaultExecGID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := PrepareExecPrivilege(&f.priv, f.data, keyDir, config); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{key, config} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st := fi.Sys().(*syscall.Stat_t); st.Uid != 0 || fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s: uid %d mode %v, want root 0600", p, st.Uid, fi.Mode().Perm())
+		}
+	}
+	c := exec.Command("sh", "-c", `for f in "$@"; do if cat "$f" >/dev/null 2>&1; then echo "read $f"; fi; done; echo done`, "sh", key, config)
+	applyExecCredential(c, f.priv)
+	out, err := c.CombinedOutput()
+	if err != nil || string(out) != "done\n" {
+		t.Fatalf("executor read of the key and config: %v\n%s", err, out)
+	}
+	if err := InstallBashShim(f.priv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(filepath.SplitList(os.Getenv("PATH"))[0]) })
+	if err := IsolationSelfTest(f.priv, IsolationTargets{DataDir: f.data, KeyDir: keyDir, ConfigPath: config}); err != nil {
+		t.Fatalf("self-test after PrepareExecPrivilege: %v", err)
+	}
+}
+
+// A data, key or config directory the executor can write fails the self-test: an
+// agent process could plant a key, a config or a data tree for the next start.
+func TestIsolationSelfTestDetectsWritableDirsAsRoot(t *testing.T) {
+	f := newIsolationRootFixture(t)
+	if err := os.Chmod(f.data, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	err := IsolationSelfTest(f.priv, f.targets())
+	if err == nil || !strings.Contains(err.Error(), "Bash can create files in "+f.data) {
+		t.Fatalf("self-test with a world-writable data directory: %v", err)
+	}
+	if err := os.Chmod(f.data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(f.keyDir, DefaultExecUID, 0); err != nil {
+		t.Fatal(err)
+	}
+	err = IsolationSelfTest(f.priv, f.targets())
+	if err == nil || !strings.Contains(err.Error(), "Bash can create files in "+f.keyDir) {
+		t.Fatalf("self-test with a key directory owned by the executor: %v", err)
+	}
+	if entries, _ := os.ReadDir(f.keyDir); len(entries) != 3 {
+		t.Fatalf("the probe left an entry in the key directory: %v", entries)
+	}
+}
+
+// A data directory whose parent the executor can write (not sticky) can be renamed
+// and replaced: the self-test reports it.
+func TestIsolationSelfTestDetectsReplaceableParentAsRoot(t *testing.T) {
+	f := newIsolationRootFixture(t)
+	open := filepath.Join(f.tmp, "open-parent")
+	if err := os.Mkdir(open, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	data := filepath.Join(open, "data")
+	if err := os.Mkdir(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tg := f.targets()
+	tg.DataDir = data
+	err := IsolationSelfTest(f.priv, tg)
+	if err == nil || !strings.Contains(err.Error(), "an agent process can replace "+data) {
+		t.Fatalf("self-test with a replaceable data directory: %v", err)
 	}
 }
 

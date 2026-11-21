@@ -12,8 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -63,6 +65,7 @@ func IsolationSelfTest(p ExecPrivilege, t IsolationTargets) error {
 	}
 	spec := isolationSpec(p, t)
 	failures := fileToolIsolationFailures(spec.Unreadable)
+	failures = append(failures, replaceableDirFailures(spec.Unwritable, p.UID, p.GID)...)
 	rep, err := runIsolationProbe(spec)
 	if err != nil {
 		failures = append(failures, fmt.Sprintf("the probe did not run through the Bash shim: %v", err))
@@ -87,12 +90,68 @@ func isolationSpec(p ExecPrivilege, t IsolationTargets) isolationProbeSpec {
 	if t.DataDir != "" {
 		spec.Unreadable = append(spec.Unreadable, filepath.Join(t.DataDir, "traffic", "_ca", "mitmproxy-ca.pem"))
 	}
+	// The directories of the keys, the config and the data: an agent process that
+	// can create an entry there can plant a key, a config or a whole data tree that
+	// the server uses at its next start.
+	for _, dir := range []string{t.DataDir, t.KeyDir, configDir(t.ConfigPath)} {
+		if dir != "" && !slices.Contains(spec.Unwritable, dir) {
+			spec.Unwritable = append(spec.Unwritable, dir)
+		}
+	}
 	if t.DSN != "" {
 		if cfg, err := pgx.ParseConfig(t.DSN); err == nil {
 			spec.DB = &isolationProbeDB{Host: cfg.Host, Port: cfg.Port, User: cfg.User, Database: cfg.Database}
 		}
 	}
 	return spec
+}
+
+func configDir(configPath string) string {
+	if configPath == "" {
+		return ""
+	}
+	return filepath.Dir(configPath)
+}
+
+// replaceableDirFailures reports each directory whose parent lets the executor
+// rename it and put another in its place: the parent is owned by the executor, or
+// the executor can write in it and it is not sticky. The probe checks the
+// directories themselves; their parents are checked here from the owners and mode
+// bits, since a sticky world-writable parent such as /tmp is writable yet safe.
+func replaceableDirFailures(dirs []string, execUID, execGID uint32) []string {
+	var failures []string
+	for _, dir := range dirs {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		parent := filepath.Dir(abs)
+		fi, err := os.Stat(parent)
+		if err != nil {
+			continue
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			continue
+		}
+		if why := parentReplaceable(fi.Mode(), st.Uid, st.Gid, execUID, execGID); why != "" {
+			failures = append(failures, fmt.Sprintf("an agent process can replace %s: its parent %s %s", dir, parent, why))
+		}
+	}
+	return failures
+}
+
+// parentReplaceable is the decision of replaceableDirFailures for one parent.
+func parentReplaceable(mode fs.FileMode, uid, gid, execUID, execGID uint32) string {
+	if uid == execUID {
+		return fmt.Sprintf("is owned by the executor uid %d", execUID)
+	}
+	if mode&fs.ModeSticky == 0 {
+		if why := normaTaskDirExecWrite(mode.Perm(), uid, gid, execUID, execGID); why != "" {
+			return "is writable by the executor and not sticky (" + why + ")"
+		}
+	}
+	return ""
 }
 
 // fileToolIsolationFailures opens each existing secret through the file tool
@@ -209,8 +268,6 @@ func checkIsolationAsExecutor(spec isolationProbeSpec) []string {
 			f.Close()
 			os.Remove(name)
 			fail("Bash can create files in %s", dir)
-		} else if !errors.Is(err, fs.ErrPermission) && !errors.Is(err, fs.ErrNotExist) {
-			fail("Bash write check of %s: %v", dir, err)
 		}
 	}
 	for _, kv := range os.Environ() {

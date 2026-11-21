@@ -302,12 +302,20 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		}
 		path := filepath.Join(keyDir, name)
 		if _, err := os.Stat(path); err == nil {
+			if err := ownByRoot(path); err != nil {
+				return fmt.Errorf("restrict %s to root: %w", path, err)
+			}
 			if err := os.Chmod(path, 0o600); err != nil {
 				return fmt.Errorf("restrict %s to root: %w", path, err)
 			}
 		}
 	}
 	if configPath != "" {
+		if _, err := os.Stat(configPath); err == nil {
+			if err := ownByRoot(configPath); err != nil {
+				return fmt.Errorf("restrict %s to root: %w", configPath, err)
+			}
+		}
 		if fi, err := os.Stat(configPath); err == nil && fi.Mode().Perm()&0o077 != 0 {
 			if err := os.Chmod(configPath, 0o600); err != nil {
 				return fmt.Errorf("restrict %s to root: %w", configPath, err)
@@ -319,6 +327,26 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 	// the executor can write what the server puts in a run directory.
 	syscall.Umask(0o002)
 	log.Printf("[exec] agent processes run as uid %d gid %d; the run directories under %s are shared with that group", p.UID, p.GID, tasks)
+	return nil
+}
+
+// ownByRoot makes root the owner of a key or config file that another user owns:
+// mode 0600 alone leaves the file readable by its owner, which could be the
+// executor uid (a file created by an agent process, or on the host under the uid
+// the executor has in the container).
+func ownByRoot(path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid == 0 {
+		return nil
+	}
+	if err := os.Chown(path, 0, -1); err != nil {
+		return err
+	}
+	log.Printf("[exec] %s was owned by uid %d; it is now owned by root", path, st.Uid)
 	return nil
 }
 

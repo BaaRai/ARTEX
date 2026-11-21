@@ -4,6 +4,7 @@ package server
 
 import (
 	"errors"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -141,6 +142,30 @@ func TestConnectWithoutPasswordRealPG(t *testing.T) {
 		t.Fatalf("connection without password: %v, want an authentication failure (28P01/28000)", err)
 	}
 	t.Logf("refused as expected: SQLSTATE %s", pgErr.Code)
+}
+
+// The parent rule: owned by the executor, or writable by it without the sticky bit,
+// lets it replace the directory; a sticky world-writable parent (/tmp) does not.
+func TestParentReplaceable(t *testing.T) {
+	const u, g = 10001, 10001
+	for _, c := range []struct {
+		name     string
+		mode     fs.FileMode
+		uid, gid uint32
+		want     bool
+	}{
+		{"root 0755", fs.ModeDir | 0o755, 0, 0, false},
+		{"owned by the executor", fs.ModeDir | 0o700, u, 0, true},
+		{"group-writable executor gid", fs.ModeDir | 0o775, 0, g, true},
+		{"group-writable other gid", fs.ModeDir | 0o775, 0, 0, false},
+		{"world-writable", fs.ModeDir | 0o777, 0, 0, true},
+		{"world-writable sticky", fs.ModeDir | fs.ModeSticky | 0o777, 0, 0, false},
+		{"host user 0755", fs.ModeDir | 0o755, 1000, 1000, false},
+	} {
+		if got := parentReplaceable(c.mode, c.uid, c.gid, u, g) != ""; got != c.want {
+			t.Errorf("%s: replaceable=%v, want %v", c.name, got, c.want)
+		}
+	}
 }
 
 // The spec carries the server's paths and the database name, never its password.
