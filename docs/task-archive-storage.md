@@ -90,6 +90,13 @@ is supported for temporary credentials. This explicit override takes precedence
 over ambient AWS credentials. Operator-supplied temporary credentials must be
 rotated by the operator; they are not an IAM role provider.
 
+At server startup, the archive client captures its credential configuration before
+ARTEX removes archive-specific keys and supported ambient AWS credential variables
+from the process environment. Agent shells, tools and MCP stdio servers therefore
+do not inherit those values. Role providers retain the configuration needed for
+refresh. This environment cleanup does not restrict access to shared credential
+files, token files or instance metadata; those require their own access controls.
+
 Both credential modes load shared AWS configuration, including `AWS_CA_BUNDLE`
 for private certificate authorities. HTTP redirects are rejected for all archive
 requests, including 307/308; configure the final endpoint directly.
