@@ -436,6 +436,12 @@ catalog (`GET /v1/models`) and pick a model; models the provider adds later appe
 next refresh. For example, [NotHoly](https://notholy.com) (offensive-security models) uses
 base URL `https://api.notholy.com/v1` with an API key from its console.
 
+**Task archive storage**: local disk by default. Set `ARTEX_ARCHIVE_STORAGE=s3` to
+store cold task packages in an S3-compatible bucket and release their local
+package space after verification. Existing local archives remain usable. See
+[Task archive storage](docs/task-archive-storage.md) for configuration, permissions,
+integrity checks, temporary disk requirements and recovery.
+
 **Concurrency**: work agents per task, in "System Settings" (default 3).
 
 **Untrusted-output boundary (on by default)**: tool results for the worker, planner, chat and main
