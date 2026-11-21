@@ -48,6 +48,9 @@ type Result struct {
 	Response Response
 	Changed  bool
 	Lines    []TraceLine
+	// Tainted lists fields written by a sensitive action in this phase so
+	// downstream tampering hooks keep those fields HMAC-masked in the trace.
+	Tainted map[string]bool
 }
 
 const (
@@ -106,6 +109,9 @@ func (s *Set) Apply(phase Phase, in Input) Result {
 		}
 	}
 	res.Lines = x.lines
+	if len(x.tainted) > 0 {
+		res.Tainted = x.tainted
+	}
 	if x.changed {
 		res.Changed, res.Request, res.Response = true, x.st.req, x.st.resp
 	}
