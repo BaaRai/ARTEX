@@ -3,7 +3,9 @@ package server
 import "os"
 
 // secretEnv lists the credentials read from the environment only at startup:
-// ARTEX_PG_DSN and ARTEX_SECRET_KEY by NewManager, the API keys by agent.FromEnv inside New.
+// ARTEX_PG_DSN and ARTEX_PG_PASSWORD by NewManager (the password is a separate
+// variable so Docker Compose does not paste it into a URL), ARTEX_SECRET_KEY,
+// and the API keys by agent.FromEnv inside New.
 // agent.FromEnv also reads ARTEX_LLM_PROXY and ARTEX_LLM_BASE_URL: both are URLs that
 // can carry credentials in their userinfo (http://user:pass@proxy:3128). The archive
 // store also captures ARTEX_ARCHIVE_S3_* credentials during New, before the scrub,
@@ -16,7 +18,7 @@ import "os"
 // credentials or config file, or from the instance metadata service, are not in
 // the environment: the scrub does not hide them from child processes.
 var secretEnv = []string{
-	"ARTEX_PG_DSN", "ARTEX_SECRET_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+	"ARTEX_PG_DSN", "ARTEX_PG_PASSWORD", "ARTEX_SECRET_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 	"ARTEX_LLM_PROXY", "ARTEX_LLM_BASE_URL",
 	"ARTEX_ARCHIVE_S3_ACCESS_KEY_ID", "ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY", "ARTEX_ARCHIVE_S3_SESSION_TOKEN",
 	"AWS_ACCESS_KEY_ID", "AWS_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY", "AWS_SECRET_KEY", "AWS_SESSION_TOKEN",
