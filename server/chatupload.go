@@ -138,14 +138,14 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 // so re-uploading the same filename never clobbers a prior attachment.
 func uniqueUploadPath(dir, name string) string {
 	dest := filepath.Join(dir, name)
-	if _, err := os.Stat(dest); os.IsNotExist(err) {
+	if _, err := os.Lstat(dest); os.IsNotExist(err) {
 		return dest
 	}
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
 	for i := 1; ; i++ {
 		cand := filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, i, ext))
-		if _, err := os.Stat(cand); os.IsNotExist(err) {
+		if _, err := os.Lstat(cand); os.IsNotExist(err) {
 			return cand
 		}
 	}
