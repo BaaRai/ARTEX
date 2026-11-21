@@ -135,22 +135,24 @@ func (p *Planner) SetKillWork(fn func(intentID int64) error) { p.killWork = fn }
 func (p *Planner) SetSteerWork(fn func(intentID int64, msg string) error) { p.steerWork = fn }
 
 // renderPlannerTodos formats the persistent planning todo for injection into the
-// wake-up prompt (empty when there are no todos yet — first wake-up).
-func renderPlannerTodos(items []actool.Todo) string {
+// wake-up prompt (empty when there are no todos yet — first wake-up). Todo text
+// is framed inside env's data envelope so target strings copied into a todo
+// cannot escape the boundary across rounds (#124).
+func renderPlannerTodos(items []actool.Todo, env dataEnvelope) string {
 	if len(items) == 0 {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("\n\n[Your planning todos (kept across wake-ups, written by you last round)]:\n")
+	var list strings.Builder
 	for _, it := range items {
 		mark := map[actool.TodoStatus]string{actool.TodoPending: "☐", actool.TodoInProgress: "▶", actool.TodoCompleted: "✔"}[it.Status]
 		if mark == "" {
 			mark = "☐"
 		}
-		b.WriteString(fmt.Sprintf("  %s %s\n", mark, it.Content))
+		list.WriteString(fmt.Sprintf("  %s %s\n", mark, it.Content))
 	}
-	b.WriteString("Advance accordingly: dispatch intents only for next steps [whose prerequisite steps are completed / whose depended-on facts exist]; update the list with TodoWrite (mark steps already satisfied by facts as completed). Don't re-dispatch steps already pending/in_progress on the list.")
-	return b.String()
+	return "\n\n[Your planning todos (kept across wake-ups, written by you last round)]:\n" +
+		env.wrap("planner_todos", strings.TrimRight(list.String(), "\n")) +
+		"\nAdvance accordingly: dispatch intents only for next steps [whose prerequisite steps are completed / whose depended-on facts exist]; update the list with TodoWrite (mark steps already satisfied by facts as completed). Don't re-dispatch steps already pending/in_progress on the list."
 }
 
 // plannerRoundInput assembles one planning round's user message: the opener, the
@@ -605,7 +607,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 			lead = "This round is a **scheduled patrol (heartbeat)** wake-up, and there are currently **no open or running intents at all** — no worker is running and no direction is queued; exploration has stalled. You **must** produce one or more new intents this round that advance toward the goal and **don't duplicate** existing ones (producing 0 intents is not allowed); first judge from the situation below whether the goal is met, and if not, add directions immediately:"
 		}
 	}
-	input := plannerRoundInput(lead, situational, renderPlannerTodos(opts.Todos.List()), goal, constraints)
+	input := plannerRoundInput(lead, situational, renderPlannerTodos(opts.Todos.List(), env), goal, constraints)
 	// MaxDuration now interrupts an in-flight tool at the wall-clock deadline and
 	// enters wrap-up in place (on the live ctx), so a stuck single round no longer
 	// bypasses wrap-up — no external hard-ctx backstop needed. ctx carries only

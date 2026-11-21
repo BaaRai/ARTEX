@@ -568,20 +568,26 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// The run-wide intent is not the current tool action. Do not forward it or
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
-	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), newDataEnvelope())
+	workerEnv := newDataEnvelope()
+	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), workerEnv)
 	staticPart, dynamicTail := workerSystemParts(w.proxyAddr, w.proxyCACert, w.workDir, runDir)
 	dynamicTail += frameLessonsBlock(w.lessonsBlock)
 	if w.wantConstraints() {
 		dynamicTail += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
 	}
-	// intent block → intent-anchored assets block → launch instruction, appended to
-	// the system tail in that order (same append pattern as constraintBlock).
+	// intent block → launch instruction in the system tail; intent-anchored assets
+	// carry target-influenced fields (PageTitle, Description, etc.) and go into
+	// the launch user message inside workerEnv's data envelope (#124).
 	dynamicTail += renderIntentTask(intent)
 	if as != nil {
 		if ids := intentAssetIDs(intent); len(ids) > 0 {
 			if assets, err := as.GetByIDs(ids); err == nil && len(assets) > 0 {
-				if b, err := json.Marshal(assets); err == nil {
-					dynamicTail += "\n\nThe target assets corresponding to this intent's asset_ids:\n" + string(b)
+				if block := renderWorkerIntentAssets(assets, workerEnv); block != "" {
+					if strings.TrimSpace(overview) == "" {
+						overview = workerEnv.intro() + block
+					} else {
+						overview += block
+					}
 				}
 				// The assets this intent explicitly targets → automatically join the task's
 				// test scope (same conservative granularity as insertAssets). upsertTaskScope's

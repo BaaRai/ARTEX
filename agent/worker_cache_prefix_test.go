@@ -249,13 +249,23 @@ func TestWorkerExecuteCachePrefixEndToEnd(t *testing.T) {
 		{"worker1", req1On, runDir1, "inspect alpha auth", dom1},
 		{"worker2", req2On, runDir2, "inspect beta checkout", dom2},
 	} {
-		for _, needle := range []string{pair.runDir, pair.intent, pair.domain, "stay within test scope", "Start executing the intent above:", "<available-deferred-tools>", "mcp__demo__scanner"} {
+		for _, needle := range []string{pair.runDir, pair.intent, "stay within test scope", "Start executing the intent above:", "<available-deferred-tools>", "mcp__demo__scanner"} {
 			if !strings.Contains(pair.req.System[1], needle) {
 				t.Errorf("%s dynamic segment missing %q", pair.name, needle)
 			}
 			if strings.Contains(pair.req.System[0], needle) {
 				t.Errorf("%s static segment unexpectedly contains %q", pair.name, needle)
 			}
+		}
+		// Intent assets moved to the framed launch user message (#124 P4.3) so target-controlled
+		// fields never appear unframed in the worker system prompt.
+		if strings.Contains(pair.req.System[0], pair.domain) || strings.Contains(pair.req.System[1], pair.domain) {
+			t.Errorf("%s system prompt unexpectedly contains target asset domain %q", pair.name, pair.domain)
+		}
+		rawMsgs, _ := json.Marshal(pair.req.Messages)
+		userMsg := string(rawMsgs)
+		if !strings.Contains(userMsg, pair.domain) || !strings.Contains(userMsg, "field=intent_assets]]") {
+			t.Errorf("%s launch user message missing framed intent_assets for %q", pair.name, pair.domain)
 		}
 	}
 
