@@ -9,6 +9,7 @@
 
 const FLUSH_AT = 10; // entries per batch
 const MAX_BODY = 256 * 1024; // matches the server-side ingest cap
+const MAX_TRACKED = 500; // unfinished requests kept in memory
 const SKIP_MIME = ["image/", "font/", "audio/", "video/", "application/octet-stream"];
 
 let session = {
@@ -167,12 +168,18 @@ async function flush() {
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!session.capturing || !source.tabId || source.tabId !== session.tabId) return;
   if (method === "Network.requestWillBeSent") {
+    let postData = params.request.postData || "";
+    if (postData.length > MAX_BODY) postData = postData.slice(0, MAX_BODY);
+    if (!session.requests.has(params.requestId) && session.requests.size >= MAX_TRACKED) {
+      const oldest = session.requests.keys().next().value;
+      session.requests.delete(oldest);
+    }
     session.requests.set(params.requestId, {
       requestId: params.requestId,
       method: params.request.method,
       url: params.request.url,
       headers: params.request.headers,
-      postData: params.request.postData || "",
+      postData,
     });
   } else if (method === "Network.responseReceived") {
     const info = session.requests.get(params.requestId);
