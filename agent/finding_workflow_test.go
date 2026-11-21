@@ -70,3 +70,54 @@ func TestFindingWorkflowSharedAssemblyAndSwitch(t *testing.T) {
 		t.Fatal("reintroduced disabled tool or its guidance")
 	}
 }
+
+func TestFindingWorkflowToolsTrafficCaptureOffNotice(t *testing.T) {
+	oldPolicy, oldCapture, oldResolve, oldAugment := FindingTrafficBindingEnabled(), TrafficCaptureEnabled(), ToolResolve(), ToolAugment()
+	t.Cleanup(func() {
+		SetFindingTrafficBindingEnabled(oldPolicy)
+		SetTrafficCaptureEnabled(oldCapture)
+		SetToolResolve(oldResolve)
+		SetToolAugment(oldAugment)
+	})
+	SetToolAugment(nil)
+	SetToolResolve(nil)
+	ts := NewToolSet(nil, "fixture")
+	base := []actool.CoreTool{ts.proveGoal(), ts.addFinding(), ts.addHint()}
+
+	for _, binding := range []bool{false, true} {
+		SetFindingTrafficBindingEnabled(func() bool { return binding })
+
+		calls := 0
+		SetTrafficCaptureEnabled(func() bool {
+			calls++
+			return false
+		})
+		outOff, _, clOff := AugmentTools(t.Context(), "planner", base)
+		clOff()
+		if calls != 1 {
+			t.Fatalf("binding=%v: capture hook called %d times for %d tools, want 1", binding, calls, len(base))
+		}
+		for _, tool := range outOff {
+			desc := tool.Description()
+			switch tool.Name() {
+			case "prove_goal", "report_finding":
+				if !strings.Contains(desc, "traffic capture is currently OFF") {
+					t.Fatalf("binding=%v %s: expected capture-off notice in description, got %q", binding, tool.Name(), desc)
+				}
+			case "add_hint":
+				if strings.Contains(desc, "traffic capture is currently OFF") {
+					t.Fatalf("binding=%v add_hint: unexpected capture-off notice", binding)
+				}
+			}
+		}
+
+		SetTrafficCaptureEnabled(func() bool { return true })
+		outOn, _, clOn := AugmentTools(t.Context(), "planner", base)
+		clOn()
+		for _, tool := range outOn {
+			if strings.Contains(tool.Description(), "traffic capture is currently OFF") {
+				t.Fatalf("binding=%v %s: unexpected capture-off notice when capture is ON", binding, tool.Name())
+			}
+		}
+	}
+}

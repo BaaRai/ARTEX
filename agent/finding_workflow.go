@@ -43,10 +43,55 @@ func findingTrafficBindingEnabled() bool {
 	return f != nil && f()
 }
 
+var (
+	trafficCaptureMu   sync.RWMutex
+	trafficCaptureHook func() bool
+)
+
+// SetTrafficCaptureEnabled installs (or, with nil, removes) the hook that
+// reports whether the server's global traffic capture switch is currently on.
+func SetTrafficCaptureEnabled(f func() bool) {
+	trafficCaptureMu.Lock()
+	trafficCaptureHook = f
+	trafficCaptureMu.Unlock()
+}
+
+// TrafficCaptureEnabled returns the current hook, or nil when none is set.
+func TrafficCaptureEnabled() func() bool {
+	trafficCaptureMu.RLock()
+	defer trafficCaptureMu.RUnlock()
+	return trafficCaptureHook
+}
+
+func trafficCaptureExplicitlyOff() bool {
+	f := TrafficCaptureEnabled()
+	return f != nil && !f()
+}
+
+const (
+	trafficCaptureOffProveGoalNote     = "\nNote: traffic capture is currently OFF on this server, so no HTTP traffic is being recorded and findings cannot be bound to captured traffic to prove HTTP goals. Recorded findings stay visible, and non-HTTP goals can still be proved with an observed tool_output fact; enable traffic capture in System settings to make HTTP findings provable."
+	trafficCaptureOffReportFindingNote = "\nNote: traffic capture is currently OFF on this server, so no HTTP traffic is being recorded. Findings still save with textual/command evidence, but cannot prove goals via prove_goal until traffic capture is enabled in System settings and verified traffic is bound."
+)
+
+func trafficCaptureOffToolNote(toolName string, captureOff bool) string {
+	if !captureOff {
+		return ""
+	}
+	switch toolName {
+	case "prove_goal":
+		return trafficCaptureOffProveGoalNote
+	case "report_finding":
+		return trafficCaptureOffReportFindingNote
+	default:
+		return ""
+	}
+}
+
 // Applied after ToolResolve: user descriptions and prompts remain intact, while
 // all actual reporters (including Planner and custom chat agents) see the same
 // API contract. Disabled/unbound tools are never reintroduced here.
 func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.CoreTool, string) {
+	captureOff := trafficCaptureExplicitlyOff()
 	if !findingTrafficBindingEnabled() {
 		out := make([]actool.CoreTool, 0, len(tools))
 		for _, tool := range tools {
@@ -56,15 +101,26 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 			if agentKey == "reporter" && (tool.Name() == "traffic_search" || tool.Name() == "traffic_get" || tool.Name() == "traffic_blob" || tool.Name() == "traffic_messages") {
 				continue
 			}
+			desc := tool.Description()
+			schema := tool.InputSchema()
+			decorated := false
 			switch tool.Name() {
 			case "report_finding", "add_hint", "add_task_hint":
 				// Work on a copy: toggling back on must restore the original schema.
 				raw, _ := json.Marshal(tool.InputSchema())
-				var schema map[string]any
-				if json.Unmarshal(raw, &schema) == nil {
-					stripTrafficParameters(schema)
-					tool = DecorateTool(tool, tool.Description(), schema)
+				var s map[string]any
+				if json.Unmarshal(raw, &s) == nil {
+					stripTrafficParameters(s)
+					schema = s
+					decorated = true
 				}
+			}
+			if note := trafficCaptureOffToolNote(tool.Name(), captureOff); note != "" {
+				desc += note
+				decorated = true
+			}
+			if decorated {
+				tool = DecorateTool(tool, desc, schema)
 			}
 			out = append(out, tool)
 		}
@@ -82,6 +138,9 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 			note = "\nWhen handing off a confirmed vulnerability, keep the verified traffic's IDs, purpose, notes, and order in the corresponding hint's traffic_refs (top-level for a single hint, inside the corresponding hints element for a batch), and state in text exactly which vulnerability it proves. The caller must not hand off only text while dropping existing traffic references. Unverified candidates must not be passed as evidence."
 		case "get_finding_traffic", "bind_finding_traffic", "list_findings", "list_task_findings", "node_detail", "get_task_node_detail", "update_finding_report":
 			note = findingIDGuidance
+		}
+		if capNote := trafficCaptureOffToolNote(tool.Name(), captureOff); capNote != "" {
+			note += capNote
 		}
 		if note != "" {
 			out[i] = DecorateTool(tool, tool.Description()+note, tool.InputSchema())

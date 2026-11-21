@@ -572,7 +572,9 @@ export default function DashboardPage() {
                 <span>{t("Recording")}</span>
               </>
             ) : (
-              <span>{t("Capture is off")}</span>
+              <Link href="/system/settings" className="text-amber-500 hover:underline">
+                {t("Capture is off · required for provable findings")}
+              </Link>
             )}
           </CardContent>
         </Card>
@@ -1164,19 +1166,29 @@ export default function DashboardPage() {
               </Badge>
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-              <div className="text-[10px] text-muted-foreground">{t("Traffic capture")}</div>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[10px]",
-                  settings?.traffic_capture
-                    ? "border-violet-500/30 bg-violet-500/10 text-violet-400"
-                    : "text-muted-foreground",
-                )}
-              >
-                {settings?.traffic_capture ? t("On") : t("Off")}
-              </Badge>
+            <div className="rounded-lg border bg-muted/20 px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] text-muted-foreground">{t("Traffic capture")}</div>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px]",
+                    settings?.traffic_capture
+                      ? "border-violet-500/30 bg-violet-500/10 text-violet-400"
+                      : "border-amber-500/30 bg-amber-500/10 text-amber-500",
+                  )}
+                >
+                  {settings?.traffic_capture ? t("On") : t("Off")}
+                </Badge>
+              </div>
+              {settings && !settings.traffic_capture && (
+                <p className="mt-1.5 text-[10px] leading-relaxed text-amber-500">
+                  {t("Traffic capture is off: findings stay recorded, but captured HTTP traffic is required for provable findings.")}{" "}
+                  <Link href="/system/settings" className="underline">
+                    {t("Enable in settings")}
+                  </Link>
+                </p>
+              )}
             </div>
 
             {activeProfile && (
