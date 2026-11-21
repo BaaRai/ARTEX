@@ -168,6 +168,59 @@ func TestParentReplaceable(t *testing.T) {
 	}
 }
 
+// A skill tree is judged from owners and mode bits: an entry the executor owns, or
+// can write through its group or as other, is reported; a symlink by its target.
+// Runs without root: the test user stands in for the executor or for root.
+func TestSkillTreeFailures(t *testing.T) {
+	root := t.TempDir()
+	skill := filepath.Join(root, "recon")
+	if err := os.Mkdir(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md := filepath.Join(skill, "SKILL.md")
+	if err := os.WriteFile(md, []byte("---\nname: recon\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	me := uint32(os.Getuid())
+	other := me + 54321 // an executor that owns nothing here
+
+	if got := skillTreeFailures(root, other, other); len(got) != 0 {
+		t.Fatalf("a tree only its owner can write: %q", got)
+	}
+	if got := skillTreeFailures(root, me, other); len(got) != 3 || !hasFailure(got, md) {
+		t.Fatalf("a tree owned by the executor uid: %q, want all three entries", got)
+	}
+	if err := os.Chmod(md, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if got := skillTreeFailures(root, other, other); len(got) != 1 || !hasFailure(got, md) || !hasFailure(got, "writable by others") {
+		t.Fatalf("a world-writable skill file: %q", got)
+	}
+	if err := os.Chmod(md, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "evil.md")
+	if err := os.WriteFile(outside, []byte("x"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(outside, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(skill, "linked.md")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := skillTreeFailures(root, other, other); len(got) != 1 || !hasFailure(got, link) {
+		t.Fatalf("a symlink to a world-writable file: %q", got)
+	}
+	if got := skillTreeFailures(filepath.Join(root, "absent"), me, me); got != nil {
+		t.Fatalf("a missing skill directory: %q", got)
+	}
+}
+
 // The spec carries the server's paths and the database name, never its password.
 func TestIsolationSpecHasNoPassword(t *testing.T) {
 	spec := isolationSpec(ExecPrivilege{Enabled: true, UID: 10001, GID: 10002}, IsolationTargets{

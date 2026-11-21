@@ -183,6 +183,49 @@ func TestIsolationSelfTestDetectsReplaceableParentAsRoot(t *testing.T) {
 	}
 }
 
+// A skill tree an agent process can write fails the self-test: a skill written there
+// directly would skip the approval of create_skill and update_skill_file. A tree
+// only root can write passes.
+func TestIsolationSelfTestDetectsWritableSkillsAsRoot(t *testing.T) {
+	f := newIsolationRootFixture(t)
+	skills := filepath.Join(f.tmp, "skills")
+	skill := filepath.Join(skills, "recon")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md := filepath.Join(skill, "SKILL.md")
+	if err := os.WriteFile(md, []byte("---\nname: recon\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tg := f.targets()
+	tg.SkillDir = skills
+	if err := IsolationSelfTest(f.priv, tg); err != nil {
+		t.Fatalf("self-test with a root-only skill tree: %v", err)
+	}
+
+	if err := os.Chown(md, DefaultExecUID, DefaultExecGID); err != nil {
+		t.Fatal(err)
+	}
+	err := IsolationSelfTest(f.priv, tg)
+	if err == nil || !strings.Contains(err.Error(), "can change the skill entry "+md) {
+		t.Fatalf("self-test with a skill file owned by the executor: %v", err)
+	}
+	if err := os.Chown(md, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(skills, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	err = IsolationSelfTest(f.priv, tg)
+	if err == nil || !strings.Contains(err.Error(), "Bash can create files in "+skills) || !strings.Contains(err.Error(), "can change the skill entry "+skills) {
+		t.Fatalf("self-test with a world-writable skill directory: %v", err)
+	}
+	if entries, _ := os.ReadDir(skills); len(entries) != 1 {
+		t.Fatalf("the probe left an entry in the skill directory: %v", entries)
+	}
+}
+
 // A database that lets the server's user in without a password fails the self-test:
 // the probe, as the executor, opens a session on it.
 func TestIsolationSelfTestDetectsPasswordlessDatabaseAsRoot(t *testing.T) {

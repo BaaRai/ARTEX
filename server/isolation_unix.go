@@ -66,6 +66,7 @@ func IsolationSelfTest(p ExecPrivilege, t IsolationTargets) error {
 	spec := isolationSpec(p, t)
 	failures := fileToolIsolationFailures(spec.Unreadable)
 	failures = append(failures, replaceableDirFailures(spec.Unwritable, p.UID, p.GID)...)
+	failures = append(failures, skillTreeFailures(t.SkillDir, p.UID, p.GID)...)
 	rep, err := runIsolationProbe(spec)
 	if err != nil {
 		failures = append(failures, fmt.Sprintf("the probe did not run through the Bash shim: %v", err))
@@ -93,7 +94,9 @@ func isolationSpec(p ExecPrivilege, t IsolationTargets) isolationProbeSpec {
 	// The directories of the keys, the config and the data: an agent process that
 	// can create an entry there can plant a key, a config or a whole data tree that
 	// the server uses at its next start.
-	for _, dir := range []string{t.DataDir, t.KeyDir, configDir(t.ConfigPath)} {
+	// The skill directory too: a skill an agent process writes there directly would
+	// skip the approval of create_skill (see skillTreeFailures).
+	for _, dir := range []string{t.DataDir, t.KeyDir, configDir(t.ConfigPath), t.SkillDir} {
 		if dir != "" && !slices.Contains(spec.Unwritable, dir) {
 			spec.Unwritable = append(spec.Unwritable, dir)
 		}
@@ -152,6 +155,48 @@ func parentReplaceable(mode fs.FileMode, uid, gid, execUID, execGID uint32) stri
 		}
 	}
 	return ""
+}
+
+// skillTreeMaxFailures caps what skillTreeFailures reports for one tree.
+const skillTreeMaxFailures = 20
+
+// skillTreeFailures reports each file and directory under the skill directory that
+// an agent process could change: agents load skill files as instructions, so a skill
+// written there directly would bypass the operator approval that create_skill and
+// update_skill_file need (intercept/persistence.go). It decides from the owners and
+// mode bits, without writing anything: an entry owned by the executor uid, or
+// writable by the executor gid or by others, is reported. A symlink is judged by its
+// target and not descended. The probe checks the directory itself for writes and
+// replaceableDirFailures its parent.
+func skillTreeFailures(root string, execUID, execGID uint32) []string {
+	if root == "" {
+		return nil
+	}
+	if _, err := os.Stat(root); err != nil {
+		return nil
+	}
+	var failures []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			return nil
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			return nil
+		}
+		if why := normaTaskDirExecWrite(fi.Mode().Perm(), st.Uid, st.Gid, execUID, execGID); why != "" {
+			failures = append(failures, fmt.Sprintf("an agent process can change the skill entry %s, bypassing the skill approval: %s", path, why))
+		}
+		if len(failures) >= skillTreeMaxFailures {
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return failures
 }
 
 // fileToolIsolationFailures opens each existing secret through the file tool
