@@ -61,6 +61,10 @@ Rules:
 Pending and in-progress findings produce nothing: there is no outcome yet.
 Empty cue, action, or source is refused by the gate.
 
+A retest counts only when it is `completed` with a verdict; extraction reads
+the latest such retest. A verdict staged on a pending, running, failed, or
+stopped retest produces nothing.
+
 A task with more than one company in `task_scope` does not gain a new lesson.
 Retraction still runs, so a lesson written while the task had one company can
 be withdrawn after a second company is added. Per-finding company attribution

@@ -114,13 +114,16 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 	// NULL company_id is not a scope.
 	write := len(companyIDs) <= 1
 	companyID := lessonExtractCompanyID(companyIDs)
+	// Only a completed retest with a verdict is an outcome. A pending, running,
+	// failed or stopped retest can carry a staged verdict that never finished.
 	rows, err := d.QueryContext(ctx, `
 		SELECT f.id, f.vulnclass, f.name, f.summary, f.severity, f.status,
 		       COALESCE(r.id,0), COALESCE(r.verdict,'')
 		FROM findings f
 		LEFT JOIN LATERAL (
 			SELECT id, verdict FROM finding_retests
-			WHERE finding_id=f.id ORDER BY id DESC LIMIT 1
+			WHERE finding_id=f.id AND status='completed' AND verdict<>''
+			ORDER BY id DESC LIMIT 1
 		) r ON true
 		WHERE f.task_id=$1
 		ORDER BY f.id`, taskID)

@@ -1082,6 +1082,112 @@ func insertLessonRetest(t *testing.T, d *DB, findingID int64, verdict string) in
 	return id
 }
 
+func insertLessonRetestStatus(t *testing.T, d *DB, findingID int64, status, verdict string) int64 {
+	t.Helper()
+	var id int64
+	if err := d.QueryRow(`
+		INSERT INTO finding_retests(finding_id,status,verdict,snapshot)
+		VALUES ($1,$2,$3,'{}'::jsonb)
+		RETURNING id`, findingID, status, verdict).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM finding_retests WHERE id=$1`, id) })
+	return id
+}
+
+// retestEvidence counts every evidence row of this retest, live or withdrawn,
+// in lessons of any kind.
+func retestEvidence(t *testing.T, d *DB, retestID int64) int {
+	t.Helper()
+	var n int
+	if err := d.QueryRow(`
+		SELECT COUNT(*) FROM rsi_lesson_evidence
+		WHERE source_kind='retest' AND source_id=$1`, retestID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A staged verdict on a retest that did not complete is not an outcome:
+// FinishFindingRetest turns completed-without-verdict into failed, and a
+// stopped or failed retest keeps whatever verdict the agent staged.
+func TestExtractLessonsIgnoresUnfinishedRetests(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson unfinished retest %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-unfinished-%d", stamp)
+	label := fmt.Sprintf("reflected in search %d", stamp)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE cue=$1`, cue) })
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','confirmed')
+		RETURNING id`, task.ID, cue, label).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+
+	for _, status := range []string{"pending", "running", "failed", "stopped"} {
+		for _, verdict := range []string{"reproduced", "fixed", "inconclusive"} {
+			rid := insertLessonRetestStatus(t, d, fid, status, verdict)
+			if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+				t.Fatal(err)
+			}
+			if n := retestEvidence(t, d, rid); n != 0 {
+				t.Fatalf("retest status=%s verdict=%s wrote %d evidence rows", status, verdict, n)
+			}
+			if status == "pending" || status == "running" {
+				// idx_finding_retests_active allows one active retest per finding.
+				cleanupExec(t, d, `DELETE FROM finding_retests WHERE id=$1`, rid)
+			}
+		}
+	}
+	var retestLessons int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM rsi_lessons
+		WHERE cue=$1 AND (kind='caution' OR action LIKE 'Reproduced %')`, cue).Scan(&retestLessons); err != nil {
+		t.Fatal(err)
+	}
+	if retestLessons != 0 {
+		t.Fatalf("unfinished retests produced %d lessons", retestLessons)
+	}
+
+	done := insertLessonRetestStatus(t, d, fid, "completed", "reproduced")
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := positiveRetestEvidence(t, d, done); n != 1 {
+		t.Fatalf("completed reproduced retest: positive evidence=%d, want 1", n)
+	}
+	findLessonByAction(t, d, task.ID, "positive", "Reproduced", label)
+
+	// A later unfinished retest does not hide the completed one.
+	insertLessonRetestStatus(t, d, fid, "running", "fixed")
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := positiveRetestEvidence(t, d, done); n != 1 {
+		t.Fatalf("completed retest after a running one: positive evidence=%d, want 1", n)
+	}
+
+	inconclusive := insertLessonRetestStatus(t, d, fid, "completed", "inconclusive")
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := retestEvidence(t, d, inconclusive); n != 1 {
+		t.Fatalf("completed inconclusive retest: evidence=%d, want 1", n)
+	}
+	findLessonByAction(t, d, task.ID, "caution", "Recheck", cue)
+}
+
 func findLessonByAction(t *testing.T, d *DB, taskID int64, kind, actionPrefix, label string) *Lesson {
 	t.Helper()
 	lessons, err := d.TaskLessons(t.Context(), taskID, 8)
