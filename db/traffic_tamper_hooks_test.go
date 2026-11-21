@@ -14,9 +14,6 @@ func TestTrafficTamperHookCRUDSealedAndVersions(t *testing.T) {
 		SkipPGUnavailable(t, err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	if err := d.InitSecrets(t.TempDir()); err != nil {
-		t.Fatalf("InitSecrets: %v", err)
-	}
 
 	const srcV1 = `package hook
 const apiSecret = "super-secret-hmac-key-v1"

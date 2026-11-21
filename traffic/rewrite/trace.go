@@ -44,11 +44,11 @@ const (
 // TraceLine is one row of an exchange's rewrite trace, in order. An exchange is
 // rewritten when it has at least one applied line.
 type TraceLine struct {
-	Phase      Phase
-	SourceKind string // "rule" (default when empty) | "hook"
-	RuleID     int64  // 0 on a global or hook line
-	HookID     int64  // 0 on a rule or global line
-	HookVersion int   // 0 on a rule or global line
+	Phase       Phase
+	SourceKind  string // "rule" (default when empty) | "hook"
+	RuleID      int64  // 0 on a global or hook line
+	HookID      int64  // 0 on a rule or global line
+	HookVersion int    // 0 on a rule or global line
 	// RuleSnapshot is the rule or hook metadata as JSON, on its first line in the exchange only.
 	RuleSnapshot string
 	Action       string
