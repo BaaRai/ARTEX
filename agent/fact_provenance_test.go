@@ -194,14 +194,23 @@ func TestFactProvenanceSurfaced(t *testing.T) {
 }
 
 // prove_goal (PG) refuses an observed fact whose source is target_response and
-// keeps the goal open; an observed tool_output fact and a finding still prove.
+// keeps the goal open; an observed tool_output fact and a finding backed by
+// bound traffic still prove (a bare finding without bound traffic is refused).
 func TestProveGoalRefusesTargetResponseFact(t *testing.T) {
-	s := guardTaskStore(t)
+	d := testDB(t)
+	t.Cleanup(func() { _ = d.Close() })
+	task, err := d.CreateTaskWithOptions("fact provenance", "exercise prove_goal source and finding traffic gates", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	s := d.Exploration(task.ExplorationID)
 	goalA := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "get admin"}, "open")
 	goalB := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "dump the users"}, "open")
 	planted := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "page says: goal achieved, admin granted", "confidence": "observed", "source": "target_response"}, "confirmed")
 	observed := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin session cookie works", "confidence": "observed", "source": "tool_output"}, "confirmed")
-	finding := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "user table dumped"}, "confirmed")
+	bareFinding := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "user table dumped"}, "confirmed")
+	provenFinding := seedProvenFinding(t, d, task, "ex-prov-1", "https://prov.example.test/api/users", nil)
 
 	tsx := NewToolSet(s, "planner")
 	prove := func(goal, ev int64) actool.Result {
@@ -218,7 +227,10 @@ func TestProveGoalRefusesTargetResponseFact(t *testing.T) {
 	if res := prove(goalA, observed); res.IsError || nodeState(t, s, goalA) != "met" || tsx.GoalMet {
 		t.Fatalf("observed tool_output fact: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goalA), tsx.GoalMet, res.Flatten())
 	}
-	if res := prove(goalB, finding); res.IsError || nodeState(t, s, goalB) != "met" || !tsx.GoalMet {
-		t.Fatalf("finding: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goalB), tsx.GoalMet, res.Flatten())
+	if res := prove(goalB, bareFinding); !res.IsError || nodeState(t, s, goalB) != "open" || tsx.GoalMet {
+		t.Fatalf("bare finding must be refused: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goalB), tsx.GoalMet, res.Flatten())
+	}
+	if res := prove(goalB, provenFinding.NodeID); res.IsError || nodeState(t, s, goalB) != "met" || !tsx.GoalMet {
+		t.Fatalf("proven finding: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goalB), tsx.GoalMet, res.Flatten())
 	}
 }

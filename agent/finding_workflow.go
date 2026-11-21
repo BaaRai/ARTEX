@@ -14,6 +14,10 @@ const findingIDGuidance = "\n\n**Finding ID conventions**: finding_id is the sta
 // The server supplies the persisted setting. A missing setting/host is off.
 // Consulted at assembly and again on writes so an already-running session
 // cannot keep binding after the user switches the feature off.
+// Note: when finding traffic binding is disabled in configuration, findings
+// remain saved and visible but cannot close a goal via prove_goal unless
+// traffic is bound manually later (non-HTTP goals still close via an observed
+// tool_output fact).
 // Guarded by a lock for the same reason as the tool hooks.
 var (
 	findingTrafficBindingMu   sync.RWMutex
@@ -73,7 +77,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 		note := ""
 		switch tool.Name() {
 		case "report_finding":
-			note = "\nBy default the report agent verifies and binds traffic before writing the report. The reporter keeps verification commands, key output, any known real traffic IDs and their purpose in evidence, so the report agent can check them against the execution records; no extra packet capture is needed for binding. Explicit immediate binding is still supported: traffic_refs or evidence_hint_id may submit already-verified references, the latter reading the structured references of the given hint in this task; if either is invalid the whole report fails. TCP / no-capture cases do not need these optional parameters. The returned finding_id and finding_node_id denote the standalone record and the exploration node respectively."
+			note = "\nBy default the report agent verifies and binds traffic before writing the report. The reporter keeps verification commands, key output, any known real traffic IDs and their purpose in evidence, so the report agent can check them against the execution records; no extra packet capture is needed for binding. Explicit immediate binding is still supported: traffic_refs or evidence_hint_id may submit already-verified references, the latter reading the structured references of the given hint in this task; if either is invalid the whole report fails. A finding without bound traffic stays recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset host is bound (non-HTTP goals close via an observed tool_output fact). The returned finding_id and finding_node_id denote the standalone record and the exploration node respectively."
 		case "add_hint", "add_task_hint":
 			note = "\nWhen handing off a confirmed vulnerability, keep the verified traffic's IDs, purpose, notes, and order in the corresponding hint's traffic_refs (top-level for a single hint, inside the corresponding hints element for a batch), and state in text exactly which vulnerability it proves. The caller must not hand off only text while dropping existing traffic references. Unverified candidates must not be passed as evidence."
 		case "get_finding_traffic", "bind_finding_traffic", "list_findings", "list_task_findings", "node_detail", "get_task_node_detail", "update_finding_report":
@@ -90,7 +94,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 			guidance += "\nWhen a platform conversation has no task context, do not call report_finding directly; hand off via add_task_hint to the existing corresponding task, let the task agent register it, and verify the result with list_task_findings."
 		}
 		if has["prove_goal"] || has["goal_met"] {
-			guidance += "\nBefore judging a goal complete, finish reporting/handing off the evidence at hand. Do not end the task or cancel Workers just because the textual vulnerability is registered while evidence handoff is incomplete; no-capture cases do not require waiting or forced capture."
+			guidance += "\nBefore judging a goal complete, finish reporting/handing off the evidence at hand. A finding only closes a goal via prove_goal once it has at least one server-verified bound traffic_ref matching its asset host (an unbound finding stays recorded and visible, and non-HTTP goals close via an observed tool_output fact). Do not end the task or cancel Workers while evidence binding is still pending."
 		}
 	}
 	if has["update_finding_report"] && has["bind_finding_traffic"] && has["get_finding_traffic"] {
