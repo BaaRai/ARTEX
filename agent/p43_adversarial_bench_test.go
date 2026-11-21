@@ -578,7 +578,9 @@ func TestAdversarialBenchTrafficRefMissingFromCaptureRefusedPG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM assets WHERE id=$1 OR domain LIKE '%p43-bench.example.test'`, assetID) })
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM assets WHERE id=$1 OR domain LIKE '%p43-bench.example.test'`, assetID)
+	})
 	store := d.Exploration(task.ExplorationID)
 
 	tr := p43Capture(t)
