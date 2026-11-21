@@ -770,7 +770,7 @@ func (d *DB) SetFindingStatus(id int64, status string) (int64, error) {
 			WHERE id = $2`, status, nodeID.Int64); err != nil {
 			return 0, err
 		}
-		if findingStatusInvalidatesGoal(status) {
+		if FindingStatusInvalidatesGoal(status) {
 			if err := reopenGoalsProvedByNodeTx(ctx, tx, nodeID.Int64); err != nil {
 				return 0, err
 			}

@@ -1103,18 +1103,10 @@ func findingPayloadStatus(n *db.Node) string {
 }
 
 // findingTriageBlocksGoal is true when the finding's triage label says it is
-// not a vulnerability to close a goal on.
-//
-// db.FindingRiskAccepted is intentionally NOT blocked here (#269): it marks a
-// real, valid vulnerability whose risk the operator chose to accept, so it may
-// still prove a goal and must not be added to this blocklist.
+// not a vulnerability to close a goal on. Delegates to db.FindingStatusInvalidatesGoal
+// so prove_goal and DB goal-reopen logic share one list and cannot drift (#269).
 func findingTriageBlocksGoal(status string) bool {
-	switch status {
-	case db.FindingFalsePositive, db.FindingDuplicate, db.FindingIgnored:
-		return true
-	default:
-		return false
-	}
+	return db.FindingStatusInvalidatesGoal(status)
 }
 
 func countActionableFindings(nodes []*db.Node) int {

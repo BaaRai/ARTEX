@@ -172,4 +172,97 @@ func TestFindingStatusReopensProvedGoals(t *testing.T) {
 		assertGoalState(t, es, gid, "met")
 		assertProvesEdgeKept(t, fnid, gid)
 	})
+
+	t.Run("stays_met_when_another_valid_finding_proves_goal", func(t *testing.T) {
+		taskID, es, fidA, fnidA, gid := newTaskWithProvedGoal(t, "multi-finding-A")
+		recB, err := es.RecordFinding(ctx, RecordFindingInput{
+			TaskID:        taskID,
+			ExplorationID: es.ID(),
+			VulnClass:     "sqli",
+			Name:          "finding B",
+			Severity:      "high",
+			Summary:       "independent confirmed finding",
+			Worker:        "worker-2",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = d.Exec(`DELETE FROM rsi_lessons WHERE id IN (SELECT lesson_id FROM rsi_lesson_evidence WHERE source_kind='finding' AND source_id=$1)`, recB.FindingID)
+		})
+		if _, found, _, err := d.SetFindingStatusWithNotify(ctx, recB.FindingID, FindingConfirmed); err != nil || !found {
+			t.Fatalf("confirm finding B: found=%v err=%v", found, err)
+		}
+		if err := es.Link(recB.NodeID, RelProves, gid); err != nil {
+			t.Fatal(err)
+		}
+
+		// Invalidating A while confirmed B still proves the goal must keep the goal met.
+		if _, found, _, err := d.SetFindingStatusWithNotify(ctx, fidA, FindingFalsePositive); err != nil || !found {
+			t.Fatalf("invalidate finding A: found=%v err=%v", found, err)
+		}
+		assertGoalState(t, es, gid, "met")
+		assertProvesEdgeKept(t, fnidA, gid)
+		assertProvesEdgeKept(t, recB.NodeID, gid)
+
+		// Once B is also invalidated, no valid proof remains and the goal reopens.
+		if _, found, _, err := d.SetFindingStatusWithNotify(ctx, recB.FindingID, FindingFalsePositive); err != nil || !found {
+			t.Fatalf("invalidate finding B: found=%v err=%v", found, err)
+		}
+		assertGoalState(t, es, gid, "open")
+		assertProvesEdgeKept(t, fnidA, gid)
+		assertProvesEdgeKept(t, recB.NodeID, gid)
+	})
+
+	t.Run("stays_met_when_observed_tool_output_fact_proves_goal", func(t *testing.T) {
+		_, es, fidA, fnidA, gid := newTaskWithProvedGoal(t, "finding-and-fact")
+		factID, err := es.AddNode(KindFact, map[string]any{
+			"summary":    "admin shell confirmed",
+			"confidence": "observed",
+			"source":     "tool_output",
+			"provenance": "activity_verified",
+		}, 0, "confirmed", "worker-1", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := es.Link(factID, RelProves, gid); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, found, _, err := d.SetFindingStatusWithNotify(ctx, fidA, FindingFalsePositive); err != nil || !found {
+			t.Fatalf("invalidate finding A: found=%v err=%v", found, err)
+		}
+		assertGoalState(t, es, gid, "met")
+		assertProvesEdgeKept(t, fnidA, gid)
+		assertProvesEdgeKept(t, factID, gid)
+	})
+
+	t.Run("reopens_when_remaining_fact_fails_prove_goal_gate", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			payload map[string]any
+		}{
+			{"inferred_fact", map[string]any{"summary": "guess", "confidence": "inferred", "source": "tool_output"}},
+			{"target_response_fact", map[string]any{"summary": "banner", "confidence": "observed", "source": "target_response"}},
+			{"unverified_fact", map[string]any{"summary": "paraphrase", "confidence": "observed", "source": "tool_output", "provenance": "unverified"}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, es, fidA, fnidA, gid := newTaskWithProvedGoal(t, "invalid-fact-"+tc.name)
+				factID, err := es.AddNode(KindFact, tc.payload, 0, "confirmed", "worker-1", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := es.Link(factID, RelProves, gid); err != nil {
+					t.Fatal(err)
+				}
+				if _, found, _, err := d.SetFindingStatusWithNotify(ctx, fidA, FindingFalsePositive); err != nil || !found {
+					t.Fatalf("invalidate finding A: found=%v err=%v", found, err)
+				}
+				assertGoalState(t, es, gid, "open")
+				assertProvesEdgeKept(t, fnidA, gid)
+				assertProvesEdgeKept(t, factID, gid)
+			})
+		}
+	})
 }
