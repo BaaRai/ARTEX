@@ -33,7 +33,7 @@ func TestTaskScopeLabelIsHonest(t *testing.T) {
 // denominator and list_untested_assets.
 func TestAutoScopeOutsideDeclaredRootExcluded(t *testing.T) {
 	d := testDB(t)
-	defer d.Close()
+	t.Cleanup(func() { _ = d.Close() })
 
 	stamp := time.Now().UnixNano()
 	declared := fmt.Sprintf("app.f8-%d.invalid", stamp)

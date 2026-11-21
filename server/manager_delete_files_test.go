@@ -18,7 +18,7 @@ func TestSeedAssociatesTargetAssetWithTask(t *testing.T) {
 	if err != nil {
 		pgdb.SkipPGUnavailable(t, err)
 	}
-	defer m.Close()
+	t.Cleanup(func() { _ = m.Close() })
 	task, err := m.CreateTask("seed ownership", "seed ownership", nil, 0, 0)
 	if err != nil {
 		t.Fatal(err)

@@ -72,7 +72,10 @@ func newNotifyFixture(t *testing.T) *notifyFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pg.Exec(`DELETE FROM tasks WHERE id=$1`, taskID) })
+	t.Cleanup(func() {
+		_, _ = pg.DeleteFindingsByTask(taskID)
+		_ = pg.DeleteTask(taskID)
+	})
 
 	var mark int64
 	if err := pg.QueryRow(`SELECT COALESCE(max(id),0) FROM notification_events`).Scan(&mark); err != nil {

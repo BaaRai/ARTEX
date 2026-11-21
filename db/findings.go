@@ -750,7 +750,36 @@ func (d *DB) DeleteFindingsByTask(taskID int64) (int64, error) {
 // do not care about notifications (parameter validation, retest flows) can
 // drive the status on their own.
 func (d *DB) SetFindingStatus(id int64, status string) (int64, error) {
-	return d.setFindingCol(id, "status", "status", status)
+	ctx := context.Background()
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var nodeID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `UPDATE findings SET status=$1 WHERE id=$2 RETURNING node_id`, status, id).Scan(&nodeID)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if nodeID.Valid {
+		if _, err := tx.ExecContext(ctx, `UPDATE exploration_nodes
+			SET payload = jsonb_set(payload, '{status}', to_jsonb($1::text))
+			WHERE id = $2`, status, nodeID.Int64); err != nil {
+			return 0, err
+		}
+		if FindingStatusInvalidatesGoal(status) {
+			if err := reopenGoalsProvedByNodeTx(ctx, tx, nodeID.Int64); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
 // SetFindingReportState updates one finding's report stage and mirrors it onto

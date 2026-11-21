@@ -101,7 +101,10 @@ CREATE TABLE IF NOT EXISTS exchange_rewrites (
   exchange_id   TEXT NOT NULL,
   seq           INTEGER NOT NULL,
   phase         TEXT NOT NULL,              -- 'request' | 'response'
-  rule_id       INTEGER,                    -- NULL on a global line
+  source_kind   TEXT NOT NULL DEFAULT 'rule', -- 'rule' | 'hook'
+  rule_id       INTEGER,                    -- NULL on a global or hook line
+  hook_id       INTEGER,                    -- NULL on a rule or global line
+  hook_version  INTEGER,                    -- NULL on a rule or global line
   rule_snapshot TEXT,                       -- JSON, no sensitive action value
   action        TEXT,
   field         TEXT,                       -- 'method' | 'url' | 'header:<Name>' | 'body' | 'status'
@@ -113,6 +116,51 @@ CREATE TABLE IF NOT EXISTS exchange_rewrites (
   after_blob    TEXT,
   PRIMARY KEY (exchange_id, seq)
 );
+
+-- Raw TCP streams relayed through the opt-in SOCKS5 CONNECT listener (P4.1a).
+-- Stored separately from HTTP exchanges: a raw TCP stream never creates a row
+-- in exchanges. Oversized directional payloads spill to _blobs/sha256 and
+-- register their hashes in blob_refs under the stream's tcp-* id.
+CREATE TABLE IF NOT EXISTS raw_tcp_streams (
+  id          TEXT PRIMARY KEY,
+  protocol    TEXT NOT NULL DEFAULT 'tcp',
+  host        TEXT NOT NULL,
+  port        INTEGER NOT NULL,
+  started_at  INTEGER NOT NULL,             -- unix milliseconds
+  ended_at    INTEGER NOT NULL,             -- unix milliseconds
+  duration_ms INTEGER NOT NULL,
+  c2s_bytes   INTEGER NOT NULL DEFAULT 0,
+  s2c_bytes   INTEGER NOT NULL DEFAULT 0,
+  truncated   INTEGER NOT NULL DEFAULT 0,
+  c2s_preview BLOB,
+  c2s_blob    TEXT,
+  s2c_preview BLOB,
+  s2c_blob    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_raw_tcp_host    ON raw_tcp_streams(host);
+CREATE INDEX IF NOT EXISTS idx_raw_tcp_started ON raw_tcp_streams(started_at DESC, id DESC);
+
+-- Raw UDP datagrams relayed through opt-in SOCKS5 UDP ASSOCIATE (P4.1c).
+-- Stored separately from HTTP exchanges: a UDP datagram never creates a row
+-- in exchanges. No fragmentation reassembly is performed: each forwarded
+-- datagram is recorded individually as it arrives. Oversized payloads spill
+-- atomically to _blobs/sha256 and register their hashes in blob_refs under
+-- the datagram's udp-* id.
+CREATE TABLE IF NOT EXISTS raw_udp_datagrams (
+  id             TEXT PRIMARY KEY,
+  association_id TEXT NOT NULL,
+  protocol       TEXT NOT NULL DEFAULT 'udp',
+  host           TEXT NOT NULL,
+  port           INTEGER NOT NULL,
+  direction      TEXT NOT NULL,              -- 'c2s' | 's2c'
+  ts             INTEGER NOT NULL,           -- unix milliseconds
+  size           INTEGER NOT NULL DEFAULT 0, -- datagram payload bytes
+  preview        BLOB,
+  blob           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_raw_udp_assoc ON raw_udp_datagrams(association_id, ts);
+CREATE INDEX IF NOT EXISTS idx_raw_udp_host  ON raw_udp_datagrams(host);
+CREATE INDEX IF NOT EXISTS idx_raw_udp_ts    ON raw_udp_datagrams(ts DESC, id DESC);
 `
 
 // ftsSchema is applied separately from indexSchema: a driver build without FTS5
@@ -226,12 +274,23 @@ type Traffic struct {
 	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
 	// whole by SetRewriteRules and applied by the sink (rewrite_flow.go).
 	rewriteRules atomic.Pointer[rewrite.Set]
+	// tamperHooks is the compiled snapshot of enabled Go tampering hooks (P4.2),
+	// replaced by SetTamperHooks. Nil when ARTEX_TAMPER_HOOKS_ENABLED is off or
+	// no hooks are enabled.
+	tamperHooks atomic.Pointer[HookSet]
 	// snaps keeps the original of each request a rule rewrote until its
 	// exchange is recorded (rewrite_flow.go). Nil on the zero value.
 	snaps *snapTable
 	// sweeping tracks the snapshot sweeper, which runs until Close. It is kept
 	// apart from reaping, which only ever holds work that finishes on its own.
 	sweeping sync.WaitGroup
+	// socks holds the opt-in SOCKS5 CONNECT listener when started via StartSOCKS5.
+	socksMu sync.Mutex
+	socks   *socks5Server
+	// transparent holds the opt-in Linux transparent TCP listener when started
+	// via StartTransparentTCP (P4.1b).
+	transparentMu sync.Mutex
+	transparent   *transparentServer
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -353,11 +412,68 @@ func (t *Traffic) initIndex() error {
 	if _, err := conn.ExecContext(ctx, indexSchema); err != nil {
 		return err
 	}
+	if err := ensureExchangeRewritesHookColumns(ctx, conn); err != nil {
+		return err
+	}
 	if _, err := conn.ExecContext(ctx, ftsSchema); err != nil {
 		log.Printf("[traffic] full-text index unavailable; body search will be disabled (metadata search is unaffected): %v", err)
 		return nil
 	}
 	t.fts = true
+	return nil
+}
+
+// SetTamperHooks atomically swaps the compiled tampering-hook snapshot used by
+// the capture proxy. Passing nil disables hook execution (baseline fast path).
+func (t *Traffic) SetTamperHooks(hs *HookSet) {
+	if t == nil {
+		return
+	}
+	t.tamperHooks.Store(hs)
+}
+
+// TamperHooks returns the currently active HookSet, or nil when disabled.
+func (t *Traffic) TamperHooks() *HookSet {
+	if t == nil {
+		return nil
+	}
+	return t.tamperHooks.Load()
+}
+
+func ensureExchangeRewritesHookColumns(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `PRAGMA table_info(exchange_rewrites)`)
+	if err != nil {
+		return err
+	}
+	existing := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, col := range []struct{ name, ddl string }{
+		{"source_kind", `ALTER TABLE exchange_rewrites ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'rule'`},
+		{"hook_id", `ALTER TABLE exchange_rewrites ADD COLUMN hook_id INTEGER`},
+		{"hook_version", `ALTER TABLE exchange_rewrites ADD COLUMN hook_version INTEGER`},
+	} {
+		if existing[col.name] {
+			continue
+		}
+		if _, err := conn.ExecContext(ctx, col.ddl); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -444,6 +560,20 @@ func (t *Traffic) Start() error { return t.proxy.Start() }
 func (t *Traffic) Close() error {
 	if t.closed != nil {
 		t.closeOnce.Do(func() { close(t.closed) })
+	}
+	t.socksMu.Lock()
+	srv := t.socks
+	t.socks = nil
+	t.socksMu.Unlock()
+	if srv != nil {
+		_ = srv.Close()
+	}
+	t.transparentMu.Lock()
+	tsrv := t.transparent
+	t.transparent = nil
+	t.transparentMu.Unlock()
+	if tsrv != nil {
+		_ = tsrv.Close()
 	}
 	t.reaping.Wait()
 	t.sweeping.Wait()
@@ -1024,6 +1154,51 @@ func (t *Traffic) Search(host string, page, size int) ([]ExchangeMeta, error) {
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// ResponseContaining reports the newest capture recorded in [fromTS,toTS]
+// (unix seconds) whose response side contains one of lines. Request-side matches
+// are ignored after the index lookup: what classifies a fact is what came back
+// from the target. ok is false when no capture matches, when this build has no
+// full-text index, or when the store is unavailable; callers keep the
+// activity-only classification in that case.
+func (t *Traffic) ResponseContaining(lines []string, fromTS, toTS int64) (id string, ok bool, err error) {
+	if t == nil || len(lines) == 0 {
+		return "", false, nil
+	}
+	for _, line := range lines {
+		cond, arg, hasFTS := t.ftsFilter(line)
+		if !hasFTS {
+			return "", false, nil
+		}
+		rows, qerr := t.db.Query(`SELECT id FROM exchanges
+WHERE ts>=? AND ts<=? AND `+cond+`
+ORDER BY ts DESC LIMIT 8`, fromTS, toTS, arg)
+		if qerr != nil {
+			return "", false, qerr
+		}
+		ids := make([]string, 0, 8)
+		for rows.Next() {
+			var cand string
+			if serr := rows.Scan(&cand); serr != nil {
+				rows.Close()
+				return "", false, serr
+			}
+			ids = append(ids, cand)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return "", false, err
+		}
+		for _, cand := range ids {
+			_, resp, gerr := t.Get(cand)
+			if gerr != nil || !strings.Contains(resp, line) {
+				continue
+			}
+			return cand, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // ftsFilter builds the SQL condition restricting rows to those whose indexed

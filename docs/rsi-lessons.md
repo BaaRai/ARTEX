@@ -35,11 +35,19 @@ POST /api/tasks/{id}/lessons/extract
 It is idempotent for the same disposition. `rsi_lesson_evidence` is keyed by
 `(lesson, source_kind, source_id)`, so a second run for the same finding adds
 no evidence and cannot inflate support. A later extract after a reversed
-disposition retracts that finding's evidence from the opposite-kind lesson,
-including every retest of the finding, and retires the lesson when its
-support hits zero. Confirming again restores the evidence; a retired lesson
-is un-retired only when it has no remaining evidence. Extraction does not
-run on status PATCH; call the endpoint after triage. Reopening a finding
+disposition withdraws that finding's evidence from the opposite-kind lesson,
+including every retest of the finding, and retires the lesson when its live
+support hits zero. The evidence row stays, with `withdrawn_at` set. Confirming
+again clears that timestamp and restores the evidence; a retired lesson is
+un-retired only when it has no remaining live evidence. A negative disposition
+also withdraws the cautions written from the finding's retests. A change inside
+the negative group (`false_positive`, `duplicate`, `ignored`, `risk_accepted`)
+withdraws the finding from the previous negative lesson before writing the
+new action text.
+
+Extraction also runs after a disposition change (`SetFindingStatusWithNotify`,
+including bulk) and after a completed retest, in addition to terminal status
+and `POST /api/tasks/{id}/lessons/extract`. Reopening a finding
 (`pending` / `in_progress`) produces nothing and retracts nothing.
 
 Rules:
@@ -49,30 +57,40 @@ Rules:
 | finding `confirmed` / `resolved` / `fixed` | positive | `Confirmed <vulnclass>: <summary>` |
 | retest `reproduced` on such a finding | positive | `Reproduced <vulnclass> on retest: <summary>` |
 | finding `false_positive` / `duplicate` / `ignored` / `risk_accepted` | negative | `Do not re-report without new mechanics: <summary> (prior <status>)` |
-| retest `fixed` / `inconclusive` | caution | `Recheck before reporting <vulnclass>: a prior retest was <verdict>` |
+| retest `fixed` / `inconclusive` on a `confirmed` / `resolved` / `fixed` finding | caution | `Recheck before reporting <vulnclass>: a prior retest was <verdict>` |
 
 Pending and in-progress findings produce nothing: there is no outcome yet.
 Empty cue, action, or source is refused by the gate.
 
-A task with more than one company in `task_scope` is skipped. A generic
-(`company_id` NULL) lesson would be visible to every later task, including
-those of the other companies on this one. Per-finding company attribution is
-a later change.
+An action is capped at 320 runes. In a negative action the summary is cut, not
+the `(prior <status>)` suffix, so each negative status keeps its own action and
+dedupe key.
+
+A retest counts only when it is `completed` with a verdict; extraction reads
+the latest such retest. A verdict staged on a pending, running, failed, or
+stopped retest produces nothing.
+
+A task with more than one company in `task_scope` does not gain a new lesson.
+Retraction still runs, so a lesson written while the task had one company can
+be withdrawn after a second company is added. It withdraws only on a changed
+disposition: a finding whose status did not move keeps its evidence. Per-finding
+company attribution is a later change.
 
 ## Selection
 
 `GET /api/tasks/{id}/lessons` returns the lessons visible to a task plus the
 rendered block. Selection is scoped:
 
-- generic lessons (no company, no category) are visible to every task;
+- a lesson with no company is visible only to a task that also has no company;
 - company scope comes from `task_scope`, not `tasks.company_id`; a lesson is
   company-scoped only when the source task had exactly one company, and a
-  task with several companies is not extracted;
+  task with several companies is not given a new lesson;
 - lessons from the same company or the same task category rank first
   (company/category matches sort ahead of generic rows);
 - within a scope: positive before negative before caution, then support, then
   recency;
-- at most eight lessons and 1800 characters are rendered.
+- at most eight lessons are rendered, and the block stops at 1800 characters
+  (runes, not bytes).
 
 Duplicates are merged at extraction time by a dedupe key over kind, scope, cue,
 and action, so the same lesson from several tasks becomes one row with several

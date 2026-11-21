@@ -355,3 +355,49 @@ func TestFindingsCSVNeutralizesFormulas(t *testing.T) {
 		t.Errorf("plain severity %q should not be prefixed", row[3])
 	}
 }
+
+func TestFindingFilenameUnicodeAndIDSuffix(t *testing.T) {
+	// Vocalized Arabic should strip combining diacritics cleanly rather than inserting underscores.
+	arabic := FindingFilename(&db.DBFinding{
+		ID:       42,
+		Severity: "critical",
+		Name:     "ثَغْرَة حَقْن SQL",
+	})
+	if arabic != "critical_ثغرة_حقن_SQL_42.md" {
+		t.Fatalf("arabic filename = %q, want %q", arabic, "critical_ثغرة_حقن_SQL_42.md")
+	}
+
+	// Composed Latin/Turkish letters stay intact after NFC normalization.
+	turkish := FindingFilename(&db.DBFinding{
+		ID:       9,
+		Severity: "medium",
+		Name:     "Gu\u0308venlik Ac\u0327ıg\u0306ı",
+	})
+	if turkish != "medium_Güvenlik_Açığı_9.md" {
+		t.Fatalf("turkish filename = %q, want %q", turkish, "medium_Güvenlik_Açığı_9.md")
+	}
+
+	// BiDi RLO control characters are stripped without breaking words.
+	bidi := FindingFilename(&db.DBFinding{
+		ID:       15,
+		Severity: "high",
+		Name:     "upload\u202Egpj.exe",
+	})
+	if strings.ContainsRune(bidi, '\u202E') || bidi != "high_uploadgpj.exe_15.md" {
+		t.Fatalf("bidi filename = %q", bidi)
+	}
+
+	// Long multi-byte titles stay valid UTF-8, within 120 bytes before .md, and keep distinct ID suffixes.
+	longPrefix := strings.Repeat("اختراق_صلاحيات_", 10)
+	f1 := FindingFilename(&db.DBFinding{ID: 101, Severity: "high", Name: longPrefix + "أ"})
+	f2 := FindingFilename(&db.DBFinding{ID: 102, Severity: "high", Name: longPrefix + "ب"})
+	for _, name := range []string{f1, f2} {
+		base := strings.TrimSuffix(name, ".md")
+		if len(base) > maxFindingFilenameBaseBytes {
+			t.Fatalf("filename base %q exceeds %d bytes (%d)", base, maxFindingFilenameBaseBytes, len(base))
+		}
+	}
+	if !strings.HasSuffix(f1, "_101.md") || !strings.HasSuffix(f2, "_102.md") || f1 == f2 {
+		t.Fatalf("expected preserved distinct ID suffixes: f1=%q f2=%q", f1, f2)
+	}
+}

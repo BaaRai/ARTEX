@@ -2,14 +2,38 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Autumn-27/artex/db"
 	actool "github.com/Autumn-27/norma/tool"
 )
+
+var (
+	testSecretsOnce sync.Once
+	testSecretsDir  string
+)
+
+func ensureTestSecrets(t *testing.T, d *db.DB) {
+	t.Helper()
+	if os.Getenv("ARTEX_SECRET_KEY") == "" {
+		t.Setenv("ARTEX_SECRET_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	}
+	testSecretsOnce.Do(func() {
+		dir := filepath.Join(os.TempDir(), "artex-agent-test-secrets")
+		_ = os.MkdirAll(dir, 0o700)
+		testSecretsDir = dir
+	})
+	if err := d.InitSecrets(testSecretsDir); err != nil {
+		t.Fatalf("InitSecrets: %v", err)
+	}
+}
 
 // guardTaskStore creates a throwaway task (PG) and returns its exploration store.
 // It has no goal node until the test adds one.
@@ -86,18 +110,88 @@ func TestGoalMetWithoutGoalNodes(t *testing.T) {
 	}
 }
 
-// prove_goal accepts a fact only when its confidence is observed; a finding is
-// still accepted (#124, F5).
+func seedTestTrafficSnapshot(trafficID, rawURL, reqHash, respHash string) db.TrafficEvidenceSnapshot {
+	snap := db.TrafficEvidenceSnapshot{
+		SourceTrafficID: trafficID,
+		URL:             rawURL,
+		Method:          "GET",
+		Status:          200,
+		ReqHash:         reqHash,
+		RespHash:        respHash,
+	}
+	snap.ID = db.TrafficSnapshotID(snap)
+	return snap
+}
+
+// seedFindingAsset records the HTTP service asset a proven finding links to: a
+// finding without a linked asset never proves a goal.
+func seedFindingAsset(t *testing.T, d *db.DB, task *db.Task, rawURL string) int64 {
+	t.Helper()
+	id, err := d.Assets().UpsertHTTPService(db.UpsertHTTPServiceReq{URL: rawURL, TaskID: task.ID})
+	if err != nil {
+		t.Fatalf("seed finding asset: %v", err)
+	}
+	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM assets WHERE id=$1`, id) })
+	return id
+}
+
+func seedProvenFinding(t *testing.T, d *db.DB, task *db.Task, trafficID, rawURL string, assetIDs []int64) *db.RecordedFinding {
+	t.Helper()
+	ensureTestSecrets(t, d)
+	snap := seedTestTrafficSnapshot(trafficID, rawURL, "req-"+trafficID, "resp-"+trafficID)
+	var rec *db.RecordedFinding
+	err := d.WithEvidenceTx(context.Background(), func(tx *sql.Tx) error {
+		var e error
+		rec, e = db.RecordFindingTx(context.Background(), tx, db.RecordFindingInput{
+			TaskID:        task.ID,
+			ExplorationID: task.ExplorationID,
+			VulnClass:     "sqli",
+			Name:          "Users dump",
+			Severity:      "high",
+			Summary:       "user table dumped with traffic proof",
+			Worker:        "worker-1",
+			AssetIDs:      assetIDs,
+		}, []db.PreparedTrafficEvidence{{
+			Ref:      db.TrafficRef{TrafficID: trafficID, Role: "proof", Note: "verified capture"},
+			Snapshot: snap,
+		}})
+		return e
+	})
+	if err != nil {
+		t.Fatalf("seed proven finding: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM finding_traffic_bindings WHERE finding_id=$1`, rec.FindingID)
+		_, _ = d.Exec(`DELETE FROM traffic_evidence_snapshots WHERE id=$1`, snap.ID)
+	})
+	return rec
+}
+
+// prove_goal accepts a fact only when its confidence is observed; a finding
+// requires at least one server-verified bound traffic_ref (bare findings without
+// bound traffic are refused, while a finding with bound traffic closes the goal)
+// (#124, F5, P4.3).
 func TestProveGoalRequiresObservedFact(t *testing.T) {
-	s := guardTaskStore(t)
+	d := testDB(t)
+	t.Cleanup(func() { _ = d.Close() })
+	task, err := d.CreateTaskWithOptions("agentic guards", "exercise the goal and finding proof guards", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	s := d.Exploration(task.ExplorationID)
+
 	goalA := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "get admin"}, "open")
 	goalB := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "dump the users"}, "open")
 	inferred := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin is probably reachable", "confidence": "inferred"}, "confirmed")
 	unlabeled := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin reachable"}, "confirmed")
 	observed := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "logged in as admin", "confidence": " Observed "}, "confirmed")
-	finding := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "user table dumped"}, "confirmed")
+	bareFinding := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "user table dumped"}, "confirmed")
+	provenFinding := seedProvenFinding(t, d, task, "ex-guard-1", "https://guard.example.test/api/users",
+		[]int64{seedFindingAsset(t, d, task, "https://guard.example.test/api/users")})
 
 	tsx := NewToolSet(s, "planner")
+	tsx.SetTrafficProofChecker(func(_ context.Context, id string) (bool, error) { return id == "ex-guard-1", nil })
 	prove := func(goal, ev int64) actool.Result {
 		return callGuardTool(t, tsx.proveGoal(), `{"goal_id":`+strconv.FormatInt(goal, 10)+`,"evidence_id":`+strconv.FormatInt(ev, 10)+`,"reason":"x"}`)
 	}
@@ -121,8 +215,13 @@ func TestProveGoalRequiresObservedFact(t *testing.T) {
 	if tsx.GoalMet {
 		t.Fatal("GoalMet set while goal B is open")
 	}
-	if res := prove(goalB, finding); res.IsError || nodeState(t, s, goalB) != "met" || !tsx.GoalMet {
-		t.Fatalf("finding: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goalB), tsx.GoalMet, res.Flatten())
+	// Bare finding without bound traffic must be refused; goal B stays open and GoalMet stays false.
+	if res := prove(goalB, bareFinding); !res.IsError || nodeState(t, s, goalB) != "open" || tsx.GoalMet {
+		t.Fatalf("bare finding must be refused: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goalB), tsx.GoalMet, res.Flatten())
+	}
+	// Finding with real bound traffic closes goal B and sets GoalMet.
+	if res := prove(goalB, provenFinding.NodeID); res.IsError || nodeState(t, s, goalB) != "met" || !tsx.GoalMet {
+		t.Fatalf("proven finding: IsError=%v state=%q GoalMet=%v %q", res.IsError, nodeState(t, s, goalB), tsx.GoalMet, res.Flatten())
 	}
 }
 

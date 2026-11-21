@@ -269,6 +269,7 @@ VALUES(?,?, 'HTTP/1.1 200 OK', ?, ?)`, id, "GET "+path+" HTTP/1.1\nHost: "+host,
 	}
 	tidV1, _ := strconv.ParseInt(taskV1.ID, 10, 64)
 	t.Cleanup(func() {
+		_, _ = s.m.pg.DeleteFindingsByTask(tidV1)
 		_, _ = s.m.pg.Exec(`DELETE FROM task_archives WHERE task_id=$1`, tidV1)
 		_ = s.m.pg.DeleteTask(tidV1)
 	})

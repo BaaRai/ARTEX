@@ -101,6 +101,14 @@ func guardPanic(t actool.CoreTool) actool.CoreTool { return &guardedTool{CoreToo
 
 type guardedTool struct{ actool.CoreTool }
 
+// AcceptsRawInput forwards the wrapped tool's opt-out of the harness schema
+// check, as overriddenTool does: this wrapper is the one the harness sees, and
+// the embedded interface alone would hide the opt-out from its type assertion.
+func (g *guardedTool) AcceptsRawInput() bool {
+	r, ok := g.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && r.AcceptsRawInput()
+}
+
 func (g *guardedTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (res actool.Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
