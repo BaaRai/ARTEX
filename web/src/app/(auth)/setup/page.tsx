@@ -139,6 +139,9 @@ export default function SetupPage() {
               >
                 {loading ? t("Saving...") : t("Set password and sign in")}
               </Button>
+              <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                {t("Traffic capture is off by default. Enable it in System settings after setup if you need provable HTTP findings — captured traffic is required for findings to prove goals.")}
+              </p>
             </form>
           )}
         </div>
