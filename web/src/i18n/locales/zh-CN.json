@@ -214,6 +214,7 @@
   "Agent": "智能体",
   "Agent \"{name}\" created": "已创建智能体“{name}”",
   "Agent \"{name}\" deleted": "已删除智能体“{name}”",
+  "Agent isolation is degraded: agent shells, tools and file tools run with the server's identity and may read its keys, config and database credentials.": "Agent 隔离已降级：Agent 的 shell、工具和文件工具以服务器身份运行，可能读取其密钥、配置和数据库凭据。",
   "Agent is replying; type /btw to ask a side question…": "Agent 正在回复，可输入 /btw 提问…",
   "Agent is running": "Agent 正在运行",
   "Agent list": "Agent 清单",

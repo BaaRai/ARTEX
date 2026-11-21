@@ -106,7 +106,7 @@ func run() int {
 		execUID = flag.Int("exec-uid", server.DefaultExecUID, "uid that agent processes run as (Bash, shell, custom tools, MCP stdio); -1 turns the drop off")
 		execGID = flag.Int("exec-gid", server.DefaultExecGID, "gid that agent processes run as")
 		// Development escape of the isolation self-test, off by default.
-		devNoIsolation = flag.Bool(server.DevNoIsolationFlag, false, "DEVELOPMENT ONLY: start even when the agent isolation self-test fails; agent processes and file tools may then read the server's keys, config and database credentials")
+		devNoIsolation = flag.Bool(server.DevNoIsolationFlag, false, "DEVELOPMENT ONLY: on Linux as root, start even when the agent isolation self-test fails; agent processes and file tools may then read the server's keys, config and database credentials")
 	)
 	flag.Parse()
 
@@ -190,11 +190,13 @@ func run() int {
 		return 1
 	}
 	// Before the stores open and any agent runs: check that the isolation above holds
-	// (server/isolation.go). A failure stops the start unless the escape is set.
+	// (server/isolation.go). On Linux as root a failure stops the start unless the
+	// escape is set; elsewhere the server starts degraded and says so.
 	selfTest := server.IsolationSelfTest(priv, server.IsolationTargets{
 		DataDir: *dataDir, KeyDir: keyDir, ConfigPath: cfgPath, SkillDir: skillDir, DSN: dsn,
 	})
-	if err := server.EnforceIsolation(selfTest, *devNoIsolation); err != nil {
+	isolation, err := server.EnforceIsolation(runtime.GOOS, priv, selfTest, *devNoIsolation)
+	if err != nil {
 		log.Printf("[config] %v", err)
 		return 1
 	}
@@ -210,7 +212,7 @@ func run() int {
 	}
 	defer mgr.Close()
 
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv))
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation))
 	// ReadTimeout bounds how long the request headers and body may take to arrive.
 	// It does not limit how long a handler runs, so an event stream stays open.
 	// WriteTimeout is left unset: a write deadline would cut that stream.

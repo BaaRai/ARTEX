@@ -54,7 +54,8 @@ type Server struct {
 
 	scrubSecrets bool // drop ARTEX_PG_DSN and the API keys from the environment once read (binary only)
 
-	execPriv ExecPrivilege // identity agent processes run under; zero keeps the server's own
+	execPriv  ExecPrivilege   // identity agent processes run under; zero keeps the server's own
+	isolation IsolationStatus // result of the startup isolation self-test (isolation.go); zero when not run
 
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
@@ -1101,6 +1102,10 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"ok": true, "service": "artex", "version": BuildVersion}
+	// The web UI shows a banner on every page for a degraded isolation (isolation.go).
+	if s.isolation.Mode != "" {
+		out["isolation"] = s.isolation
+	}
 	// Opt-in only (ARTEX_UPDATE_CHECK); off, this returns "" without any request.
 	if latest := updates.newerVersion(r.Context(), time.Now(), BuildVersion); latest != "" {
 		out["latest_version"] = latest
