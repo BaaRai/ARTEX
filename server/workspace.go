@@ -39,8 +39,9 @@ func (s *Server) wsResolveConfined(rel string) (confinedPath, bool) {
 
 // workspaceDeniedPrefixes are platform-internal subtrees under the data dir
 // that the workspace file manager must not expose. traffic/_ca holds the
-// capture proxy CA private key; traffic/_index holds the SQLite exchange index.
-var workspaceDeniedPrefixes = []string{"traffic/_ca", "traffic/_index"}
+// capture proxy CA private key; traffic/_index holds the SQLite exchange index;
+// traffic/_blobs holds the captured bodies the index refers to by hash.
+var workspaceDeniedPrefixes = []string{"traffic/_ca", "traffic/_index", "traffic/_blobs"}
 
 // workspacePathDenied reports whether realPath lands in a platform-internal
 // subtree. It compares the canonicalized path relative to the real root, so a
@@ -63,6 +64,27 @@ func workspacePathDenied(realRoot, realPath string) bool {
 	rel = strings.Join(segs, "/")
 	for _, prefix := range workspaceDeniedPrefixes {
 		if rel == prefix || strings.HasPrefix(rel, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// workspaceHoldsDenied reports whether a platform-internal subtree lies beneath
+// path, so that removing path would remove it too. Segments are normalised as
+// in workspacePathDenied.
+func workspaceHoldsDenied(realRoot, path string) bool {
+	rel, err := filepath.Rel(realRoot, path)
+	if err != nil {
+		return true // fail closed
+	}
+	segs := strings.Split(filepath.ToSlash(rel), "/")
+	for i, seg := range segs {
+		segs[i] = strings.ToLower(strings.TrimRight(seg, ". "))
+	}
+	rel = strings.Join(segs, "/")
+	for _, prefix := range workspaceDeniedPrefixes {
+		if strings.HasPrefix(prefix, rel+"/") {
 			return true
 		}
 	}
@@ -233,6 +255,12 @@ func (s *Server) wsDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if cp.realPath == cp.realRoot {
 		writeErr(w, 400, "cannot delete the workspace root directory")
+		return
+	}
+	// entryPath is what RemoveAll removes: a symlink is removed as a link, a
+	// directory with everything beneath it.
+	if workspaceHoldsDenied(cp.realRoot, cp.entryPath) {
+		writeErr(w, 400, "cannot delete a directory that holds platform data (the capture CA, index and blob store)")
 		return
 	}
 	if !cp.exists {
