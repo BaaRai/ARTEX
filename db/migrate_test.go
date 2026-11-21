@@ -139,9 +139,10 @@ func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 	}{{1, llmRecordsMigration}, {2, llmUsageMigration}, {3, "0003_task_scope_icp_index.sql"}, {4, "0004_llm_usage_ts_index.sql"},
 		{5, "0005_traffic_rewrite_rules.sql"}, {6, "0006_activity_outbox.sql"}, {7, "0007_finding_report_state.sql"},
 		{8, "0008_traffic_evidence_rewrite_flag.sql"}, {9, "0009_llm_context.sql"}, {10, "0010_dashboard_usage_indexes.sql"},
-		{11, "0011_traffic_tamper_hooks.sql"}, {12, "0012_lesson_withdrawn.sql"}}
+		{11, "0011_traffic_tamper_hooks.sql"}, {12, "0012_lesson_withdrawn.sql"},
+		{13, "0013_lesson_evidence_history.sql"}}
 	if len(applied) != len(want) {
-		t.Fatalf("schema_migrations = %+v, want versions 1 to 12", applied)
+		t.Fatalf("schema_migrations = %+v, want versions 1 to 13", applied)
 	}
 	for i, w := range want {
 		content, err := fs.ReadFile(migrationsFS(), w.name)
@@ -432,10 +433,11 @@ func TestLessonWithdrawnMigrationKeepsExistingEvidence(t *testing.T) {
 	}
 	// The migration file alone adds the column to a table without it.
 	for _, q := range []string{
+		`DROP INDEX IF EXISTS uq_rsi_lesson_evidence_live`,
 		`ALTER TABLE rsi_lesson_evidence DROP COLUMN withdrawn_at`,
 		string(migrationSQL),
 		`ALTER TABLE rsi_lesson_evidence DROP COLUMN withdrawn_at`,
-		`DELETE FROM schema_migrations WHERE version=12`,
+		`DELETE FROM schema_migrations WHERE version IN (12, 13)`,
 		`INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,status)
 		 VALUES ('legacy-lesson','positive','xss','Confirmed xss: legacy','adopted')`,
 		`INSERT INTO rsi_lesson_evidence(lesson_id,source_kind,source_id,detail)
@@ -479,8 +481,15 @@ func TestLessonWithdrawnMigrationKeepsExistingEvidence(t *testing.T) {
 	}
 	check(d)
 	before := readApplied(t, d)
-	if last := before[len(before)-1]; last.version != 12 || last.name != migrationName {
-		t.Fatalf("last applied migration = %+v, want 0012", last)
+	has12 := false
+	for _, m := range before {
+		if m.version == 12 && m.name == migrationName {
+			has12 = true
+			break
+		}
+	}
+	if !has12 {
+		t.Fatalf("applied migrations = %+v, missing 0012", before)
 	}
 	d.Close()
 

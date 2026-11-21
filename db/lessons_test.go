@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -1481,4 +1482,95 @@ func lessonStatusSupport(t *testing.T, d *DB, lessonID int64) (status string, su
 		t.Fatal(err)
 	}
 	return status, support
+}
+
+// Re-confirming a previously withdrawn finding must NOT clear withdrawn_at on
+// the old evidence row: the withdrawal row stays for history and re-confirmation
+// inserts a new live row (#269).
+func TestReconfirmingFindingPreservesWithdrawalHistory(t *testing.T) {
+	d := notifyTestDB(t)
+	ctx := context.Background()
+
+	task, err := d.CreateTaskWithOptions("withdraw-history", "test withdrawal history", TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	es := d.Exploration(task.ExplorationID)
+	rec, err := es.RecordFinding(ctx, RecordFindingInput{
+		TaskID:        task.ID,
+		ExplorationID: task.ExplorationID,
+		VulnClass:     "ssrf",
+		Name:          "SSRF on webhook",
+		Severity:      "high",
+		Summary:       "SSRF on webhook endpoint",
+		Worker:        "worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid := rec.FindingID
+
+	// 1. Confirm -> positive lesson created with 1 live evidence row.
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	var lessonID, firstRowID int64
+	if err := d.QueryRow(`SELECT e.lesson_id, e.id
+		FROM rsi_lesson_evidence e JOIN rsi_lessons l ON l.id=e.lesson_id
+		WHERE l.kind='positive' AND e.source_kind='finding' AND e.source_id=$1 AND e.withdrawn_at IS NULL`,
+		fid).Scan(&lessonID, &firstRowID); err != nil {
+		t.Fatalf("positive evidence row: %v", err)
+	}
+
+	// 2. Flip to false_positive -> firstRowID gets withdrawn_at set.
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	var withdrawnAt1 sql.NullTime
+	if err := d.QueryRow(`SELECT withdrawn_at FROM rsi_lesson_evidence WHERE id=$1`, firstRowID).Scan(&withdrawnAt1); err != nil {
+		t.Fatal(err)
+	}
+	if !withdrawnAt1.Valid {
+		t.Fatalf("expected firstRowID=%d to have withdrawn_at set after false_positive", firstRowID)
+	}
+
+	// 3. Re-confirm -> old withdrawal row stays untouched, new live row is inserted.
+	if _, _, _, err := d.SetFindingStatusWithNotify(ctx, fid, FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	var withdrawnAt2 sql.NullTime
+	if err := d.QueryRow(`SELECT withdrawn_at FROM rsi_lesson_evidence WHERE id=$1`, firstRowID).Scan(&withdrawnAt2); err != nil {
+		t.Fatal(err)
+	}
+	if !withdrawnAt2.Valid || !withdrawnAt2.Time.Equal(withdrawnAt1.Time) {
+		t.Fatalf("old withdrawal row %d was altered: got %v, want %v", firstRowID, withdrawnAt2, withdrawnAt1)
+	}
+
+	var secondRowID int64
+	if err := d.QueryRow(`SELECT id FROM rsi_lesson_evidence
+		WHERE lesson_id=$1 AND source_kind='finding' AND source_id=$2 AND withdrawn_at IS NULL`,
+		lessonID, fid).Scan(&secondRowID); err != nil {
+		t.Fatalf("new live evidence row missing after re-confirm: %v", err)
+	}
+	if secondRowID == firstRowID {
+		t.Fatalf("re-confirm reused old row %d instead of inserting a new live row", firstRowID)
+	}
+
+	// 4. Repeat extraction is idempotent: still 1 live + 1 withdrawn row.
+	if _, err := d.ExtractLessonsForTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	var totalRows, liveRows, withdrawnRows int
+	if err := d.QueryRow(`SELECT COUNT(*), COUNT(*) FILTER (WHERE withdrawn_at IS NULL), COUNT(*) FILTER (WHERE withdrawn_at IS NOT NULL)
+		FROM rsi_lesson_evidence WHERE lesson_id=$1 AND source_kind='finding' AND source_id=$2`,
+		lessonID, fid).Scan(&totalRows, &liveRows, &withdrawnRows); err != nil {
+		t.Fatal(err)
+	}
+	if totalRows != 2 || liveRows != 1 || withdrawnRows != 1 {
+		t.Fatalf("evidence rows = total %d live %d withdrawn %d, want 2 / 1 / 1", totalRows, liveRows, withdrawnRows)
+	}
+	if status, support := lessonStatusSupport(t, d, lessonID); status != "candidate" || support != 1 {
+		t.Fatalf("lesson status=%s support=%d, want candidate / 1", status, support)
+	}
 }

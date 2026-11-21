@@ -170,9 +170,8 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 			if _, err := d.ExecContext(ctx, `
 				INSERT INTO rsi_lesson_evidence(lesson_id,source_kind,source_id,detail)
 				VALUES($1,$2,$3,$4)
-				ON CONFLICT (lesson_id, source_kind, source_id) DO UPDATE SET
-					detail=EXCLUDED.detail,
-					withdrawn_at=NULL`,
+				ON CONFLICT (lesson_id, source_kind, source_id) WHERE withdrawn_at IS NULL
+				DO UPDATE SET detail=EXCLUDED.detail`,
 				id, sourceKind, sourceID, lessonText(detail, lessonDetailMax)); err != nil {
 				return err
 			}
