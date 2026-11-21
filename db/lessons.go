@@ -99,7 +99,8 @@ func lessonExtractCompanyID(companyIDs []int64) int64 {
 // retests. It is idempotent for the same disposition: the evidence primary key
 // means a second run adds no support. A later run after a reversed disposition
 // retracts that finding's evidence from the opposite-kind lesson, including
-// every retest of the finding, and retires the lesson when nothing else
+// every retest of the finding (a negative disposition also withdraws its
+// retest cautions), and retires the lesson when nothing else
 // supports it. Confirming again restores the evidence; a retired lesson is
 // un-retired only when it has no remaining live evidence. Pending and in_progress
 // produce nothing and retract nothing. A task with more than one company does
@@ -190,6 +191,14 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 						return 0, err
 					}
 				}
+				// A caution needs an outcome too: pending and in_progress write
+				// nothing, and a negative disposition withdraws it below.
+				if retestID > 0 && (verdict == "fixed" || verdict == "inconclusive") {
+					if err := add("caution", "Recheck before reporting "+cue+": a prior retest was "+verdict,
+						"retest", retestID, "verdict="+verdict); err != nil {
+						return 0, err
+					}
+				}
 			}
 			if err := d.retractLessonEvidence(ctx, "finding", findingID, "negative", ""); err != nil {
 				return 0, err
@@ -223,10 +232,7 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 			if err := d.retractFindingRetestEvidence(ctx, findingID, "positive"); err != nil {
 				return 0, err
 			}
-		}
-		if write && retestID > 0 && (verdict == "fixed" || verdict == "inconclusive") {
-			if err := add("caution", "Recheck before reporting "+cue+": a prior retest was "+verdict,
-				"retest", retestID, "verdict="+verdict); err != nil {
+			if err := d.retractFindingRetestEvidence(ctx, findingID, "caution"); err != nil {
 				return 0, err
 			}
 		}

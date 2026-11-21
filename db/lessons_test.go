@@ -1224,6 +1224,108 @@ func TestNegativeStatusSurvivesActionCap(t *testing.T) {
 	}
 }
 
+// A pending or in-progress finding has no outcome yet, so even a completed
+// retest on it writes no caution.
+func TestCautionNeedsFindingOutcome(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson caution open %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-caution-open-%d", stamp)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE cue=$1`, cue) })
+
+	for _, status := range []string{FindingPending, FindingInProgress} {
+		var fid int64
+		if err := d.QueryRow(`
+			INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+			VALUES ($1,$2,'Reflected XSS','reflected in search','high',$3)
+			RETURNING id`, task.ID, cue, status).Scan(&fid); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+		for _, verdict := range []string{"fixed", "inconclusive"} {
+			rid := insertLessonRetestStatus(t, d, fid, "completed", verdict)
+			if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+				t.Fatal(err)
+			}
+			if n := retestEvidence(t, d, rid); n != 0 {
+				t.Fatalf("finding status=%s, completed %s retest wrote %d evidence rows", status, verdict, n)
+			}
+		}
+	}
+	var lessons int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM rsi_lessons WHERE cue=$1`, cue).Scan(&lessons); err != nil {
+		t.Fatal(err)
+	}
+	if lessons != 0 {
+		t.Fatalf("open findings produced %d lessons", lessons)
+	}
+}
+
+// A reversed disposition withdraws the finding's evidence, and a caution from
+// its retest is part of that evidence. Confirming again restores it.
+func TestFalsePositiveWithdrawsRetestCaution(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson caution fp %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-caution-fp-%d", stamp)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE cue=$1`, cue) })
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS','reflected in search','high','confirmed')
+		RETURNING id`, task.ID, cue).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+	insertLessonRetestStatus(t, d, fid, "completed", "inconclusive")
+
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	caution := findLessonByAction(t, d, task.ID, "caution", "Recheck", cue)
+	if status, support := lessonStatusSupport(t, d, caution.ID); status != "candidate" || support != 1 {
+		t.Fatalf("caution after confirmed: status=%s support=%d, want candidate 1", status, support)
+	}
+
+	if _, err := d.SetFindingStatus(fid, FindingFalsePositive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if status, support := lessonStatusSupport(t, d, caution.ID); status != "retired" || support != 0 {
+		t.Fatalf("caution after false_positive: status=%s support=%d, want retired 0", status, support)
+	}
+
+	if _, err := d.SetFindingStatus(fid, FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if status, support := lessonStatusSupport(t, d, caution.ID); status != "candidate" || support != 1 {
+		t.Fatalf("caution after re-confirm: status=%s support=%d, want candidate 1", status, support)
+	}
+}
+
 func insertLessonRetest(t *testing.T, d *DB, findingID int64, verdict string) int64 {
 	t.Helper()
 	var id int64

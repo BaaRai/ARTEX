@@ -39,8 +39,9 @@ disposition withdraws that finding's evidence from the opposite-kind lesson,
 including every retest of the finding, and retires the lesson when its live
 support hits zero. The evidence row stays, with `withdrawn_at` set. Confirming
 again clears that timestamp and restores the evidence; a retired lesson is
-un-retired only when it has no remaining live evidence. A change inside the
-negative group (`false_positive`, `duplicate`, `ignored`, `risk_accepted`)
+un-retired only when it has no remaining live evidence. A negative disposition
+also withdraws the cautions written from the finding's retests. A change inside
+the negative group (`false_positive`, `duplicate`, `ignored`, `risk_accepted`)
 withdraws the finding from the previous negative lesson before writing the
 new action text.
 
@@ -56,7 +57,7 @@ Rules:
 | finding `confirmed` / `resolved` / `fixed` | positive | `Confirmed <vulnclass>: <summary>` |
 | retest `reproduced` on such a finding | positive | `Reproduced <vulnclass> on retest: <summary>` |
 | finding `false_positive` / `duplicate` / `ignored` / `risk_accepted` | negative | `Do not re-report without new mechanics: <summary> (prior <status>)` |
-| retest `fixed` / `inconclusive` | caution | `Recheck before reporting <vulnclass>: a prior retest was <verdict>` |
+| retest `fixed` / `inconclusive` on a `confirmed` / `resolved` / `fixed` finding | caution | `Recheck before reporting <vulnclass>: a prior retest was <verdict>` |
 
 Pending and in-progress findings produce nothing: there is no outcome yet.
 Empty cue, action, or source is refused by the gate.
