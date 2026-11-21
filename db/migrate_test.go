@@ -139,9 +139,9 @@ func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 	}{{1, llmRecordsMigration}, {2, llmUsageMigration}, {3, "0003_task_scope_icp_index.sql"}, {4, "0004_llm_usage_ts_index.sql"},
 		{5, "0005_traffic_rewrite_rules.sql"}, {6, "0006_activity_outbox.sql"}, {7, "0007_finding_report_state.sql"},
 		{8, "0008_traffic_evidence_rewrite_flag.sql"}, {9, "0009_llm_context.sql"}, {10, "0010_dashboard_usage_indexes.sql"},
-		{11, "0011_traffic_tamper_hooks.sql"}}
+		{11, "0011_traffic_tamper_hooks.sql"}, {12, "0012_lesson_withdrawn.sql"}}
 	if len(applied) != len(want) {
-		t.Fatalf("schema_migrations = %+v, want versions 1 to 11", applied)
+		t.Fatalf("schema_migrations = %+v, want versions 1 to 12", applied)
 	}
 	for i, w := range want {
 		content, err := fs.ReadFile(migrationsFS(), w.name)
@@ -414,5 +414,89 @@ func TestMigrationsRefuseOutOfOrderVersion(t *testing.T) {
 	}
 	if usage {
 		t.Error("llm_usage exists: the refused 0002 migration ran")
+	}
+}
+
+// A database from before withdrawn_at has lesson evidence and no 0012 row.
+// Open adds the column, keeps every row live, and a second Open is a no-op.
+func TestLessonWithdrawnMigrationKeepsExistingEvidence(t *testing.T) {
+	dsn := scratchDSN(t, "lesson_withdrawn")
+	d, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	const migrationName = "0012_lesson_withdrawn.sql"
+	migrationSQL, err := fs.ReadFile(migrationsFS(), migrationName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The migration file alone adds the column to a table without it.
+	for _, q := range []string{
+		`ALTER TABLE rsi_lesson_evidence DROP COLUMN withdrawn_at`,
+		string(migrationSQL),
+		`ALTER TABLE rsi_lesson_evidence DROP COLUMN withdrawn_at`,
+		`DELETE FROM schema_migrations WHERE version=12`,
+		`INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,status)
+		 VALUES ('legacy-lesson','positive','xss','Confirmed xss: legacy','adopted')`,
+		`INSERT INTO rsi_lesson_evidence(lesson_id,source_kind,source_id,detail)
+		 SELECT id,'finding',101,'legacy' FROM rsi_lessons WHERE dedupe_key='legacy-lesson'
+		 UNION ALL
+		 SELECT id,'retest',202,'legacy' FROM rsi_lessons WHERE dedupe_key='legacy-lesson'`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	d.Close()
+
+	check := func(d *DB) {
+		t.Helper()
+		var nullable, dataType string
+		var hasDefault bool
+		if err := d.QueryRow(`SELECT is_nullable, data_type, column_default IS NOT NULL
+			FROM information_schema.columns
+			WHERE table_name='rsi_lesson_evidence' AND column_name='withdrawn_at'`).Scan(&nullable, &dataType, &hasDefault); err != nil {
+			t.Fatalf("withdrawn_at column: %v", err)
+		}
+		if nullable != "YES" || dataType != "timestamp with time zone" || hasDefault {
+			t.Fatalf("withdrawn_at nullable=%s type=%s default=%v, want YES, timestamp with time zone, none", nullable, dataType, hasDefault)
+		}
+		var status string
+		var rows, live int
+		if err := d.QueryRow(`SELECT l.status, COUNT(e.*), COUNT(e.*) FILTER (WHERE e.withdrawn_at IS NULL)
+			FROM rsi_lessons l JOIN rsi_lesson_evidence e ON e.lesson_id=l.id
+			WHERE l.dedupe_key='legacy-lesson' GROUP BY l.status`).Scan(&status, &rows, &live); err != nil {
+			t.Fatalf("legacy lesson: %v", err)
+		}
+		if status != "adopted" || rows != 2 || live != 2 {
+			t.Fatalf("legacy lesson status=%s evidence=%d live=%d, want adopted 2 2", status, rows, live)
+		}
+	}
+
+	d, err = Open(dsn)
+	if err != nil {
+		t.Fatalf("Open on the pre-0012 database: %v", err)
+	}
+	check(d)
+	before := readApplied(t, d)
+	if last := before[len(before)-1]; last.version != 12 || last.name != migrationName {
+		t.Fatalf("last applied migration = %+v, want 0012", last)
+	}
+	d.Close()
+
+	d, err = Open(dsn)
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	defer d.Close()
+	check(d)
+	after := readApplied(t, d)
+	if len(after) != len(before) {
+		t.Fatalf("second Open changed schema_migrations: before %+v, after %+v", before, after)
+	}
+	for i := range before {
+		if !after[i].appliedAt.Equal(before[i].appliedAt) || after[i].checksum != before[i].checksum {
+			t.Errorf("second Open changed migration %04d: before %+v, after %+v", before[i].version, before[i], after[i])
+		}
 	}
 }
