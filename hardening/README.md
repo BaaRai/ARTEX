@@ -18,3 +18,29 @@ rule cache):
 Requests show up under Intercept → pending in the console. With no decision in
 30 minutes the request is denied (the agent gets the refusal and takes another
 path). Change the timeout or action in the console or in `intercept-rules.sql`.
+
+## What this is and is not
+
+- **Priority.** The rules are priority 70-72, **below** the built-in destructive
+  denies (80/90/100). `intercept.Match` returns the first rule in priority-DESC
+  order, so a command that is also destructive (e.g. `pip install x && curl -X
+  DELETE ...`) still hits the built-in DELETE deny first instead of being
+  downgraded to an approval.
+- **Tripwire, not a boundary.** The regexes match the raw `tool_input` JSON on a
+  best effort. They have bypasses and false positives — listed in
+  `skills/third-party-code-review/SKILL.md`. The real control is the human
+  decision on what they catch; the skill is what makes the agent behave when they
+  do not.
+- **One enforced rule.** Reading `/app/keys/*`, `/proc/<pid>/environ`, or the DSN
+  is a `deny` (not an approval). The SHA-256 blocklist and the rest are agent
+  discipline.
+- **Target-only mode.** Where the run uses target-only tool mode, only the
+  built-in rules are consulted and these are not; the skill still binds the agent.
+
+## Tests
+
+`hardening/rulecheck` compiles the patterns straight from `intercept-rules.sql`
+(Go RE2) and asserts the positive matches, the bypasses that are now closed, and
+the documented open bypasses/false positives:
+
+    go run ./hardening/rulecheck
