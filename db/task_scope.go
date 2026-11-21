@@ -223,9 +223,13 @@ func (s *AssetStore) AddAgentScope(taskID int64, kind, value, reason, source str
 		return ts, fmt.Errorf("unsupported kind: %s (company/root_domain/subdomain/ip/cidr/icp/keyword)", kind)
 	}
 	if source == "agent" {
-		if expanded, err := s.isScopeExpansion(taskID, ts); err == nil {
-			ts.Expanded = expanded
+		expanded, err := s.isScopeExpansion(taskID, ts)
+		if err != nil {
+			// The declared scope could not be read, so coverage is unknown:
+			// record the addition as an expansion rather than as in-scope.
+			expanded = true
 		}
+		ts.Expanded = expanded
 	}
 	if err := s.upsertTaskScope(ts); err != nil {
 		return ts, err

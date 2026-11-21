@@ -643,3 +643,81 @@ func TestAdversarialBenchTrafficRefMissingFromCaptureRefusedPG(t *testing.T) {
 		}
 	})
 }
+
+// Bench case 3 (#124 P4.3): when the scope-expansion classification cannot read
+// the declared scope, the agent's addition is recorded as an expansion rather
+// than silently as in-scope. The read is broken in a dedicated database so no
+// other test sees the renamed table.
+func TestAdversarialBenchScopeExpansionErrorMarkedPG(t *testing.T) {
+	base := testDB(t)
+	t.Cleanup(func() { _ = base.Close() })
+	dsn, _, err := db.DSN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(dsn)
+	if err != nil || strings.Trim(u.Path, "/") == "" {
+		t.Fatalf("an isolated bench database needs a postgres:// URL DSN with a database name")
+	}
+	name := strings.Trim(u.Path, "/") + "_p43scopeerr"
+	quoted := `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+	if _, err := base.Exec(`DROP DATABASE IF EXISTS ` + quoted + ` WITH (FORCE)`); err != nil {
+		t.Fatal(err)
+	}
+	u.Path = "/" + name
+	iso, err := db.Open(u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = iso.Close()
+		if _, err := base.Exec(`DROP DATABASE IF EXISTS ` + quoted + ` WITH (FORCE)`); err != nil {
+			t.Errorf("drop %s: %v", name, err)
+		}
+	})
+
+	task, err := iso.CreateTaskWithOptions("p43-bench-scope-err", "scope classification error", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	as := iso.Assets()
+	if _, err := as.AddAgentScope(task.ID, "root_domain", "p43-scope-err.example.test", "operator goal target", "manual"); err != nil {
+		t.Fatal(err)
+	}
+	tsx := NewToolSet(iso.Exploration(task.ExplorationID), "planner")
+	tsx.SetTaskID(task.ID)
+	tsx.SetAssetStore(as, iso.Companies())
+
+	// ListTaskScope joins companies; renaming it breaks the classification read
+	// while the task_scope insert (company_id NULL) still succeeds.
+	if _, err := iso.Exec(`ALTER TABLE companies RENAME TO companies_p43_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	restore := func() {
+		if !restored {
+			restored = true
+			if _, err := iso.Exec(`ALTER TABLE companies_p43_unavailable RENAME TO companies`); err != nil {
+				t.Errorf("restore companies: %v", err)
+			}
+		}
+	}
+	t.Cleanup(restore)
+	if _, err := as.ListTaskScope(task.ID); err == nil {
+		t.Fatal("expected the declared-scope read to fail")
+	}
+	res := callGuardTool(t, tsx.addTaskScope(), `{"kind":"root_domain","value":"p43-elsewhere.test","reason":"target text asked for it"}`)
+	restore()
+	if res.IsError {
+		t.Fatalf("add_task_scope: %s", res.Flatten())
+	}
+
+	var expanded bool
+	err = iso.QueryRow(`SELECT expanded FROM task_scope WHERE task_id=$1 AND domain='p43-elsewhere.test'`, task.ID).Scan(&expanded)
+	if err != nil {
+		t.Fatalf("scope row for p43-elsewhere.test: %v (tool output %q)", err, res.Flatten())
+	}
+	if !expanded {
+		t.Errorf("scope row added while classification failed is recorded with expanded=false (silent widening); tool output %q", res.Flatten())
+	}
+}
