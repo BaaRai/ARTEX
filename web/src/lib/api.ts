@@ -23,6 +23,8 @@ import type {
   BatchCategoryItem,
   BatchControlItem,
   ChatAttachment,
+  ChatBridge,
+  ChatBridgeIdentity,
   CommandRecord,
   Company,
   CompanyScopeMutation,
@@ -1061,6 +1063,18 @@ export const api = {
     ).then((r) => ({ ...r, deliveries: arr(r.deliveries) }));
   },
   notifyRetryDelivery: (id: number) => post<{ ok: boolean }>(`/notify/deliveries/${id}/retry`),
+
+  // ---- Inbound chat bridge ----
+  // One bridge per chat app kind. PUT semantics: omitted fields keep their stored value, and a masked
+  // config value sent back as-is keeps the stored secret.
+  chatBridges: () => get<ChatBridge[]>(`/chat-bridges`).then(arr),
+  chatBridgeSave: (
+    kind: string,
+    payload: { enabled?: boolean; config?: Record<string, unknown>; allowed_chats?: string[] },
+  ) => put<ChatBridge>(`/chat-bridges/${encodeURIComponent(kind)}`, payload),
+  // Asks the chat app which bot the stored token belongs to; sends no message.
+  chatBridgeTest: (kind: string) =>
+    post<{ ok: boolean; bot: ChatBridgeIdentity; latency_ms: number }>(`/chat-bridges/${encodeURIComponent(kind)}/test`),
   report: async (task?: string) => {
     if (MOCK) return mockReport(task);
     const token = getToken();
