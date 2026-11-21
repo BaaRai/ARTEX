@@ -1779,20 +1779,21 @@ func (s *ExplorationStore) ActivityContainingEvidence(nodeID int64, lines []stri
 	if nodeID <= 0 || len(lines) == 0 {
 		return 0, time.Time{}, false, nil
 	}
-	for _, line := range lines {
-		err := s.db.QueryRow(`SELECT id, created_at FROM activity
+	// One query across all lines: the newest matching activity wins, not the
+	// newest match for whichever line came first.
+	err = s.db.QueryRow(`SELECT id, created_at FROM activity a
 WHERE exploration_id=$1 AND node_id=$2
-  AND (strpos(COALESCE(detail,''), $3) > 0 OR strpos(COALESCE(summary,''), $3) > 0)
-ORDER BY id DESC LIMIT 1`, s.expID, nodeID, line).Scan(&id, &createdAt)
-		if err == sql.ErrNoRows {
-			continue
-		}
-		if err != nil {
-			return 0, time.Time{}, false, err
-		}
-		return id, createdAt, true, nil
+  AND EXISTS (SELECT 1 FROM unnest($3::text[]) AS line
+              WHERE strpos(COALESCE(a.detail,''), line) > 0
+                 OR strpos(COALESCE(a.summary,''), line) > 0)
+ORDER BY id DESC LIMIT 1`, s.expID, nodeID, lines).Scan(&id, &createdAt)
+	if err == sql.ErrNoRows {
+		return 0, time.Time{}, false, nil
 	}
-	return 0, time.Time{}, false, nil
+	if err != nil {
+		return 0, time.Time{}, false, err
+	}
+	return id, createdAt, true, nil
 }
 
 // ActivityListForTerminalIntent is the inherited, incremental-read boundary.

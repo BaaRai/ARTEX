@@ -366,6 +366,28 @@ func TestFactProvenanceTiedToRecordedActivity(t *testing.T) {
 	}
 }
 
+// The tie picks the newest matching activity across all lines, not the newest
+// match for whichever line the model wrote first.
+func TestActivityContainingEvidenceNewestAcrossLines(t *testing.T) {
+	s := guardTaskStore(t)
+	intent := addGuardNode(t, s, db.KindIntent, map[string]any{"text": "collect banners"}, "running")
+	older, err := s.AppendActivity(db.Activity{NodeID: &intent, Kind: "tool_result", Tool: "Bash", Detail: "Server: nginx/1.25.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := s.AppendActivity(db.Activity{NodeID: &intent, Kind: "tool_result", Tool: "Bash", Detail: "X-Powered-By: Express"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _, ok, err := s.ActivityContainingEvidence(intent, []string{"Server: nginx/1.25.3", "X-Powered-By: Express"})
+	if err != nil || !ok || id != newer || newer <= older {
+		t.Fatalf("ActivityContainingEvidence = %d, %v, %v; want newest %d", id, ok, err, newer)
+	}
+	if id, _, ok, err := s.ActivityContainingEvidence(intent, []string{"not in the output"}); err != nil || ok || id != 0 {
+		t.Fatalf("no-match = %d, %v, %v; want 0/false/nil", id, ok, err)
+	}
+}
+
 // fakeFactTraffic answers like the traffic store and records the window asked
 // for, so the test can check both the classification and the bounds.
 type fakeFactTraffic struct {
