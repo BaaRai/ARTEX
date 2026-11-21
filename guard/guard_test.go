@@ -2,6 +2,7 @@ package guard
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -237,6 +238,45 @@ func TestShortBlockReasonUnchanged(t *testing.T) {
 	if got, want := TargetBlockMessage(res),
 		"[ARTEX platform control, not target defense] TARGET_DENIED: target app.example.com:443: the request was denied. "+targetGuidance[intercept.TargetDenied]; got != want {
 		t.Errorf("TargetBlockMessage = %q, want %q", got, want)
+	}
+}
+
+// A rule store that cannot be read blocks the call end to end, in the full guard
+// (workers, chat) and in the target-only guard (planner, main agent), instead of
+// letting it run unchecked. The handle is closed before its first query, so no
+// server is contacted.
+func TestUnreadableRuleStoreBlocksCalls(t *testing.T) {
+	closed := func() *intercept.Interceptor {
+		sqlDB, err := sql.Open("pgx", "postgres://u:p@127.0.0.1:1/unreachable")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sqlDB.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return intercept.New(&db.DB{DB: sqlDB})
+	}
+	for name, g := range map[string]*Guard{
+		"full guard":        NewWithInterceptor(closed()),
+		"target-only guard": NewTargetOnly(closed()),
+	} {
+		for _, call := range []struct{ tool, input string }{
+			{"Bash", `{"command":"ls -la"}`},
+			{"Monitor", `{"command":"tail -f /dev/null"}`},
+			{"create_mcp", `{"name":"x","command":"sh"}`},
+		} {
+			block, msg := pre(g, context.Background(), call.tool, call.input)
+			if !block || !strings.HasPrefix(msg, "[ARTEX platform control, not target defense]") ||
+				!strings.Contains(msg, "intercept rules could not be loaded") {
+				t.Errorf("%s: %s block=%v msg=%q, want a block that names the unreadable rule store", name, call.tool, block, msg)
+			}
+		}
+	}
+	// The blocked call is recorded as a block, never as an allow.
+	g := NewWithInterceptor(closed())
+	pre(g, context.Background(), "Bash", `{"command":"ls -la"}`)
+	if a := g.Audit(); len(a) != 1 || a[0].Action != "block" {
+		t.Errorf("audit = %+v, want one block entry", a)
 	}
 }
 
