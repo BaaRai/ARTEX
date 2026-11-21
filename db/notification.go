@@ -502,15 +502,19 @@ func assetDisplayName(typ, domain, ip, url, appName, bundleID string) string {
 //     already succeeded and the caller must not report an error for it.
 func (d *DB) SetFindingStatusWithNotify(ctx context.Context, id int64, status string) (from string, found bool, notified bool, err error) {
 	err = d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
+		var changed bool
 		var txErr error
-		from, found, _, notified, txErr = SetFindingStatusTx(ctx, tx, id, status)
-		return txErr
+		from, found, changed, notified, txErr = SetFindingStatusTx(ctx, tx, id, status)
+		if txErr != nil {
+			return txErr
+		}
+		if found && changed {
+			return syncLessonsForFindingTx(ctx, tx, id)
+		}
+		return nil
 	})
 	if err != nil {
-		return from, found, notified, err
-	}
-	if found && from != status {
-		d.syncLessonsForFinding(ctx, id)
+		return from, found, false, err
 	}
 	return from, found, notified, nil
 }
@@ -532,30 +536,22 @@ type FindingStatusBatchResult struct {
 func (d *DB) SetFindingStatusesWithNotify(ctx context.Context, ids []int64, status string) ([]FindingStatusBatchResult, error) {
 	out := make([]FindingStatusBatchResult, 0, len(ids))
 	err := d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
+		changedIDs := make([]int64, 0, len(ids))
 		for _, id := range ids {
 			from, found, changed, notified, err := SetFindingStatusTx(ctx, tx, id, status)
 			if err != nil {
 				return err
 			}
+			if changed {
+				changedIDs = append(changedIDs, id)
+			}
 			out = append(out, FindingStatusBatchResult{ID: id, From: from, Found: found, Changed: changed, Notified: notified})
 		}
-		return nil
+		return syncLessonsForFindingsTx(ctx, tx, changedIDs)
 	})
 	if err != nil {
 		return nil, err
 	}
-	taskIDs := make([]int64, 0, len(out))
-	for _, r := range out {
-		if !r.Changed {
-			continue
-		}
-		var taskID sql.NullInt64
-		if err := d.QueryRowContext(ctx, `SELECT task_id FROM findings WHERE id=$1`, r.ID).Scan(&taskID); err != nil || !taskID.Valid {
-			continue
-		}
-		taskIDs = append(taskIDs, taskID.Int64)
-	}
-	d.syncLessonsForTasks(ctx, taskIDs)
 	return out, nil
 }
 

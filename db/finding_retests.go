@@ -282,11 +282,13 @@ func (d *DB) FinishFindingRetest(id int64, status, reason string) error {
 			return err
 		}
 	}
+	if finalStatus == "completed" {
+		if err := syncLessonsForFindingTx(context.Background(), tx, findingID); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return err
-	}
-	if finalStatus == "completed" {
-		d.syncLessonsForFinding(context.Background(), findingID)
 	}
 	return nil
 }
