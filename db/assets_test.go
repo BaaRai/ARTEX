@@ -908,6 +908,7 @@ func TestNormalizeURL(t *testing.T) {
 		{"https://user@example.com/", "https://example.com"},
 		{"https://u:p@example.com:8443/users/@alice?x=1", "https://example.com:8443/users/@alice?x=1"},
 		{"https://example.com/@me?r=http://a:b@x/", "https://example.com/@me?r=http://a:b@x/"},
+		{"http://user:secret@ex ample.com/a", "http://ex ample.com/a"},
 	}
 	for _, tc := range tests {
 		got := normalizeURL(tc.raw)
