@@ -61,9 +61,14 @@ install_docker_linux(){
     || die "automatic Docker install is not supported on '${id:-unknown}'; please install docker + the compose plugin yourself and retry"
   info "'${id:-unknown}' (like: ${id_like:-n/a}) is not supported by get.docker.com; installing from the distro's apt repos"
   # Drop a broken repo left by an earlier get.docker.com run (it fails every apt update).
+  # Match the URI and the distro id anywhere in the file: in a one-line .list entry
+  # they share a line, but in a deb822 .sources file the URIs and Suites fields are
+  # on separate lines. -w keeps "kali" matching inside "kali-rolling".
   local f
   for f in /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources; do
-    if [ -f "$f" ] && grep -q "download.docker.com/linux/debian.*${id}" "$f" 2>/dev/null; then
+    if [ -n "$id" ] && [ -f "$f" ] \
+      && grep -qF "download.docker.com/linux/debian" "$f" 2>/dev/null \
+      && grep -qwF "$id" "$f" 2>/dev/null; then
       warn "removing broken Docker repo $f"
       sudo rm -f "$f"
     fi
