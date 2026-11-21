@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -282,8 +283,55 @@ func extractToken(r *http.Request) string {
 	return r.URL.Query().Get("token")
 }
 
+// cookieAuthenticated reports whether extractToken takes the session from the
+// artex_token cookie. The browser attaches that cookie on its own, to requests
+// a foreign page makes as well; a bearer or query token is put there by the caller.
+func cookieAuthenticated(r *http.Request) bool {
+	if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		return false
+	}
+	c, err := r.Cookie("artex_token")
+	return err == nil && c.Value != ""
+}
+
+// sameOrigin reports whether the browser states that the request comes from a
+// page of this server: Sec-Fetch-Site is same-origin, or Origin names the
+// scheme, host and port the request was sent to. Scripts can set neither
+// header. A request that carries neither is not same-origin.
+func sameOrigin(r *http.Request) bool {
+	if r.Header.Get("Sec-Fetch-Site") == "same-origin" {
+		return true
+	}
+	o, err := url.Parse(r.Header.Get("Origin"))
+	if err != nil || o.Host == "" {
+		return false
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return o.Scheme == scheme && hostWithPort(o.Host, scheme) == hostWithPort(r.Host, scheme)
+}
+
+// hostWithPort returns host in lower case with its port, the scheme's default
+// when host names none.
+func hostWithPort(host, scheme string) string {
+	u := url.URL{Host: host}
+	port := u.Port()
+	if port == "" {
+		port = "80"
+		if scheme == "https" {
+			port = "443"
+		}
+	}
+	return strings.ToLower(u.Hostname()) + ":" + port
+}
+
 // requireAuth wraps h with JWT validation.
 // /api/auth/*, /api/health and /api/ready are exempt.
+// A state-changing request whose session is the cookie must be same-origin
+// (see sameOrigin), so that a foreign page cannot act with the operator's
+// session. Requests that carry a bearer token, and GET and HEAD, are not checked.
 func (s *Server) requireAuth(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
@@ -299,6 +347,13 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 		if !s.sessionOK(tok) {
 			writeErr(w, 401, "token is invalid or expired")
 			return
+		}
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			if cookieAuthenticated(r) && !sameOrigin(r) {
+				writeErr(w, 403, "cross-origin request refused: a cookie session can change state only from the console's own origin; send the token as Authorization: Bearer instead")
+				return
+			}
 		}
 		h.ServeHTTP(w, r)
 	})
