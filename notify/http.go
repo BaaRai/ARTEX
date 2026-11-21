@@ -104,6 +104,10 @@ var notifyTransport = func() *http.Transport {
 		return &http.Transport{}
 	}
 	clone := t.Clone()
+	// Clone keeps ProxyFromEnvironment. The dial would then be to the proxy, so
+	// blockInternalDial would see the proxy address and a link-local target
+	// could still be reached through it. Notifications go direct.
+	clone.Proxy = nil
 	clone.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: blockInternalDial}).DialContext
 	return clone
 }()
