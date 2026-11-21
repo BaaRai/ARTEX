@@ -1527,12 +1527,20 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		if !findingTrafficBindingEnabled() {
 			a.TrafficRefs, a.EvidenceHintID = nil, nil
 		}
-		if len(a.EvidenceHintID) > 0 && pid(a.EvidenceHintID) <= 0 {
-			return actool.Errorf("evidence_hint_id must be a valid hint node ID; omit it when there is no handover hint"), nil
-		}
+		// A model routinely emits "evidence_hint_id": 0 meaning "absent" — the field
+		// is optional, so 0 must mean "no hint", not an error. A hint id that does
+		// not resolve to a local hint node (passing a fact node number is the common
+		// case) must not sink an otherwise complete finding either: when explicit
+		// traffic_refs are present they are sufficient on their own, so degrade to
+		// them and keep the finding. Only a call with neither usable hint nor usable
+		// refs fails.
 		refs, err := t.findingRefsFromHint(pid(a.EvidenceHintID), a.TrafficRefs)
 		if err != nil {
-			return actool.Errorf(err.Error()), nil
+			if degraded, derr := db.NormalizeTrafficRefs(a.TrafficRefs); derr == nil && len(degraded) > 0 {
+				refs = degraded
+			} else {
+				return actool.Errorf(err.Error()), nil
+			}
 		}
 		input := db.RecordFindingInput{TaskID: t.taskID, ExplorationID: t.ts.ID(), IntentID: pid(a.IntentID), VulnClass: a.VulnClass, Name: a.Name, Severity: a.Severity, Summary: a.Summary, Evidence: a.Evidence, Worker: t.worker, AssetIDs: pidList(a.AssetIDs), Counterevidence: a.Counterevidence, ConfidenceRationale: a.ConfidenceRationale}
 		var recorded *db.RecordedFinding
