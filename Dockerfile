@@ -22,10 +22,11 @@ COPY web/ ./
 RUN npm run build:static
 
 # ------------------------------------------------------------- Go binary ---
-# Pinned to the Go 1.26 line (matches go.mod and the release binaries job). The
-# binary is CGO-free, so this stage runs on the build platform and cross-compiles
-# to $TARGETARCH without QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
+# Pinned to the exact Go release go.mod requires. The official image sets
+# GOTOOLCHAIN=local, so a floating 1.26 tag that lags go.mod fails the build;
+# bump this together with the go line in go.mod. The binary is CGO-free, so this
+# stage runs on the build platform and cross-compiles to $TARGETARCH without QEMU.
+FROM --platform=$BUILDPLATFORM golang:1.26.11-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
