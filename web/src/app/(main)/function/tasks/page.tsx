@@ -3273,6 +3273,7 @@ function CreateTaskSheet({
       setSeedFirstIntent(false);
       setCoverageEnabled(true);
       setInterceptRules([]);
+      setCredentials([]);
       setUploadCount(0);
       draftIdRef.current = "";
       setOpen(false);
@@ -3457,6 +3458,8 @@ function CreateTaskSheet({
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, username: e.target.value } : x)))}
                     />
                     <Input
+                      type="password"
+                      autoComplete="new-password"
                       placeholder={t("password (empty = agent generates)")}
                       value={c.password}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, password: e.target.value } : x)))}
