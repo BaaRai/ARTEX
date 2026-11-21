@@ -61,6 +61,10 @@ Rules:
 Pending and in-progress findings produce nothing: there is no outcome yet.
 Empty cue, action, or source is refused by the gate.
 
+An action is capped at 320 runes. In a negative action the summary is cut, not
+the `(prior <status>)` suffix, so each negative status keeps its own action and
+dedupe key.
+
 A retest counts only when it is `completed` with a verdict; extraction reads
 the latest such retest. A verdict staged on a pending, running, failed, or
 stopped retest produces nothing.

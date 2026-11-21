@@ -202,7 +202,13 @@ func (d *DB) ExtractLessonsForTask(ctx context.Context, taskID int64) (int, erro
 			// on the action, not the dedupe key: the key carries the company, and a
 			// task with several companies cannot rebuild the key it was written
 			// under, though its disposition is unchanged.
-			action := "Do not re-report without new mechanics: " + label + " (prior " + status + ")"
+			// Cut the label, not the status, at the action cap: without the
+			// suffix, a long summary gives every negative status the same action
+			// and the same dedupe key.
+			prefix := "Do not re-report without new mechanics: "
+			suffix := " (prior " + status + ")"
+			room := lessonActionMax - utf8.RuneCountInString(prefix) - utf8.RuneCountInString(suffix)
+			action := prefix + lessonText(label, room) + suffix
 			if err := d.retractLessonEvidence(ctx, "finding", findingID, "negative", lessonText(action, lessonActionMax)); err != nil {
 				return 0, err
 			}

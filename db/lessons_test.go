@@ -1145,6 +1145,85 @@ func TestMultiCompanyExtractKeepsUnchangedNegative(t *testing.T) {
 	}
 }
 
+// liveNegativeLesson returns the one negative lesson that holds this finding as
+// live evidence.
+func liveNegativeLesson(t *testing.T, d *DB, findingID int64) (id int64, key, action string) {
+	t.Helper()
+	if err := d.QueryRow(`
+		SELECT l.id, l.dedupe_key, l.action FROM rsi_lessons l
+		JOIN rsi_lesson_evidence e ON e.lesson_id=l.id
+		WHERE l.kind='negative' AND e.source_kind='finding' AND e.source_id=$1
+		  AND e.withdrawn_at IS NULL`, findingID).Scan(&id, &key, &action); err != nil {
+		t.Fatalf("live negative lesson of finding %d: %v", findingID, err)
+	}
+	return id, key, action
+}
+
+// A summary long enough to fill the action cap must not cut the status off:
+// false_positive and duplicate would then share one action and one key.
+func TestNegativeStatusSurvivesActionCap(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	task, err := d.CreateTask(fmt.Sprintf("lesson long summary %d", stamp), "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	cue := fmt.Sprintf("xss-long-%d", stamp)
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE cue=$1`, cue) })
+	summary := fmt.Sprintf("long-%d-", stamp)
+	summary += strings.Repeat("x", 300-utf8.RuneCountInString(summary))
+	if n := utf8.RuneCountInString(summary); n != 300 {
+		t.Fatalf("summary has %d runes, want 300", n)
+	}
+	var fid int64
+	if err := d.QueryRow(`
+		INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
+		VALUES ($1,$2,'Reflected XSS',$3,'high','false_positive')
+		RETURNING id`, task.ID, cue, summary).Scan(&fid); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM findings WHERE id=$1`, fid) })
+
+	if _, err := d.ExtractLessonsForTask(t.Context(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	firstID, firstKey, firstAction := liveNegativeLesson(t, d, fid)
+
+	if _, err := d.SetFindingStatus(fid, FindingDuplicate); err != nil {
+		t.Fatal(err)
+	}
+	n, err := d.ExtractLessonsForTask(t.Context(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("duplicate extract wrote %d lessons, want 1", n)
+	}
+	secondID, secondKey, secondAction := liveNegativeLesson(t, d, fid)
+	if secondID == firstID || secondKey == firstKey {
+		t.Fatalf("false_positive and duplicate share lesson %d / key %s", secondID, secondKey)
+	}
+	if !strings.HasSuffix(firstAction, "(prior false_positive)") {
+		t.Fatalf("false_positive action lost its status: %q", firstAction)
+	}
+	if !strings.HasSuffix(secondAction, "(prior duplicate)") {
+		t.Fatalf("duplicate action lost its status: %q", secondAction)
+	}
+	if n := utf8.RuneCountInString(secondAction); n > lessonActionMax {
+		t.Fatalf("action has %d runes, cap is %d", n, lessonActionMax)
+	}
+	status, support := lessonStatusSupport(t, d, firstID)
+	if status != "retired" || support != 0 {
+		t.Fatalf("false_positive lesson after duplicate: status=%s support=%d, want retired 0", status, support)
+	}
+}
+
 func insertLessonRetest(t *testing.T, d *DB, findingID int64, verdict string) int64 {
 	t.Helper()
 	var id int64
