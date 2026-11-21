@@ -1227,7 +1227,8 @@ func (s *Server) fsSkillUsage(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	calls, err := pg.RecentSkillCalls(name, limit)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		log.Printf("[skills] recent calls for %s: %v", name, err)
+		writeErr(w, 500, "failed to load skill usage")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"calls": calls})
@@ -1243,7 +1244,8 @@ func (s *Server) fsMissingSkills(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	missing, err := pg.MissingSkillStats(limit)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		log.Printf("[skills] missing skills: %v", err)
+		writeErr(w, 500, "failed to load missing skills")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"missing": missing})

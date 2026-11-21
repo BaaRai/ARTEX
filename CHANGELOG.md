@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Skill endpoints no longer return database driver text**: a failure loading skill usage or missing-skill stats is logged on the server and the client receives a fixed message.
 - **Docker Compose database passwords with URL-special characters**: `docker-compose.yml` no longer pastes `POSTGRES_PASSWORD` into `ARTEX_PG_DSN`. The server builds the URL from `ARTEX_PG_HOST`, `ARTEX_PG_PORT`, `ARTEX_PG_USER`, `ARTEX_PG_PASSWORD`, `ARTEX_PG_DBNAME` and `ARTEX_PG_SSLMODE`, percent-encoding the user and password, so `/`, `?`, `%`, `@`, `:` and spaces connect. An explicit `ARTEX_PG_DSN` still wins and is not rewritten. `ARTEX_PG_PASSWORD` is removed from the environment with the other startup secrets (#450).
 
 ## [0.7.0] - 2026-11-21
