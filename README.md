@@ -57,8 +57,9 @@ printed at startup:
 docker compose logs artex | grep "Setup token"
 ```
 
-> There is no prebuilt Docker image to pull: the image is always built from your checkout.
-> For all installation paths (script, binaries, source, release archives), see [Installation](#installation).
+> Multi-arch release images (`linux/amd64`, `linux/arm64`) are published to GitHub Container
+> Registry at `ghcr.io/baarai/artex`. For pulling the prebuilt image and all other installation
+> paths (script, binaries, source, release archives), see [Installation](#installation).
 
 ---
 
@@ -331,7 +332,9 @@ The UI listens on `127.0.0.1` by default. To reach it from another machine (or f
 ARTEX runs inside WSL), set `ARTEX_BIND_ADDR=0.0.0.0` in `.env` (the setup token still protects the
 first-run claim), or keep loopback and use a reverse proxy or SSH tunnel.
 
-### Option 2: Docker Compose (manual)
+### Option 2: Docker (Compose checkout build or prebuilt GHCR image)
+
+Build from a checkout with Docker Compose:
 
 ```bash
 git clone https://github.com/BaaRai/ARTEX.git
@@ -341,12 +344,41 @@ docker compose up -d --build
 # → http://localhost:8787
 ```
 
-`POSTGRES_PASSWORD` is passed to ARTEX as its own variable. The server percent-encodes it into
-the connection URL, so a password may contain `/`, `?`, `%`, `@`, `:` or spaces. In `.env`, quote
-a value that contains `#`, and write `$$` for a literal `$`.
+Each `v*` release publishes a multi-arch image (`linux/amd64`, `linux/arm64`) to GitHub
+Container Registry with tags `:latest`, `:v<version>`, and `:<version>`. GHCR packages start
+private. After the first release, maintainers should check that the `artex` package visibility
+is set to Public and verify the pull below on a machine without GHCR credentials before
+announcing anonymous installation.
+
+The standalone container requires an existing PostgreSQL database reachable from the container.
+Set `ARTEX_PG_DSN` to its connection string. The example uses Docker Desktop's
+`host.docker.internal` to reach PostgreSQL on the host. On native Linux Docker Engine, add
+`--add-host=host.docker.internal:host-gateway` to `docker run` for a host database, or use
+the reachable hostname of your database server.
+
+```bash
+docker pull ghcr.io/baarai/artex:latest
+
+mkdir -p data keys
+docker run -d --name artex \
+  --security-opt no-new-privileges:true \
+  -p 127.0.0.1:8787:8787 \
+  -p 127.0.0.1:8788:8788 \
+  -e ARTEX_PG_DSN="postgres://artex:yourpass@host.docker.internal:5432/artex?sslmode=disable" \
+  -e ARTEX_JWT_KEY_DIR=/app/keys \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/keys:/app/keys" \
+  ghcr.io/baarai/artex:latest
+# → http://localhost:8787  (docker logs artex | grep "Setup token")
+```
+
+In `docker-compose.yml`, `POSTGRES_PASSWORD` is passed to ARTEX as its own variable. The server
+percent-encodes it into the connection URL, so a password may contain `/`, `?`, `%`, `@`, `:` or
+spaces. In `.env`, quote a value that contains `#`, and write `$$` for a literal `$`.
 
 The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
-`sqlmap`, `ripgrep`, `curl`, `npm`, …); `./skills` and `./data` are persisted via bind mounts.
+`sqlmap`, `ripgrep`, `curl`, `npm`, …) and built-in `/app/skills`; Compose persists `./skills`,
+`./keys` and `./data` via bind mounts.
 
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
@@ -647,7 +679,7 @@ The script optionally `git pull`s, then offers **① Docker update** (`docker co
 `docker compose up -d artex`) or **② local build update** (rebuild the frontend static assets, then
 recompile `./artex`; restart the process for it to take effect).
 
-#### Option 2: Docker Compose (manual)
+#### Option 2: Docker (Compose or GHCR image)
 
 ```bash
 cd ARTEX
@@ -656,6 +688,10 @@ docker compose build artex
 docker compose up -d artex
 docker image prune -f            # optional
 ```
+
+If running the prebuilt `ghcr.io/baarai/artex` container directly, pull the new tag (`docker pull
+ghcr.io/baarai/artex:latest` or a pinned `:v<version>`) and recreate the container with the same
+`/app/data` and `/app/keys` mounts.
 
 #### Option 3: prebuilt binaries
 
