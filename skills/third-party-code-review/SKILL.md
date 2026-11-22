@@ -35,8 +35,9 @@ skill even when no approval prompt appears — the prompt is a backstop, not the
    what you expect it to do.
 
 ## After an approved download, before executing
-1. Compute `sha256sum` of every downloaded file and check `/app/data/third-party-blocklist.txt`.
-   If the hash is listed, delete the file and do not run it.
+1. Compute `sha256sum` of every downloaded file and check `$HOME/third-party-blocklist.txt`.
+   If the hash is listed, delete the file and do not run it. The blocklist lives in the executor
+   home, which is writable in both normal and isolated runs.
 2. Read the code (`cat`/`sed -n`), then write a short review for the operator:
    - what it does, step by step;
    - every network destination it contacts (hosts, IPs, ports) and whether they are in scope;
@@ -44,7 +45,7 @@ skill even when no approval prompt appears — the prompt is a backstop, not the
    - obfuscation: base64/hex blobs, `eval`/`exec`, downloads of further stages, compiled binaries.
 3. If you find anything that acts against the operator or outside the scope (exfiltration, reverse
    shell to a non-target host, reading platform keys, persistence, further remote stages):
-   do NOT run it; append `<sha256>  <url>  <reason>` to `/app/data/third-party-blocklist.txt`;
+   do NOT run it; append `<sha256>  <url>  <reason>` to `$HOME/third-party-blocklist.txt`;
    record it as a fact; pick another source or approach.
 4. Only run code whose review is clean, and only against declared targets.
 
