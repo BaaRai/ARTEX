@@ -6,11 +6,12 @@ import { Loader2Icon, RefreshCwIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
-import type { TrafficStreamMessage } from "@/lib/types";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { intlLocale, t } from "@/i18n";
+import { api } from "@/lib/api";
+import { createTrafficStreamPager, emptyTrafficStreamState } from "@/lib/traffic-stream";
+import type { TrafficStreamDirection, TrafficStreamMessage } from "@/lib/types";
 
-const PAGE_SIZE = 50;
 // Binary payloads loaded in full are shown as hex of their first 64 KiB.
 const HEX_PREVIEW_BYTES = 64 * 1024;
 
@@ -107,52 +108,18 @@ function StreamMessageRow({ message }: { message: TrafficStreamMessage }) {
 // StreamMessagesPanel lists the messages of one WebSocket or SSE exchange, a
 // page at a time. It does not poll: Refresh reloads from the start.
 export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; kind: "websocket" | "sse" }) {
-  const [items, setItems] = React.useState<TrafficStreamMessage[]>([]);
-  const [total, setTotal] = React.useState(0);
-  const [loading, setLoading] = React.useState(true);
-  const [loadingMore, setLoadingMore] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  // Answers for an older exchange (or an older refresh) are dropped.
-  const generation = React.useRef(0);
-
-  const load = React.useCallback(
-    (offset: number) => {
-      const gen = offset === 0 ? ++generation.current : generation.current;
-      if (offset === 0) {
-        setLoading(true);
-        setError(null);
-      } else {
-        setLoadingMore(true);
-      }
-      api
-        .trafficStream(exchangeId, offset, PAGE_SIZE)
-        .then((page) => {
-          if (gen !== generation.current) return;
-          const next = page.items ?? [];
-          setItems((prev) => (offset === 0 ? next : [...prev, ...next]));
-          setTotal(page.total ?? 0);
-        })
-        .catch((e: Error) => {
-          if (gen === generation.current) setError(e.message);
-        })
-        .finally(() => {
-          if (gen !== generation.current) return;
-          setLoading(false);
-          setLoadingMore(false);
-        });
-    },
-    [exchangeId],
-  );
+  const [direction, setDirection] = React.useState<TrafficStreamDirection>("");
+  const [{ items, total, loading, loadingMore, error }, setPage] = React.useState(emptyTrafficStreamState);
+  const pager = React.useMemo(() => createTrafficStreamPager(api.trafficStream, setPage), []);
 
   React.useEffect(() => {
-    setItems([]);
-    setTotal(0);
-    load(0);
-  }, [load]);
+    pager.select(exchangeId, direction);
+    return pager.cancel;
+  }, [exchangeId, direction, pager]);
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center gap-2 px-5 py-3 text-muted-foreground text-xs">
+      <div className="flex flex-wrap items-center gap-2 px-5 py-3 text-muted-foreground text-xs">
         <span>
           {t("{kind} · {count} of {total} messages", {
             kind: kind === "websocket" ? "WebSocket" : "Server-Sent Events",
@@ -160,7 +127,27 @@ export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; 
             total,
           })}
         </span>
-        <Button variant="outline" size="xs" className="ml-auto" disabled={loading} onClick={() => load(0)}>
+        <Select
+          value={direction || "all"}
+          onValueChange={(value) => {
+            const next = value === "all" ? "" : (value as TrafficStreamDirection);
+            if (next === direction) return;
+            // Invalidate before the next effect, so an old page cannot land
+            // between the selection event and the new filter's first request.
+            pager.cancel();
+            setDirection(next);
+          }}
+        >
+          <SelectTrigger size="sm" className="ml-auto" aria-label={t("Message direction")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("All directions")}</SelectItem>
+            <SelectItem value="c2s">{t("client -> server")}</SelectItem>
+            <SelectItem value="s2c">{t("server -> client")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="xs" disabled={loading} onClick={pager.refresh}>
           <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
           {t("Refresh")}
         </Button>
@@ -182,7 +169,11 @@ export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; 
       return <div className="p-5 text-destructive text-xs">{t("Failed to load messages: {error}", { error })}</div>;
     }
     if (items.length === 0) {
-      return <div className="p-5 text-muted-foreground text-xs">{t("No messages recorded for this stream.")}</div>;
+      return (
+        <div className="p-5 text-muted-foreground text-xs">
+          {direction ? t("No messages recorded in this direction.") : t("No messages recorded for this stream.")}
+        </div>
+      );
     }
     return (
       <>
@@ -193,7 +184,7 @@ export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; 
         </div>
         {items.length < total && (
           <div className="flex justify-center p-4">
-            <Button variant="outline" size="sm" disabled={loadingMore} onClick={() => load(items.length)}>
+            <Button variant="outline" size="sm" disabled={loadingMore} onClick={pager.loadMore}>
               {loadingMore && <Loader2Icon className="animate-spin" />}
               {t("Load more")}
             </Button>

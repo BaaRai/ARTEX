@@ -130,6 +130,7 @@ if want_web; then
   run_step "web polling tests" bash -c 'cd web && npm run test:polling'
   run_step "web replay tests" bash -c 'cd web && npm run test:replay'
   run_step "web upload tests" bash -c 'cd web && npm run test:upload'
+  run_step "web traffic stream tests" bash -c 'cd web && npm run test:traffic-stream'
   if [ "$FULL" -eq 1 ]; then
     run_step "web static build" bash -c 'cd web && npm run build:static'
   fi

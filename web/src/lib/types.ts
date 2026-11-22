@@ -976,6 +976,8 @@ export interface TrafficStreamMessage {
   truncated?: boolean;
 }
 
+export type TrafficStreamDirection = "" | "c2s" | "s2c";
+
 export interface TrafficStreamPage {
   items: TrafficStreamMessage[];
   total: number;

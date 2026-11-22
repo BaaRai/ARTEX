@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- **Stream viewer direction filter** (follow-up to #380): the Traffic detail's Stream tab can show all messages, client-to-server messages or server-to-client messages. Pagination and refresh keep the selected direction, changing the filter resets the list, and recording-limit warnings remain visible.
+
 ### Fixed
 
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
