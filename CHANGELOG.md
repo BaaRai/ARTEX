@@ -4,13 +4,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- **Global company switcher**: the sidebar header carries a company picker (search, an explicit "all companies", the asset count). It persists per browser and narrows these views on the server: the findings list, grouped view, asset tree and stat cards (`GET /api/exploration/findings`, `/groups`, `/asset-tree`, `/stats` take `company`), the dashboard findings panels (same list endpoint), the task list (`GET /api/tasks?company=`), the traffic list (`GET /api/traffic?company=`, the hosts the company owns) and the asset tabs (`GET /api/assets?company_id=`, plain and DSL path; the company clause is ANDed outside the compiled DSL). A finding belongs to a company through its live assets. A finding with no live asset belongs to a company only when its task is scoped to that company (`task_scope` kind `company`); otherwise it shows under "all companies" only. An unknown or non-numeric company id returns nothing (#425).
+
 ### Fixed
 
 - **LLM connection-test logs stay one line**: the response body written by a connection test has CR and LF replaced with spaces before it is logged, so the body cannot start a second log record.
+- **Benchmark judge validation**: grading and the judge's falsification battery require one verdict per ground-truth ID, actual boolean decisions and gates, and matches to the supplied scanner findings. Invalid grading responses use the existing three-attempt budget and abort without writing scores, rather than counting duplicate IDs or truthy strings such as `"false"`.
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
 - **Notification delivery ignores HTTP_PROXY**: the dial guard checks the address it connects to. An environment proxy made that address the proxy, so a link-local target could still be reached. Notification HTTP now connects directly.
 - **Captured traffic blobs are owner-only**: HTTP and raw-stream bodies spilled out of the database are written `0600`, and their bucket directory is `0700`. An existing blob is tightened when it is seen again.
 - **Asset URLs drop userinfo when parsing fails**: a URL `url.Parse` rejects is no longer stored unchanged. The `scheme://userinfo@` prefix is removed first, so a password in that prefix does not land in the asset row.
+- **Hook `==` keeps the fraction of a float**: comparing a float with an integer truncated the float first, so `1.5 == 1` and `-0.5 == 0` were true. A number decoded by `json.Decode` is a float, so a hook testing `m["amount"] == 0` matched `{"amount":0.5}`. A float on either side is now compared as a float.
 - **Hook `range` counts against the memory budget**: ranging over a body, slice, string, or map charges the iteration before the loop. A body larger than the hook budget now stops with the memory limit instead of allocating one element at a time with no check.
 - **Chat upload name search stops**: choosing `name`, `name-1`, `name-2`, … now returns an error when the filesystem rejects the path or after 10000 collisions, instead of looping while `Stat` keeps failing.
 - **Uploads do not follow a symlink**: chat and workspace uploads `Lstat` the destination and refuse to write when it is already a symlink. A dangling link is no longer treated as a free name.
