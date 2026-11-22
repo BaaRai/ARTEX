@@ -351,7 +351,7 @@ is set to Public and verify the pull below on a machine without GHCR credentials
 announcing anonymous installation.
 
 The standalone container requires an existing PostgreSQL database reachable from the container.
-Set `ARTEX_PG_DSN` to its connection string. The example uses Docker Desktop's
+Set the `ARTEX_PG_*` variables below. The example uses Docker Desktop's
 `host.docker.internal` to reach PostgreSQL on the host. On native Linux Docker Engine, add
 `--add-host=host.docker.internal:host-gateway` to `docker run` for a host database, or use
 the reachable hostname of your database server.
@@ -364,7 +364,12 @@ docker run -d --name artex \
   --security-opt no-new-privileges:true \
   -p 127.0.0.1:8787:8787 \
   -p 127.0.0.1:8788:8788 \
-  -e ARTEX_PG_DSN="postgres://artex:yourpass@host.docker.internal:5432/artex?sslmode=disable" \
+  -e ARTEX_PG_HOST=host.docker.internal \
+  -e ARTEX_PG_PORT=5432 \
+  -e ARTEX_PG_USER=artex \
+  -e ARTEX_PG_PASSWORD='yourpass' \
+  -e ARTEX_PG_DBNAME=artex \
+  -e ARTEX_PG_SSLMODE=disable \
   -e ARTEX_JWT_KEY_DIR=/app/keys \
   -v "$PWD/data:/app/data" \
   -v "$PWD/keys:/app/keys" \
@@ -372,13 +377,40 @@ docker run -d --name artex \
 # → http://localhost:8787  (docker logs artex | grep "Setup token")
 ```
 
-In `docker-compose.yml`, `POSTGRES_PASSWORD` is passed to ARTEX as its own variable. The server
-percent-encodes it into the connection URL, so a password may contain `/`, `?`, `%`, `@`, `:` or
-spaces. In `.env`, quote a value that contains `#`, and write `$$` for a literal `$`.
+In `docker-compose.yml` and `docker-compose.ghcr.yml`, `POSTGRES_PASSWORD` is passed to ARTEX as
+its own variable. The server percent-encodes it into the connection URL, so a password may contain
+`/`, `?`, `%`, `@`, `:` or spaces. In `.env`, quote a value that contains `#`, and write `$$` for a
+literal `$`. The `ARTEX_PG_*` variables take the password raw; quote it in a shell.
 
 The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
-`sqlmap`, `ripgrep`, `curl`, `npm`, …) and built-in `/app/skills`; Compose persists `./skills`,
-`./keys` and `./data` via bind mounts.
+`sqlmap`, `ripgrep`, `curl`, `npm`, …) and built-in `/app/skills`. The GHCR Compose file below
+persists `./keys` and `./data`; it does not mount a host `skills/` directory, so the image's
+built-in skills are used.
+
+#### Compose stack from the prebuilt image
+
+`docker-compose.ghcr.yml` runs the same ARTEX + PostgreSQL stack from the released image, with no
+checkout build. Download it and `.env.example` once:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/BaaRai/ARTEX/main/docker-compose.ghcr.yml
+curl -fsSLO https://raw.githubusercontent.com/BaaRai/ARTEX/main/.env.example
+cp .env.example .env            # set POSTGRES_PASSWORD, optionally an LLM key
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+# → http://localhost:8787  (docker compose -f docker-compose.ghcr.yml logs artex | grep "Setup token")
+```
+
+Update the stack without a git checkout:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Pin a version with `ARTEX_IMAGE_TAG=v0.7.1` in `.env` (or `0.7.1`); unset uses `latest`. To use
+custom skills, copy them into a host directory and add `- ./skills:/app/skills` to the `artex`
+volumes, which overrides the built-in `/app/skills`.
 
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
@@ -691,7 +723,12 @@ docker image prune -f            # optional
 
 If running the prebuilt `ghcr.io/baarai/artex` container directly, pull the new tag (`docker pull
 ghcr.io/baarai/artex:latest` or a pinned `:v<version>`) and recreate the container with the same
-`/app/data` and `/app/keys` mounts.
+`/app/data` and `/app/keys` mounts. If you run the prebuilt Compose stack, the update is:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
 
 #### Option 3: prebuilt binaries
 
