@@ -1273,17 +1273,19 @@ const (
 // of -1 skip the response-size bounds. An empty Sort/Order defaults to
 // newest-first by timestamp.
 type PageQuery struct {
-	Host      string // host substring
-	Method    string // exact method (case-insensitive)
-	Query     string // broad search box: metadata columns OR captured text
-	Body      string // content box: captured request/response text only (full-text)
-	Path      string // url_template substring — the vulnerability's path
-	Status    string // exact code ("404") or class bucket ("4xx")
-	Rewritten string // all (default) | rewritten (or true) | original (or false)
-	RespMin   int64  // minimum resp_len, or -1 when unset
-	RespMax   int64  // maximum resp_len, or -1 when unset
-	Sort      string // ts | status | resp_len (default ts)
-	Order     string // asc | desc (default desc)
+	Host      string   // host substring
+	Hosts     []string // exact host allowlist (company scope); empty = no filter
+	MatchNone bool     // force an empty result (a company that owns no host yet)
+	Method    string   // exact method (case-insensitive)
+	Query     string   // broad search box: metadata columns OR captured text
+	Body      string   // content box: captured request/response text only (full-text)
+	Path      string   // url_template substring — the vulnerability's path
+	Status    string   // exact code ("404") or class bucket ("4xx")
+	Rewritten string   // all (default) | rewritten (or true) | original (or false)
+	RespMin   int64    // minimum resp_len, or -1 when unset
+	RespMax   int64    // maximum resp_len, or -1 when unset
+	Sort      string   // ts | status | resp_len (default ts)
+	Order     string   // asc | desc (default desc)
 }
 
 // rewriteFilterSQL turns a rewritten filter token into a SQL condition over
@@ -1336,6 +1338,18 @@ func (t *Traffic) pageWhere(f PageQuery) (where string, args []any) {
 	}
 	if h := strings.TrimSpace(f.Host); h != "" {
 		add("host LIKE ?", "%"+h+"%")
+	}
+	if f.MatchNone {
+		add("1=0")
+	}
+	if len(f.Hosts) > 0 {
+		placeholders := make([]string, len(f.Hosts))
+		args2 := make([]any, len(f.Hosts))
+		for i, h := range f.Hosts {
+			placeholders[i] = "?"
+			args2[i] = h
+		}
+		add("host IN ("+strings.Join(placeholders, ",")+")", args2...)
 	}
 	if m := strings.TrimSpace(f.Method); m != "" {
 		add("method=?", strings.ToUpper(m))

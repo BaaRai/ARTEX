@@ -56,7 +56,7 @@ import { useSideQuestions } from "@/hooks/use-side-questions";
 import { mergeActivities } from "@/lib/activity-merge";
 import { api } from "@/lib/api";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
-import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
+import { getLocalStorageValue, removeLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { isBtwCommand } from "@/lib/side-questions";
 import type { Activity, Agent, ChatAttachment, Conversation, LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -96,6 +96,10 @@ const CONVERSATION_LIST_PAGE = 100;
 // rail looks the same after a reload; unknown keys are harmless (a deleted agent
 // simply never renders a group again).
 const COLLAPSED_AGENTS_KEY = "artex.chat.collapsed-agents";
+// The conversation that was open when the user last left the chat page. The
+// sidebar links to a bare /chat, so without this, coming back from another page
+// always lands on the empty draft view. A ?c= in the URL takes precedence.
+const LAST_CONVERSATION_KEY = "artex.chat.last-conversation";
 
 function conversationIsPinned(conversation: Conversation): boolean {
   return conversation.pinned ?? Boolean(conversation.pinned_at);
@@ -1171,13 +1175,14 @@ export default function ChatPage() {
     });
   }, []);
 
-  // Restore the open conversation from the URL (?c=<id>) on mount, so a refresh
-  // returns to the same thread instead of the empty draft view. Runs after
+  // Restore the open conversation on mount, so a refresh or a return from another
+  // page lands on the same thread instead of the empty draft view: the URL
+  // (?c=<id>) first, else the last conversation opened here. Runs after
   // hydration (not a lazy useState init) to avoid a server/client mismatch.
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setSourceRequested(params.has("approval"));
-    const c = params.get("c");
+    const c = params.get("c") ?? getLocalStorageValue(LAST_CONVERSATION_KEY);
     const id = c ? Number(c) : NaN;
     if (Number.isFinite(id)) setSelectedId(id);
   }, []);
@@ -1185,10 +1190,19 @@ export default function ChatPage() {
   // selectedId with no matching conversation (e.g. a stale ?c=, or a just-created
   // one before reloadConvs lands) simply renders the draft view — harmless — so we
   // deliberately do NOT auto-clear it here (that raced new-conversation creation).
+  // The same value goes to localStorage for the restore above. On mount this
+  // effect runs once with the initial null before the restored id lands; the
+  // restore has already read the stored value by then and writes it back on the
+  // next render.
   React.useEffect(() => {
     const url = new URL(window.location.href);
-    if (selectedId != null) url.searchParams.set("c", String(selectedId));
-    else url.searchParams.delete("c");
+    if (selectedId != null) {
+      url.searchParams.set("c", String(selectedId));
+      setLocalStorageValue(LAST_CONVERSATION_KEY, String(selectedId));
+    } else {
+      url.searchParams.delete("c");
+      removeLocalStorageValue(LAST_CONVERSATION_KEY);
+    }
     window.history.replaceState(null, "", url);
   }, [selectedId]);
 

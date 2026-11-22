@@ -616,3 +616,28 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, ts, host, "GET", "/p/"+id, "https://"+host+"
 		t.Fatalf("Search rewritten flags = %v", found)
 	}
 }
+
+// TestPageHostsAllowlist pins the company-scope filter: an exact host allowlist
+// keeps only those hosts (the substring Host filter stays independent), and
+// MatchNone forces an empty result for a company that owns no host.
+func TestPageHostsAllowlist(t *testing.T) {
+	tr, _ := openTraffic(t)
+	tr.record(newFlow("api.example.com", "GET", "/a", nil, []byte("a")))
+	tr.record(newFlow("api.other.example", "GET", "/b", nil, []byte("b")))
+	tr.record(newFlow("shop.example.com", "GET", "/c", nil, []byte("c")))
+
+	rows, total, err := tr.Page(PageQuery{Hosts: []string{"api.example.com", "shop.example.com"}, RespMin: -1, RespMax: -1}, 0, 100)
+	if err != nil || total != 2 || len(rows) != 2 {
+		t.Fatalf("allowlist should keep 2 rows, got total=%d rows=%d err=%v", total, len(rows), err)
+	}
+	// Exact match: api.other.example is not api.example.com.
+	if rows, _, err := tr.Page(PageQuery{Hosts: []string{"api.example.com"}, RespMin: -1, RespMax: -1}, 0, 100); err != nil || len(rows) != 1 {
+		t.Fatalf("exact allowlist should keep 1 row, got %d err=%v", len(rows), err)
+	}
+	if _, total, err := tr.Page(PageQuery{MatchNone: true, RespMin: -1, RespMax: -1}, 0, 100); err != nil || total != 0 {
+		t.Fatalf("MatchNone should match nothing, got total=%d err=%v", total, err)
+	}
+	if _, total, err := tr.Page(PageQuery{RespMin: -1, RespMax: -1}, 0, 100); err != nil || total != 3 {
+		t.Fatalf("no filter should return all 3, got %d err=%v", total, err)
+	}
+}

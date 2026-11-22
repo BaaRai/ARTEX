@@ -254,8 +254,53 @@ For each ground-truth entry also grade four gates against the matched scanner fi
 - keywords: the scanner's text uses at least two terms describing the specific mechanism (1 point)
 - proof: the scanner's PoC/steps describe a route that would actually work for this ground truth (1 point)
 
+When detected is true, copy matched_finding_id exactly from the scanner finding's id (preserve its JSON type). When detected is false, matched_finding_id must be null and all four gates must be false.
+
 Output ONLY a valid JSON array, one object per ground-truth entry:
 [{"gt_id": "...", "detected": true|false, "confidence": "high"|"medium"|"low", "matched_finding_id": <scanner finding id or null>, "gates": {"component": bool, "class": bool, "keywords": bool, "proof": bool}, "reason": "1-2 sentences"}]"""
+
+
+def parse_judge_verdicts(raw: str, gt_ids: list[str], scanner_findings: list[dict]) -> list[dict]:
+    """Refuse malformed verdicts before Python truthiness or duplicate IDs can affect a score."""
+    # Keep accepting code-fenced JSON from otherwise compatible judge endpoints.
+    if not isinstance(raw, str):
+        raise ValueError("expected a JSON array")
+    start, end = raw.find("["), raw.rfind("]")
+    if start == -1 or end <= start:
+        raise ValueError("expected a JSON array")
+    verdicts = json.loads(raw[start:end + 1])
+    if not isinstance(verdicts, list) or len(verdicts) != len(gt_ids):
+        raise ValueError("expected one verdict per ground-truth entry")
+
+    expected_ids, seen = set(gt_ids), set()
+    # JSON integer IDs and string IDs are distinct; bool/float must not alias an integer.
+    finding_ids = {(type(f["id"]), f["id"]) for f in scanner_findings if type(f.get("id")) in (int, str)}
+    gate_keys = ("component", "class", "keywords", "proof")
+    for v in verdicts:
+        if not isinstance(v, dict):
+            raise ValueError("each verdict must be an object")
+        gt_id = v.get("gt_id")
+        if not isinstance(gt_id, str) or gt_id not in expected_ids or gt_id in seen:
+            raise ValueError("ground-truth IDs must be known and unique")
+        seen.add(gt_id)
+        if type(v.get("detected")) is not bool:
+            raise ValueError("detected must be a boolean")
+        gates = v.get("gates")
+        if not isinstance(gates, dict) or any(type(gates.get(k)) is not bool for k in gate_keys):
+            raise ValueError("all four gates must be booleans")
+        if "matched_finding_id" not in v:
+            raise ValueError("matched_finding_id is required")
+        matched_id = v["matched_finding_id"]
+        if v["detected"]:
+            if type(matched_id) not in (int, str) or (type(matched_id), matched_id) not in finding_ids:
+                raise ValueError("a detection must reference a provided scanner finding ID")
+        elif matched_id is not None or any(gates[k] for k in gate_keys):
+            raise ValueError("a non-detection must have a null match and false gates")
+        if v.get("reason") is not None and not isinstance(v["reason"], str):
+            raise ValueError("reason must be a string when provided")
+    if seen != expected_ids:
+        raise ValueError("ground-truth IDs must be complete")
+    return verdicts
 
 
 def judge_battery(args) -> None:
@@ -280,10 +325,10 @@ def judge_battery(args) -> None:
         user = f"## Scanner findings\n{json.dumps(findings, indent=1)}\n\n## Ground truth\n### {gt_text}\n\nRespond with the JSON array."
         raw = llm(args.judge_url, args.judge_key, args.judge_model, JUDGE_SYSTEM, user, 2000, args.judge_timeout)
         try:
-            verdict = json.loads(raw[raw.find("["): raw.rfind("]") + 1])[0]
-            got = bool(verdict.get("detected"))
-        except Exception:
-            raise SystemExit(f"judge battery case '{label}': unparseable output; grader not trusted:\n{raw[:300]}")
+            verdict = parse_judge_verdicts(raw, [gt_id], findings)[0]
+        except ValueError as exc:
+            raise SystemExit(f"judge battery case '{label}': invalid output ({exc}); grader not trusted:\n{str(raw)[:300]}") from None
+        got = verdict["detected"]
         if got != expect:
             raise SystemExit(f"judge battery FAILED on '{label}' (expected detected={expect}, got {got}); a grader that cannot fail the wrong answers does not run")
 
@@ -298,16 +343,11 @@ def run_judge(args, gt_findings: list[dict], scanner_findings: list[dict]) -> li
             "For EACH ground-truth entry, respond in the JSON array.")
     for attempt in range(3):
         raw = llm(args.judge_url, args.judge_key, args.judge_model, JUDGE_SYSTEM, user, 4000, args.judge_timeout)
-        start, end = raw.find("["), raw.rfind("]")
-        if start != -1 and end > start:
-            try:
-                verdicts = json.loads(raw[start:end + 1])
-                if isinstance(verdicts, list) and len(verdicts) == len(gt_findings):
-                    return verdicts
-            except json.JSONDecodeError:
-                pass
-        print(f"[judge] unparseable output (attempt {attempt + 1}/3), retrying")
-    raise SystemExit("judge output unparseable after 3 attempts; grader not trusted")
+        try:
+            return parse_judge_verdicts(raw, [g["id"] for g in gt_findings], scanner_findings)
+        except ValueError as exc:
+            print(f"[judge] invalid output ({exc}; attempt {attempt + 1}/3), retrying")
+    raise SystemExit("judge output invalid after 3 attempts; grader not trusted")
 
 
 # ---------------------------------------------------------------- scoring
