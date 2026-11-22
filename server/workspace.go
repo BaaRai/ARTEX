@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -340,18 +341,39 @@ func (s *Server) wsUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func saveUpload(hdr *multipart.FileHeader, dest string) error {
+	if err := refuseUploadSymlink(dest); err != nil {
+		return err
+	}
 	src, err := hdr.Open()
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	out, err := os.Create(dest)
+	out, err := openUploadFileNoFollow(dest)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
 	_, err = io.Copy(out, src)
 	return err
+}
+
+// refuseUploadSymlink rejects a destination that is already a symlink. os.Create
+// follows one, including a dangling link that Stat reports as missing, so an
+// agent that can write the uploads directory could aim the server's write at
+// another path. Lstat sees the link itself.
+func refuseUploadSymlink(dest string) error {
+	fi, err := os.Lstat(dest)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write through a symlink")
+	}
+	return nil
 }
 
 // sanitizeFilename strips characters unsafe for a Content-Disposition filename token.

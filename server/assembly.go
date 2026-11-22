@@ -181,11 +181,18 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 				_ = c.Close()
 			}
 		}
+		var skillNames []string
+		if reg != nil {
+			for _, s := range reg.List() {
+				skillNames = append(skillNames, s.Name)
+			}
+		}
 		def := agent.DeferredInfo{
 			Deferred:    allNames,
 			GlobalNames: globalNames,
 			Unlock:      unlock,
 			UnlockSkill: unlockSkill,
+			SkillIndex:  agent.SkillIndexBlock(skillNames),
 		}
 		return extra, def, cleanup
 	})

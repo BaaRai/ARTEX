@@ -204,6 +204,25 @@ func OnResponse(req *Request, resp *Response) error {
 }
 
 func TestResourceBoundsMemoryStepTimeoutPanicAndRegexp(t *testing.T) {
+	t.Run("range_over_body_stopped_by_memory_budget", func(t *testing.T) {
+		src := `package hook
+func OnRequest(req *Request) error {
+	for _, b := range req.Body {
+		_ = b
+	}
+	return nil
+}`
+		prog, err := Compile("request", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := make([]byte, 256<<10)
+		err = prog.RunRequest(context.Background(), &Request{Body: body}, RunOptions{MaxMemory: 64 << 10})
+		if !errors.Is(err, ErrMemoryLimit) {
+			t.Fatalf("err = %v, want ErrMemoryLimit", err)
+		}
+	})
+
 	t.Run("make_100MiB_stopped_by_memory_budget", func(t *testing.T) {
 		src := `package hook
 func OnRequest(req *Request) error {

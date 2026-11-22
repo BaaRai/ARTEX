@@ -330,24 +330,30 @@ func (e *vm) execRange(s *ast.RangeStmt, sc *env) (flowSignal, any) {
 	var items []kvPair
 	switch x := e.eval(s.X, sc).(type) {
 	case []byte:
+		e.alloc(int64(len(x)) * 32)
 		for i, v := range x {
 			items = append(items, kvPair{int64(i), int64(v)})
 		}
 	case []any:
+		e.alloc(int64(len(x)) * 32)
 		for i, v := range x {
 			items = append(items, kvPair{int64(i), v})
 		}
 	case []string:
+		e.alloc(int64(len(x)) * 32)
 		for i, v := range x {
 			items = append(items, kvPair{int64(i), v})
 		}
 	case string:
+		e.alloc(int64(len(x)) * 32)
 		for i, r := range x {
 			items = append(items, kvPair{int64(i), int64(r)})
 		}
 	case map[string]any:
+		e.alloc(int64(len(x)) * 32)
 		items = sortedMapPairs(x)
 	case map[string][]string:
+		e.alloc(int64(len(x)) * 32)
 		items = sortedMapPairs(x)
 	case nil:
 		return flowNone, nil
