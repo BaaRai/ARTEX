@@ -84,3 +84,50 @@ func TestQueryDSLInScopeOrDoesNotEscape(t *testing.T) {
 		t.Fatalf("out-of-scope asset %d leaked through an OR query", outID)
 	}
 }
+
+// TestQueryDSLForCompanyOrDoesNotEscape: the company clause sits outside the
+// compiled DSL, so a top-level OR naming another company returns none of its assets.
+func TestQueryDSLForCompanyOrDoesNotEscape(t *testing.T) {
+	d, assets, _ := testSetup(t)
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	var companyA, companyB, assetA, assetB int64
+	for _, c := range []struct {
+		key string
+		id  *int64
+	}{{fmt.Sprintf("dsl-or-a-%d", stamp), &companyA}, {fmt.Sprintf("dsl-or-b-%d", stamp), &companyB}} {
+		if err := d.QueryRow(`INSERT INTO companies(name, nkey) VALUES ($1, $1) RETURNING id`, c.key).Scan(c.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		cleanupExec(t, d, `DELETE FROM companies WHERE id=ANY($1::bigint[])`, []int64{companyA, companyB})
+	})
+	for _, a := range []struct {
+		company int64
+		id      *int64
+	}{{companyA, &assetA}, {companyB, &assetB}} {
+		domain := fmt.Sprintf("dsl-or-%d-%d.invalid", a.company, stamp)
+		if err := d.QueryRow(`INSERT INTO assets(type,domain,root_domain,company_id,last_seen)
+			VALUES ('root_domain',$1,$1,$2,now()) RETURNING id`, domain, a.company).Scan(a.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		cleanupExec(t, d, `DELETE FROM assets WHERE id=ANY($1::bigint[])`, []int64{assetA, assetB})
+	})
+
+	dsl := fmt.Sprintf("company_id=%d OR company_id=%d", companyA, companyB)
+	n, err := assets.CountDSLForCompany(dsl, "", 0, companyA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := assets.QueryDSLForCompany(dsl, "", 0, companyA, 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(got) != 1 || got[0].ID != assetA {
+		t.Fatalf("want only asset %d, got count=%d rows=%+v", assetA, n, got)
+	}
+}

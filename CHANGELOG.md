@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
-- **Global company switcher**: the sidebar header carries a company picker (search, an explicit "all companies", the asset count) that narrows the findings list, the dashboard, the task list, the traffic list and the asset tabs to one target, and persists per browser. Findings with no live asset anchor stay visible under their company. The company now rides on the existing ownership column, so `GET /api/exploration/findings` and `GET /api/traffic` take a `company`/`asset_scope` filter and `GET /api/assets` takes `company_id` on both the plain and the DSL path (#425).
+- **Global company switcher**: the sidebar header carries a company picker (search, an explicit "all companies", the asset count). It persists per browser and narrows these views on the server: the findings list, grouped view, asset tree and stat cards (`GET /api/exploration/findings`, `/groups`, `/asset-tree`, `/stats` take `company`), the dashboard findings panels (same list endpoint), the task list (`GET /api/tasks?company=`), the traffic list (`GET /api/traffic?company=`, the hosts the company owns) and the asset tabs (`GET /api/assets?company_id=`, plain and DSL path; the company clause is ANDed outside the compiled DSL). A finding belongs to a company through its live assets. A finding with no live asset belongs to a company only when its task is scoped to that company (`task_scope` kind `company`); otherwise it shows under "all companies" only. An unknown or non-numeric company id returns nothing (#425).
 
 ### Fixed
 

@@ -308,7 +308,7 @@ function compareTasks(left: Task, right: Task, field: TaskSortField, direction: 
 }
 
 export default function TasksPage() {
-  // The sidebar's company switcher limits the list to tasks scoped to it.
+  // The sidebar's company switcher: the server returns only the tasks scoped to it.
   const companyId = useActiveCompanyID();
   const [activeTab, setActiveTab] = React.useState("current");
   const [tasks, setTasks] = React.useState<Task[]>([]);
@@ -363,7 +363,6 @@ export default function TasksPage() {
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     return tasks.filter((t) => {
-      if (companyId !== null && !(t.company_ids ?? []).includes(companyId)) return false;
       if (statusFilter !== "all" && t.status !== statusFilter) return false;
       if (categoryFilter === UNCATEGORIZED_VALUE && t.category_id != null) return false;
       if (
@@ -381,7 +380,7 @@ export default function TasksPage() {
         t.id.toLowerCase().includes(q)
       );
     });
-  }, [tasks, query, statusFilter, categoryFilter, companyId]);
+  }, [tasks, query, statusFilter, categoryFilter]);
 
   const sortNowSec = sortField === "duration" ? nowSec : 0;
   const ordered = React.useMemo(() => {
@@ -463,7 +462,7 @@ export default function TasksPage() {
 
   const load = React.useCallback(() => {
     api
-      .tasks()
+      .tasks(companyId)
       .then((r) => {
         const next = r.tasks.map((t) => (t.id === r.active ? { ...t, active: true } : t));
         const sig = JSON.stringify(next);
@@ -474,7 +473,7 @@ export default function TasksPage() {
       .catch(() => {
         // Polling is best-effort; the next interval retries automatically.
       });
-  }, []);
+  }, [companyId]);
 
   const loadCategories = React.useCallback(() => {
     api

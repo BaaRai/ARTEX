@@ -368,24 +368,20 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 	// beyond the last row can return an empty page without an expensive scan.
 	total := 0
 
-	// company_id narrows both paths to one company's assets (the sidebar switcher).
-	if cid, _ := strconv.ParseInt(q.Get("company_id"), 10, 64); cid > 0 {
-		if dsl := strings.TrimSpace(q.Get("dsl")); dsl != "" {
-			// No spaces around '=': the DSL lexer takes the operator only tight.
-			q.Set("dsl", fmt.Sprintf("(company_id=%d) AND (%s)", cid, dsl))
-		}
-	}
 	if dsl := q.Get("dsl"); dsl != "" {
 		if err := db.ValidateDSL(dsl); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		// task_id scopes the DSL search to a task's assets (the task detail
-		// "test assets" search); 0 means the global asset view.
+		// "test assets" search); 0 means the global asset view. company_id
+		// narrows it to one company (the sidebar switcher). Both are applied as
+		// SQL clauses next to the compiled DSL, never pasted into the DSL text.
 		taskID, _ := strconv.ParseInt(q.Get("task_id"), 10, 64)
-		total, err = as.CountDSL(dsl, typ, taskID)
+		companyID, _ := strconv.ParseInt(q.Get("company_id"), 10, 64)
+		total, err = as.CountDSLForCompany(dsl, typ, taskID, companyID)
 		if err == nil && offset < total {
-			assets, err = as.QueryDSL(dsl, typ, taskID, limit, offset)
+			assets, err = as.QueryDSLForCompany(dsl, typ, taskID, companyID, limit, offset)
 		}
 	} else {
 		companyID, _ := strconv.ParseInt(q.Get("company_id"), 10, 64)

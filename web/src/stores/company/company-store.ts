@@ -3,10 +3,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-// The sidebar's company switcher. One company narrows every page that reads
-// assets (findings, dashboard, traffic, tasks); null means "all companies".
-// The asset graph already carries company_id, so the narrowing rides on the
-// existing asset_scope filter (node key c:<id>) rather than a new parameter.
+// The sidebar's company switcher; null means "all companies". Pages pass the
+// id to the server, which filters: findings (list, groups, asset tree, stat
+// cards) and tasks take `company`, assets take `company_id`, traffic takes
+// `company`.
 type CompanyState = {
   companyId: number | null;
   companyName: string;
@@ -24,11 +24,11 @@ export const useCompanyStore = create<CompanyState>()(
   ),
 );
 
-// useActiveCompanyScope returns the asset_scope node key for the active company,
+// useActiveCompany returns the active company id as the `company` query value,
 // or undefined when every company is in view.
-export function useActiveCompanyScope(): string | undefined {
+export function useActiveCompany(): string | undefined {
   const companyId = useCompanyStore((s) => s.companyId);
-  return companyId === null ? undefined : `c:${companyId}`;
+  return companyId === null ? undefined : String(companyId);
 }
 
 // useActiveCompanyID is the numeric id, for filters that take an id.

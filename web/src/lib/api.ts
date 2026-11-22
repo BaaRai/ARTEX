@@ -258,6 +258,7 @@ function findingFilterParams(q: Omit<FindingQuery, "page" | "pageSize">): URLSea
   if (q.query?.trim()) p.set("q", q.query.trim());
   if (q.sort) p.set("sort", q.sort);
   if (q.assetScope) p.set("asset_scope", q.assetScope);
+  if (q.company) p.set("company", q.company);
   return p;
 }
 
@@ -282,8 +283,11 @@ export const api = {
     post<{ ok: boolean }>("/auth/change-password", { old_password: oldPassword, new_password: newPassword }),
 
   // ---- tasks ----
-  tasks: () =>
-    get<{ tasks: Task[]; active: string }>("/tasks").then((r) => ({ tasks: arr(r.tasks), active: r.active ?? "" })),
+  tasks: (companyId: number | null = null) =>
+    get<{ tasks: Task[]; active: string }>(`/tasks${companyId ? `?company=${companyId}` : ""}`).then((r) => ({
+      tasks: arr(r.tasks),
+      active: r.active ?? "",
+    })),
   task: (id: string) => get<Task>(`/tasks/${encodeURIComponent(id)}`),
   createTask: (input: {
     name?: string;
@@ -589,10 +593,10 @@ export const api = {
 
   // ---- exploration (per task) ----
   frontier: (task?: string) => get<TaskNode[]>(`/exploration/frontier${tq(task)}`).then(arr),
-  findings: (task?: string, assetScope?: string) => {
+  findings: (task?: string, company?: string) => {
     const p = new URLSearchParams();
     if (task) p.set("task", task);
-    if (assetScope) p.set("asset_scope", assetScope);
+    if (company) p.set("company", company);
     const qs = p.toString();
     return get<Finding[]>(`/exploration/findings${qs ? `?${qs}` : ""}`).then(arr);
   },
@@ -612,7 +616,8 @@ export const api = {
   // findings and their ancestors, nodes carrying subtree aggregate counts. Not paginated — the tree is a navigation structure, fetched in one go.
   findingAssetTree: (q: Omit<FindingQuery, "page" | "pageSize">) =>
     get<FindingAssetTree>(`/exploration/findings/asset-tree?${findingFilterParams(q).toString()}`),
-  findingStats: () => get<FindingStats>("/exploration/findings/stats"),
+  findingStats: (company?: string) =>
+    get<FindingStats>(`/exploration/findings/stats${company ? `?company=${encodeURIComponent(company)}` : ""}`),
   // exportFindings triggers the findings page export and downloads the file. scope=selected
   // sends ids (a finding_id list); scope=filtered sends the current filters (the FindingQuery filter fields); scope=all ignores filters.
   exportFindings: async (opts: {

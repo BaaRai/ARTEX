@@ -55,7 +55,7 @@ import type {
   VerificationStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useActiveCompanyScope } from "@/stores/company/company-store";
+import { useActiveCompany } from "@/stores/company/company-store";
 
 import { AssetTree, assetPathOf } from "./_components/asset-tree";
 import {
@@ -142,10 +142,10 @@ const EMPTY_STATS: FindingStats = {
 };
 
 export default function FindingsPage() {
-  // The sidebar's company switcher narrows everything below to that company's
-  // asset subtree. It rides on asset_scope (node key c:<id>): the picked asset
-  // node wins, the company is the fallback, and an empty scope means everything.
-  const companyScope = useActiveCompanyScope();
+  // The sidebar's company switcher narrows everything below on the server: the
+  // flat and grouped lists, the asset tree and the stat cards all send `company`.
+  // Undefined means all companies.
+  const company = useActiveCompany();
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
@@ -190,7 +190,7 @@ export default function FindingsPage() {
     task,
     sort,
     query,
-    companyScope,
+    company,
   ]);
   const activeFilterFingerprint = React.useRef(filterFingerprint);
   activeFilterFingerprint.current = filterFingerprint;
@@ -338,6 +338,7 @@ export default function FindingsPage() {
           query,
           sort,
           assetScope: activeAssetScope ?? undefined,
+          company,
         },
         ids: [...selectedIds],
       });
@@ -366,14 +367,13 @@ export default function FindingsPage() {
   // A company switch drops the picked asset node: the node may belong to the
   // company we just left, and the tree is about to be reloaded under the new one.
   React.useEffect(() => {
-    // companyScope is a trigger here, not a value the effect reads.
-    void companyScope;
+    // company is a trigger here, not a value the effect reads.
+    void company;
     setAssetScope(null);
-  }, [companyScope]);
+  }, [company]);
 
   // The asset view's right-hand list = the flat list + a filter for the selected subtree, so both views share one list state.
-  // Every view honours the active company; only the asset view narrows further.
-  const activeAssetScope = (view === "asset" ? assetScope : null) ?? companyScope;
+  const activeAssetScope = view === "asset" ? assetScope : null;
 
   // loadFlat fetches the flat view's current page; the task filter goes to the backend, sharing the same filter set as the grouped view.
   const loadFlat = React.useCallback(async () => {
@@ -394,6 +394,7 @@ export default function FindingsPage() {
         query,
         sort,
         assetScope: activeAssetScope ?? undefined,
+        company,
       });
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setFlat({ items: result.items, total: result.total, loaded: true, loading: false });
@@ -404,6 +405,7 @@ export default function FindingsPage() {
     }
   }, [
     activeAssetScope,
+    company,
     filterFingerprint,
     flatPage,
     flatPageSize,
@@ -434,7 +436,7 @@ export default function FindingsPage() {
         task,
         query,
         sort,
-        assetScope: companyScope,
+        company,
       });
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree({
@@ -451,7 +453,7 @@ export default function FindingsPage() {
       toast.error(t("Failed to load the asset tree: {error}", { error: (e as Error).message }));
     }
   }, [
-    companyScope,
+    company,
     filterFingerprint,
     reportState,
     severity,
@@ -479,6 +481,7 @@ export default function FindingsPage() {
         task,
         query,
         sort,
+        company,
       });
       if (request !== groupsRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setGroups(result.items);
@@ -488,6 +491,7 @@ export default function FindingsPage() {
       // Polling keeps the last successful snapshot visible.
     }
   }, [
+    company,
     filterFingerprint,
     page,
     pageSize,
@@ -530,6 +534,7 @@ export default function FindingsPage() {
           task: key,
           query,
           sort,
+          company,
         });
         if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
         setGroupFindings((current) => ({
@@ -560,7 +565,7 @@ export default function FindingsPage() {
         }));
       }
     },
-    [filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, query, sort],
+    [company, filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, query, sort],
   );
 
   React.useEffect(() => {
@@ -681,7 +686,7 @@ export default function FindingsPage() {
     let alive = true;
     const load = () => {
       api
-        .findingStats()
+        .findingStats(company)
         .then((s) => {
           if (alive) {
             setStats(s);
@@ -698,7 +703,7 @@ export default function FindingsPage() {
       alive = false;
       stopPolling();
     };
-  }, []);
+  }, [company]);
 
   React.useEffect(() => {
     if (!statsLoaded) return;
@@ -723,7 +728,7 @@ export default function FindingsPage() {
         toast.success(t('Marked as "{label}"', { label: statusMeta("finding", next).label }));
         // refresh stat cards (pending count) and drop the row if it no longer matches the status filter
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The row update remains valid even if the aggregate refresh fails.
@@ -739,7 +744,7 @@ export default function FindingsPage() {
         toast.error(t("Update failed: {error}", { error: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, setFindings, status],
+    [refreshAfterMutation, setFindings, status, company],
   );
 
   const updateReportState = React.useCallback(
@@ -751,7 +756,7 @@ export default function FindingsPage() {
         await api.setFindingReportState(f.finding_id, next);
         toast.success(t('Report stage set to "{label}"', { label: REPORT_STATE_META[next].label }));
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The row update remains valid even if the aggregate refresh fails.
@@ -767,7 +772,7 @@ export default function FindingsPage() {
         toast.error(t("Update failed: {error}", { error: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, reportState, setFindings],
+    [refreshAfterMutation, reportState, setFindings, company],
   );
 
   // applyBulkStatus sets the same triage status on every selected finding, then
@@ -784,7 +789,7 @@ export default function FindingsPage() {
         void loadFlat();
         if (view === "asset") void loadAssetTree();
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The list reload remains valid even if the aggregate refresh fails.
@@ -795,7 +800,7 @@ export default function FindingsPage() {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view],
+    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view, company],
   );
 
   const applyBulkReportState = React.useCallback(
@@ -810,7 +815,7 @@ export default function FindingsPage() {
         void loadFlat();
         if (view === "asset") void loadAssetTree();
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The list reload remains valid even if the aggregate refresh fails.
@@ -821,7 +826,7 @@ export default function FindingsPage() {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view],
+    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view, company],
   );
 
   // The inline expanded detailed-report cache is keyed by the globally stable row key. report is long-form
@@ -875,7 +880,7 @@ export default function FindingsPage() {
         );
         toast.success(t("Saved"));
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The edit remains valid even if the aggregate refresh fails.
@@ -887,7 +892,7 @@ export default function FindingsPage() {
         setSaving(false);
       }
     },
-    [edit, refreshAfterMutation, setFindings],
+    [edit, refreshAfterMutation, setFindings, company],
   );
 
   // deleteFinding deletes one vulnerability (with confirmation): on success it removes it from the list, collapses the row, and refreshes stats.
@@ -908,7 +913,7 @@ export default function FindingsPage() {
         setExpanded((cur) => (cur === rowKey ? null : cur));
         toast.success(t("Vulnerability deleted"));
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The deletion remains valid even if the aggregate refresh fails.
@@ -918,7 +923,7 @@ export default function FindingsPage() {
         toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, setFindings],
+    [refreshAfterMutation, setFindings, company],
   );
 
   const openDeepen = React.useCallback((f: Finding) => {

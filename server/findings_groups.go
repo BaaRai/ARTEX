@@ -39,6 +39,8 @@ func findingFilterFromQuery(q url.Values) db.FindingFilter {
 		Query:      q.Get("q"),
 		Sort:       q.Get("sort"),
 		AssetScope: strings.TrimSpace(q.Get("asset_scope")),
+		// company is the sidebar switcher; it also narrows the asset tree.
+		Company: strings.TrimSpace(q.Get("company")),
 	}
 }
 

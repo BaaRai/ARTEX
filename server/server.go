@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1204,8 +1205,15 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[tasks] list metrics query failed — metrics zeroed: %v", err)
 	}
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
+	// company keeps the tasks scoped to that company (the sidebar switcher). A
+	// non-numeric id, or one no task is scoped to, returns an empty list.
+	companyParam := strings.TrimSpace(r.URL.Query().Get("company"))
+	companyID, companyErr := strconv.ParseInt(companyParam, 10, 64)
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
+		if companyParam != "" && (companyErr != nil || !slices.Contains(t.lifecycleSnapshot().CompanyIDs, companyID)) {
+			continue
+		}
 		dto := taskDTO(t, s.resolvedTaskStatus(t))
 		applyTaskArchiveBlocker(&dto, archiveBlockers)
 		s.applyTaskMetrics(&dto, t, metrics[t.ExpID])
@@ -2363,7 +2371,8 @@ func (s *Server) resolveAssetIDs(ids []int64) map[int64]*db.Asset {
 // findingStats serves the whole-table aggregates (stat cards + vuln-class filter)
 // for the paginated Findings page.
 func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
-	st, err := s.m.pg.FindingStats()
+	// company narrows the cards to the sidebar's company, with the list's rule.
+	st, err := s.m.pg.FindingStatsForCompany(r.URL.Query().Get("company"))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

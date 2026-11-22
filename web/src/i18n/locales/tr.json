@@ -2713,5 +2713,12 @@
   "Traffic capture is off by default. Enable it in System settings after setup if you need provable HTTP findings — captured traffic is required for findings to prove goals.": "Trafik yakalama varsayılan olarak kapalıdır. Kanıtlanabilir HTTP bulguları gerekiyorsa kurulumdan sonra Sistem ayarlarından etkinleştirin — bulguların hedefleri kanıtlaması için yakalanmış trafik gereklidir.",
   "Capture is off · required for provable findings": "Yakalama kapalı · kanıtlanabilir bulgular için gerekli",
   "Traffic capture is off: findings stay recorded, but captured HTTP traffic is required for provable findings.": "Trafik yakalama kapalı: bulgular kaydedilmeye devam eder ancak kanıtlanabilir bulgular için yakalanmış HTTP trafiği gereklidir.",
-  "Enable in settings": "Ayarlardan etkinleştir"
+  "Enable in settings": "Ayarlardan etkinleştir",
+  "Switch company": "Şirket değiştir",
+  "All companies": "Tüm şirketler",
+  "Every target in view": "Tüm hedefler görünümde",
+  "Search company…": "Şirket ara…",
+  "Failed to load companies": "Şirketler yüklenemedi",
+  "No company found": "Şirket bulunamadı",
+  "Manage companies": "Şirketleri yönet"
 }
