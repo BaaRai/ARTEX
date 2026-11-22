@@ -600,6 +600,8 @@ export interface FindingQuery {
   sort?: "severity" | "time";
   // asset tree node key; selecting a node selects its whole subtree. Empty = no asset filter.
   assetScope?: string;
+  // company id from the sidebar switcher; also narrows the asset tree. Empty = all companies.
+  company?: string;
 }
 
 // ---- Findings by asset (asset view) ----

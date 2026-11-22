@@ -451,3 +451,30 @@ func OnRequest(req *Request) error {
 		}
 	}
 }
+
+func TestEqualityKeepsFloatFraction(t *testing.T) {
+	src := `package hook
+func mark(b bool) string {
+	if b {
+		return "T"
+	}
+	return "F"
+}
+func OnRequest(req *Request) error {
+	x := 1.5
+	n := 1
+	req.SetHeader("X-Eq", mark(x == 1)+mark(x != n)+mark(-0.5 == 0)+mark(2.0 == 2)+mark(n == 1.0))
+	return nil
+}`
+	prog, err := Compile("request", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &Request{}
+	if err := prog.RunRequest(context.Background(), req, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Headers["X-Eq"][0]; got != "FTFTT" {
+		t.Fatalf("X-Eq = %q, want FTFTT", got)
+	}
+}
