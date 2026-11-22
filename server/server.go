@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/archivestore"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
@@ -158,9 +160,11 @@ type Server struct {
 
 	// Cold task archives run through one persistent FIFO worker. The buffered wake
 	// channel coalesces enqueue bursts; the database remains the source of truth.
-	archiveWake chan struct{}
-	archiveWG   sync.WaitGroup
-	side        *sideQuestionState
+	archiveWake     chan struct{}
+	archiveWG       sync.WaitGroup
+	archiveStore    *archivestore.Store
+	archiveStoreErr error
+	side            *sideQuestionState
 }
 
 // provEntry is a cached provider + its config for one LLM profile id.
@@ -302,8 +306,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	} else {
 		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
 	}
-	// Both env readers have now run (NewManager for the DSN, FromEnv above for the
-	// keys). Drop the secrets before anything below can spawn a child process:
+	s.initTaskArchiveStore()
+	// Startup env readers have now run (NewManager for the DSN, the LLM provider
+	// and archive store for their credentials). Drop the secrets before anything
+	// below can spawn a child process:
 	// restoring runtimes resumes workers that run shells, and MCP discovery starts
 	// stdio servers.
 	if s.scrubSecrets {
@@ -898,9 +904,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
 	mux.HandleFunc("POST /api/traffic/ingest", s.ingestTraffic)
 	mux.HandleFunc("POST /api/traffic/replay", s.replayTraffic)
+	mux.HandleFunc("POST /api/traffic/import/har", s.importTrafficHAR)
+	mux.HandleFunc("GET /api/traffic/export/har", s.exportTrafficHAR)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // aggregate call counts per tool
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
+	mux.HandleFunc("GET /api/llm/context/summary", s.pgLLMContextSummary)
 	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
 	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)
 	mux.HandleFunc("GET /api/llm/records/by-model", s.pgTokenByModel) // aggregate this task's token usage by model
@@ -1030,6 +1039,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/traffic/rewrite-rules/{id}", s.rewriteDeleteRule)
 	mux.HandleFunc("POST /api/traffic/rewrite-rules/{id}/toggle", s.rewriteToggleRule)
 
+	// capture-proxy constrained Go tampering hooks (P4.2, operator-only, opt-in via ARTEX_TAMPER_HOOKS_ENABLED)
+	mux.HandleFunc("GET /api/traffic/hooks", s.tamperListHooks)
+	mux.HandleFunc("POST /api/traffic/hooks", s.tamperCreateHook)
+	mux.HandleFunc("PUT /api/traffic/hooks/{id}", s.tamperUpdateHook)
+	mux.HandleFunc("DELETE /api/traffic/hooks/{id}", s.tamperDeleteHook)
+	mux.HandleFunc("POST /api/traffic/hooks/{id}/toggle", s.tamperToggleHook)
+	mux.HandleFunc("GET /api/traffic/hooks/{id}/versions", s.tamperListHookVersions)
+	mux.HandleFunc("POST /api/traffic/hooks/{id}/rollback", s.tamperRollbackHook)
+	mux.HandleFunc("POST /api/traffic/hooks/dry-run", s.tamperDryRunHook)
+
 	// asset interception rule management (global blocklist: domains/IPs/URLs/CIDRs)
 	mux.HandleFunc("GET /api/asset-intercept/rules", s.assetInterceptListRules)
 	mux.HandleFunc("POST /api/asset-intercept/rules", s.assetInterceptCreateRule)
@@ -1063,13 +1082,11 @@ func (s *Server) Handler() http.Handler {
 	root.Handle("/api/", api)
 	webui := s.webuiHandler()
 	root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Keep the operator console out of cross-origin frames and referrers.
-		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
-		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-		w.Header().Set("Referrer-Policy", "same-origin")
+		// Document-only headers; the shared ones come from securityHeaders.
+		consoleHeaders(w.Header())
 		webui.ServeHTTP(w, r)
 	})
-	return limitRequestBody(root)
+	return s.securityHeaders(limitRequestBody(root))
 }
 
 // --- handlers ---
@@ -1186,8 +1203,15 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[tasks] list metrics query failed — metrics zeroed: %v", err)
 	}
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
+	// company keeps the tasks scoped to that company (the sidebar switcher). A
+	// non-numeric id, or one no task is scoped to, returns an empty list.
+	companyParam := strings.TrimSpace(r.URL.Query().Get("company"))
+	companyID, companyErr := strconv.ParseInt(companyParam, 10, 64)
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
+		if companyParam != "" && (companyErr != nil || !slices.Contains(t.lifecycleSnapshot().CompanyIDs, companyID)) {
+			continue
+		}
 		dto := taskDTO(t, s.resolvedTaskStatus(t))
 		applyTaskArchiveBlocker(&dto, archiveBlockers)
 		s.applyTaskMetrics(&dto, t, metrics[t.ExpID])
@@ -2214,9 +2238,10 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	taskParam := q.Get("task")
 	if taskParam == "" {
 		// With page/limit → server-side pagination {items,total,...}; without → a bare array (for dashboard aggregation,
-		// same compat policy as the intents endpoint). Filtering/sorting is pushed down to SQL uniformly.
+		// same compat policy as the intents endpoint). Filtering/sorting is pushed down to SQL uniformly, and the bare
+		// array honours the filters too: the dashboard narrows by the active company through asset_scope.
 		if q.Get("page") == "" && q.Get("limit") == "" {
-			fs, _ := s.m.pg.ListFindings(500)
+			fs, _ := s.m.pg.ListFindingsFiltered(findingFilterFromQuery(q), 500)
 			assets := s.resolveFindingAssets(fs)
 			out := make([]FindingDTO, 0, len(fs))
 			for _, f := range fs {
@@ -2344,7 +2369,8 @@ func (s *Server) resolveAssetIDs(ids []int64) map[int64]*db.Asset {
 // findingStats serves the whole-table aggregates (stat cards + vuln-class filter)
 // for the paginated Findings page.
 func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
-	st, err := s.m.pg.FindingStats()
+	// company narrows the cards to the sidebar's company, with the list's rule.
+	st, err := s.m.pg.FindingStatsForCompany(r.URL.Query().Get("company"))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -3329,7 +3355,7 @@ func (s *Server) getLogsHistory(w http.ResponseWriter, r *http.Request) {
 			TS:    r.CreatedAt.Format(time.RFC3339),
 			Level: r.Level,
 			Tag:   r.Tag,
-			Text:  r.Text,
+			Text:  maskURLCredentials(r.Text), // rows written before the sink masked them
 		})
 	}
 	writeJSON(w, 200, map[string]any{"items": items, "has_more": len(rows) == limit})
@@ -3541,18 +3567,17 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 0)
 	size := atoiDefault(q.Get("size"), 100)
-	ex, matched, _ := tr.Page(traffic.PageQuery{
-		Host:    q.Get("host"),
-		Method:  q.Get("method"),
-		Query:   q.Get("q"),
-		Body:    q.Get("body"),
-		Path:    q.Get("path"),
-		Status:  q.Get("status"),
-		RespMin: int64(atoiDefault(q.Get("resp_min"), -1)),
-		RespMax: int64(atoiDefault(q.Get("resp_max"), -1)),
-		Sort:    q.Get("sort"),
-		Order:   q.Get("order"),
-	}, page, size)
+	// company narrows the list to the hosts that company owns, so the page
+	// follows the sidebar switcher like every other asset-backed view.
+	hosts, err := s.companyHosts(int64(atoiDefault(q.Get("company"), 0)))
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	pq := parseTrafficPageQuery(q)
+	pq.Hosts = hosts
+	pq.MatchNone = q.Get("company") != "" && len(hosts) == 0 // a company owning no host matches nothing
+	ex, matched, _ := tr.Page(pq, page, size)
 	count, _ := tr.Count() // global total, for the stat card
 	writeJSON(w, 200, map[string]any{
 		"enabled":   s.m.TrafficEnabled(), // reflect the capture toggle

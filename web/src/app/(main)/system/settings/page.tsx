@@ -320,16 +320,23 @@ export default function SystemSettingsPage() {
               )}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="traffic-capture" className="text-sm font-normal text-muted-foreground">
-              {trafficCapture ? t("On · recording traffic and injecting proxy") : t("Off · no recording, no proxy injection")}
-            </Label>
-            <Switch
-              id="traffic-capture"
-              checked={trafficCapture}
-              disabled={!loaded || saving}
-              onCheckedChange={toggleTraffic}
-            />
+          <CardContent className="space-y-2.5">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="traffic-capture" className="text-sm font-normal text-muted-foreground">
+                {trafficCapture ? t("On · recording traffic and injecting proxy") : t("Off · no recording, no proxy injection")}
+              </Label>
+              <Switch
+                id="traffic-capture"
+                checked={trafficCapture}
+                disabled={!loaded || saving}
+                onCheckedChange={toggleTraffic}
+              />
+            </div>
+            {loaded && !trafficCapture && (
+              <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                {t("Traffic capture is off: findings stay recorded, but captured HTTP traffic is required for provable findings.")}
+              </p>
+            )}
           </CardContent>
         </Card>
 

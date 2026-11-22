@@ -18,6 +18,7 @@ import (
 // from history on a resumed session (design doc C2).
 type DeferredInfo struct {
 	FindingGuidance string            // derived from the final permitted tools, including DB overrides
+	SkillIndex      string            // names-only skill index for the system prompt ("" when no skills)
 	Deferred        []string          // all MCP tool names (schema withheld)
 	GlobalNames     []string          // MCP names to list in the system-prompt block
 	Unlock          *actool.UnlockSet // shared call-gate; nil when no MCP tools
@@ -100,6 +101,14 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 func guardPanic(t actool.CoreTool) actool.CoreTool { return &guardedTool{CoreTool: t} }
 
 type guardedTool struct{ actool.CoreTool }
+
+// AcceptsRawInput forwards the wrapped tool's opt-out of the harness schema
+// check, as overriddenTool does: this wrapper is the one the harness sees, and
+// the embedded interface alone would hide the opt-out from its type assertion.
+func (g *guardedTool) AcceptsRawInput() bool {
+	r, ok := g.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && r.AcceptsRawInput()
+}
 
 func (g *guardedTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (res actool.Result, err error) {
 	defer func() {

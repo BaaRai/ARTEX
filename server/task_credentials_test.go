@@ -49,7 +49,14 @@ func TestTaskCredentialsFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.m.PG().Exec(`DELETE FROM tasks WHERE id=$1`, id) })
+	t.Cleanup(func() {
+		_ = s.m.pg.DeleteTask(id)
+		// The first POST with an invalid credential entry returns 400 after
+		// creating a task/exploration row; remove any remaining fixture rows.
+		_, _ = s.m.PG().Exec(`DELETE FROM tasks WHERE description = 'credential flow test'`)
+		_, _ = s.m.PG().Exec(`DELETE FROM explorations WHERE description = 'credential flow test'`)
+		_, _ = s.m.PG().Exec(`DELETE FROM assets WHERE type = 'ip' AND ip = '127.0.0.1'`)
+	})
 
 	// List: both rows, user source, order stable.
 	resp = request("GET", fmt.Sprintf("/api/tasks/%s/credentials", created.ID), "")

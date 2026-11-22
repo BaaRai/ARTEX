@@ -573,6 +573,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedFindingEvidenceSchema()     // optional counterevidence / confidence_rationale on report_finding, added once per DB
 	s.seedFactInputSchema()           // restore record_fact single/batch contracts
 	s.seedFactSourceSchema()          // source enum on record_fact, added once per DB
+	s.refreshRecordFactContract()     // record_fact publishes the facts-only contract (one-time)
 	s.seedTaskScopeDescription()      // add_task_scope: "coverage scope, not enforced" replaces the authorization-boundary text
 	// Note: pentest's default tool bindings need no migration — BuiltinToolSeeds already seeds
 	// list_assets/insert_assets/report_finding/list_findings/list_companies together with
@@ -602,11 +603,23 @@ func (s *Server) seedFactSourceSchema() {
 		if err := json.Unmarshal(obj["properties"], &properties); err != nil {
 			return
 		}
-		if len(properties["source"]) == 0 {
+		// The source enum lives on the facts[] items (facts-only contract); the
+		// top level has no fact fields any more.
+		var facts map[string]json.RawMessage
+		var items map[string]json.RawMessage
+		var itemProps map[string]json.RawMessage
+		if err := json.Unmarshal(properties["facts"], &facts); err != nil {
 			return
 		}
-		_, err = s.m.pg.Exec(`UPDATE tools SET schema=jsonb_set(schema,ARRAY['properties','source'],$1::jsonb,true),updated_at=now()
-WHERE key='record_fact' AND system AND NOT(COALESCE(schema->'properties','{}'::jsonb) ? 'source')`, string(properties["source"]))
+		if err := json.Unmarshal(facts["items"], &items); err != nil {
+			return
+		}
+		if err := json.Unmarshal(items["properties"], &itemProps); err != nil || len(itemProps["source"]) == 0 {
+			return
+		}
+		_, err = s.m.pg.Exec(`UPDATE tools SET schema=jsonb_set(schema,ARRAY['properties','facts','items','properties','source'],$1::jsonb,true),updated_at=now()
+WHERE key='record_fact' AND system AND (schema->'properties'->'facts'->'items') ? 'properties'
+  AND NOT(COALESCE(schema->'properties'->'facts'->'items'->'properties','{}'::jsonb) ? 'source')`, string(itemProps["source"]))
 		if err != nil {
 			log.Printf("[facts] upgrade record_fact.source: %v", err)
 		}

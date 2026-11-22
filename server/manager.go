@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -266,6 +267,10 @@ type Manager struct {
 	rewriteMu     sync.Mutex
 	rewriteSet    atomic.Pointer[rewrite.Set]
 	rewriteErrors rewrite.ErrorLog
+	// Capture-proxy constrained Go tampering hooks (P4.2), behind ARTEX_TAMPER_HOOKS_ENABLED.
+	hookMu       sync.Mutex
+	hookSet      atomic.Pointer[traffic.HookSet]
+	hookLoadErrs map[int64]string
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
@@ -463,6 +468,26 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		if tr != nil {
 			m.traffic = tr
 			m.reloadRewriteRules() // in place before the proxy accepts a connection
+			m.reloadTamperHooks()  // opt-in behind ARTEX_TAMPER_HOOKS_ENABLED=1
+			if scfg, ok := traffic.SOCKS5ConfigFromEnv(); ok {
+				scfg.DialContext = m.interceptor.DialSOCKS5
+				scfg.ResolveUDP4 = m.interceptor.ResolveUDP4
+				if bound, serr := tr.StartSOCKS5(scfg); serr != nil {
+					log.Printf("[traffic/socks5] disabled: %v", serr)
+				} else if scfg.EnableUDP {
+					log.Printf("[traffic/socks5] opt-in SOCKS5 CONNECT + UDP ASSOCIATE listener on %s", bound)
+				} else {
+					log.Printf("[traffic/socks5] opt-in SOCKS5 CONNECT listener on %s", bound)
+				}
+			}
+			if tcfg, ok := traffic.TransparentTCPConfigFromEnv(); ok {
+				tcfg.DialContext = m.interceptor.DialSOCKS5
+				if bound, terr := tr.StartTransparentTCP(tcfg); terr != nil {
+					log.Printf("[traffic/transparent] disabled: %v", terr)
+				} else {
+					log.Printf("[traffic/transparent] opt-in transparent TCP listener on %s (Linux IPv4 SO_ORIGINAL_DST)", bound)
+				}
+			}
 			go func() {
 				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
 				if err := tr.Start(); err != nil {
@@ -503,7 +528,9 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	if m.traffic != nil {
 		if err := m.traffic.SetUpstreamProxy(m.globalProxy); err != nil {
-			log.Printf("[proxy] global proxy %q invalid, ignored: %v", m.globalProxy, err)
+			// Neither the stored value nor err (which quotes it) is logged: both
+			// can carry the proxy credentials.
+			log.Printf("[proxy] global proxy %q invalid, ignored; set it again in Settings (shown without credentials, empty when it cannot be parsed)", proxyWithoutCredentials(m.globalProxy))
 		}
 	}
 	m.enrich = enrich.New(m.assets, m.ProxyAddr, 4)
@@ -731,7 +758,10 @@ func (m *Manager) syncBrowserMCPProxy() {
 		return // user removed/renamed it — leave it alone
 	}
 
-	proxy := m.ProxyAddr()  // "" when capture off
+	// "" when capture is off and no global proxy is set. The global proxy can
+	// carry user:password; the row is listed by GET /api/mcp and the address is
+	// logged below, so the credentials are left out of both.
+	proxy := proxyWithoutCredentials(m.ProxyAddr())
 	cert := m.ProxyCACert() // "" when capture off
 
 	args := stripProxyArgs(decodeStrSlice(srv.Args))
@@ -754,6 +784,18 @@ func (m *Manager) syncBrowserMCPProxy() {
 	} else {
 		log.Printf("[mcp] browser MCP capture proxy configuration removed")
 	}
+}
+
+// proxyWithoutCredentials returns a proxy URL without its user:password, for
+// log lines and stored rows. An address that does not parse is returned as "":
+// its credentials cannot be told apart from the rest.
+func proxyWithoutCredentials(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	u.User = nil
+	return u.String()
 }
 
 // stripProxyArgs removes any --proxy-server/--proxy-bypass flags (both "--flag val"

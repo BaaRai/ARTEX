@@ -149,6 +149,7 @@ if [ "$GO_ONLY" -eq 0 ] && [ "$WEB_ONLY" -eq 0 ]; then
     printf 'note: shellcheck is not installed; skipping the shellcheck step\n'
   fi
   run_step "posture check" python3 scripts/posture_check_test.py
+  run_step "benchmark tests" python3 -m unittest discover -s scripts/benchmark -p 'test_*.py' -v
   run_step "changelog section tests" bash scripts/test-extract-changelog-section.sh
   run_step "bot context tests" bash scripts/test-bot-context.sh
 fi

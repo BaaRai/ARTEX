@@ -44,7 +44,10 @@ func TestReportFindingStoresReasoningFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.DeleteTask(task.ID)
+	defer func() {
+		_, _ = d.DeleteFindingsByTask(task.ID)
+		_ = d.DeleteTask(task.ID)
+	}()
 	ts := NewToolSet(nil, "")
 	ts.ts, ts.taskID = d.Exploration(task.ExplorationID), task.ID
 	for _, tc := range []struct{ extra, counter, rationale string }{

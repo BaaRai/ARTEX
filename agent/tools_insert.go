@@ -508,7 +508,10 @@ func (t *ToolSet) addTaskScope() actool.CoreTool {
 					errs[strconv.Itoa(i)] = err.Error()
 					continue
 				}
-				added = append(added, map[string]any{"kind": ts.Kind, "domain": ts.Domain, "net": ts.Net, "value": ts.Value, "company_id": ts.CompanyID})
+				added = append(added, map[string]any{
+					"kind": ts.Kind, "domain": ts.Domain, "net": ts.Net, "value": ts.Value,
+					"company_id": ts.CompanyID, "source": ts.Source, "reason": ts.Reason, "expanded": ts.Expanded,
+				})
 			}
 			out := map[string]any{"added": added}
 			if len(errs) > 0 {

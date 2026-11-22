@@ -14,11 +14,11 @@ import {
   TargetIcon,
   ZapIcon,
 } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
@@ -42,6 +42,7 @@ import type {
 import { cn } from "@/lib/utils";
 import { t } from "@/i18n";
 import { setVisibleInterval } from "@/lib/polling";
+import { useActiveCompany } from "@/stores/company/company-store";
 
 // ── chart constants ───────────────────────────────────────────────────────────
 
@@ -132,6 +133,9 @@ function SectionTitle({
 // ── page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
+  // The sidebar's company switcher narrows the finding-derived panels to that
+  // company (server-side `company` filter). Undefined means all companies.
+  const company = useActiveCompany();
   // data state
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [findings, setFindings] = React.useState<Finding[]>([]);
@@ -190,7 +194,7 @@ export default function DashboardPage() {
       loading = true;
       try {
         const [findings, stats, settings, pending, activity, tokens, conversationTokens] = await Promise.all([
-          api.findings(),
+          api.findings(undefined, company),
           api.stats(),
           api.settings(),
           api.interceptPending(),
@@ -218,7 +222,7 @@ export default function DashboardPage() {
       alive = false;
       stopPolling();
     };
-  }, []);
+  }, [company]);
 
   // slow poll: traffic, assets, system-static (every 15s)
   React.useEffect(() => {
@@ -572,7 +576,9 @@ export default function DashboardPage() {
                 <span>{t("Recording")}</span>
               </>
             ) : (
-              <span>{t("Capture is off")}</span>
+              <Link href="/system/settings" className="text-amber-500 hover:underline">
+                {t("Capture is off · required for provable findings")}
+              </Link>
             )}
           </CardContent>
         </Card>
@@ -1164,19 +1170,29 @@ export default function DashboardPage() {
               </Badge>
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-              <div className="text-[10px] text-muted-foreground">{t("Traffic capture")}</div>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[10px]",
-                  settings?.traffic_capture
-                    ? "border-violet-500/30 bg-violet-500/10 text-violet-400"
-                    : "text-muted-foreground",
-                )}
-              >
-                {settings?.traffic_capture ? t("On") : t("Off")}
-              </Badge>
+            <div className="rounded-lg border bg-muted/20 px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] text-muted-foreground">{t("Traffic capture")}</div>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px]",
+                    settings?.traffic_capture
+                      ? "border-violet-500/30 bg-violet-500/10 text-violet-400"
+                      : "border-amber-500/30 bg-amber-500/10 text-amber-500",
+                  )}
+                >
+                  {settings?.traffic_capture ? t("On") : t("Off")}
+                </Badge>
+              </div>
+              {settings && !settings.traffic_capture && (
+                <p className="mt-1.5 text-[10px] leading-relaxed text-amber-500">
+                  {t("Traffic capture is off: findings stay recorded, but captured HTTP traffic is required for provable findings.")}{" "}
+                  <Link href="/system/settings" className="underline">
+                    {t("Enable in settings")}
+                  </Link>
+                </p>
+              )}
             </div>
 
             {activeProfile && (

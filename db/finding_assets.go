@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -144,7 +145,13 @@ type findingAssetHit struct {
 // BuildFindingAssetTree builds the asset tree under the current filter.
 // AssetScope itself does not participate (otherwise the tree would collapse
 // into a single chain around the selected node).
+// Company does participate: the tree then holds only that company's assets,
+// and its findings with no live asset land in the unlinked bucket.
 func (d *DB) BuildFindingAssetTree(f FindingFilter) (*FindingAssetTree, error) {
+	f, err := d.resolveCompany(f)
+	if err != nil {
+		return nil, err
+	}
 	return d.buildFindingAssetTree(f, findingAssetTreeMaxNodes)
 }
 
@@ -165,6 +172,10 @@ FROM findings f LEFT JOIN tasks t ON f.task_id = t.id`+where, args...)
 	}
 	hits := []findingAssetHit{}
 	assetIDs := map[int64]bool{}
+	companyAssets := make(map[int64]bool, len(f.companyAssetIDs))
+	for _, id := range f.companyAssetIDs {
+		companyAssets[id] = true
+	}
 	for rows.Next() {
 		var h findingAssetHit
 		var aidsJSON string
@@ -173,6 +184,10 @@ FROM findings f LEFT JOIN tasks t ON f.task_id = t.id`+where, args...)
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(aidsJSON), &h.assetIDs)
+		if f.companyID > 0 {
+			// Under a company, a finding hangs only off that company's assets.
+			h.assetIDs = slices.DeleteFunc(h.assetIDs, func(id int64) bool { return !companyAssets[id] })
+		}
 		for _, id := range h.assetIDs {
 			if id > 0 {
 				assetIDs[id] = true
@@ -656,12 +671,30 @@ func truncateFindingAssetTree(tree *FindingAssetTree, maxNodes int) {
 func (d *DB) applyAssetScope(f FindingFilter) (FindingFilter, error) {
 	scope := strings.TrimSpace(f.AssetScope)
 	f.assetIDs, f.assetNone, f.assetMiss = nil, false, false
+	if !strings.HasPrefix(scope, "c:") {
+		var err error
+		if f, err = d.resolveCompany(f); err != nil {
+			return f, err
+		}
+	}
 	if scope == "" {
 		return f, nil
 	}
 	if scope == FindingUnassignedAsset {
 		f.assetNone = true
 		return f, nil
+	}
+	// A company node selects the same rows as the Company filter: the ownership
+	// column, not the tree, which holds only assets that carry findings.
+	if id, ok := strings.CutPrefix(scope, "c:"); ok {
+		switch {
+		case f.Company == "":
+			f.Company = id
+		case strings.TrimSpace(f.Company) != id:
+			f.assetMiss = true // a company node outside the selected company
+			return f, nil
+		}
+		return d.resolveCompany(f)
 	}
 	// No truncation: dropped endpoints must still take part in id collection,
 	// otherwise the list would lose rows.
@@ -712,4 +745,44 @@ func assetIDContainments(ids []int64) []string {
 		out = append(out, "["+strconv.FormatInt(id, 10)+"]")
 	}
 	return out
+}
+
+// resolveCompany turns Company into the owning company's id and asset ids.
+// An unknown or non-numeric id sets companyMiss, so the query matches nothing.
+func (d *DB) resolveCompany(f FindingFilter) (FindingFilter, error) {
+	f.companyID, f.companyAssetIDs, f.companyMiss = 0, nil, false
+	raw := strings.TrimSpace(f.Company)
+	if raw == "" {
+		return f, nil
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		f.companyMiss = true
+		return f, nil
+	}
+	var exists bool
+	if err := d.QueryRow(`SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return f, err
+	}
+	if !exists {
+		f.companyMiss = true
+		return f, nil
+	}
+	rows, err := d.Query(`SELECT id FROM assets WHERE company_id = $1`, id)
+	if err != nil {
+		return f, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var assetID int64
+		if err := rows.Scan(&assetID); err != nil {
+			return f, err
+		}
+		f.companyAssetIDs = append(f.companyAssetIDs, assetID)
+	}
+	if err := rows.Err(); err != nil {
+		return f, err
+	}
+	f.companyID = id
+	return f, nil
 }

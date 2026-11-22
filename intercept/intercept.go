@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"regexp"
 	"strconv"
@@ -111,15 +112,17 @@ func TargetScopeFromContext(ctx context.Context) (s TargetScope, ok bool) {
 }
 
 // compiledRule is an InterceptRule with the regex pre-compiled (nil for string rules)
-// and the argv tokens pre-parsed (nil for non-argv rules).
+// and the argv tokens pre-parsed (nil for non-argv rules). bad marks a deny or
+// ask rule whose pattern does not compile: it matches every call, as a deny.
 type compiledRule struct {
 	db.InterceptRule
 	re   *regexp.Regexp
 	argv []string
+	bad  bool
 }
 
 // compileRule prepares a rule for matching. ok is false for a rule whose
-// pattern does not compile; such a rule is skipped rather than crashing.
+// pattern does not compile; see loadLocked for what happens to it.
 func compileRule(r db.InterceptRule) (compiledRule, bool) {
 	cr := compiledRule{InterceptRule: r}
 	switch r.MatchType {
@@ -205,6 +208,7 @@ type Interceptor struct {
 	mu           sync.RWMutex
 	cached       []compiledRule  // sorted by priority DESC; nil means not loaded yet
 	enabledTools map[string]bool // nil means not loaded yet
+	loadFailed   bool            // the last load failed; its error has been logged
 	pending      *pendingManager
 	reviewer     Reviewer  // nil = freeform LLM fallback judge not wired
 	completer    Completer // nil = closed-question judge not wired
@@ -289,11 +293,24 @@ func (i *Interceptor) Invalidate() {
 	i.mu.Unlock()
 }
 
+// loadLocked reads the rules and the enabled-tools setting. It installs both or,
+// when either read fails, neither: the callers then fail closed (IsToolEnabled
+// answers true, the matchers deny). The error is logged once per outage.
 func (i *Interceptor) loadLocked() error {
 	rules, err := i.db.ListInterceptRules()
+	var val string
+	var ok bool
+	if err == nil {
+		val, ok, err = i.db.GetSetting("intercept_enabled_tools")
+	}
 	if err != nil {
+		if !i.loadFailed {
+			i.loadFailed = true
+			log.Printf("[intercept] the rule store cannot be read; every tool call is denied until it can: %v", err)
+		}
 		return err
 	}
+	i.loadFailed = false
 	var out []compiledRule
 	for _, r := range rules {
 		if !r.Enabled {
@@ -301,16 +318,26 @@ func (i *Interceptor) loadLocked() error {
 		}
 		cr, ok := compileRule(r)
 		if !ok {
-			continue // skip rules with a bad pattern rather than crashing
+			if r.Action != "deny" && r.Action != "ask" {
+				continue // an allow rule with a bad pattern allows nothing
+			}
+			// A deny or ask rule that cannot be evaluated must not fail open.
+			cr.bad, cr.Action = true, "deny"
+			cr.Message = "intercept rule [" + r.Name + "] has a pattern that does not compile; calls are blocked until the rule is fixed or disabled"
 		}
 		out = append(out, cr)
 	}
 	i.cached = out
 
-	// Load enabled-tools set from settings, falling back to hard-coded defaults.
-	val, ok, _ := i.db.GetSetting("intercept_enabled_tools")
+	// Enabled-tools set from settings, falling back to hard-coded defaults.
 	i.enabledTools = enabledToolsFromSetting(val, ok)
 	return nil
+}
+
+// storeUnreadableDecision is what the matchers answer when the rules cannot be
+// loaded: a deny, so that a call is never let through unchecked.
+func storeUnreadableDecision() Decision {
+	return Decision{Action: "deny", Message: "the intercept rules could not be loaded, so the call cannot be checked; it is blocked until the rule store is readable again"}
 }
 
 // enabledToolsFromSetting maps the stored intercept_enabled_tools value to the
@@ -357,7 +384,8 @@ func (i *Interceptor) rules() ([]compiledRule, error) {
 
 // IsToolEnabled returns true if the named tool is in the intercept-enabled set
 // (i.e. it should enter the rule-matching path). Uses the same double-check lock
-// pattern as rules().
+// pattern as rules(). When the set cannot be loaded it answers true for every
+// tool, so the call reaches the rule path, where Match denies it.
 func (i *Interceptor) IsToolEnabled(name string) bool {
 	i.mu.RLock()
 	if i.enabledTools != nil {
@@ -370,7 +398,9 @@ func (i *Interceptor) IsToolEnabled(name string) bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if i.enabledTools == nil {
-		_ = i.loadLocked()
+		if err := i.loadLocked(); err != nil {
+			return true
+		}
 	}
 	return i.enabledTools[name]
 }
@@ -676,11 +706,12 @@ func judgeActionLabel(action string) string {
 
 // Match evaluates the rule list (priority DESC) against a tool call.
 // Returns (Decision, true) for the first matching enabled rule, or
-// (Decision{}, false) if no rule matches.
+// (Decision{}, false) if no rule matches. When the rules cannot be loaded it
+// returns a deny.
 func (i *Interceptor) Match(toolName string, input []byte) (Decision, bool) {
 	rules, err := i.rules()
-	if err != nil || len(rules) == 0 {
-		return Decision{}, false
+	if err != nil {
+		return storeUnreadableDecision(), true
 	}
 	for _, r := range rules {
 		if ruleMatches(r, toolName, input) {
@@ -712,7 +743,7 @@ const builtinRulePrefix = "[built-in]"
 // enter the rule system. It returns the first match in priority order. User rules,
 // allow and ask rules, and the judge are not consulted. The planner and the main
 // agent use it (#124, F11). An interceptor without a database and without loaded
-// rules matches nothing.
+// rules matches nothing. When the rules cannot be loaded it returns a deny.
 func (i *Interceptor) MatchBuiltin(toolName string, input []byte) (Decision, bool) {
 	i.mu.RLock()
 	loaded := i.cached != nil
@@ -725,7 +756,7 @@ func (i *Interceptor) MatchBuiltin(toolName string, input []byte) (Decision, boo
 	}
 	rules, err := i.rules()
 	if err != nil {
-		return Decision{}, false
+		return storeUnreadableDecision(), true
 	}
 	for _, r := range rules {
 		if r.Action != "deny" || !strings.HasPrefix(r.Name, builtinRulePrefix) || !ruleMatches(r, toolName, input) {
@@ -772,6 +803,9 @@ func (i *Interceptor) SetRulesForTest(rules []db.InterceptRule) {
 }
 
 func ruleMatches(r compiledRule, toolName string, input []byte) bool {
+	if r.bad {
+		return true
+	}
 	if r.MatchType == "argv" {
 		// Bash only, on the parsed command; match_target is always tool_input.
 		// Allow rules stay strictly limited to a single simple command with

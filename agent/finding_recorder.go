@@ -12,9 +12,13 @@ type FindingRecorder interface {
 	Record(context.Context, db.RecordFindingInput, []db.TrafficRef) (*db.RecordedFinding, error)
 }
 
-// Tool-use guidance is appended without replacing the user's editable prompt.
-// It does not require capture or claim that unavailable traffic tools exist.
-const findingTrafficGuidance = "\n\n**Vulnerability traffic evidence (optional)**: when reporting a vulnerability via report_finding, if there are HTTP requests/responses you have reviewed and confirmed to support the conclusion, you may bind their real IDs via traffic_refs in reproduction order; domains and times are only candidate filters and do not imply association. For TCP and other non-HTTP vulnerabilities, when nothing was captured, or when there is no exact match, omit it or pass [], keep other verifiable evidence such as command output and logs in evidence, and preferably state why nothing was bound. Do not guess IDs, and do not re-probe just to capture packets."
+// TrafficCaptureChecker is implemented by a FindingRecorder that owns the live
+// traffic capture (the host's evidence store). Plan() hands it to prove_goal so
+// a finding's bound traffic_ref must still exist in that capture. Without it,
+// finding proofs are refused (#124, P4.3).
+type TrafficCaptureChecker interface {
+	TrafficExists(ctx context.Context, trafficID string) (bool, error)
+}
 
 func (t *ToolSet) SetFindingRecorder(r FindingRecorder)   { t.findingRecorder = r }
 func (w *Worker) SetFindingRecorder(r FindingRecorder)    { w.findingRecorder = r }

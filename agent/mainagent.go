@@ -28,6 +28,7 @@ type MainAgent struct {
 	maxTurns        int                                    // max agent turns per run (0 = unlimited)
 	proxyAddr       string                                 // recording proxy for WebFetch (empty = direct)
 	proxyCACert     string                                 // recording proxy's CA cert path (HTTPS verify)
+	factTraffic     FactTrafficLookup                      // proxy captures for fact provenance (nil = activity-only)
 	webSearch       WebSearchOpts                          // web_search tool backend selection (off by default)
 	workDir         string                                 // shared work dir (surfaced in prompt as artifact-output target)
 	steerWork       func(intentID int64, msg string) error // engine callback: steer a running work (nil = off)
@@ -75,6 +76,10 @@ func (m *MainAgent) compactionWindow() int {
 // cert it trusts to verify HTTPS through it (empty addr = direct).
 func (m *MainAgent) SetProxy(addr, caCert string) { m.proxyAddr, m.proxyCACert = addr, caCert }
 
+// SetFactTraffic wires the proxy capture store used to classify recorded facts
+// (#124 row 1). nil keeps the activity-only classification.
+func (m *MainAgent) SetFactTraffic(l FactTrafficLookup) { m.factTraffic = l }
+
 // SetWebSearch selects the web_search backend for the main agent (off by default).
 func (m *MainAgent) SetWebSearch(o WebSearchOpts) { m.webSearch = o }
 
@@ -114,6 +119,7 @@ func mainAgentSystem(goal, dataDir, workDir string) string {
 func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, message string, hooks harness.HookRunner, emit func(db.Activity), notify, resume func(), notifyGoal func([]string), notifyHint func(string, []string)) (string, error) {
 	tsx := NewToolSet(ts, "human")
 	tsx.SetFindingRecorder(m.findingRecorder)
+	tsx.SetFactTraffic(m.factTraffic)
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
 	}

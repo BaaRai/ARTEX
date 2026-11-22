@@ -38,7 +38,7 @@ func (i *Interceptor) MatchPersistence(toolName string, input []byte) (Decision,
 	}
 	rules, err := i.rules()
 	if err != nil {
-		return Decision{}, false
+		return storeUnreadableDecision(), true
 	}
 	var ask *compiledRule
 	for idx := range rules {

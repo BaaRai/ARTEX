@@ -908,6 +908,7 @@ func TestNormalizeURL(t *testing.T) {
 		{"https://user@example.com/", "https://example.com"},
 		{"https://u:p@example.com:8443/users/@alice?x=1", "https://example.com:8443/users/@alice?x=1"},
 		{"https://example.com/@me?r=http://a:b@x/", "https://example.com/@me?r=http://a:b@x/"},
+		{"http://user:secret@ex ample.com/a", "http://ex ample.com/a"},
 	}
 	for _, tc := range tests {
 		got := normalizeURL(tc.raw)
@@ -1143,6 +1144,7 @@ func TestAssetIPRejectsHostname(t *testing.T) {
 		t.Fatalf("empty ip rejected: %v", err)
 	}
 	deleteAsset(d, id)
+	_, _ = d.Exec(`DELETE FROM assets WHERE domain IN ('ip-guard.example.com','example.com')`)
 	id, err = av2.UpsertIP(UpsertIPReq{IP: "203.0.113.7"})
 	if err != nil {
 		t.Fatalf("valid ip rejected: %v", err)

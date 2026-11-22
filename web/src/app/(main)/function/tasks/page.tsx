@@ -139,6 +139,7 @@ import type {
   TaskStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useActiveCompanyID } from "@/stores/company/company-store";
 
 // fmtBytes renders a human file size for the upload manifest.
 function fmtBytes(n: number): string {
@@ -307,6 +308,8 @@ function compareTasks(left: Task, right: Task, field: TaskSortField, direction: 
 }
 
 export default function TasksPage() {
+  // The sidebar's company switcher: the server returns only the tasks scoped to it.
+  const companyId = useActiveCompanyID();
   const [activeTab, setActiveTab] = React.useState("current");
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [categories, setCategories] = React.useState<TaskCategory[]>([]);
@@ -459,7 +462,7 @@ export default function TasksPage() {
 
   const load = React.useCallback(() => {
     api
-      .tasks()
+      .tasks(companyId)
       .then((r) => {
         const next = r.tasks.map((t) => (t.id === r.active ? { ...t, active: true } : t));
         const sig = JSON.stringify(next);
@@ -470,7 +473,7 @@ export default function TasksPage() {
       .catch(() => {
         // Polling is best-effort; the next interval retries automatically.
       });
-  }, []);
+  }, [companyId]);
 
   const loadCategories = React.useCallback(() => {
     api
@@ -1555,7 +1558,7 @@ function ArchiveConfirmDialog({
           <AlertDialogTitle>{count === 1 ? t("Archive task") : t("Archive {count} tasks", { count })}</AlertDialogTitle>
           <AlertDialogDescription className="[overflow-wrap:anywhere]">
             {t(
-              "Archiving stops task scheduling and compresses the graph, LLM history, files, and exclusive assets and traffic into local cold storage. Once archived, a task can be restored from \"Archived\".",
+              "Archiving stops task scheduling and compresses the graph, LLM history, files, and exclusive assets and traffic into the configured archive storage. Once archived, a task can be restored from \"Archived\". Restoring requires free space on this server.",
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -1999,6 +2002,11 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                       title={t("Before compression: {size}", { size: formatArchiveBytes(archive.original_size) })}
                     >
                       {archiveCompressionLabel(archive)}
+                      {(archive.storage === "s3" || archive.storage === "local") && (
+                        <div className="text-muted-foreground">
+                          {archive.storage === "s3" ? t("Object storage") : t("Local storage")}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs tabular-nums">{archiveDataTotal(archive).toLocaleString(intlLocale)}</TableCell>
                     <TableCell>
@@ -2017,7 +2025,11 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                           </p>
                         ))}
                         <span className="text-muted-foreground text-xs">
-                          {t(archive.phase)} · {archive.progress}%
+                          {archive.phase === "upload_and_verify"
+                            ? t("Uploading and verifying")
+                            : archive.phase === "download_and_verify"
+                              ? t("Downloading and verifying")
+                              : t(archive.phase)} · {archive.progress}%
                         </span>
                       </div>
                     </TableCell>

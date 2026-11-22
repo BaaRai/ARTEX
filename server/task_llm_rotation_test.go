@@ -75,7 +75,10 @@ func TestRotationConcurrentProvidersAndPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.DeleteTask(task.ID, DeleteTaskOptions{})
+	defer func() {
+		_, _ = m.pg.Exec(`DELETE FROM llm_usage WHERE task_id = $1`, task.ID)
+		_, _ = m.DeleteTask(task.ID, DeleteTaskOptions{})
+	}()
 	s := &Server{m: m, provByProfile: map[int64]*provEntry{}}
 	runtime := &taskLLMRuntime{s: s, taskID: task.ID, agentKey: "worker"}
 	done := make(chan error, 3)
@@ -343,7 +346,10 @@ func TestRunIntentRotatesPinnedProfileWithCachedExecCtx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.DeleteTask(task.ID, DeleteTaskOptions{})
+	defer func() {
+		_, _ = m.pg.Exec(`DELETE FROM llm_usage WHERE task_id = $1`, task.ID)
+		_, _ = m.DeleteTask(task.ID, DeleteTaskOptions{})
+	}()
 
 	e := NewEngine(m)
 	// Warm the per-task cached execCtx before any worker intent runs.

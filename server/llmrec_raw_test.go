@@ -74,6 +74,7 @@ func TestRecorderPersistsRawWireBodies(t *testing.T) {
 		if _, err := pg.Exec(`DELETE FROM llm_records WHERE session_id = $1`, session); err != nil {
 			t.Logf("cleanup: %v", err)
 		}
+		_, _ = pg.Exec(`DELETE FROM llm_usage WHERE task_id = '999999' AND profile_name = 'raw-test-profile'`)
 	}()
 
 	ctx := transcript.WithSessionID(context.Background(), session)

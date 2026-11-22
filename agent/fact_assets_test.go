@@ -115,10 +115,9 @@ func TestRecordFactAssetAliases(t *testing.T) {
 func TestRecordFactAssetAliasSchema(t *testing.T) {
 	schema := NewToolSet(nil, "").recordFact().InputSchema()
 	props := schema["properties"].(map[string]any)
-	for _, name := range []string{"asset_ids", "tested_asset_ids"} {
-		if props[name] == nil {
-			t.Fatalf("single schema missing %s", name)
-		}
+	// Facts-only contract: the alias lives on the items.
+	if len(props) != 1 || props["facts"] == nil {
+		t.Fatalf("top level must hold facts only: %v", props)
 	}
 	item := props["facts"].(map[string]any)["items"].(map[string]any)
 	itemProps, _ := item["properties"].(map[string]any)

@@ -9,8 +9,11 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Rendering for the findings page "Export": renders a batch of findings table rows
@@ -122,21 +125,75 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 
 var unsafeFilenameChars = regexp.MustCompile(`[^\p{Han}\p{L}\p{N}._-]+`)
 
+const maxFindingFilenameBaseBytes = 120
+
+// stripCombiningAndFormat drops uncombined non-spacing marks (e.g. Arabic
+// diacritics after NFC composition) and format controls (e.g. BiDi RLO/LRO)
+// so they are omitted rather than turned into underscores between letters.
+func stripCombiningAndFormat(s string) string {
+	s = norm.NFC.String(s)
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func truncateUTF8Bytes(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	n := 0
+	for i := range s {
+		if i > maxBytes {
+			break
+		}
+		n = i
+	}
+	if n == 0 && len(s) > 0 {
+		_, size := utf8.DecodeRuneInString(s)
+		if size <= maxBytes {
+			return s[:size]
+		}
+		return ""
+	}
+	return s[:n]
+}
+
 // FindingFilename generates a safe .md filename for "one file per vulnerability", e.g.
-// `critical_SQL_injection_#123.md`. Strips path separators and control characters to avoid illegal paths inside the zip.
+// `critical_SQL_injection_123.md`. Strips path separators, combining diacritics, and
+// control characters to avoid illegal paths inside the zip while preserving the ID suffix.
 func FindingFilename(f *db.DBFinding) string {
-	sev := nz(f.Severity, "info")
-	title := findingTitle(f)
-	name := fmt.Sprintf("%s_%s_#%d", sev, title, f.ID)
-	name = unsafeFilenameChars.ReplaceAllString(name, "_")
-	name = strings.Trim(name, "._")
-	if name == "" {
+	sev := unsafeFilenameChars.ReplaceAllString(stripCombiningAndFormat(nz(f.Severity, "info")), "_")
+	sev = strings.Trim(sev, "._")
+	if sev == "" {
+		sev = "info"
+	}
+	title := unsafeFilenameChars.ReplaceAllString(stripCombiningAndFormat(findingTitle(f)), "_")
+	title = strings.Trim(title, "._")
+	suffix := fmt.Sprintf("_%d", f.ID)
+	prefix := sev
+	if title != "" {
+		prefix = sev + "_" + title
+	}
+	budget := maxFindingFilenameBaseBytes - len(suffix)
+	if len(prefix) > budget {
+		prefix = strings.TrimRight(truncateUTF8Bytes(prefix, budget), "._")
+	}
+	var name string
+	if prefix == "" {
 		name = fmt.Sprintf("finding_%d", f.ID)
+	} else {
+		name = prefix + suffix
 	}
 	// Defensive: strip one more path layer to rule out zip slip.
 	name = path.Base(name)
-	if len(name) > 120 {
-		name = strings.ToValidUTF8(name[:120], "")
+	if name == "" || name == "." || name == ".." {
+		name = fmt.Sprintf("finding_%d", f.ID)
 	}
 	return name + ".md"
 }

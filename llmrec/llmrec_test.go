@@ -151,15 +151,9 @@ func (meteredStreamProvider) Stream(context.Context, llm.CompletionRequest) iter
 }
 
 func TestSideUsageRecordedOnceOnConsumerCancellation(t *testing.T) {
-	// Timing-sensitive on 2-core CI runners (BaaRai/ARTEX#9). Repro:
-	//   ARTEX_PG_DSN=postgres://artex:testpass@localhost:5432/artextest_race \
-	//     go test ./llmrec -run TestSideUsageRecordedOnceOnConsumerCancellation -count=20 -race -v
-	// The `early=` t.Fatalf assertion below compares the single llm_usage row's
-	// count/input/output/worker/status; in the `early` branch the status
-	// occasionally comes back "ok" instead of "error" because the consumer's
-	// cancellation and the recorder's deferred finish race on a loaded runner.
-	// Keep the skip until the metering status is made cancellation-explicit.
-	t.Skip("timing-sensitive on CI runners; repro and failing assertion documented above; BaaRai/ARTEX#9")
+	// Previously skipped as timing-sensitive (BaaRai/ARTEX#9). The recorder now
+	// decides the status at the point the consumer stops, so the result no
+	// longer depends on when the deferred finish runs.
 	dsn := os.Getenv("ARTEX_PG_DSN")
 	if dsn == "" {
 		t.Skip("requires isolated ARTEX_PG_DSN")
@@ -169,7 +163,9 @@ func TestSideUsageRecordedOnceOnConsumerCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pg.Close()
-	for _, early := range []bool{false, true} {
+	// full: read to the end. cancel: cancel ctx, then stop reading.
+	// abandon: stop reading before message_stop with ctx still live.
+	for _, mode := range []string{"full", "cancel", "abandon"} {
 		profile := "btw-metering-" + uuid.NewString()
 		ctx, cancel := context.WithCancel(transcript.WithSessionID(t.Context(), "exp0-btw-test"))
 		recorder := Wrap(meteredStreamProvider{}, pg, "fixture", profile, "", "", func() bool { return false })
@@ -177,8 +173,10 @@ func TestSideUsageRecordedOnceOnConsumerCancellation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if early && event.Type == llm.SEMessageDelta {
-				cancel()
+			if mode != "full" && event.Type == llm.SEMessageDelta {
+				if mode == "cancel" {
+					cancel()
+				}
 				break // Consumer exits before the provider can return a cancellation event.
 			}
 		}
@@ -192,11 +190,11 @@ FROM llm_usage WHERE profile_name=$1`, profile).Scan(&count, &input, &output, &w
 			t.Fatal(err)
 		}
 		wantStatus := "ok"
-		if early {
+		if mode != "full" {
 			wantStatus = "error"
 		}
 		if count != 1 || input != 23 || output != 5 || worker != "btw" || status != wantStatus {
-			t.Fatalf("early=%v: count=%d usage=%d/%d worker=%q status=%q", early, count, input, output, worker, status)
+			t.Fatalf("mode=%s: count=%d usage=%d/%d worker=%q status=%q", mode, count, input, output, worker, status)
 		}
 	}
 }
