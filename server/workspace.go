@@ -349,7 +349,7 @@ func saveUpload(hdr *multipart.FileHeader, dest string) error {
 		return err
 	}
 	defer src.Close()
-	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	out, err := openUploadFileNoFollow(dest)
 	if err != nil {
 		return err
 	}
