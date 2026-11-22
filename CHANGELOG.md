@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`/api/auth/init` is rate-limited**: setup sits outside the login limiter and pays a bcrypt hash on every request while no password is set. It now has its own per-IP bucket (10 attempts per minute, the same 429 with `Retry-After` as login), cleared on a successful setup.
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
 - **Notification delivery ignores HTTP_PROXY**: the dial guard checks the address it connects to. An environment proxy made that address the proxy, so a link-local target could still be reached. Notification HTTP now connects directly.
 - **Captured traffic blobs are owner-only**: HTTP and raw-stream bodies spilled out of the database are written `0600`, and their bucket directory is `0700`. An existing blob is tightened when it is seen again.

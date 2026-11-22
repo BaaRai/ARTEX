@@ -477,6 +477,18 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
+	// A request while the password is set is cheap (one setting read), but one
+	// while it is not pays a bcrypt hash. The setup token is 128 bits and cannot
+	// be guessed, so this is about CPU and first-run noise, not brute force.
+	ip := clientIP(r, s.trustedProxies)
+	if s.initLimit != nil {
+		if wait := s.initLimit.allow(ip); wait > 0 {
+			secs := int((wait + time.Second - 1) / time.Second)
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			writeErr(w, 429, fmt.Sprintf("Too many setup attempts, try again in %d seconds", secs))
+			return
+		}
+	}
 	existing, _, err := pg.GetSetting(s.passwordHashKey())
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
@@ -523,6 +535,9 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	s.setupMu.Lock()
 	s.setupToken = ""
 	s.setupMu.Unlock()
+	if s.initLimit != nil {
+		s.initLimit.reset(ip)
+	}
 	s.applyPasswordVersion(version)
 	tok, err := signJWTVersion(s.jwtKey, version)
 	if err != nil {

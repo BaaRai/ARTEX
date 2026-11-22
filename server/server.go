@@ -78,6 +78,7 @@ type Server struct {
 	modelRootCAs        *x509.CertPool
 
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
+	initLimit      *loginLimiter  // per-IP attempt limit on POST /api/auth/init
 	pwdLimit       *loginLimiter  // attempt limit on POST /api/auth/change-password (IP + session token)
 	trustedProxies []netip.Prefix // ARTEX_TRUSTED_PROXIES; see clientIP
 
@@ -199,7 +200,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{},
 		taskAgents:     map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
-		loginLimit: newLoginLimiter(time.Now), pwdLimit: newLoginLimiter(time.Now)}
+		loginLimit: newLoginLimiter(time.Now), initLimit: newLoginLimiter(time.Now), pwdLimit: newLoginLimiter(time.Now)}
 	s.llmHealth, s.llmHealthSync = newLLMHealthRegistry(ctx, m.pg)
 	for _, o := range opts {
 		o(s)
