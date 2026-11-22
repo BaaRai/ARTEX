@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Autumn-27/norma/llm"
@@ -15,9 +16,9 @@ import (
 
 func TestBedrockGatewayCompleteAndStream(t *testing.T) {
 	const token = "synthetic-test-token"
-	var calls int
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/bedrock/model/test.model/invoke") {
 			t.Errorf("path = %s", r.URL.Path)
 		}
@@ -96,8 +97,8 @@ func TestBedrockGatewayCompleteAndStream(t *testing.T) {
 			toolInput += ev.Text
 		}
 	}
-	if streamed != "streamed" || toolName != "lookup" || toolInput != `{"q":"x"}` || calls != 2 {
-		t.Fatalf("stream = %q, tool = %q %q, calls = %d", streamed, toolName, toolInput, calls)
+	if streamed != "streamed" || toolName != "lookup" || toolInput != `{"q":"x"}` || calls.Load() != 2 {
+		t.Fatalf("stream = %q, tool = %q %q, calls = %d", streamed, toolName, toolInput, calls.Load())
 	}
 }
 
@@ -124,8 +125,8 @@ func TestBedrockGatewayStreamExceptionIsAnError(t *testing.T) {
 }
 
 func TestBedrockGatewayDoesNotFollowRedirectWithToken(t *testing.T) {
-	redirected := false
-	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected = true }))
+	var redirected atomic.Bool
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected.Store(true) }))
 	defer other.Close()
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, other.URL, http.StatusTemporaryRedirect)
@@ -137,7 +138,7 @@ func TestBedrockGatewayDoesNotFollowRedirectWithToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, _, err = p.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("hello")}})
-	if err == nil || redirected {
+	if err == nil || redirected.Load() {
 		t.Fatal("redirect followed or treated as success")
 	}
 }
