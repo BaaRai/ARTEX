@@ -21,6 +21,10 @@ const (
 	// Allow multipart headers and boundaries in addition to the file data.
 	chatUploadMultipartOverhead = 1 << 20 // 1 MiB
 	chatUploadLimitMessage      = "files exceed the 512 MiB upload limit"
+	// maxUploadNameTries bounds the name-1, name-2, … search. A Stat error that
+	// is not "not exist" (a component the filesystem rejects) must stop the
+	// search instead of spinning.
+	maxUploadNameTries = 10000
 )
 
 // safeChatID guards the {id} path segment against traversal — task ids are numeric,
@@ -123,7 +127,11 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 			continue
 		}
-		dest := uniqueUploadPath(dir, name)
+		dest, err := uniqueUploadPath(dir, name)
+		if err != nil {
+			writeErr(w, 500, "Save failed: "+err.Error())
+			return
+		}
 		if err := saveUpload(hdr, dest); err != nil {
 			writeErr(w, 500, "Save failed: "+err.Error())
 			return
@@ -136,19 +144,34 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 
 // uniqueUploadPath returns dir/name, or dir/name-1, dir/name-2… when it already exists,
 // so re-uploading the same filename never clobbers a prior attachment.
-func uniqueUploadPath(dir, name string) string {
-	dest := filepath.Join(dir, name)
-	if _, err := os.Stat(dest); os.IsNotExist(err) {
-		return dest
+func uniqueUploadPath(dir, name string) (string, error) {
+	if dest, ok, err := uploadPathFree(filepath.Join(dir, name)); err != nil || ok {
+		return dest, err
 	}
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
-	for i := 1; ; i++ {
+	for i := 1; i <= maxUploadNameTries; i++ {
 		cand := filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, i, ext))
-		if _, err := os.Stat(cand); os.IsNotExist(err) {
-			return cand
+		dest, ok, err := uploadPathFree(cand)
+		if err != nil || ok {
+			return dest, err
 		}
 	}
+	return "", fmt.Errorf("no free name for upload %q", name)
+}
+
+// uploadPathFree reports whether path can be created. ok is false when a file
+// or a symlink (including a dangling one) is already there. Any other Lstat
+// error is returned so the caller stops.
+func uploadPathFree(path string) (dest string, ok bool, err error) {
+	_, err = os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return path, true, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return "", false, nil
 }
 
 // composeAgentMessage appends an attachment manifest to the user's message so the agent
