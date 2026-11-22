@@ -334,6 +334,15 @@ const (
 	// Target noise profile (off|quiet|balanced|aggressive). When stored it wins over
 	// ARTEX_NOISE_PROFILE, which stays the fallback; applied at startup and on PUT.
 	settingNoiseProfile = "noise_profile"
+	// settingTriageProfile names an llm_profiles row that serves the decision-model
+	// (/v1/systemone) contract: the triage client for closed-list judgements such as
+	// the duplicate check in report_finding. Empty or 0 = triage off (main model
+	// decides, exactly as before). See server/triage.go.
+	settingTriageProfile = "triage_profile_id"
+	// settingTriageMinConfidence is the suppression threshold for a duplicate answer
+	// (0..1, empty = 0.5). Confidence on true duplicates moves with the question's
+	// width, so this is a knob rather than a constant.
+	settingTriageMinConfidence = "triage_min_confidence"
 	// defaultWebSearchBackend is used when web search is on but no backend was picked.
 	defaultWebSearchBackend = "ddgs"
 	// deepSeekWebSearchBackend borrows the active LLM profile instead of its own

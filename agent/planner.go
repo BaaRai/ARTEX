@@ -23,6 +23,7 @@ import (
 // into the frontier. It is the sole intent generator.
 type Planner struct {
 	findingRecorder   FindingRecorder
+	triage            TriageClient // advisory decision-model client (agent/triage.go); nil = off
 	prov              llm.Provider
 	model             string
 	tx                *transcript.Store                      // raw LLM conversation persistence (nil = off)
@@ -482,6 +483,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	p.compactor.OnPlannerRound(ctx, ts)
 	tsx := NewToolSet(ts, "planner")
 	tsx.SetFindingRecorder(p.findingRecorder)
+	tsx.SetTriageClient(p.triage)
 	// The host's finding recorder owns the live capture; prove_goal checks bound
 	// traffic_refs against it. No checker means finding proofs are refused.
 	if c, ok := p.findingRecorder.(TrafficCaptureChecker); ok {

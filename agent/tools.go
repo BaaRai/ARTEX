@@ -139,6 +139,10 @@ func compactIntents(ns []*db.Node, parentsOf, yieldsOf map[int64][]int64) []map[
 // One ToolSet is created per planner/worker run; per-run signals live here.
 type ToolSet struct {
 	findingRecorder FindingRecorder
+	// triage, if set, is an advisory decision-model client used for closed-list
+	// judgements (currently the duplicate check in report_finding). nil = the
+	// judgement is left to the main model, exactly as before. See agent/triage.go.
+	triage TriageClient
 	// trafficProofChecker verifies that a bound snapshot's source_traffic_id
 	// exists in the live capture store during prove_goal. Planner.Plan wires it
 	// from the finding recorder; nil or any error fails closed.
@@ -1566,6 +1570,24 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			}
 		}
 		input := db.RecordFindingInput{TaskID: t.taskID, ExplorationID: t.ts.ID(), IntentID: pid(a.IntentID), VulnClass: a.VulnClass, Name: a.Name, Severity: a.Severity, Summary: a.Summary, Evidence: a.Evidence, Worker: t.worker, AssetIDs: pidList(a.AssetIDs), Counterevidence: a.Counterevidence, ConfidenceRationale: a.ConfidenceRationale}
+		// Advisory dedup (agent/triage.go): a decision model answers "same defect as
+		// an already registered finding?" in one small request instead of a
+		// main-model turn. A confident duplicate is not registered a second time —
+		// the caller is told which finding to extend. Every failure path (no client,
+		// no existing findings, transport error, low confidence) falls through to
+		// the normal registration below.
+		if ans, ok := t.triageDuplicate(ctx, input); ok && triageDuplicateHit(ans) {
+			res := map[string]any{
+				"duplicate_of_finding_id": ans.DuplicateOf,
+				"triage_confidence":       ans.Confidence,
+				"evidence_status":         "duplicate_not_registered",
+				"note": "Triage matched this finding to an already registered one, so no new finding was created. " +
+					"If the new evidence adds detail, extend that finding with update_finding_report; if it is in fact a " +
+					"distinct defect (different endpoint, parameter or root cause), register it again explicitly.",
+			}
+			raw, _ := json.Marshal(res)
+			return actool.Text(fmt.Sprintf("finding matched to existing finding_id %d (triage confidence %.2f) — not registered again\n%s", ans.DuplicateOf, ans.Confidence, raw)), nil
+		}
 		var recorded *db.RecordedFinding
 		if t.findingRecorder != nil {
 			recorded, err = t.findingRecorder.Record(ctx, input, refs)

@@ -3897,6 +3897,8 @@ func (s *Server) settingsPayload() map[string]any {
 	return map[string]any{
 		"traffic_capture":          s.m.TrafficEnabled(),
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
+		"triage_profile_id":        s.triageProfileID(),
+		"triage_min_confidence":    s.triageMinConfidence(),
 		"llm_record":               s.m.LLMRecordEnabled(),
 		"web_search_enabled":       on,
 		"web_search_backend":       backend,
@@ -3998,6 +4000,14 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// operation-constraint injection scope switches (default both on); take effect immediately (planner/worker read them every round), no agent rebuild needed.
 		ConstraintsInjectPlanner *bool `json:"constraints_inject_planner"`
 		ConstraintsInjectWorker  *bool `json:"constraints_inject_worker"`
+		// Triage profile: an llm_profiles row serving the decision-model (/v1/systemone)
+		// contract, used for closed-list judgements (report_finding dedup). 0/null-safe:
+		// omit = keep, 0 = off. Read per agent run, so it applies to runs started afterwards.
+		TriageProfileID *int64 `json:"triage_profile_id"`
+		// Suppression threshold for a duplicate answer (0..1). Lower catches more real
+		// duplicates and risks suppressing a distinct one; the caller is told to
+		// re-register in that case, which is what makes the low end affordable.
+		TriageMinConfidence *float64 `json:"triage_min_confidence"`
 		// Experimental: noa context compaction switch (default off); read per run, applies to runs started afterwards, no agent rebuild needed.
 		NoaCompaction *bool `json:"noa_compaction"`
 		// Vulnerability IM push global settings. The delivery engine re-reads all three every round, so changes
@@ -4040,6 +4050,19 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ConstraintsInjectWorker != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectWorker, *req.ConstraintsInjectWorker); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.TriageMinConfidence != nil {
+		if err := s.m.pg.SetSetting(settingTriageMinConfidence, strconv.FormatFloat(*req.TriageMinConfidence, 'f', 3, 64)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		s.applyTriageThreshold()
+	}
+	if req.TriageProfileID != nil {
+		if err := s.m.pg.SetSetting(settingTriageProfile, strconv.FormatInt(*req.TriageProfileID, 10)); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
