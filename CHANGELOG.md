@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- **Security response headers on every response**: `X-Content-Type-Options: nosniff`, a same-origin referrer policy, `X-Frame-Options: SAMEORIGIN` and a `frame-ancestors 'self'` CSP are now set by one wrapper around the whole handler tree, so the JSON API carries them too; previously only the console route did. Console documents additionally get `Permissions-Policy` and COOP/CORP. `Strict-Transport-Security` is sent only when the request is known to be HTTPS: directly over TLS, or via `X-Forwarded-Proto: https` from a peer in `ARTEX_TRUSTED_PROXIES`, so a direct client cannot claim HTTPS on its own. The README reverse-proxy recipe now starts with an 80 to 443 redirect.
+
 ### Fixed
 
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
