@@ -39,8 +39,9 @@ path). Change the timeout or action in the console or in `intercept-rules.sql`.
 
 ## Tests
 
-`hardening/rulecheck` compiles the patterns straight from `intercept-rules.sql`
-(Go RE2) and asserts the positive matches, the bypasses that are now closed, and
-the documented open bypasses/false positives:
+`hardening/rulecheck_test.go` parses the `[hardening]` rules straight from
+`intercept-rules.sql`, runs them through `intercept.Match` (Go RE2), and
+asserts the positive matches, closed bypasses, documented open bypasses/false
+positives, and priority precedence below the built-in destructive denies:
 
-    go run ./hardening/rulecheck
+    go test -v ./hardening

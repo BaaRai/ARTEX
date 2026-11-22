@@ -37,15 +37,15 @@ INSERT INTO intercept_rules(name, enabled, priority, match_target, match_type, p
  'ask', 'Executing remote or decoded content directly in an interpreter requires approval. Download to a file, review it (skill third-party-code-review), and request approval.', true, 1800, 'deny'),
 
 ('[hardening] Access to server keys or DSN', true, 72, 'tool_input', 'regex',
- $re$(?i)"(?:command|text|paste)"\s*:\s*"(?:[^"\\]|\\.)*?(?:/app/keys/|/proc/[0-9]+/environ|\bARTEX_PG_DSN\b|\bARTEX_SECRET_KEY\b)$re$,
+ $re$(?i)"(?:command|text|paste)"\s*:\s*"(?:[^"\\]|\\.)*?(?:/app/keys/|/proc/(?:[0-9]+|self|thread-self)/environ|\bARTEX_PG_DSN\b|\bARTEX_SECRET_KEY\b)$re$,
  'deny', 'Reading the server signing/secret keys or the database DSN from the agent shell is forbidden. This is enforced; the skill prose is not.', false, 0, 'deny');
 
 -- Make the review skill visible to the executor agents. Only enabled=true rows
--- are visible (db/config.go). Adjust the agent names to your deployment.
+-- are visible (db/config.go). Match by stable agents.key (not display name).
 INSERT INTO agent_skill_visibility(agent_id, skill_name, enabled)
 SELECT a.id, 'third-party-code-review', true
 FROM agents a
-WHERE a.name IN ('Main', 'Worker', 'Auto', 'Penetration Testing', 'Vulnerability Retest')
+WHERE a.key IN ('mainagent', 'worker', 'auto', 'pentest', 'retester')
 ON CONFLICT (agent_id, skill_name) DO UPDATE SET enabled = true;
 
 COMMIT;
