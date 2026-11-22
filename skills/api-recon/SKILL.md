@@ -1,6 +1,6 @@
 ---
 name: api-recon
-description: Invoke this skill when collecting a website's API endpoints.
+description: "Invoke this skill when collecting a website's API endpoints."
 ---
 
 # API Recon (frontend API reconnaissance)

@@ -1,25 +1,25 @@
 ---
 name: rea
-description: "Reverse-engineer binaries and application packages (ELF, PE, Mach-O, APK, IPA, HAP, WASM, ZIP/JAR containers, JavaScript bundles) through the rea MCP server running on the host. Invoke when a task needs static analysis of a compiled or packaged target: embedded secrets, hardcoded endpoints, native library review, string and constant extraction, managed code structure, or deobfuscation."
+description: "Reverse-engineer binaries and application packages (ELF, PE, Mach-O, APK, IPA, HAP, WASM, ZIP/JAR containers, JavaScript bundles) through the rea MCP server running in this container. Invoke when a task needs static analysis of a compiled or packaged target: embedded secrets, hardcoded endpoints, native library review, string and constant extraction, managed code structure, or deobfuscation."
 mcps: rea
 ---
 
 # rea: binary and application reverse engineering
 
-The rea MCP server runs on the host machine, not inside this container. Its tools are named `mcp__rea__<tool>`. After this skill loads, their names appear as deferred tools: fetch each tool's schema with SearchExtraTools (for example `select:mcp__rea__open_binary`, or keywords like `rea strings`), then invoke it with ExecuteExtraTool. Use the tool that directly answers the question; do not enumerate the whole catalog.
+The rea MCP server runs inside this container as a stdio server (`/usr/local/bin/rea mcp`, package `rea-agents@6.9.0`) and is already wired to Ghidra 12.2 with JDK 25. Its tools are named `mcp__rea__<tool>`. If a `mcp__rea__*` call fails with `provider_unavailable`, check `GHIDRA_INSTALL_DIR=/opt/ghidra rea doctor` before anything else. After this skill loads, their names appear as deferred tools: fetch each tool's schema with SearchExtraTools (for example `select:mcp__rea__open_binary`, or keywords like `rea strings`), then invoke it with ExecuteExtraTool. Use the tool that directly answers the question; do not enumerate the whole catalog.
 
-## 1. File paths: container view vs host view
+## 1. File paths
 
-rea opens files on the HOST filesystem, not inside the container. Only files under the bind-mounted data directory are visible to both sides; the exact host prefix is deployment-specific (check the compose file, or ask the operator via task chat when unknown).
+rea runs in the same container as the shell, so it reads ordinary container paths. No host-side translation is needed.
 
 Rules:
-- Save or download every target file under the container data directory (for example `/app/data/tasks/<task_id>/rea/`) so both sides can see it. Files elsewhere in the container are invisible to rea.
-- Always pass the host-side path in rea tool parameters. If open_binary reports the path as missing, you passed a container path: retry with the host-side equivalent of the same mount.
-- Verify the file exists on your side (ls) before opening it with rea.
+- Save or download every target file under the task workspace (for example `/app/data/tasks/<task_id>/rea/`) and pass that absolute container path.
+- Verify the file exists with `ls` and note its sha256 before opening it; if a path is reported missing, it is a typo, not a mount problem.
+- Keep the working copy out of `/tmp` so it survives for analysis and evidence binding.
 
 ## 2. Session lifecycle
 
-1. `open_binary` with `path` (host path). For native binaries (ELF, PE, Mach-O) set `provider_id: "ghidra"`; if the error lists candidate provider ids, retry with one of them. Packages and bundles (APK, IPA, HAP, zip, JAR, wasm, JavaScript) need no provider.
+1. `open_binary` with the absolute container `path`. For native binaries (ELF, PE, Mach-O) set `provider_id: "ghidra"`; if the error lists candidate provider ids, retry with one of them. Packages and bundles (APK, IPA, HAP, zip, JAR, wasm, JavaScript) need no provider.
 2. Run analysis tools (`search_strings`, `list_strings`, `search_procedures`, `inspect_native_*`, `project_managed_application_graph`, family-specific graph tools, ...). Results are Evidence objects: they carry an evidence id, a normalized result, and a limitations section. Record anything task-relevant as facts in the knowledge graph and cite the evidence id in findings.
 3. `close_binary` when done. One open target per session; close before opening another. Never leave a binary open at the end of a run.
 
