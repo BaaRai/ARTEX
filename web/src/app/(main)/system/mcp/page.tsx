@@ -4,6 +4,8 @@ import * as React from "react";
 import { toast } from "sonner";
 import { PlusIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
 
+import { LoadError } from "@/components/load-error";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,12 +61,14 @@ export default function MCPPage() {
   const [toolsLoading, setToolsLoading] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const load = React.useCallback(() => {
     api.agents().then(setAgents).catch(() => {});
     api
       .mcpServers()
       .then((ss) => {
         setServers(ss);
+        setLoadError(null);
         ss.forEach((s) =>
           api
             .resourceVisibility("mcp", s.id)
@@ -72,7 +76,7 @@ export default function MCPPage() {
             .catch(() => {}),
         );
       })
-      .catch(() => {});
+      .catch((e) => setLoadError((e as Error).message));
   }, []);
   React.useEffect(() => {
     load();
@@ -203,7 +207,13 @@ export default function MCPPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function removeServer(s: MCPServer) {
+    const ok = await confirmAction({
+      title: `Delete MCP server "${s.name}"?`,
+      description: "Agents lose access to its tools. This cannot be undone.",
+    });
+    if (!ok) return;
     try {
       await api.deleteMcpServer(s.id);
       toast.success(`Deleted: ${s.name}`);
@@ -376,6 +386,7 @@ export default function MCPPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
+      {loadError && <LoadError what="MCP servers" error={loadError} onRetry={load} />}
       <div>
         <h1 className="text-xl font-semibold tracking-tight">MCP</h1>
         <p className="text-muted-foreground text-sm">External MCP tool servers · visibility granted per agent</p>

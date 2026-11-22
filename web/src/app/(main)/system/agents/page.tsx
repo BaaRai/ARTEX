@@ -4,6 +4,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { Bot, PlusIcon, Trash2Icon } from "lucide-react";
 
+import { LoadError } from "@/components/load-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -95,10 +96,10 @@ function AgentGridCard({
       {!agent.builtin && (
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button
+            <Button aria-label={`Delete agent ${agent.name}`}
               variant="ghost"
               size="icon-sm"
-              className="text-muted-foreground hover:text-destructive absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100"
+              className="text-muted-foreground hover:text-destructive absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
             >
               <Trash2Icon className="size-3.5" />
             </Button>
@@ -112,7 +113,7 @@ function AgentGridCard({
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={del}>Delete</AlertDialogAction>
+              <AlertDialogAction variant="destructive" onClick={del}>Delete</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -210,8 +211,15 @@ export default function AgentsPage() {
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [editKey, setEditKey] = React.useState<string | null>(null);
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const reload = React.useCallback(() => {
-    api.agents().then(setAgents).catch(() => setAgents([]));
+    api
+      .agents()
+      .then((a) => {
+        setAgents(a);
+        setLoadError(null);
+      })
+      .catch((e) => setLoadError((e as Error).message));
   }, []);
   React.useEffect(() => {
     reload();
@@ -221,6 +229,7 @@ export default function AgentsPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
+      {loadError && <LoadError what="agents" error={loadError} onRetry={reload} />}
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Agent</h1>
@@ -242,7 +251,7 @@ export default function AgentsPage() {
           <CardDescription>{agents.length} total</CardDescription>
         </CardHeader>
         <CardContent>
-          {agents.length === 0 ? (
+          {agents.length === 0 && !loadError ? (
             <p className="text-muted-foreground py-6 text-center text-sm">(no agents)</p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

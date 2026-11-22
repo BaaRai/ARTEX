@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { LoadError } from "@/components/load-error";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -891,11 +893,13 @@ export default function LLMPage() {
     }
   }, []);
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const load = React.useCallback(async () => {
     try {
       setProfiles(await api.llmProfiles());
-    } catch {
-      /* ignore */
+      setLoadError(null);
+    } catch (e) {
+      setLoadError((e as Error).message);
     }
     await loadPool();
   }, [loadPool]);
@@ -921,11 +925,17 @@ export default function LLMPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function remove(p: LLMProfile) {
     if (p.is_default) {
       toast.error("Cannot delete the active profile");
       return;
     }
+    const ok = await confirmAction({
+      title: `Delete model profile "${p.name}"?`,
+      description: "Its key, model and limits are removed. This cannot be undone.",
+    });
+    if (!ok) return;
     try {
       await api.deleteLLMProfile(p.id);
       toast.success(`Deleted: ${p.name}`);
@@ -939,6 +949,7 @@ export default function LLMPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
+      {loadError && <LoadError what="model profiles" error={loadError} onRetry={() => void load()} />}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-semibold text-xl tracking-tight">LLM</h1>
@@ -1055,7 +1066,7 @@ export default function LLMPage() {
                 </Card>
               );
             })}
-            {profiles.length === 0 && (
+            {profiles.length === 0 && !loadError && (
               <div className="col-span-full rounded-lg border border-dashed p-10 text-center text-muted-foreground text-sm">
                 No model profiles yet — click "Create" in the top right to add the first one.
               </div>

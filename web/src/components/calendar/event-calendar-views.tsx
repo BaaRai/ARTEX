@@ -93,7 +93,7 @@ export function EventCalendarViews({
           info.isSelected
             ? ['outline-3', info.isDragging && 'shadow-lg']
             : 'focus-visible:outline-3',
-          'outline-ring/50',
+          'outline-ring',
         )}
 
         /* Background Event
@@ -195,7 +195,7 @@ export function EventCalendarViews({
         /* More-Link
         ----------------------------------------------------------------------------------------- */
 
-        moreLinkClass="focus-visible:outline-3 outline-ring/50"
+        moreLinkClass="focus-visible:outline-3 outline-ring"
         moreLinkInnerClass='whitespace-nowrap overflow-hidden'
         columnMoreLinkClass="my-0.5 border border-transparent print:border-black rounded-md bg-[color-mix(in_oklab,var(--foreground)_10%,var(--background))] hover:bg-[color-mix(in_oklab,var(--foreground)_13%,var(--background))] print:bg-white ring ring-background"
         columnMoreLinkInnerClass={(info) => cn(
@@ -241,7 +241,7 @@ export function EventCalendarViews({
                     (textPart.type === 'day' && info.isToday)
                       ? [
                           'first:-ms-1 last:-me-1 size-7 rounded-full font-semibold flex flex-row items-center justify-center bg-chart-1/50',
-                          info.hasNavLink && 'group-hover:bg-chart-1/60 group-focus-visible:outline-3 outline-ring/50',
+                          info.hasNavLink && 'group-hover:bg-chart-1/60 group-focus-visible:outline-3 outline-ring',
                         ]
                       : 'text-muted-foreground',
                   )}
@@ -295,7 +295,7 @@ export function EventCalendarViews({
                     (textPart.type === 'day' && info.isToday)
                       ? [
                           'rounded-full font-semibold flex flex-row items-center justify-center bg-chart-1/50',
-                          info.hasNavLink && 'group-hover:bg-chart-1/60 group-focus-visible:outline-3 outline-ring/50',
+                          info.hasNavLink && 'group-hover:bg-chart-1/60 group-focus-visible:outline-3 outline-ring',
                           info.isNarrow
                             ? 'size-5'
                             : 'size-6 first:-ms-1 last:-me-1',
@@ -313,7 +313,7 @@ export function EventCalendarViews({
         ----------------------------------------------------------------------------------------- */
 
         popoverClass='border rounded-md overflow-hidden shadow-lg m-1 bg-popover text-popover-foreground min-w-55'
-        popoverCloseClass="group absolute top-1.5 end-1.5 p-0.5 rounded-sm hover:bg-foreground/5 focus-visible:outline-3 outline-ring/50"
+        popoverCloseClass="group absolute top-1.5 end-1.5 p-0.5 rounded-sm hover:bg-foreground/5 focus-visible:outline-3 outline-ring"
 
         /* Lane
         ----------------------------------------------------------------------------------------- */
@@ -347,7 +347,7 @@ export function EventCalendarViews({
           (!info.level && info.isToday)
             ? [
                 'bg-chart-1/50',
-                info.hasNavLink && 'hover:bg-chart-1/60 focus-visible:outline-3 outline-ring/50',
+                info.hasNavLink && 'hover:bg-chart-1/60 focus-visible:outline-3 outline-ring',
               ]
             : info.hasNavLink && 'hover:bg-foreground/5',
         )}
@@ -383,7 +383,7 @@ export function EventCalendarViews({
         /* Misc Content
         ----------------------------------------------------------------------------------------- */
 
-        navLinkClass="focus-visible:outline-3 outline-ring/50"
+        navLinkClass="focus-visible:outline-3 outline-ring"
         inlineWeekNumberClass={(info) => cn(
           'absolute start-0 whitespace-nowrap rounded-e-sm text-muted-foreground',
           info.isNarrow

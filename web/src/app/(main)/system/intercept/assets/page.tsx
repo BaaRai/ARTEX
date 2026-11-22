@@ -5,6 +5,7 @@ import * as React from "react";
 import { BanIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -152,8 +153,15 @@ export default function AssetInterceptPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function handleDelete(rule: AssetInterceptRule) {
-    if (!window.confirm(`Are you sure you want to delete asset interception rule "${rule.pattern}"?`)) return;
+    const ok = await confirmAction({
+      title: `Delete blocking rule "${rule.pattern}"?`,
+      description: rule.builtin
+        ? "This is a built-in safety rule. Once deleted, targets it blocked can be tested by the agent."
+        : "Targets this rule blocked can be tested by the agent again. This cannot be undone.",
+    });
+    if (!ok) return;
     try {
       await api.deleteAssetInterceptRule(rule.id);
       toast.success("Rule deleted");
@@ -244,14 +252,14 @@ export default function AssetInterceptPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-center">
-                      <Switch checked={rule.enabled} onCheckedChange={() => handleToggle(rule)} />
+                      <Switch aria-label={`Enable rule ${rule.pattern}`} checked={rule.enabled} onCheckedChange={() => handleToggle(rule)} />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-0.5">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
+                        <Button aria-label={`Edit rule ${rule.pattern}`} size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
                           <PencilIcon className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
+                        <Button aria-label={`Delete rule ${rule.pattern}`}
                           size="icon"
                           variant="ghost"
                           className="h-7 w-7 text-destructive hover:text-destructive"

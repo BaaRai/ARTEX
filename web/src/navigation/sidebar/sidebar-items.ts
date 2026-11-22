@@ -70,6 +70,8 @@ export const sidebarItems: NavGroup[] = [
       { id: "chat", title: "Chat", url: "/chat", icon: MessageSquare },
       { id: "tasks", title: "Tasks", url: "/function/tasks", icon: Target },
       { id: "findings", title: "Findings", url: "/function/findings", icon: Bug },
+      // A live work queue (the agent is blocked until someone decides), so it sits with the daily pages, not in System.
+      { id: "approvals", title: "Approvals", url: "/system/intercept/approvals", icon: ClipboardList },
       { id: "traffic", title: "Traffic", url: "/function/traffic", icon: Activity },
       { id: "commands", title: "Tool Execution", url: "/function/commands", icon: Terminal },
       { id: "llm-records", title: "LLM Recording", url: "/function/llm-records", icon: Radio },
@@ -90,7 +92,6 @@ export const sidebarItems: NavGroup[] = [
       { id: "notify", title: "Notifications", url: "/system/notify", icon: BellRing },
       { id: "intercept", title: "Interception Rules", url: "/system/intercept", icon: ShieldAlert },
       { id: "asset-intercept", title: "Asset Interception", url: "/system/intercept/assets", icon: Ban },
-      { id: "approvals", title: "Approval Records", url: "/system/intercept/approvals", icon: ClipboardList },
       { id: "logs", title: "Logs", url: "/system/logs", icon: ScrollText },
       { id: "settings", title: "System Settings", url: "/system/settings", icon: Settings2 },
     ],

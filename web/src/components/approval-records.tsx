@@ -982,7 +982,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       await latestLoad.current(true);
     }
   };
-  const title = taskId ? "Interception approval" : "Approval records";
+  const title = taskId ? "Interception approval" : "Approvals";
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">

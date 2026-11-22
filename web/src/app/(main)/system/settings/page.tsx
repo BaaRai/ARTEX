@@ -5,6 +5,7 @@ import * as React from "react";
 import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import { LoadError } from "@/components/load-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -103,13 +104,25 @@ export default function SystemSettingsPage() {
       .finally(() => setSaving(false));
   };
 
-  React.useEffect(() => {
+  // Controls stay disabled until the real settings arrive: enabling them on a failed load
+  // would show defaults (workers=3, capture off) that Save would then write back.
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [retrying, setRetrying] = React.useState(false);
+  const loadSettings = React.useCallback(() => {
+    setRetrying(true);
     api
       .settings()
-      .then(apply)
-      .catch(() => undefined)
-      .finally(() => setLoaded(true));
+      .then((s) => {
+        apply(s);
+        setLoaded(true);
+        setLoadError(null);
+      })
+      .catch((e) => setLoadError((e as Error).message))
+      .finally(() => setRetrying(false));
   }, [apply]);
+  React.useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
 
   const toggleTraffic = (v: boolean) => {
     setTrafficCapture(v); // optimistic
@@ -278,6 +291,7 @@ export default function SystemSettingsPage() {
         <h1 className="text-xl font-semibold tracking-tight">System settings</h1>
         <p className="text-muted-foreground text-sm">Global runtime switches</p>
       </div>
+      {loadError && <LoadError what="settings" error={loadError} onRetry={loadSettings} retrying={retrying} />}
 
       {/* Multi-column instead of grid: the web search card is several times taller than the others and
           its height varies with the selected backend (brave/tavily key inputs are conditional). A grid

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -129,8 +130,15 @@ export default function WorkspacePage() {
       });
   };
 
-  const del = (e: WorkspaceEntry) => {
-    if (!window.confirm(`Confirm deleting ${e.dir ? "directory" : "file"} "${e.name}"?${e.dir ? " (including everything inside)" : ""}`)) return;
+  const confirmAction = useConfirm();
+  const del = async (e: WorkspaceEntry) => {
+    const ok = await confirmAction({
+      title: `Delete ${e.dir ? "folder" : "file"} "${e.name}"?`,
+      description: e.dir
+        ? "Everything inside this folder is deleted too. This cannot be undone."
+        : "This cannot be undone.",
+    });
+    if (!ok) return;
     api
       .workspaceDelete(e.path)
       .then(() => {

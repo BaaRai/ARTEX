@@ -23,6 +23,7 @@ import {
   ArrowUpIcon,
   ChevronRightIcon,
   EyeIcon,
+  EyeOffIcon,
   FolderInputIcon,
   GripVerticalIcon,
   Loader2Icon,
@@ -3093,6 +3094,7 @@ function CreateTaskSheet({
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // asset coverage feature; on by default. Off = no coverage computed/displayed, no scope accumulation, scope-related tools hidden (company links unaffected)
   const [interceptRules, setInterceptRules] = React.useState<AssetInterceptRuleInput[]>([]); // task-level asset intercept rules (this task only, never entering the global table)
   const [credentials, setCredentials] = React.useState<TaskCredentialInput[]>([]); // test accounts declared at creation (#3); an empty password = the agent registers that account and records it
+  const [showCredentialPasswords, setShowCredentialPasswords] = React.useState(false);
   // Method 1, file upload: files are staged under drafts/<draftId>/uploads/ before the task is created, and their absolute paths are appended to the description.
   const [uploading, setUploading] = React.useState(false);
   const [uploadCount, setUploadCount] = React.useState(0);
@@ -3182,6 +3184,8 @@ function CreateTaskSheet({
       setSeedFirstIntent(false);
       setCoverageEnabled(true);
       setInterceptRules([]);
+      setCredentials([]); // never let one task's test accounts leak into the next task
+      setShowCredentialPasswords(false);
       setUploadCount(0);
       draftIdRef.current = "";
       setOpen(false);
@@ -3342,21 +3346,27 @@ function CreateTaskSheet({
               <FieldDescription>Reorder profiles to choose worker rotation order or failover priority. Saving the chain resets exhausted profiles.</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="task-credentials">Test accounts (optional)</FieldLabel>
-              <div className="grid gap-2">
+              <FieldLabel id="task-credentials-label">Test accounts (optional)</FieldLabel>
+              <fieldset aria-labelledby="task-credentials-label" className="m-0 grid min-w-0 gap-2 border-0 p-0">
                 {credentials.map((c, i) => (
                   <div key={i} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
                     <Input
+                      aria-label={`Account ${i + 1} domain`}
                       placeholder="domain (e.g. target.example.com)"
                       value={c.domain}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, domain: e.target.value } : x)))}
                     />
                     <Input
+                      aria-label={`Account ${i + 1} email or username`}
+                      autoComplete="off"
                       placeholder="email or username"
                       value={c.username}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, username: e.target.value } : x)))}
                     />
                     <Input
+                      aria-label={`Account ${i + 1} password`}
+                      type={showCredentialPasswords ? "text" : "password"}
+                      autoComplete="new-password"
                       placeholder="password (empty = agent generates)"
                       value={c.password}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, password: e.target.value } : x)))}
@@ -3365,12 +3375,13 @@ function CreateTaskSheet({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label="Remove account"
+                      aria-label={`Remove account ${i + 1}`}
                       onClick={() => setCredentials((prev) => prev.filter((_, j) => j !== i))}
                     >
                       <TrashIcon />
                     </Button>
                     <Input
+                      aria-label={`Account ${i + 1} note`}
                       className="sm:col-span-4"
                       placeholder="note (optional, e.g. program alias account)"
                       value={c.note ?? ""}
@@ -3378,16 +3389,31 @@ function CreateTaskSheet({
                     />
                   </div>
                 ))}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="w-fit"
-                  onClick={() => setCredentials((prev) => [...prev, { domain: "", username: "", password: "", note: "" }])}
-                >
-                  <PlusIcon className="size-4" /> Add account
-                </Button>
-              </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="w-fit"
+                    onClick={() => setCredentials((prev) => [...prev, { domain: "", username: "", password: "", note: "" }])}
+                  >
+                    <PlusIcon className="size-4" /> Add account
+                  </Button>
+                  {credentials.length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="w-fit"
+                      aria-pressed={showCredentialPasswords}
+                      onClick={() => setShowCredentialPasswords((v) => !v)}
+                    >
+                      {showCredentialPasswords ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+                      {showCredentialPasswords ? "Hide passwords" : "Show passwords"}
+                    </Button>
+                  )}
+                </div>
+              </fieldset>
               <FieldDescription>
                 Test accounts reused by the agent for authenticated testing. Leave the password empty to have the agent register that
                 account itself and record the password it chose. Use dedicated test accounts only — anything declared here is sent to

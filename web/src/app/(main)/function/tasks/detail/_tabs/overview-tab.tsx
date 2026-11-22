@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { toast } from "sonner";
 
 import {
   ActivityIcon,
@@ -20,6 +21,7 @@ import {
   XIcon,
 } from "lucide-react";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -220,11 +222,21 @@ export function OverviewTab({ taskId }: { taskId: string }) {
     }
   };
 
+  const confirmAction = useConfirm();
+  const shorten = (t: string) => (t.length > 80 ? `${t.slice(0, 77)}…` : t);
+
   const removeGoal = async (g: TaskGoal) => {
+    const ok = await confirmAction({
+      title: "Remove this goal?",
+      description: `"${shorten(g.text)}" — the planner stops working towards it.`,
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
     setGoals((prev) => prev.filter((x) => x.id !== g.id));
     try {
       await api.deleteGoal(taskId, g.id);
-    } catch {
+    } catch (e) {
+      toast.error(`Couldn't remove the goal: ${(e as Error).message}`);
       await loadGoals(); // delete failed: re-fetch to restore
     }
   };
@@ -283,10 +295,17 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   };
 
   const removeConstraint = async (c: TaskConstraint) => {
+    const ok = await confirmAction({
+      title: "Remove this constraint?",
+      description: `"${shorten(c.text)}" — the planner and workers no longer have to respect it.`,
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
     setConstraints((prev) => prev.filter((x) => x.id !== c.id));
     try {
       await api.deleteConstraint(taskId, c.id);
-    } catch {
+    } catch (e) {
+      toast.error(`Couldn't remove the constraint: ${(e as Error).message}`);
       await loadConstraints(); // delete failed: re-fetch to restore
     }
   };
@@ -520,7 +539,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       }}
                       disabled={goalBusy}
                     />
-                    <Button
+                    <Button aria-label="Save goal"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -529,7 +548,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                     >
                       <CheckIcon className="size-3.5 text-emerald-500" />
                     </Button>
-                    <Button
+                    <Button aria-label="Cancel editing goal"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -548,7 +567,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                         {g.vulnclass}
                       </span>
                     )}
-                    <Button
+                    <Button aria-label="Edit goal"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -557,7 +576,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                     >
                       <PencilIcon className="size-3.5" />
                     </Button>
-                    <Button
+                    <Button aria-label="Delete goal"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -643,7 +662,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={conBusy}
                       autoFocus
                     />
-                    <Button
+                    <Button aria-label="Save constraint"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -652,7 +671,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                     >
                       <CheckIcon className="size-3.5 text-emerald-500" />
                     </Button>
-                    <Button
+                    <Button aria-label="Cancel editing constraint"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -674,7 +693,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       {c.kind === "allow" ? "Allow" : "Deny"}
                     </span>
                     <span className="min-w-0 flex-1 break-words">{c.text}</span>
-                    <Button
+                    <Button aria-label="Edit constraint"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -683,7 +702,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                     >
                       <PencilIcon className="size-3.5" />
                     </Button>
-                    <Button
+                    <Button aria-label="Delete constraint"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -891,7 +910,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                   <span className="min-w-0 flex-1 truncate font-mono text-xs">{scopeValue(row)}</span>
                   <span className="text-muted-foreground shrink-0 text-xs">{SCOPE_SOURCE_LABELS[row.source]}</span>
                   {row.task_id.toString() === taskId ? (
-                    <Button
+                    <Button aria-label="Remove scope entry"
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -1163,11 +1182,19 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
     }
   }
 
+  const confirmAction = useConfirm();
   async function remove(r: AssetInterceptRule) {
+    const ok = await confirmAction({
+      title: `Remove blocking rule "${r.pattern}"?`,
+      description: "Targets it blocked can be tested by this task's agents.",
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
     setRules((prev) => prev.filter((x) => x.id !== r.id));
     try {
       await api.deleteTaskInterceptRule(taskId, r.id);
-    } catch {
+    } catch (e) {
+      toast.error(`Couldn't remove the rule: ${(e as Error).message}`);
       await load();
     }
   }
@@ -1272,7 +1299,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     onChange={(e) => setEditNote(e.target.value)}
                     disabled={busy}
                   />
-                  <Button
+                  <Button aria-label="Save rule"
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5"
@@ -1281,7 +1308,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                   >
                     <CheckIcon className="size-3.5 text-emerald-500" />
                   </Button>
-                  <Button
+                  <Button aria-label="Cancel editing rule"
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5"
@@ -1308,7 +1335,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     <span className="text-muted-foreground max-w-[120px] shrink-0 truncate text-xs">{r.note}</span>
                   )}
                   <Switch checked={r.enabled} onCheckedChange={() => void toggle(r)} />
-                  <Button
+                  <Button aria-label="Edit rule"
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5"
@@ -1317,7 +1344,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                   >
                     <PencilIcon className="size-3.5" />
                   </Button>
-                  <Button
+                  <Button aria-label="Delete rule"
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5"

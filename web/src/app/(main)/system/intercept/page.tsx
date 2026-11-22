@@ -11,6 +11,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -306,7 +307,7 @@ function JudgeCard() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-xs text-muted-foreground">{cfg.enabled ? "Enabled" : "Disabled"}</span>
-          <Switch checked={cfg.enabled} disabled={loading} onCheckedChange={(v) => patch({ enabled: v })} />
+          <Switch aria-label="Enable model fallback approval" checked={cfg.enabled} disabled={loading} onCheckedChange={(v) => patch({ enabled: v })} />
         </div>
       </div>
 
@@ -562,7 +563,14 @@ export default function InterceptPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function handleDelete(id: number) {
+    const rule = rules.find((r) => r.id === id);
+    const ok = await confirmAction({
+      title: `Delete interception rule${rule ? ` "${rule.name}"` : ""}?`,
+      description: "Commands it matched will run without this check. This cannot be undone.",
+    });
+    if (!ok) return;
     try {
       await api.deleteInterceptRule(id);
       toast.success("Rule deleted");
@@ -744,19 +752,20 @@ export default function InterceptPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <Switch
+                        aria-label={`Enable rule ${rule.name}`}
                         checked={rule.enabled}
                         onCheckedChange={() => handleToggle(rule)}
                       />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-0.5">
-                        <Button
+                        <Button aria-label={`Edit rule ${rule.name}`}
                           size="icon" variant="ghost" className="h-7 w-7"
                           onClick={() => openEdit(rule)}
                         >
                           <PencilIcon className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
+                        <Button aria-label={`Delete rule ${rule.name}`}
                           size="icon" variant="ghost"
                           className="h-7 w-7 text-destructive hover:text-destructive"
                           onClick={() => handleDelete(rule.id)}

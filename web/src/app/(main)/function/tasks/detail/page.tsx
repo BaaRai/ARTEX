@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArchiveIcon, ArrowLeftIcon, BrainIcon, CheckIcon, CircleAlertIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import { LoadError } from "@/components/load-error";
 import { StatusBadge } from "@/components/status-badge";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -36,7 +37,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { LLMProfile, Task } from "@/lib/types";
 
 import { AssetsTab } from "./_tabs/assets-tab";
@@ -251,6 +252,8 @@ function TaskDetailInner() {
   }, [id]);
 
   const taskLoadInFlight = React.useRef<string | null>(null);
+  // Only a 404 means the task is gone; any other failure is a load error with Retry.
+  const [loadError, setLoadError] = React.useState<{ notFound: boolean; message: string } | null>(null);
   const load = React.useCallback(() => {
     if (taskLoadInFlight.current === id) return;
     taskLoadInFlight.current = id;
@@ -268,9 +271,11 @@ function TaskDetailInner() {
         }
         setTask(base);
         setPaused(at?.paused ?? base.paused ?? false);
+        setLoadError(null);
       })
-      .catch(() => {
+      .catch((e) => {
         // Keep the last rendered task state during a transient poll failure.
+        setLoadError({ notFound: e instanceof ApiError && e.status === 404, message: (e as Error).message });
       })
       .finally(() => {
         if (taskLoadInFlight.current === id) {
@@ -313,7 +318,15 @@ function TaskDetailInner() {
   if (!task) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-        <p className="text-muted-foreground">{loaded ? `Task ${id} was deleted, archived, or does not exist` : "Loading…"}</p>
+        {loaded && loadError && !loadError.notFound ? (
+          <div className="w-full max-w-lg text-left">
+            <LoadError what={`task ${id}`} error={loadError.message} onRetry={load} />
+          </div>
+        ) : (
+          <p className="text-muted-foreground">
+            {loaded ? `Task ${id} was deleted, archived, or does not exist` : "Loading…"}
+          </p>
+        )}
         {loaded && (
           <Button asChild variant="outline">
             <Link href="/function/tasks">

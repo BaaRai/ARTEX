@@ -5,6 +5,7 @@ import * as React from "react";
 import { BellIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -232,7 +233,13 @@ export default function NotifyPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function removeChannel(ch: NotificationChannel) {
+    const ok = await confirmAction({
+      title: `Delete notification channel "${ch.name}"?`,
+      description: "It stops receiving alerts. This cannot be undone.",
+    });
+    if (!ok) return;
     try {
       await api.notifyDeleteChannel(ch.id);
       toast.success(`Deleted: ${ch.name}`);

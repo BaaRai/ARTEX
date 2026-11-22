@@ -25,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -358,6 +359,7 @@ export default function SkillsPage() {
   React.useEffect(() => { load(); }, [load]);
 
   // ── Upload a .zip skill ───────────────────────────────────────────────────
+  const confirmAction = useConfirm();
   async function uploadZip(file: File, overwrite = false) {
     setUploading(true);
     try {
@@ -368,7 +370,13 @@ export default function SkillsPage() {
       const msg = (e as Error).message;
       // offer overwrite when the skill already exists
       if (!overwrite && msg.includes("already exists")) {
-        if (window.confirm(`${msg}\n\nOverwrite the skill with the same name?`)) {
+        if (
+          await confirmAction({
+            title: "Replace the existing skill?",
+            description: `${msg}. Uploading replaces its files with the ones in this .zip.`,
+            confirmLabel: "Replace",
+          })
+        ) {
           await uploadZip(file, true);
           return;
         }
