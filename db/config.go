@@ -13,16 +13,18 @@ import (
 // ---------- LLM profiles ----------
 
 type LLMProfile struct {
-	ID            int64   `json:"id"`
-	Name          string  `json:"name"`
-	Format        string  `json:"format"`
-	BaseURL       string  `json:"base_url,omitempty"`
-	Proxy         string  `json:"proxy,omitempty"` // LLM outbound proxy (http/https/socks5); empty = use environment variables
-	Model         string  `json:"model"`
-	APIKey        string  `json:"-"` // never serialized to UI
-	APIKeyHint    string  `json:"api_key_hint,omitempty"`
-	RatePerSecond float64 `json:"rate_per_second"`
-	RatePerMinute float64 `json:"rate_per_minute"`
+	ID                 int64   `json:"id"`
+	Name               string  `json:"name"`
+	Format             string  `json:"format"`
+	BaseURL            string  `json:"base_url,omitempty"`
+	Proxy              string  `json:"proxy,omitempty"` // LLM outbound proxy (http/https/socks5); empty = use environment variables
+	Model              string  `json:"model"`
+	APIKey             string  `json:"-"` // never serialized to UI
+	CustomHeaders      string  `json:"-"` // encrypted at rest; never serialized to UI
+	ClearCustomHeaders bool    `json:"-"`
+	APIKeyHint         string  `json:"api_key_hint,omitempty"`
+	RatePerSecond      float64 `json:"rate_per_second"`
+	RatePerMinute      float64 `json:"rate_per_minute"`
 	// ContextWindowK is the model's context window in K tokens, used to size
 	// compaction thresholds. 0 = use a 200K default; capped at 1000 (1M).
 	ContextWindowK int `json:"context_window_k"`
@@ -93,8 +95,8 @@ type RetryOverride struct {
 // profileCols is the read column list (hint variant, no api key) shared by the
 // list query; profileColsKey is the same with api_key for the single-row loads.
 const profileRetryCols = `COALESCE(retry_connect_attempts,0),COALESCE(retry_connect_interval_ms,0),COALESCE(retry_empty_attempts,0),COALESCE(retry_empty_interval_ms,0),COALESCE(retry_stream_attempts,0),COALESCE(retry_stream_interval_ms,0)`
-const profileCols = `id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key_hint,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),is_default,priority,pool_exclude,COALESCE(thinking_type,''),COALESCE(streaming,true),COALESCE(max_tokens,0),COALESCE(max_tokens_field,''),COALESCE(session_header_key,''),` + profileRetryCols + `,COALESCE(price_input_per_m,0),COALESCE(price_output_per_m,0),COALESCE(price_cache_read_per_m,0),COALESCE(price_cache_write_per_m,0),COALESCE(user_agent,'')`
-const profileColsKey = `id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),is_default,priority,pool_exclude,COALESCE(thinking_type,''),COALESCE(streaming,true),COALESCE(max_tokens,0),COALESCE(max_tokens_field,''),COALESCE(session_header_key,''),` + profileRetryCols + `,COALESCE(price_input_per_m,0),COALESCE(price_output_per_m,0),COALESCE(price_cache_read_per_m,0),COALESCE(price_cache_write_per_m,0),COALESCE(user_agent,'')`
+const profileCols = `id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key_hint,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),is_default,priority,pool_exclude,COALESCE(thinking_type,''),COALESCE(streaming,true),COALESCE(max_tokens,0),COALESCE(max_tokens_field,''),COALESCE(session_header_key,''),` + profileRetryCols + `,COALESCE(price_input_per_m,0),COALESCE(price_output_per_m,0),COALESCE(price_cache_read_per_m,0),COALESCE(price_cache_write_per_m,0),COALESCE(user_agent,''),COALESCE(custom_headers,'')`
+const profileColsKey = `id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),is_default,priority,pool_exclude,COALESCE(thinking_type,''),COALESCE(streaming,true),COALESCE(max_tokens,0),COALESCE(max_tokens_field,''),COALESCE(session_header_key,''),` + profileRetryCols + `,COALESCE(price_input_per_m,0),COALESCE(price_output_per_m,0),COALESCE(price_cache_read_per_m,0),COALESCE(price_cache_write_per_m,0),COALESCE(user_agent,''),COALESCE(custom_headers,'')`
 
 // scanProfile reads one row in the profileCols / profileColsKey column order. The
 // 7th column lands in APIKeyHint or APIKey depending on which list the caller used.
@@ -106,11 +108,14 @@ func scanProfile(sc interface{ Scan(...any) error }, into *string, p *LLMProfile
 		&p.Retry.Empty.Attempts, &p.Retry.Empty.IntervalMS,
 		&p.Retry.Stream.Attempts, &p.Retry.Stream.IntervalMS,
 		&p.PriceInputPerM, &p.PriceOutputPerM, &p.PriceCacheReadPerM, &p.PriceCacheWritePerM,
-		&p.UserAgent)
+		&p.UserAgent, &p.CustomHeaders)
 	if err != nil {
 		return err
 	}
 	if p.Proxy, err = openSecret(colLLMProxy, p.Proxy); err != nil || into != &p.APIKey {
+		return err
+	}
+	if p.CustomHeaders, err = openSecret(colLLMHeaders, p.CustomHeaders); err != nil {
 		return err
 	}
 	p.APIKey, err = openSecret(colLLMKey, p.APIKey)
@@ -198,6 +203,11 @@ func (d *DB) SaveProfile(p *LLMProfile) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if p.CustomHeaders != "" || p.ClearCustomHeaders {
+		if _, err := sealSecret(colLLMHeaders, p.CustomHeaders); err != nil {
+			return 0, err
+		}
+	}
 	r := p.Retry.Clamped()
 	if p.ID == 0 {
 		var id int64
@@ -208,6 +218,9 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$
 		if err == nil {
 			_, err = d.saveProfilePrices(id, p)
 		}
+		if err == nil {
+			err = d.saveProfileHeaders(id, p)
+		}
 		return id, err
 	}
 	if p.APIKey == "" {
@@ -217,6 +230,9 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$
 		if err == nil {
 			_, err = d.saveProfilePrices(p.ID, p)
 		}
+		if err == nil {
+			err = d.saveProfileHeaders(p.ID, p)
+		}
 		return p.ID, err
 	}
 	_, err = d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,api_key=$6,api_key_hint=$7,rate_per_second=$8,rate_per_minute=$9,context_window_k=$10,reasoning_effort=$11,priority=$12,pool_exclude=$13,thinking_type=$14,streaming=$15,max_tokens=$16,max_tokens_field=$17,session_header_key=$18,retry_connect_attempts=$19,retry_connect_interval_ms=$20,retry_empty_attempts=$21,retry_empty_interval_ms=$22,retry_stream_attempts=$23,retry_stream_interval_ms=$24,user_agent=$25 WHERE id=$26`,
@@ -225,7 +241,22 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$
 	if err == nil {
 		_, err = d.saveProfilePrices(p.ID, p)
 	}
+	if err == nil {
+		err = d.saveProfileHeaders(p.ID, p)
+	}
 	return p.ID, err
+}
+
+func (d *DB) saveProfileHeaders(id int64, p *LLMProfile) error {
+	if p.CustomHeaders == "" && !p.ClearCustomHeaders {
+		return nil
+	}
+	value, err := sealSecret(colLLMHeaders, p.CustomHeaders)
+	if err != nil {
+		return err
+	}
+	_, err = d.Exec(`UPDATE llm_profiles SET custom_headers=$1 WHERE id=$2`, value, id)
+	return err
 }
 
 // saveProfilePrices writes the cost-ledger columns (kept out of the three main

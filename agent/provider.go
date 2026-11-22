@@ -92,6 +92,8 @@ type Config struct {
 	// LLM request built from this config. Empty = don't set it, leaving the Go/Norma
 	// default UA untouched (the historical behavior). Validated by ValidateUserAgent.
 	UserAgent string
+	// CustomHeaders are static Bedrock gateway headers, one Name: Value per line.
+	CustomHeaders string
 	// Retry holds the retry parameters resolved for this config (profile override →
 	// global policy → built-in default, resolved server-side). See RetryConfig for
 	// the per-layer semantics; zero values = fully inherit the built-in defaults.
@@ -141,6 +143,7 @@ const (
 // forcing our base-URL/key defaults so an empty key never falls back to
 // OpenAI's public endpoint).
 const FormatOllama llm.Format = "ollama"
+const FormatBedrockGateway llm.Format = "bedrock-gateway"
 
 // DefaultOllamaBaseURL is the base of Ollama's OpenAI-compatible endpoint the
 // provider appends /chat/completions to. Must never end up empty: with an
@@ -273,6 +276,13 @@ func FromEnv() (Config, bool) {
 		if c.Model == "" {
 			c.Model = "llama3.2"
 		}
+	case "bedrock-gateway":
+		c.Format = FormatBedrockGateway
+		c.APIKey = strings.TrimSpace(os.Getenv("ARTEX_LLM_API_KEY"))
+		c.CustomHeaders = os.Getenv("ARTEX_LLM_CUSTOM_HEADERS")
+		if c.BaseURL == "" || c.Model == "" {
+			return Config{}, false
+		}
 	default:
 		c.Format = llm.FormatAnthropic
 		c.APIKey = anthKey
@@ -324,6 +334,10 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		if c.Model == "" {
 			c.Model = "llama3.2"
 		}
+	case "bedrock-gateway":
+		c.Format = FormatBedrockGateway
+		// No public-provider defaults: an absent URL, model or token fails closed.
+		c.BaseURL = strings.TrimRight(strings.TrimSuffix(strings.TrimSuffix(c.BaseURL, "/invoke-with-response-stream"), "/invoke"), "/")
 	default:
 		c.Format = llm.FormatAnthropic
 		// provider appends "/v1/messages".
@@ -355,6 +369,8 @@ func (c Config) Provider() string {
 		return "openai-responses"
 	case FormatOllama:
 		return "ollama"
+	case FormatBedrockGateway:
+		return "bedrock-gateway"
 	}
 	return "anthropic"
 }
@@ -383,6 +399,17 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		if strings.TrimSpace(apiKey) == "" {
 			apiKey = ollamaPlaceholderKey
 		}
+	}
+	if wireFormat == FormatBedrockGateway {
+		headers, err := validateBedrockGateway(baseURL, apiKey, c.Model, c.CustomHeaders)
+		if err != nil {
+			return nil, err
+		}
+		wireFormat = llm.FormatAnthropic
+		qt := client.Transport.(quotaAwareTransport)
+		qt.base = &bedrockGatewayTransport{base: qt.base, baseURL: baseURL, token: apiKey, model: c.Model, headers: headers}
+		client.Transport = qt
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	}
 	lc := llm.Config{
 		Format:     wireFormat,
