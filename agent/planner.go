@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -395,6 +396,9 @@ type triggerLookup struct {
 	intentSummary func(int64) string
 	workerOutput  func(int64) string
 	factIDs       func(int64) string
+	// factOnly renders the «proved but not registered» block: intents that produced
+	// facts and no finding. Nil in tests that do not care about it.
+	factOnly func() string
 }
 
 func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
@@ -402,13 +406,46 @@ func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
 		intentSummary: func(id int64) string { return intentSummary(ts, id) },
 		workerOutput:  func(id int64) string { return workerOutput(ts, id) },
 		factIDs:       func(id int64) string { return factIDsYielded(ts, id) },
+		factOnly:      func() string { return factOnlyBlock(ts) },
 	}
+}
+
+// factOnlyBlock names the intents whose work proved something and registered no
+// finding — the defect the run record shows plainly (three runs in twelve had every
+// fact-producing intent register nothing). A fact carries no "this is a defect"
+// flag, so the planner is the only place that can turn one into a finding; without
+// the counter it has to notice by reading every fact again.
+func factOnlyBlock(ts *db.ExplorationStore) string {
+	if ts == nil {
+		return ""
+	}
+	rows, err := ts.FactOnlyIntents(0)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n[Proved but not registered: ")
+	b.WriteString(strconv.Itoa(len(rows)))
+	b.WriteString(" finished intent(s) produced facts and NO finding. For each, decide explicitly: " +
+		"either register the defect as a finding (report_finding, with the executed request as evidence) " +
+		"or state why the fact is not a defect. Facts carry no defect flag — only you can turn one into a finding.]\n")
+	for _, r := range rows {
+		// 140: сводка интента — одно предложение; 140 символов хватает, чтобы отличить
+		// направления друг от друга (полный текст в одной node_detail). Обрезка общая
+		// с триггерами, чтобы блок не стал вторым источником контекста.
+		b.WriteString(fmt.Sprintf("  #%d (%d fact(s)): %s\n", r.IntentID, r.Facts, truncOutput(r.Summary, 140)))
+	}
+	return b.String()
 }
 
 // plannerSituational is the planner's situational block for one round: the
 // envelope intro, the triggers, then the overview, all framed with env.
 func plannerSituational(evs []TriggerEvent, look triggerLookup, data map[string]any, env dataEnvelope) string {
-	return env.intro() + renderTriggers(evs, env, look) + renderGraphOverview(data, env)
+	block := ""
+	if look.factOnly != nil {
+		block = look.factOnly()
+	}
+	return env.intro() + renderTriggers(evs, env, look) + renderGraphOverview(data, env) + block
 }
 
 // plannerDefaultTmpl is the built-in EDITABLE body (section [A]) of the planner
