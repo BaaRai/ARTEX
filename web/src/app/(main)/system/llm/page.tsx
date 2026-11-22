@@ -1072,6 +1072,19 @@ export default function LLMPage() {
               </div>
             )}
           </div>
+
+          <section aria-labelledby="model-references" className="mt-6 grid gap-2">
+            <h2 id="model-references" className="text-sm font-semibold">Model references</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Venice · Abliterated Large V2</p>
+                <code className="break-all text-xs text-muted-foreground">abliteration-abliterated-model-large-v2</code>
+              </div>
+              <a href="https://venice.ai/settings/api" className="text-sm underline underline-offset-4">
+                Venice API dashboard
+              </a>
+            </div>
+          </section>
         </TabsContent>
 
         <TabsContent value="retry" className="mt-4">
