@@ -201,3 +201,21 @@ jobs:
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # A brand-new GHCR package starts private: the push succeeds, but an
+      # anonymous pull is denied until the package visibility is set to Public.
+      # Use an empty Docker config so the registry login above cannot mask it.
+      - name: Verify the image pulls anonymously
+        if: github.event_name == 'push'
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          tag="${GITHUB_REF_NAME}"
+          cfg="$(mktemp -d)"
+          for attempt in 1 2 3; do
+            if DOCKER_CONFIG="$cfg" docker manifest inspect "ghcr.io/${repo}:${tag}" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "anonymous pull of ghcr.io/${repo}:${tag} is denied; set the package visibility to Public" >&2
+          exit 1
