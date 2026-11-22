@@ -1692,7 +1692,9 @@ func factEvidenceLines(evidence string) []string {
 		}
 	}
 	return out
-} // factProvenance classifies one fact against the intent's recorded activity.
+}
+
+// factProvenance classifies one fact against the intent's recorded activity.
 // Beyond the activity tie it checks whether the quoted bytes were captured
 // coming back from the target through the proxy, in which case the target
 // authored them and the fact is classified target_response even when the model
