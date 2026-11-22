@@ -610,7 +610,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./keys:/app/keys
-      - ./skills:/app/skills
     restart: unless-stopped
 ```
 
