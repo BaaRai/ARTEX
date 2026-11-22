@@ -473,7 +473,7 @@ runtime supports it.
 
 ## Configuration
 
-**Database** (`config.json`, or the `ARTEX_PG_DSN` environment variable):
+**Database** (`config.json`, `ARTEX_PG_DSN`, or `ARTEX_PG_*` environment variables — see [External PostgreSQL](#external-postgresql)):
 
 ```json
 {
@@ -557,6 +557,70 @@ from the defaults until a worker finishes in this process.
 
 **Common flags**: `./start.sh -addr :8787 -proxy :8788` (`-addr` frontend/API, `-proxy` traffic
 recording proxy).
+
+### External PostgreSQL
+
+ARTEX already supports an external PostgreSQL 16+ instance — the `postgres` service in
+`docker-compose.yml` is only the bundled default. Because the database is startup configuration and
+the system's single source of truth, there is no runtime database switcher in the UI: change the
+environment variables and restart the server to point at another instance.
+
+Configure the connection with either a full connection string or individual parts:
+
+- **`ARTEX_PG_DSN`**: full PostgreSQL connection URL (for example
+  `postgres://artex:pass@db.example.internal:5432/artex?sslmode=require`). When set, it takes
+  precedence over the `ARTEX_PG_*` variables and you are responsible for percent-encoding any
+  URL-special characters in the username or password.
+- **`ARTEX_PG_*` parts** (recommended when passwords contain `/`, `?`, `%`, `@`, `:`, or spaces —
+  ARTEX percent-encodes the user and password and removes `ARTEX_PG_PASSWORD` from the environment
+  at startup):
+  - `ARTEX_PG_HOST` — PostgreSQL host
+  - `ARTEX_PG_PORT` — PostgreSQL port (default `5432`)
+  - `ARTEX_PG_USER` — database user
+  - `ARTEX_PG_PASSWORD` — database password (raw, not URL-encoded)
+  - `ARTEX_PG_DBNAME` — database name
+  - `ARTEX_PG_SSLMODE` — TLS mode (`disable`, `require`, `verify-ca`, `verify-full`)
+
+#### Compose without the bundled `postgres` service
+
+To run ARTEX against an external PostgreSQL server with Docker Compose, remove the `postgres`
+service, the `depends_on` block, and the `pgdata` volume from `docker-compose.yml`, and point
+`artex` at your database:
+
+```yaml
+services:
+  artex:
+    image: ghcr.io/baarai/artex:latest
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      # Option A: individual parts (recommended; percent-encodes special characters)
+      ARTEX_PG_HOST: ${ARTEX_PG_HOST:?Set ARTEX_PG_HOST in .env}
+      ARTEX_PG_PORT: ${ARTEX_PG_PORT:-5432}
+      ARTEX_PG_USER: ${ARTEX_PG_USER:-artex}
+      ARTEX_PG_PASSWORD: ${ARTEX_PG_PASSWORD:?Set ARTEX_PG_PASSWORD in .env}
+      ARTEX_PG_DBNAME: ${ARTEX_PG_DBNAME:-artex}
+      ARTEX_PG_SSLMODE: ${ARTEX_PG_SSLMODE:-require}
+      # Option B: full DSN (overrides ARTEX_PG_* when set)
+      # ARTEX_PG_DSN: ${ARTEX_PG_DSN}
+      ARTEX_JWT_KEY_DIR: /app/keys
+    ports:
+      - "${ARTEX_BIND_ADDR:-127.0.0.1}:8787:8787"
+      - "127.0.0.1:8788:8788"
+    volumes:
+      - ./data:/app/data
+      - ./keys:/app/keys
+    restart: unless-stopped
+```
+
+#### Local disk usage (`data/`)
+
+Moving PostgreSQL to an external host does **not** move the runtime `data/` directory off local
+disk. `data/` still stores spilled HTTP/TCP traffic blobs (`data/traffic/_blobs`), LLM
+transcripts, task working files, and local task archives, so heavy workloads can still fill the
+host disk if `data/` is on a small volume. Mount `data/` on a suitably sized volume, and consider
+setting `ARTEX_ARCHIVE_STORAGE=s3` (see [Task archive storage](docs/task-archive-storage.md)) to
+offload cold task archives to object storage.
 
 ### Reverse proxy deployment (HTTPS / exposing only 443)
 
