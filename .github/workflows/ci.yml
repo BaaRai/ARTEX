@@ -159,3 +159,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 scripts/posture_check_test.py
+      - run: python3 -m unittest discover -s scripts/benchmark -p 'test_*.py' -v

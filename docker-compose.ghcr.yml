@@ -4,6 +4,10 @@
 #   docker compose -f docker-compose.ghcr.yml pull
 #   docker compose -f docker-compose.ghcr.yml up -d
 #
+# The image is published from the next tagged release: v0.7.0 predates the
+# GHCR publish step, so the pull above fails with "denied" until then. Use
+# `docker compose up -d --build` with docker-compose.yml in the meantime.
+#
 # Set POSTGRES_PASSWORD in .env. Pin the image with ARTEX_IMAGE_TAG=v0.7.1 in
 # .env; unset uses latest. The image carries the built-in /app/skills; this file
 # does not mount a host skills/ directory. To use custom skills, copy them into a

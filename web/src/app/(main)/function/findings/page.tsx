@@ -55,6 +55,7 @@ import type {
   VerificationStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useActiveCompany } from "@/stores/company/company-store";
 
 import { AssetTree, assetPathOf } from "./_components/asset-tree";
 import {
@@ -141,6 +142,10 @@ const EMPTY_STATS: FindingStats = {
 };
 
 export default function FindingsPage() {
+  // The sidebar's company switcher narrows everything below on the server: the
+  // flat and grouped lists, the asset tree and the stat cards all send `company`.
+  // Undefined means all companies.
+  const company = useActiveCompany();
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
@@ -185,6 +190,7 @@ export default function FindingsPage() {
     task,
     sort,
     query,
+    company,
   ]);
   const activeFilterFingerprint = React.useRef(filterFingerprint);
   activeFilterFingerprint.current = filterFingerprint;
@@ -202,7 +208,8 @@ export default function FindingsPage() {
         setActiveRetests(Object.fromEntries(rows.map((item) => [item.finding_id, item])));
         failed = false;
       } catch (error) {
-        if (!disposed && !failed) toast.error(t("Failed to load retest status: {error}", { error: (error as Error).message }));
+        if (!disposed && !failed)
+          toast.error(t("Failed to load retest status: {error}", { error: (error as Error).message }));
         failed = true;
       } finally {
         if (!disposed) timer = setTimeout(() => void refreshRetests(), 3000);
@@ -321,7 +328,18 @@ export default function FindingsPage() {
       await api.exportFindings({
         format: exportFormat,
         scope: exportScope,
-        filters: { severity, status, reportState, verificationStatus, vulnclass, task, query, sort },
+        filters: {
+          severity,
+          status,
+          reportState,
+          verificationStatus,
+          vulnclass,
+          task,
+          query,
+          sort,
+          assetScope: activeAssetScope ?? undefined,
+          company,
+        },
         ids: [...selectedIds],
       });
       setExportOpen(false);
@@ -346,6 +364,14 @@ export default function FindingsPage() {
   groupFindingsRef.current = groupFindings;
   visibleGroupKeysRef.current = new Set(groups.map(findingGroupKey));
 
+  // A company switch drops the picked asset node: the node may belong to the
+  // company we just left, and the tree is about to be reloaded under the new one.
+  React.useEffect(() => {
+    // company is a trigger here, not a value the effect reads.
+    void company;
+    setAssetScope(null);
+  }, [company]);
+
   // The asset view's right-hand list = the flat list + a filter for the selected subtree, so both views share one list state.
   const activeAssetScope = view === "asset" ? assetScope : null;
 
@@ -368,6 +394,7 @@ export default function FindingsPage() {
         query,
         sort,
         assetScope: activeAssetScope ?? undefined,
+        company,
       });
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setFlat({ items: result.items, total: result.total, loaded: true, loading: false });
@@ -378,6 +405,7 @@ export default function FindingsPage() {
     }
   }, [
     activeAssetScope,
+    company,
     filterFingerprint,
     flatPage,
     flatPageSize,
@@ -392,7 +420,7 @@ export default function FindingsPage() {
   ]);
 
   // loadAssetTree fetches the whole asset tree. The tree doesn't change with the selected node (otherwise
-  // picking one would collapse it into a single chain), so no assetScope here.
+  // picking one would collapse it into a single chain), so no picked node here — only the active company.
   const loadAssetTree = React.useCallback(async () => {
     const requestFilter = filterFingerprint;
     if (activeFilterFingerprint.current !== requestFilter) return;
@@ -408,6 +436,7 @@ export default function FindingsPage() {
         task,
         query,
         sort,
+        company,
       });
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree({
@@ -423,7 +452,18 @@ export default function FindingsPage() {
       setAssetTree((current) => ({ ...current, loading: false }));
       toast.error(t("Failed to load the asset tree: {error}", { error: (e as Error).message }));
     }
-  }, [filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, task, query, sort]);
+  }, [
+    company,
+    filterFingerprint,
+    reportState,
+    severity,
+    status,
+    verificationStatus,
+    vulnclass,
+    task,
+    query,
+    sort,
+  ]);
 
   const refreshGroups = React.useCallback(async () => {
     const requestFilter = filterFingerprint;
@@ -441,6 +481,7 @@ export default function FindingsPage() {
         task,
         query,
         sort,
+        company,
       });
       if (request !== groupsRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setGroups(result.items);
@@ -449,7 +490,20 @@ export default function FindingsPage() {
     } catch {
       // Polling keeps the last successful snapshot visible.
     }
-  }, [filterFingerprint, page, pageSize, reportState, severity, status, verificationStatus, vulnclass, task, query, sort]);
+  }, [
+    company,
+    filterFingerprint,
+    page,
+    pageSize,
+    reportState,
+    severity,
+    status,
+    verificationStatus,
+    vulnclass,
+    task,
+    query,
+    sort,
+  ]);
 
   const loadGroup = React.useCallback(
     async (key: string, groupPage: number, groupPageSize: number) => {
@@ -480,6 +534,7 @@ export default function FindingsPage() {
           task: key,
           query,
           sort,
+          company,
         });
         if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
         setGroupFindings((current) => ({
@@ -510,7 +565,7 @@ export default function FindingsPage() {
         }));
       }
     },
-    [filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, query, sort],
+    [company, filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, query, sort],
   );
 
   React.useEffect(() => {
@@ -631,7 +686,7 @@ export default function FindingsPage() {
     let alive = true;
     const load = () => {
       api
-        .findingStats()
+        .findingStats(company)
         .then((s) => {
           if (alive) {
             setStats(s);
@@ -648,7 +703,7 @@ export default function FindingsPage() {
       alive = false;
       stopPolling();
     };
-  }, []);
+  }, [company]);
 
   React.useEffect(() => {
     if (!statsLoaded) return;
@@ -673,7 +728,7 @@ export default function FindingsPage() {
         toast.success(t('Marked as "{label}"', { label: statusMeta("finding", next).label }));
         // refresh stat cards (pending count) and drop the row if it no longer matches the status filter
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The row update remains valid even if the aggregate refresh fails.
@@ -689,7 +744,7 @@ export default function FindingsPage() {
         toast.error(t("Update failed: {error}", { error: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, setFindings, status],
+    [refreshAfterMutation, setFindings, status, company],
   );
 
   const updateReportState = React.useCallback(
@@ -701,7 +756,7 @@ export default function FindingsPage() {
         await api.setFindingReportState(f.finding_id, next);
         toast.success(t('Report stage set to "{label}"', { label: REPORT_STATE_META[next].label }));
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The row update remains valid even if the aggregate refresh fails.
@@ -717,7 +772,7 @@ export default function FindingsPage() {
         toast.error(t("Update failed: {error}", { error: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, reportState, setFindings],
+    [refreshAfterMutation, reportState, setFindings, company],
   );
 
   // applyBulkStatus sets the same triage status on every selected finding, then
@@ -734,7 +789,7 @@ export default function FindingsPage() {
         void loadFlat();
         if (view === "asset") void loadAssetTree();
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The list reload remains valid even if the aggregate refresh fails.
@@ -745,7 +800,7 @@ export default function FindingsPage() {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view],
+    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view, company],
   );
 
   const applyBulkReportState = React.useCallback(
@@ -760,7 +815,7 @@ export default function FindingsPage() {
         void loadFlat();
         if (view === "asset") void loadAssetTree();
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The list reload remains valid even if the aggregate refresh fails.
@@ -771,7 +826,7 @@ export default function FindingsPage() {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view],
+    [bulkBusy, loadAssetTree, loadFlat, selectedIds, view, company],
   );
 
   // The inline expanded detailed-report cache is keyed by the globally stable row key. report is long-form
@@ -825,7 +880,7 @@ export default function FindingsPage() {
         );
         toast.success(t("Saved"));
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The edit remains valid even if the aggregate refresh fails.
@@ -837,7 +892,7 @@ export default function FindingsPage() {
         setSaving(false);
       }
     },
-    [edit, refreshAfterMutation, setFindings],
+    [edit, refreshAfterMutation, setFindings, company],
   );
 
   // deleteFinding deletes one vulnerability (with confirmation): on success it removes it from the list, collapses the row, and refreshes stats.
@@ -858,7 +913,7 @@ export default function FindingsPage() {
         setExpanded((cur) => (cur === rowKey ? null : cur));
         toast.success(t("Vulnerability deleted"));
         api
-          .findingStats()
+          .findingStats(company)
           .then(setStats)
           .catch(() => {
             // The deletion remains valid even if the aggregate refresh fails.
@@ -868,7 +923,7 @@ export default function FindingsPage() {
         toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
       }
     },
-    [refreshAfterMutation, setFindings],
+    [refreshAfterMutation, setFindings, company],
   );
 
   const openDeepen = React.useCallback((f: Finding) => {
@@ -1159,7 +1214,11 @@ export default function FindingsPage() {
                   }}
                   disabled={bulkBusy}
                 >
-                  <SelectTrigger size="sm" className="w-44" aria-label={t("Set the report stage of the selected findings")}>
+                  <SelectTrigger
+                    size="sm"
+                    className="w-44"
+                    aria-label={t("Set the report stage of the selected findings")}
+                  >
                     <SelectValue placeholder={bulkBusy ? t("Updating…") : t("Set report stage")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1227,7 +1286,9 @@ export default function FindingsPage() {
                     </button>
                   </React.Fragment>
                 ))}
-                <span className="ml-auto shrink-0 text-xs tabular-nums">{t("{count} in total", { count: flat.total })}</span>
+                <span className="ml-auto shrink-0 text-xs tabular-nums">
+                  {t("{count} in total", { count: flat.total })}
+                </span>
               </div>
               {flatListCard}
             </div>
@@ -1333,7 +1394,9 @@ export default function FindingsPage() {
             })}
             {groups.length === 0 && (
               <Card>
-                <CardContent className="py-12 text-center text-sm text-muted-foreground">{t("No matching findings.")}</CardContent>
+                <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                  {t("No matching findings.")}
+                </CardContent>
               </Card>
             )}
             <TablePagination

@@ -58,8 +58,9 @@ docker compose logs artex | grep "Setup token"
 ```
 
 > Multi-arch release images (`linux/amd64`, `linux/arm64`) are published to GitHub Container
-> Registry at `ghcr.io/baarai/artex`. For pulling the prebuilt image and all other installation
-> paths (script, binaries, source, release archives), see [Installation](#installation).
+> Registry at `ghcr.io/baarai/artex` from the next tagged release; v0.7.0 predates the publish
+> step. For pulling the prebuilt image and all other installation paths (script, binaries,
+> source, release archives), see [Installation](#installation).
 
 ---
 
@@ -344,13 +345,16 @@ docker compose up -d --build
 # → http://localhost:8787
 ```
 
-Each `v*` release publishes a multi-arch image (`linux/amd64`, `linux/arm64`) to GitHub
-Container Registry with tags `:latest`, `:v<version>`, and `:<version>`. GHCR packages start
-private. After the first release, maintainers should check that the `artex` package visibility
-is set to Public and verify the pull below on a machine without GHCR credentials before
-announcing anonymous installation.
+The release workflow publishes a multi-arch image (`linux/amd64`, `linux/arm64`) to GitHub
+Container Registry on each `v*` tag, with tags `:latest`, `:v<version>`, and `:<version>`.
+v0.7.0 predates that step, so there is no `artex` package yet: until the next tagged release,
+use the checkout build above, and `docker-compose.ghcr.yml` and the `docker pull` below will
+fail with `denied`. GHCR packages start private; after the first publish the package visibility
+must be set to Public, and the release workflow verifies that the image pulls anonymously and
+fails the job otherwise.
 
-The standalone container requires an existing PostgreSQL database reachable from the container.
+Once the image is published, the standalone container requires an existing PostgreSQL database
+reachable from the container.
 Set the `ARTEX_PG_*` variables below. The example uses Docker Desktop's
 `host.docker.internal` to reach PostgreSQL on the host. On native Linux Docker Engine, add
 `--add-host=host.docker.internal:host-gateway` to `docker run` for a host database, or use
@@ -390,7 +394,9 @@ built-in skills are used.
 #### Compose stack from the prebuilt image
 
 `docker-compose.ghcr.yml` runs the same ARTEX + PostgreSQL stack from the released image, with no
-checkout build. Download it and `.env.example` once:
+checkout build. The image is not published yet: v0.7.0 predates the GHCR publish step, so use the
+checkout build above until the next tagged release. Once the first image is published, download
+the file and `.env.example` once:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/BaaRai/ARTEX/main/docker-compose.ghcr.yml
