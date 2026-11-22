@@ -24,7 +24,7 @@ func TestPauseShiftsTaskDeadlineOnResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pg.Exec(`DELETE FROM tasks WHERE id=$1`, id) })
+	t.Cleanup(func() { _ = pg.DeleteTask(id) })
 
 	// A running task with a stamped deadline (first_run_at + 1h budget).
 	if _, err := m.StampTaskFirstRun(task.ID); err != nil {

@@ -73,6 +73,9 @@ func TestCoreTaskLifecyclePG(t *testing.T) {
 	if id == "" || expID == 0 {
 		t.Fatalf("bad task payload: %v", out)
 	}
+	defer func() {
+		_, _ = m.pg.Exec(`DELETE FROM assets WHERE type = 'ip' AND ip = '127.0.0.1'`)
+	}()
 
 	// the exploration owns goal node(s) — goal seeding is async, poll briefly
 	var goals []*db.Node

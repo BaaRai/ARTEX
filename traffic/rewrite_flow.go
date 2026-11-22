@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,6 +76,7 @@ type reqSnap struct {
 	// slot any more. The flow itself is not referenced.
 	done  <-chan struct{}
 	rules *rewrite.Set // the snapshot of rules the flow runs with, both phases
+	hooks *HookSet     // the snapshot of tampering hooks the flow runs with, both phases
 	host  string       // host name: the only part of the request a log shows
 	tomb  bool
 
@@ -359,10 +361,10 @@ func (t *Traffic) RewriteStats() RewriteStats {
 // newEntry builds the snapshot of a request before the rules' result is put on
 // the flow: URL and headers cloned, the body referenced, and only when a body
 // action applied (otherwise the flow's body is still the client's).
-func newEntry(f *mproxy.Flow, set *rewrite.Set, res rewrite.Result) *reqSnap {
+func newEntry(f *mproxy.Flow, set *rewrite.Set, hooks *HookSet, res rewrite.Result) *reqSnap {
 	r := f.Request
 	u := *r.URL
-	e := &reqSnap{done: f.Done(), rules: set, host: r.URL.Hostname(), rewritten: res.Changed,
+	e := &reqSnap{done: f.Done(), rules: set, hooks: hooks, host: r.URL.Hostname(), rewritten: res.Changed,
 		method: r.Method, url: &u, header: r.Header.Clone(), lines: res.Lines}
 	if raw := r.Raw(); raw != nil {
 		e.rawHost = raw.Host
@@ -420,6 +422,32 @@ func engineRequest(r *mproxy.Request) rewrite.Request {
 	return rewrite.Request{Method: r.Method, URL: r.URL, Header: r.Header, Body: r.Body}
 }
 
+// takeReplayNonce removes every occurrence of X-ARTEX-Replay-Nonce from h
+// unconditionally and returns its value only when exactly one header value was
+// present.
+func takeReplayNonce(h http.Header) (nonce string, present bool) {
+	if h == nil {
+		return "", false
+	}
+	count := 0
+	for k, vs := range h {
+		if strings.EqualFold(k, replayNonceHeader) {
+			present = true
+			for _, v := range vs {
+				count++
+				if count == 1 {
+					nonce = strings.TrimSpace(v)
+				}
+			}
+			delete(h, k)
+		}
+	}
+	if count != 1 {
+		return "", present
+	}
+	return nonce, present
+}
+
 // Request runs the request phase. The result goes on the flow only once the
 // request's snapshot slot is reserved; without one the request leaves as the
 // client sent it. Rules fail open: a panic leaves the request unchanged.
@@ -427,8 +455,15 @@ func (s *sink) Request(f *mproxy.Flow) {
 	if s.t == nil || f.Request == nil || f.Request.URL == nil {
 		return
 	}
+	// Strip the internal replay bypass header unconditionally before forwarding
+	// or running rules; honour it only when its value matches a registered nonce.
+	if nonce, present := takeReplayNonce(f.Request.Header); present && consumeReplayNonce(nonce) {
+		s.bypass.Store(keyOf(f), struct{}{})
+		return
+	}
 	set := s.t.rewriteRules.Load()
-	if set.Len(rewrite.PhaseRequest) == 0 {
+	hooks := s.t.tamperHooks.Load()
+	if set.Len(rewrite.PhaseRequest) == 0 && hooks.Len(rewrite.PhaseRequest) == 0 {
 		return
 	}
 	host := f.Request.URL.Hostname()
@@ -437,12 +472,22 @@ func (s *sink) Request(f *mproxy.Flow) {
 			log.Printf("[traffic] rewrite rules stopped on a request to %s (class %s): it is sent as the client sent it", host, rewrite.ErrClassPanic)
 		}
 	}()
-	res := set.Apply(rewrite.PhaseRequest, rewrite.Input{Request: engineRequest(f.Request), IsBinary: rulesIsBinary})
+	in := rewrite.Input{Request: engineRequest(f.Request), IsBinary: rulesIsBinary}
+	res := set.Apply(rewrite.PhaseRequest, in)
+	if hooks.Len(rewrite.PhaseRequest) > 0 {
+		hIn := in
+		hIn.Request = res.Request
+		hRes := hooks.Apply(rewrite.PhaseRequest, hIn, res.Tainted)
+		if hRes.Changed {
+			res.Changed, res.Request = true, hRes.Request
+		}
+		res.Lines = append(res.Lines, hRes.Lines...)
+	}
 	runTestHook("request")
 	if len(res.Lines) == 0 {
 		return
 	}
-	if !s.t.snaps.reserve(keyOf(f), newEntry(f, set, res)) {
+	if !s.t.snaps.reserve(keyOf(f), newEntry(f, set, hooks, res)) {
 		return
 	}
 	if res.Changed {
@@ -453,24 +498,30 @@ func (s *sink) Request(f *mproxy.Flow) {
 
 // Response records the exchange and runs the response phase: the exchange
 // keeps the client's request and the target's response, the client gets the
-// rewritten response. Without a slot and without response rules this is the
-// plain record.
+// rewritten response. Without a slot and without response rules/hooks this is
+// the plain record.
 func (s *sink) Response(f *mproxy.Flow) {
 	if f.Request == nil || f.Response == nil {
 		return
 	}
+	if _, bypassed := s.bypass.LoadAndDelete(keyOf(f)); bypassed {
+		s.t.record(f)
+		return
+	}
 	snap := s.t.snaps.take(keyOf(f))
 	set := s.t.rewriteRules.Load()
+	hooks := s.t.tamperHooks.Load()
 	if snap != nil {
 		set = snap.rules
+		hooks = snap.hooks
 	}
-	if snap == nil && set.Len(rewrite.PhaseResponse) == 0 {
+	if snap == nil && set.Len(rewrite.PhaseResponse) == 0 && hooks.Len(rewrite.PhaseResponse) == 0 {
 		s.t.record(f)
 		return
 	}
 	rq, lines := originalRequest(f, snap)
 	rs := flowResponseView(f.Response)
-	res := s.applyResponse(f, set, rewrite.Input{
+	res := s.applyResponse(f, set, hooks, rewrite.Input{
 		Request:  engineRequest(f.Request), // as sent to the target
 		Response: rewrite.Response{Status: rs.status, Header: rs.header, Body: rs.body},
 		IsBinary: rulesIsBinary,
@@ -481,9 +532,10 @@ func (s *sink) Response(f *mproxy.Flow) {
 	}
 }
 
-// applyResponse runs the response phase; a panic yields no change and no line.
-func (s *sink) applyResponse(f *mproxy.Flow, set *rewrite.Set, in rewrite.Input) (res rewrite.Result) {
-	if set.Len(rewrite.PhaseResponse) == 0 {
+// applyResponse runs the response phase (rules first, then hooks); a panic
+// yields no change and no line.
+func (s *sink) applyResponse(f *mproxy.Flow, set *rewrite.Set, hooks *HookSet, in rewrite.Input) (res rewrite.Result) {
+	if set.Len(rewrite.PhaseResponse) == 0 && hooks.Len(rewrite.PhaseResponse) == 0 {
 		return rewrite.Result{}
 	}
 	defer func() {
@@ -493,6 +545,15 @@ func (s *sink) applyResponse(f *mproxy.Flow, set *rewrite.Set, in rewrite.Input)
 		}
 	}()
 	r := set.Apply(rewrite.PhaseResponse, in)
+	if hooks.Len(rewrite.PhaseResponse) > 0 {
+		hIn := in
+		hIn.Response = r.Response
+		hRes := hooks.Apply(rewrite.PhaseResponse, hIn, r.Tainted)
+		if hRes.Changed {
+			r.Changed, r.Response = true, hRes.Response
+		}
+		r.Lines = append(r.Lines, hRes.Lines...)
+	}
 	runTestHook("response")
 	return r
 }
@@ -506,10 +567,19 @@ func (s *sink) applyResponse(f *mproxy.Flow, set *rewrite.Set, in rewrite.Input)
 // upgrade, with no response on the flow: nothing of the handshake can change
 // there, so every candidate rule is traced "not rewritten: stream".
 func (s *sink) rewriteStream(f *mproxy.Flow, kind string) (rq requestView, rs responseView, lines []rewrite.TraceLine, res rewrite.Result) {
+	if _, bypassed := s.bypass.LoadAndDelete(keyOf(f)); bypassed {
+		rq = flowRequestView(f.Request)
+		if kind == "sse" {
+			rs = flowResponseView(f.Response)
+		}
+		return rq, rs, nil, rewrite.Result{}
+	}
 	snap := s.t.snaps.take(keyOf(f))
 	set := s.t.rewriteRules.Load()
+	hooks := s.t.tamperHooks.Load()
 	if snap != nil {
 		set = snap.rules
+		hooks = snap.hooks
 	}
 	rq, lines = originalRequest(f, snap)
 	if kind == "sse" {
@@ -517,10 +587,10 @@ func (s *sink) rewriteStream(f *mproxy.Flow, kind string) (rq requestView, rs re
 	}
 	cur := engineRequest(f.Request)
 	if kind != "websocket" {
-		res = s.applyResponse(f, set, rewrite.Input{Request: cur, Response: rewrite.Response{Status: rs.status, Header: rs.header}, Stream: true, IsBinary: rulesIsBinary})
+		res = s.applyResponse(f, set, hooks, rewrite.Input{Request: cur, Response: rewrite.Response{Status: rs.status, Header: rs.header}, Stream: true, IsBinary: rulesIsBinary})
 		return rq, rs, append(lines, res.Lines...), res
 	}
-	if set.Len(rewrite.PhaseRequest)+set.Len(rewrite.PhaseResponse) == 0 {
+	if set.Len(rewrite.PhaseRequest)+set.Len(rewrite.PhaseResponse)+hooks.Len(rewrite.PhaseRequest)+hooks.Len(rewrite.PhaseResponse) == 0 {
 		return rq, rs, lines, rewrite.Result{}
 	}
 	// The engine never changes a request with Upgrade; a ws:// stream arrives
@@ -533,21 +603,26 @@ func (s *sink) rewriteStream(f *mproxy.Flow, kind string) (rq requestView, rs re
 		cur.Header.Set("Upgrade", "websocket")
 	}
 	if snap == nil {
-		lines = append(lines, s.applyRequestTrace(f, set, cur)...)
+		lines = append(lines, s.applyRequestTrace(f, set, hooks, cur)...)
 	}
-	r := s.applyResponse(f, set, rewrite.Input{Request: cur, Response: rewrite.Response{Status: http.StatusSwitchingProtocols}, Stream: true, IsBinary: rulesIsBinary})
+	r := s.applyResponse(f, set, hooks, rewrite.Input{Request: cur, Response: rewrite.Response{Status: http.StatusSwitchingProtocols}, Stream: true, IsBinary: rulesIsBinary})
 	return rq, rs, append(lines, r.Lines...), rewrite.Result{}
 }
 
 // applyRequestTrace runs the request phase for its trace only.
-func (s *sink) applyRequestTrace(f *mproxy.Flow, set *rewrite.Set, req rewrite.Request) (lines []rewrite.TraceLine) {
+func (s *sink) applyRequestTrace(f *mproxy.Flow, set *rewrite.Set, hooks *HookSet, req rewrite.Request) (lines []rewrite.TraceLine) {
 	defer func() {
 		if recover() != nil {
 			lines = nil
 			log.Printf("[traffic] rewrite rules stopped on a request to %s (class %s)", f.Request.URL.Hostname(), rewrite.ErrClassPanic)
 		}
 	}()
-	return set.Apply(rewrite.PhaseRequest, rewrite.Input{Request: req, IsBinary: rulesIsBinary}).Lines
+	in := rewrite.Input{Request: req, IsBinary: rulesIsBinary}
+	out := set.Apply(rewrite.PhaseRequest, in).Lines
+	if hooks.Len(rewrite.PhaseRequest) > 0 {
+		out = append(out, hooks.Apply(rewrite.PhaseRequest, in, nil).Lines...)
+	}
+	return out
 }
 
 // applyStreamResponse puts the rewritten status and headers of an SSE
@@ -568,6 +643,7 @@ func (s *sink) applyStreamResponse(f *mproxy.Flow, res rewrite.Result) {
 // and the rules, never the URL or the error text.
 func (s *sink) RequestError(f *mproxy.Flow, err error) {
 	if f != nil {
+		s.bypass.Delete(keyOf(f))
 		if snap := s.t.snaps.take(keyOf(f)); snap != nil && snap.requestRewritten() {
 			ids := snap.appliedRuleIDs()
 			for _, id := range ids {
@@ -593,6 +669,7 @@ func (s *sink) StreamResponseModifier(f *mproxy.Flow, in io.Reader) (out io.Read
 	if s == nil || s.t == nil || f == nil || !f.Stream || f.SSE != nil {
 		return in
 	}
+	s.bypass.Delete(keyOf(f))
 	snap := s.t.snaps.take(keyOf(f))
 	if snap == nil {
 		return in
@@ -624,16 +701,26 @@ func writeTrace(tx *sql.Tx, id string, lines []rewrite.TraceLine, trace []stored
 		}
 	}
 	for i, l := range lines {
-		var ruleID, after any
+		var ruleID, hookID, hookVer, after any
 		if l.RuleID != 0 {
 			ruleID = l.RuleID
+		}
+		if l.HookID != 0 {
+			hookID = l.HookID
+		}
+		if l.HookVersion != 0 {
+			hookVer = l.HookVersion
+		}
+		sourceKind := l.SourceKind
+		if sourceKind == "" {
+			sourceKind = rewrite.SourceKindRule
 		}
 		if trace[i].inline != nil {
 			after = trace[i].inline
 		}
-		if _, err := tx.Exec(`INSERT INTO exchange_rewrites(exchange_id,seq,phase,rule_id,rule_snapshot,action,field,outcome,reason,before_hash,after_hash,after_inline,after_blob)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			id, i, string(l.Phase), ruleID, nullIfEmpty(l.RuleSnapshot), nullIfEmpty(l.Action), nullIfEmpty(l.Field), l.Outcome, l.Reason,
+		if _, err := tx.Exec(`INSERT INTO exchange_rewrites(exchange_id,seq,phase,source_kind,rule_id,hook_id,hook_version,rule_snapshot,action,field,outcome,reason,before_hash,after_hash,after_inline,after_blob)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			id, i, string(l.Phase), sourceKind, ruleID, hookID, hookVer, nullIfEmpty(l.RuleSnapshot), nullIfEmpty(l.Action), nullIfEmpty(l.Field), l.Outcome, l.Reason,
 			nullIfEmpty(l.BeforeHash), nullIfEmpty(l.AfterHash), after, nullIfEmpty(trace[i].hash)); err != nil {
 			return &recordError{"writing rewrite trace", err}
 		}

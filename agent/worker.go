@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -66,6 +67,7 @@ type Worker struct {
 	workDir         string
 	proxyAddr       string
 	proxyCACert     string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
+	factTraffic     FactTrafficLookup // proxy captures for fact provenance (nil = activity-only)
 	webSearch       WebSearchOpts     // web_search tool backend selection (off by default)
 	tx              *transcript.Store // raw LLM conversation persistence (nil = off)
 	window          int               // context window in tokens (for compaction)
@@ -174,14 +176,14 @@ func NewWorker(prov llm.Provider, model, workDir string, tx *transcript.Store, w
 	return &Worker{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, extraTools: extra}
 }
 
-// defaultToolsExcept returns actool.DefaultTools() minus the named tools (by
+// defaultToolsExcept returns defaultTools(base) minus the named tools (by
 // CoreTool.Name()). Used to trim SDK default tools an agent shouldn't have.
-func defaultToolsExcept(exclude ...string) []actool.CoreTool {
+func defaultToolsExcept(base string, exclude ...string) []actool.CoreTool {
 	drop := make(map[string]bool, len(exclude))
 	for _, n := range exclude {
 		drop[n] = true
 	}
-	all := actool.DefaultTools()
+	all := defaultTools(base)
 	out := make([]actool.CoreTool, 0, len(all))
 	for _, t := range all {
 		if !drop[t.Name()] {
@@ -204,6 +206,10 @@ func (w *Worker) compactionWindow() int {
 // traffic through, plus the CA cert path WebFetch trusts to verify HTTPS through
 // that MITM proxy. Empty addr disables the hint.
 func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = addr, caCert }
+
+// SetFactTraffic wires the proxy capture store used to classify recorded facts
+// (#124 row 1). nil keeps the activity-only classification.
+func (w *Worker) SetFactTraffic(l FactTrafficLookup) { w.factTraffic = l }
 
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
@@ -314,29 +320,129 @@ func workerArtifactSpec(runDir string) string {
 	return "\n\n**Intermediate artifact output rules**: all intermediate artifacts — scripts, payloads, captured response bodies, temporary data — **must be written to this intent's dedicated work directory " + runDir + "** (already created automatically; just write with relative paths there — no manual mkdir needed) — **do NOT write to /tmp, do NOT use other absolute paths**."
 }
 
-// ensureRunDir builds and creates an agent's working directory under base:
-// <base>/tasks/<taskID> for planner/main; <base>/tasks/<taskID>/i<intentID> for a
-// worker (intentID<=0 → task dir only). The "tasks/" segment groups per-task dirs
-// symmetrically with the chat agent's "sessions/<sessionID>". Best-effort mkdir — on
-// failure, writes fail the same way an unwritable CWD would.
-func ensureRunDir(base string, taskID, intentID int64) string {
-	dir := filepath.Join(base, "tasks", strconv.FormatInt(taskID, 10))
-	if intentID > 0 {
-		dir = filepath.Join(dir, "i"+strconv.FormatInt(intentID, 10))
+// mainRunDirName is the run directory of a task's main agent and planner.
+const mainRunDirName = "main"
+
+// runDirMaker creates a run directory below the data directory with the ownership
+// the server wants. The server sets it when agent processes run as the executor
+// (server/execpriv_unix.go); nil keeps a plain MkdirAll.
+var runDirMaker func(base, leaf string) error
+
+// SetRunDirMaker sets how run directories are created. Call it before any agent runs.
+func SetRunDirMaker(f func(base, leaf string) error) { runDirMaker = f }
+
+// makeRunDir creates the run directory leaf below base. Best-effort — on failure,
+// writes fail the same way an unwritable CWD would.
+func makeRunDir(base, leaf string) {
+	if runDirMaker == nil {
+		// 0775: the umask of the server decides the final bits.
+		_ = os.MkdirAll(leaf, 0o775)
+		return
 	}
-	_ = os.MkdirAll(dir, 0o755)
+	if err := runDirMaker(base, leaf); err != nil {
+		log.Printf("[agent] run directory %s: %v", leaf, err)
+	}
+}
+
+// ensureRunDir builds and creates an agent's working directory under base:
+// <base>/tasks/<taskID>/main for planner/main (intentID<=0);
+// <base>/tasks/<taskID>/i<intentID> for a worker. No run directory is an ancestor of
+// another: the task directory holds the leaves and is no agent's working directory.
+// The "tasks/" segment groups per-task dirs symmetrically with the chat agent's
+// "sessions/<sessionID>".
+func ensureRunDir(base string, taskID, intentID int64) string {
+	leaf := mainRunDirName
+	if intentID > 0 {
+		leaf = "i" + strconv.FormatInt(intentID, 10)
+	}
+	dir := filepath.Join(base, "tasks", strconv.FormatInt(taskID, 10), leaf)
+	makeRunDir(base, dir)
 	return dir
 }
 
-// cmdOutDir is the SDK large-tool-output spill dir under an agent's run dir.
-func cmdOutDir(dir string) string { return filepath.Join(dir, "cmd-output") }
+// EnsureRunDir is ensureRunDir for the server, which places the main agent's
+// uploads in its run directory.
+func EnsureRunDir(base string, taskID, intentID int64) string {
+	return ensureRunDir(base, taskID, intentID)
+}
 
-func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
+// EnsureSessionDir creates the chat run directory <base>/sessions/<sessionID> the
+// way ensureRunDir creates a task one, and returns it.
+func EnsureSessionDir(base, sessionID string) string {
+	dir := filepath.Join(base, "sessions", sessionID)
+	makeRunDir(base, dir)
+	return dir
+}
+
+// IsRunDirName reports whether name is a run directory inside a task directory:
+// main or i<intentID>.
+func IsRunDirName(name string) bool {
+	if name == mainRunDirName {
+		return true
+	}
+	digits, ok := strings.CutPrefix(name, "i")
+	if !ok || digits == "" {
+		return false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// CachePrefixEnv is the opt-in environment flag enabling the worker system
+// prompt cache-prefix split (P3.5 phase C). Off by default: when unset/false,
+// worker system segments and DynamicBoundary are byte-identical to the legacy
+// layout. Planner, mainagent, chat, and goals are unaffected.
+const CachePrefixEnv = "ARTEX_CACHE_PREFIX"
+
+func cachePrefixEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(CachePrefixEnv))) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	return false
+}
+
+// workerSystemParts splits workerSystem at the first per-intent volatile
+// segment (workerArtifactSpec(runDir)) without reordering any text:
+//   - staticPart  = body + untrustedContentTail + workerTrafficBlock
+//   - dynamicHead = workerArtifactSpec(runDir) + noiseProfileBlock
+//
+// Custom DB prompts that reference {{.Now}} remain volatile inside staticPart.
+func workerSystemParts(proxyAddr, caCert, dataDir, runDir string) (staticPart, dynamicHead string) {
 	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr, DataDir: dataDir, Now: nowStr()})
 	// caCert is present only when the recording MITM is on, which is exactly when
 	// the traffic_* tools are registered — so it gates the traffic-tool note.
 	// Optional finding guidance is added for every role after tool resolution.
-	return body + untrustedContentTail(body) + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir) + noiseProfileBlock()
+	staticPart = body + untrustedContentTail(body) + workerTrafficBlock(caCert != "")
+	dynamicHead = workerArtifactSpec(runDir) + noiseProfileBlock()
+	return staticPart, dynamicHead
+}
+
+func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
+	staticPart, dynamicHead := workerSystemParts(proxyAddr, caCert, dataDir, runDir)
+	return staticPart + dynamicHead
+}
+
+// assembleWorkerSystem builds the worker's SystemPrompt segments and
+// DynamicBoundary. When split is false (default), it delegates directly to
+// deferredSystem(staticPart+dynamicTail, def). When split is true
+// (ARTEX_CACHE_PREFIX=1), it emits two segments [staticPart, dynamic] with
+// DynamicBoundary=1 so sibling workers in the same task share the cached static
+// prefix, absorbing the leading "\n\n" separator from workerArtifactSpec so
+// strings.Join(system, "\n\n") is byte-identical to the unsplit prompt.
+func assembleWorkerSystem(staticPart, dynamicTail string, def DeferredInfo, split bool) (system []string, boundary int) {
+	if !split {
+		return deferredSystem(staticPart+dynamicTail, def)
+	}
+	dyn := strings.TrimPrefix(dynamicTail+def.FindingGuidance, "\n\n")
+	if block := actool.RenderDeferredToolsBlock(def.GlobalNames); block != "" {
+		dyn += "\n\n" + block
+	}
+	return []string{staticPart, dyn}, 1
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:
@@ -426,12 +532,14 @@ func (w *Worker) ExecuteWithMessage(ctx context.Context, name string, taskID int
 func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string), requestID, message string) (harness.TerminalReason, WriteCounts, error) {
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
+	tsx.SetFactTraffic(w.factTraffic)
 	tsx.SetTaskID(taskID)
 	coverageEnabled := coverageOn(as, taskID)
 	tsx.SetCoverageEnabled(coverageEnabled)
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
 	}
+	tsx.SetWorkBase(w.workDir)          // ingest_bbot reads its file under the same base as the file tools below
 	tsx.SetOwnerNode(intent.ID)         // assets this worker discovers anchor to its intent → visible to the task
 	tsx.SetEnrich(enr)                  // async DNS/HTTP auto-completion for assets this worker writes
 	tsx.SetNotifyFinding(notifyFinding) // when report_finding lands, wake the planner on the spot with "which intent + finding"
@@ -443,7 +551,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// searching goes through Bash(grep/find) — narrowing the tool surface and reducing
 	// low-value calls. The rest of the SDK default tools (Read/Write/Edit/LS/Bash/Sleep)
 	// are kept as usual.
-	base = append(base, defaultToolsExcept("MultiEdit", "Glob", "Grep")...)
+	base = append(base, defaultToolsExcept(w.workDir, "MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
 	tools, def, cleanup := AugmentTools(WithToolQuery(ctx, nodeSummary(intent)), "worker", base)
 	defer cleanup()
@@ -466,19 +574,26 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// The run-wide intent is not the current tool action. Do not forward it or
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
-	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), newDataEnvelope())
-	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir) + frameLessonsBlock(w.lessonsBlock)
+	workerEnv := newDataEnvelope()
+	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), workerEnv)
+	staticPart, dynamicTail := workerSystemParts(w.proxyAddr, w.proxyCACert, w.workDir, runDir)
+	dynamicTail += frameLessonsBlock(w.lessonsBlock)
 	if w.wantConstraints() {
-		sysBody += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
+		dynamicTail += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
 	}
-	// intent block → intent-anchored assets block → launch instruction, appended to
-	// the system tail in that order (same append pattern as constraintBlock).
-	sysBody += renderIntentTask(intent)
+	// intent block → launch instruction in the system tail; intent-anchored assets
+	// carry target-influenced fields (PageTitle, Description, etc.) and go into
+	// the launch user message inside workerEnv's data envelope (#124).
+	dynamicTail += renderIntentTask(intent)
 	if as != nil {
 		if ids := intentAssetIDs(intent); len(ids) > 0 {
 			if assets, err := as.GetByIDs(ids); err == nil && len(assets) > 0 {
-				if b, err := json.Marshal(assets); err == nil {
-					sysBody += "\n\nThe target assets corresponding to this intent's asset_ids:\n" + string(b)
+				if block := renderWorkerIntentAssets(assets, workerEnv); block != "" {
+					if strings.TrimSpace(overview) == "" {
+						overview = workerEnv.intro() + block
+					} else {
+						overview += block
+					}
 				}
 				// The assets this intent explicitly targets → automatically join the task's
 				// test scope (same conservative granularity as insertAssets). upsertTaskScope's
@@ -494,8 +609,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 			}
 		}
 	}
-	sysBody += "\n\nStart executing the intent above: do only it, produce only facts, assets, findings, stop when done."
-	system, boundary := deferredSystem(sysBody, def)
+	dynamicTail += "\n\nStart executing the intent above: do only it, produce only facts, assets, findings, stop when done."
+	system, boundary := assembleWorkerSystem(staticPart, dynamicTail, def, cachePrefixEnabled())
 	// The task-level deadline (injected via ctx) clamps this run's wall-clock budget +
 	// decides the wrap-up prompt (see taskclock.go).
 	tc := taskClockFrom(ctx)
@@ -544,10 +659,10 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		// deadline → task-timeout prompt; turns = the turn budget ran out inside the
 		// clamped window → fall back to the per-run prompt. Non-clamped stays pure per-run.
 		Settlement: settle,
-		// large tool output spills to cmd-output/ with a head + pointer (SDK tool.Capture);
-		// full output preserved on disk. The truncation cap uses the SDK default (30000
-		// chars).
-		ToolOutputDir: cmdOutDir(runDir),
+		// large tool output spills to a file with a head + pointer (SDK tool.Capture);
+		// full output preserved on disk, in cmd-output/ or in the task's spill
+		// directory (spill.go). The truncation cap uses the SDK default (30000 chars).
+		ToolOutputDir: TaskToolOutputDir(w.workDir, taskID, runDir),
 		Compaction:    compactionConfig(w.compactionWindow()), // long tool-heavy runs stay within the window
 		Todos:         actool.NewTodoStore(),                  // session-level scratch todos (TodoWrite), pure planning, discarded on exit
 		NonStreaming:  w.nonStreaming(),                       // when this profile selects non-streaming, use Provider.Complete
@@ -559,6 +674,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
 		opts.Hooks = hooks
 	}
+	opts.Hooks = SpillHooks(opts.Hooks, opts.ToolOutputDir)
 	// The session id is the provider-side identity (session header, usage metering)
 	// with or without persistence; Norma only puts it on ctx when it writes a transcript.
 	opts.SessionID = WorkerSessionID(ts.ID(), intent.ID)

@@ -2,11 +2,14 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Every literal t("...") / t('...') key must exist in the locale dictionary
-// with the same {placeholders}. Dynamic keys (variables, template literals
-// with ${}) are skipped: there is nothing to compare them against.
+// English source text is the key. Check every shipped dictionary, including
+// dynamic entries, while retaining the existing literal-call coverage check.
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const dict = JSON.parse(readFileSync(join(root, "src/i18n/locales/tr.json"), "utf8"));
+const localeDir = join(root, "src/i18n/locales");
+const dictionaries = readdirSync(localeDir)
+  .filter((name) => name.endsWith(".json"))
+  .sort()
+  .map((name) => [name, JSON.parse(readFileSync(join(localeDir, name), "utf8"))]);
 
 const files = [];
 function walk(dir) {
@@ -19,7 +22,7 @@ function walk(dir) {
 }
 walk(join(root, "src"));
 
-const calls = new Map(); // key -> first file that uses it
+const calls = new Map();
 const literalCall = /(?:^|[^\w$.])t\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/gm;
 for (const file of files) {
   const src = readFileSync(file, "utf8");
@@ -31,34 +34,28 @@ for (const file of files) {
 }
 
 function placeholders(s) {
-  return [...s.matchAll(/\{(\w+)\}/g)]
-    .map((m) => m[1])
-    .sort()
-    .join(",");
+  return [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(",");
 }
 
-const missing = [];
-const mismatch = [];
-for (const [key, file] of calls) {
-  if (!Object.prototype.hasOwnProperty.call(dict, key)) {
-    missing.push(`${file}: ${JSON.stringify(key)}`);
-    continue;
+const allKeys = new Set(dictionaries.flatMap(([, dict]) => Object.keys(dict)));
+const errors = [];
+if (!dictionaries.length) errors.push("No locale dictionaries found");
+for (const [name, dict] of dictionaries) {
+  for (const key of new Set([...allKeys, ...calls.keys()])) {
+    if (!Object.prototype.hasOwnProperty.call(dict, key)) {
+      errors.push(`${name}: missing ${JSON.stringify(key)} (${calls.get(key) ?? "dictionary parity"})`);
+      continue;
+    }
+    const value = dict[key];
+    if (typeof value !== "string" || !value.trim()) {
+      errors.push(`${name}: empty or non-string value for ${JSON.stringify(key)}`);
+    } else if (placeholders(value) !== placeholders(key)) {
+      errors.push(`${name}: placeholder mismatch for ${JSON.stringify(key)}`);
+    }
   }
-  if (placeholders(dict[key]) !== placeholders(key)) {
-    mismatch.push(`${JSON.stringify(key)}: source {${placeholders(key)}} dict {${placeholders(dict[key])}}`);
-  }
+  console.log(`i18n: ${calls.size} literal keys checked against ${Object.keys(dict).length} ${name} entries`);
 }
-
-if (missing.length || mismatch.length) {
-  if (missing.length) {
-    console.error(`Missing tr.json entries (${missing.length}):\n${missing.join("\n")}`);
-  }
-  if (mismatch.length) {
-    console.error(`Placeholder mismatches (${mismatch.length}):\n${mismatch.join("\n")}`);
-  }
+if (errors.length) {
+  console.error(errors.join("\n"));
   process.exit(1);
 }
-
-console.log(
-  `i18n: ${calls.size} literal keys checked against ${Object.keys(dict).length} tr.json entries`,
-);

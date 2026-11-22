@@ -73,12 +73,19 @@ func TestWireTools(t *testing.T) {
 	// Edit description + add a default to a scalar param, then confirm the resolved
 	// worker tool reflects both. Restore from code default on cleanup.
 	t.Cleanup(func() { _ = pg.UpsertToolForce(rf.Key, rf.Description, rf.Schema, mustJSON(rf.Agents)) })
+	// Facts-only contract: the fact fields, and so the
+	// editable scalar annotations, live on the facts[] items.
 	var schema map[string]any
 	_ = json.Unmarshal(rf.Schema, &schema)
-	if props, ok := schema["properties"].(map[string]any); ok {
-		if conf, ok := props["confidence"].(map[string]any); ok {
-			conf["default"] = "inferred"
-		}
+	itemProps := func(sc map[string]any) map[string]any {
+		props, _ := sc["properties"].(map[string]any)
+		facts, _ := props["facts"].(map[string]any)
+		items, _ := facts["items"].(map[string]any)
+		ip, _ := items["properties"].(map[string]any)
+		return ip
+	}
+	if conf, ok := itemProps(schema)["confidence"].(map[string]any); ok {
+		conf["default"] = "inferred"
 	}
 	edited := mustJSON(schema)
 	if err := pg.UpdateTool(rf.Key, "EDITED DESC", edited, mustJSON([]string{"worker"}), true); err != nil {
@@ -96,9 +103,8 @@ func TestWireTools(t *testing.T) {
 	// Default injection: omit confidence → handler input should carry the default.
 	// We can't run the real handler (nil store), but InputSchema must show the default.
 	sc := got.InputSchema()
-	props := sc["properties"].(map[string]any)
-	conf := props["confidence"].(map[string]any)
-	if conf["default"] != "inferred" {
+	conf, _ := itemProps(sc)["confidence"].(map[string]any)
+	if conf == nil || conf["default"] != "inferred" {
 		t.Errorf("confidence.default = %v, want inferred", conf["default"])
 	}
 }

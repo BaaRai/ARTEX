@@ -1,17 +1,29 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func clearPGComponentEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"ARTEX_PG_HOST", "ARTEX_PG_PORT", "ARTEX_PG_USER", "ARTEX_PG_PASSWORD",
+		"ARTEX_PG_DBNAME", "ARTEX_PG_SSLMODE",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
 func TestPostgresDSNPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
 	os.WriteFile(cfgPath, []byte(`{"database":{"host":"10.1.2.3","port":6000,"user":"u","password":"p","dbname":"d","sslmode":"require"}}`), 0o644)
 	t.Setenv("ARTEX_CONFIG", cfgPath)
+	clearPGComponentEnv(t)
 
 	// no env DSN → built from config file fields
 	t.Setenv("ARTEX_PG_DSN", "")
@@ -42,6 +54,53 @@ func TestPostgresDSNPrecedence(t *testing.T) {
 	}
 }
 
+func TestPostgresDSNEncodesComponentPassword(t *testing.T) {
+	clearPGComponentEnv(t)
+	t.Setenv("ARTEX_PG_DSN", "")
+	t.Setenv("ARTEX_CONFIG", filepath.Join(t.TempDir(), "nope.json"))
+	const password = "p/ss w@rd?#%"
+	t.Setenv("ARTEX_PG_HOST", "postgres")
+	t.Setenv("ARTEX_PG_PORT", "5432")
+	t.Setenv("ARTEX_PG_USER", "artex")
+	t.Setenv("ARTEX_PG_PASSWORD", password)
+	t.Setenv("ARTEX_PG_DBNAME", "artex")
+	t.Setenv("ARTEX_PG_SSLMODE", "disable")
+
+	got, source, err := PostgresDSN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(source, "ARTEX_PG_HOST") {
+		t.Fatalf("source %q", source)
+	}
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse %q: %v", got, err)
+	}
+	pw, ok := u.User.Password()
+	if !ok || pw != password || u.User.Username() != "artex" || u.Host != "postgres:5432" || u.Path != "/artex" {
+		t.Fatalf("dsn %q decoded user=%q password=%q ok=%v host=%q path=%q", got, u.User.Username(), pw, ok, u.Host, u.Path)
+	}
+	if u.Query().Get("sslmode") != "disable" {
+		t.Fatalf("sslmode %q", u.RawQuery)
+	}
+	if strings.Contains(got, password) {
+		t.Fatalf("password left raw in %q", got)
+	}
+
+	// An explicit URL is not rewritten, even when the component password is set.
+	t.Setenv("ARTEX_PG_DSN", "postgres://already/set")
+	if got, _, err = PostgresDSN(); err != nil || got != "postgres://already/set" {
+		t.Fatalf("explicit DSN got %q err %v", got, err)
+	}
+
+	t.Setenv("ARTEX_PG_DSN", "")
+	t.Setenv("ARTEX_PG_PORT", "nope")
+	if _, _, err = PostgresDSN(); err == nil || !strings.Contains(err.Error(), "ARTEX_PG_PORT") {
+		t.Fatalf("bad port: %v", err)
+	}
+}
+
 // A config file that exists but is not valid JSON must fail loudly, not run with
 // defaults (or report "no database config") as if the file were absent.
 func TestRedactMasksEveryDSNPasswordForm(t *testing.T) {
@@ -66,6 +125,7 @@ func TestMalformedConfigIsAnError(t *testing.T) {
 	os.WriteFile(cfgPath, []byte(`{"database":{"host":"h","password":"a"b","dbname":"d"},"skill_dir":"/s"}`), 0o644)
 	t.Setenv("ARTEX_CONFIG", cfgPath)
 	t.Setenv("ARTEX_PG_DSN", "")
+	clearPGComponentEnv(t)
 	t.Setenv("ARTEX_SKILL_DIR", "")
 
 	if _, _, err := PostgresDSN(); err == nil || !strings.Contains(err.Error(), "parse config file") {

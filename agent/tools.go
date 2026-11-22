@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
 	acperm "github.com/Autumn-27/norma/permission"
@@ -138,17 +139,26 @@ func compactIntents(ns []*db.Node, parentsOf, yieldsOf map[int64][]int64) []map[
 // One ToolSet is created per planner/worker run; per-run signals live here.
 type ToolSet struct {
 	findingRecorder FindingRecorder
-	as              *db.AssetStore   // asset store (optional; nil = asset tools not available)
-	cs              *db.CompanyStore // company store (optional)
-	ts              *db.ExplorationStore
-	worker          string
-	taskID          int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
+	// trafficProofChecker verifies that a bound snapshot's source_traffic_id
+	// exists in the live capture store during prove_goal. Planner.Plan wires it
+	// from the finding recorder; nil or any error fails closed.
+	trafficProofChecker func(ctx context.Context, trafficID string) (bool, error)
+	as                  *db.AssetStore   // asset store (optional; nil = asset tools not available)
+	cs                  *db.CompanyStore // company store (optional)
+	ts                  *db.ExplorationStore
+	factTraffic         FactTrafficLookup // proxy capture store for fact classification; nil = activity-only
+	worker              string
+	taskID              int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
 	// coverageDisabled mirrors tasks.coverage_enabled=false. Stored inverted so the
 	// zero value (all existing ToolSet constructions) means ENABLED — matching the
 	// DB default (true). When true: graphOverviewData drops the coverage block, the
 	// auto-scope hook (insertAssets) is skipped, and add_task_scope/list_untested_assets
 	// are filtered out of the agent's tool list. The scope field stays regardless.
 	coverageDisabled bool
+	// workBase is the data directory the run directories live in, the base of the
+	// file tools (defaultTools). ingest_bbot opens its file through the run's working
+	// directory below it; empty = the tool refuses every path.
+	workBase string
 	// ownerNode is the exploration node that writes attach to: assets this run
 	// touches get anchored to it as lineage/provenance (NOT visibility — the asset
 	// graph is global and shared). Worker = its claimed intent; planner = begin root.
@@ -252,6 +262,11 @@ func NewToolSet(ts *db.ExplorationStore, worker string) *ToolSet {
 	return &ToolSet{ts: ts, worker: worker}
 }
 
+// SetFactTraffic wires the proxy capture store used to relabel facts whose
+// evidence came back from the target (#124 row 1, step 3). Callers pass the
+// process traffic store; nil leaves classification activity-only.
+func (t *ToolSet) SetFactTraffic(l FactTrafficLookup) { t.factTraffic = l }
+
 // SetTaskID sets the PG task id on this ToolSet so that report_finding can
 // dual-write to the standalone findings table (which survives task deletion).
 func (t *ToolSet) SetTaskID(id int64) { t.taskID = id }
@@ -312,6 +327,10 @@ func (t *ToolSet) SetEnrich(e EnrichTrigger) { t.enrich = e }
 // intent node; planner/main: the begin root). Assets created/referenced while
 // ownerNode is set are anchored to it as lineage (not visibility).
 func (t *ToolSet) SetOwnerNode(id int64) { t.ownerNode = id }
+
+// SetWorkBase sets the data directory the run directories live in (see
+// ToolSet.workBase): the same base the run's file tools are confined under.
+func (t *ToolSet) SetWorkBase(base string) { t.workBase = base }
 
 // anchorOwner records a lineage edge from this run's owner node to an asset
 // (no-op if unset). Provenance only — the asset graph is global and shared, so
@@ -386,8 +405,21 @@ func readTool(name, desc string, schema map[string]any, run func(context.Context
 }
 
 func writeTool(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
+	return buildWriteTool(name, desc, schema, false, run)
+}
+
+// writeRawTool is writeTool for a handler that validates its own input: the
+// harness skips its schema check (Spec.RawInput), so the published schema can
+// be stricter (required properties) than the legacy shapes the handler still
+// accepts, and refusals carry the handler's own message instead of the
+// SDK's generic one.
+func writeRawTool(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
+	return buildWriteTool(name, desc, schema, true, run)
+}
+
+func buildWriteTool(name, desc string, schema map[string]any, raw bool, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
 	return actool.Build(actool.Spec{
-		Name: name, Description: desc, Schema: schema,
+		Name: name, Description: desc, Schema: schema, RawInput: raw,
 		Permissions: func(context.Context, json.RawMessage, acperm.Context) acperm.Decision { return acperm.Allowed() },
 		Run: func(ctx context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
 			return run(ctx, in)
@@ -409,6 +441,12 @@ func (t *ToolSet) readExpTool(name, desc string, schema map[string]any, run func
 
 func (t *ToolSet) writeExpTool(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
 	return writeTool(name, desc, schema, t.needExploration(name, run))
+}
+
+// writeExpToolRaw is writeExpTool with the harness schema check skipped (see
+// writeRawTool); the handler validates the input itself.
+func (t *ToolSet) writeExpToolRaw(name, desc string, schema map[string]any, run func(context.Context, json.RawMessage) (actool.Result, error)) actool.CoreTool {
+	return writeRawTool(name, desc, schema, t.needExploration(name, run))
 }
 
 // needExploration wraps a handler so it only runs with an exploration store.
@@ -544,8 +582,11 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// via node_detail(id).
 	vulnNodes, _ := t.ts.ListByKind(db.KindFinding, 1000)
 	factNodes, _ := t.ts.ListByKind(db.KindFact, 1000) // newest first
-	out["findings_total"] = len(vulnNodes)             // total confirmed findings (goal judgment looks here); details in finding_list (latest window)
-	out["facts"] = len(factNodes)                      // number of exploration facts/conclusions (including negative conclusions)
+	// findings_total is what goal judgment reads. A false_positive, duplicate,
+	// or ignored triage label is not an open finding, so it does not count.
+	// finding_list still shows those rows, with status, so the planner can see them.
+	out["findings_total"] = countActionableFindings(vulnNodes)
+	out["facts"] = len(factNodes) // number of exploration facts/conclusions (including negative conclusions)
 	// Stagnation surfacing (#99): repeated finished directions with no findings
 	// since their first attempt. Self-describing payload — the instruction ships
 	// with the data so no prompt-template change is needed on deployed installs.
@@ -558,8 +599,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// findings are the task's highest-value output → the overview carries the latest
 	// window (≤10 entries; vulnNodes is id-DESC, i.e. newest first) so the planner sees
 	// the recently confirmed findings at a glance each round when judging goals; use
-	// list_findings for the full/older set. Each entry keeps only {id, summary,
-	// from_intent?}: from_intent is the intent that produced this finding.
+	// list_findings for the full/older set. Each entry keeps {id, summary,
+	// status?, from_intent?}: status is the triage label mirrored onto the
+	// node, and from_intent is the intent that produced this finding.
 	// evidence/assets/vulnclass/severity/state etc. remain available via
 	// list_findings / node_detail(id).
 	const findingListCap = 10
@@ -571,6 +613,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		var fp map[string]any
 		_ = json.Unmarshal(n.Payload, &fp)
 		m := map[string]any{"id": n.ID, "summary": fp["summary"]}
+		if st, ok := fp["status"].(string); ok && strings.TrimSpace(st) != "" {
+			m["status"] = st
+		}
 		if from := factFrom[n.ID]; from > 0 {
 			m["from_intent"] = from // which intent produced this finding
 		}
@@ -1014,6 +1059,15 @@ func compactNode(n *db.Node) map[string]any {
 	if s, ok := p["source"].(string); ok && s != "" {
 		m["source"] = s
 	}
+	if prov, ok := p["provenance"].(string); ok && prov != "" {
+		m["provenance"] = prov
+		if id, ok := p["provenance_activity_id"]; ok && id != nil {
+			m["provenance_activity_id"] = id
+		}
+		if tid, ok := p["provenance_traffic_id"].(string); ok && tid != "" {
+			m["provenance_traffic_id"] = tid
+		}
+	}
 	if n.Inherited {
 		inheritedMap(m, n.SourceTaskID)
 	}
@@ -1039,6 +1093,30 @@ func compactFinding(n *db.Node) map[string]any {
 		m["status"] = st
 	}
 	return m
+}
+
+func findingPayloadStatus(n *db.Node) string {
+	var p map[string]any
+	_ = json.Unmarshal(n.Payload, &p)
+	st, _ := p["status"].(string)
+	return strings.ToLower(strings.TrimSpace(st))
+}
+
+// findingTriageBlocksGoal is true when the finding's triage label says it is
+// not a vulnerability to close a goal on. Delegates to db.FindingStatusInvalidatesGoal
+// so prove_goal and DB goal-reopen logic share one list and cannot drift (#269).
+func findingTriageBlocksGoal(status string) bool {
+	return db.FindingStatusInvalidatesGoal(status)
+}
+
+func countActionableFindings(nodes []*db.Node) int {
+	n := 0
+	for _, node := range nodes {
+		if !findingTriageBlocksGoal(findingPayloadStatus(node)) {
+			n++
+		}
+	}
+	return n
 }
 
 func (t *ToolSet) listFindings() actool.CoreTool {
@@ -1305,14 +1383,20 @@ func (t *ToolSet) listGoals() actool.CoreTool {
 		})
 }
 
+// SetTrafficProofChecker wires a live capture-store verifier used by prove_goal
+// when checking a finding's bound traffic_ref. Returning an error fails closed.
+func (t *ToolSet) SetTrafficProofChecker(fn func(ctx context.Context, trafficID string) (bool, error)) {
+	t.trafficProofChecker = fn
+}
+
 func (t *ToolSet) proveGoal() actool.CoreTool {
-	return t.writeExpTool("prove_goal", "Call when you judge that a finding/fact proves a goal met: links the evidence node to the goal node and marks the goal met. A fact counts as evidence only when its confidence is observed and its source is not target_response; any other fact is refused and the goal stays open.",
+	return t.writeExpTool("prove_goal", "Call when you judge that a finding/fact proves a goal met: links the evidence node to the goal node and marks the goal met. A finding closes a goal ONLY when it has at least one server-verified bound traffic_ref whose host matches the finding's asset (recomputed from current bindings, so a later bind_finding_traffic counts); an unbound finding stays recorded and visible but cannot close a goal. Non-HTTP goals (TCP, DNS, cloud without packets) close via an observed fact whose source is tool_output (or operator_input), not target_response. A finding whose triage status is false_positive, duplicate, or ignored is refused. Any other evidence is refused and the goal stays open.",
 		obj(map[string]any{
 			"goal_id":     idp("goal node id"),
 			"evidence_id": idp("id of the finding/fact node that proves it"),
 			"reason":      str("why this evidence satisfies the goal"),
 		}, "goal_id", "evidence_id"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
 				GoalID     json.RawMessage `json:"goal_id"`
 				EvidenceID json.RawMessage `json:"evidence_id"`
@@ -1337,17 +1421,46 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 			if evidenceNode.Kind == db.KindFact {
 				var fp map[string]any
 				_ = json.Unmarshal(evidenceNode.Payload, &fp)
+				// A fact the server could not tie to recorded work is not authority
+				// (#124 row 1): the declared source alone does not make it one. Legacy
+				// facts written before provenance existed carry no key and keep their
+				// old behaviour; every new fact carries one.
+				if prov, ok := fp["provenance"].(string); ok && prov == factProvenanceUnverified {
+					note, _ := fp["provenance_note"].(string)
+					if note == "" {
+						note = "its evidence is not tied to a recorded activity"
+					}
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d is unverified (%s). Goal %d stays open: prove it with a finding or with a fact whose evidence quotes this intent's recorded activity.", ev, note, goal)), nil
+				}
 				confidence, _ := fp["confidence"].(string)
 				if strings.ToLower(strings.TrimSpace(confidence)) != "observed" {
 					if confidence == "" {
 						confidence = "none"
 					}
-					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has confidence %q, and a fact proves a goal only when its confidence is \"observed\" (seen directly in tool output). Goal %d stays open: prove it with a finding or with an observed fact.", ev, confidence, goal)), nil
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has confidence %q, and a fact proves a goal only when its confidence is \"observed\" (seen directly in tool output). Goal %d stays open: prove it with a finding backed by verified bound traffic or with an observed tool_output fact.", ev, confidence, goal)), nil
 				}
 				// A fact whose declared source is the target's own response is not
 				// authoritative (#124, F4): the target could have planted it.
 				if source, _ := fp["source"].(string); strings.ToLower(strings.TrimSpace(source)) == factSourceTargetResponse {
-					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has source \"target_response\" (its content comes from the target, which could have planted it), and such a fact never proves a goal. Goal %d stays open: prove it with a finding or with an observed fact from another source.", ev, goal)), nil
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has source \"target_response\" (its content comes from the target, which could have planted it), and such a fact never proves a goal. Goal %d stays open: prove it with a finding backed by verified bound traffic or with an observed fact from another source.", ev, goal)), nil
+				}
+			}
+			if evidenceNode.Kind == db.KindFinding {
+				triage := findingPayloadStatus(evidenceNode)
+				if findingTriageBlocksGoal(triage) {
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: finding %d has status %q, and a false_positive, duplicate, or ignored finding never proves a goal. Goal %d stays open: prove it with a confirmed finding or with an observed fact.", ev, triage, goal)), nil
+				}
+			}
+			// A finding closes a goal only when server-side verification confirms at least
+			// one bound traffic_ref matching the finding's asset host (#124, P4.3).
+			// Lookup errors fail closed; unbound findings remain saved and visible.
+			if evidenceNode.Kind == db.KindFinding {
+				check, err := t.ts.VerifyFindingProofForNode(ctx, evidenceNode.ID, t.trafficProofChecker)
+				if err != nil {
+					return actool.Errorf(fmt.Sprintf("prove_goal refused (fail-closed): finding %d proof verification unavailable (%v). Goal %d stays open.", ev, err, goal)), nil
+				}
+				if !check.Proven {
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: finding %d cannot close goal %d (%s). The finding remains recorded and visible; bind at least one verified traffic_ref matching the finding's asset via bind_finding_traffic, or for non-HTTP goals prove with an observed tool_output fact. Goal %d stays open.", ev, goal, check.Reason, goal)), nil
 				}
 			}
 			_ = t.ts.Link(ev, db.RelProves, goal)
@@ -1403,7 +1516,7 @@ func (t *ToolSet) goalMet() actool.CoreTool {
 // --- worker write tools ---
 
 func (t *ToolSet) addFinding() actool.CoreTool {
-	return writeTool("report_finding", "Record a confirmed finding, with evidence providing verifiable proof such as command output and logs. In a task context, pass the current intent_id. The returned finding_id is the standalone finding record ID; finding_node_id is the exploration node ID (the first line keeps that node number).", obj(map[string]any{
+	return writeTool("report_finding", "Record a confirmed finding, with evidence providing verifiable proof such as command output and logs. In a task context, pass the current intent_id. The returned finding_id is the standalone finding record ID; finding_node_id is the exploration node ID (the first line keeps that node number). A finding without bound traffic stays recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset host is bound (for non-HTTP goals, prove with an observed tool_output fact).", obj(map[string]any{
 		"vulnclass": str("vulnerability class"), "name": str("vulnerability name"), "severity": str("critical|high|medium|low"), "summary": str("finding summary"),
 		"intent_id": idp("the current task's intent id"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "affected asset ids"},
 		"evidence":         str("evidence/PoC text"),
@@ -1437,12 +1550,20 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		if !findingTrafficBindingEnabled() {
 			a.TrafficRefs, a.EvidenceHintID = nil, nil
 		}
-		if len(a.EvidenceHintID) > 0 && pid(a.EvidenceHintID) <= 0 {
-			return actool.Errorf("evidence_hint_id must be a valid hint node ID; omit it when there is no handover hint"), nil
-		}
+		// A model routinely emits "evidence_hint_id": 0 meaning "absent" — the field
+		// is optional, so 0 must mean "no hint", not an error. A hint id that does
+		// not resolve to a local hint node (passing a fact node number is the common
+		// case) must not sink an otherwise complete finding either: when explicit
+		// traffic_refs are present they are sufficient on their own, so degrade to
+		// them and keep the finding. Only a call with neither usable hint nor usable
+		// refs fails.
 		refs, err := t.findingRefsFromHint(pid(a.EvidenceHintID), a.TrafficRefs)
 		if err != nil {
-			return actool.Errorf(err.Error()), nil
+			if degraded, derr := db.NormalizeTrafficRefs(a.TrafficRefs); derr == nil && len(degraded) > 0 {
+				refs = degraded
+			} else {
+				return actool.Errorf(err.Error()), nil
+			}
 		}
 		input := db.RecordFindingInput{TaskID: t.taskID, ExplorationID: t.ts.ID(), IntentID: pid(a.IntentID), VulnClass: a.VulnClass, Name: a.Name, Severity: a.Severity, Summary: a.Summary, Evidence: a.Evidence, Worker: t.worker, AssetIDs: pidList(a.AssetIDs), Counterevidence: a.Counterevidence, ConfidenceRationale: a.ConfidenceRationale}
 		var recorded *db.RecordedFinding
@@ -1478,9 +1599,9 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		}{RecordedFinding: recorded, EvidenceStatus: "bound"}
 		if len(recorded.Traffic.Bindings) == 0 {
 			result.EvidenceStatus = "not_bound"
-			result.EvidenceNote = "Finding saved without bound traffic. TCP/no-packet cases can proceed normally; if you already have verified HTTP traffic, bind it via the available bind_finding_traffic or the findings page before finishing the evidence handover. Do not create the finding again."
+			result.EvidenceNote = "Finding saved without bound traffic (recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset is bound). Bind verified HTTP traffic via bind_finding_traffic or the findings page; for non-HTTP goals, prove the goal with an observed tool_output fact. Do not create the finding again."
 			if !findingTrafficBindingEnabled() {
-				result.EvidenceNote = "Finding saved. Automatic agent traffic binding is off; you can link traffic manually on the page."
+				result.EvidenceNote = "Finding saved without bound traffic. Automatic agent traffic binding is off: this finding remains visible but cannot close a goal unless traffic is bound manually later (or a non-HTTP goal is proven with an observed tool_output fact)."
 			}
 		}
 		raw, _ := json.Marshal(result)
@@ -1518,6 +1639,95 @@ const (
 
 var factSources = []string{factSourceTargetResponse, factSourceToolOutput, factSourceThirdPartyIntel, factSourceOperatorInput, factSourceInference}
 
+// Fact provenance (#124, row 1): the source above is declared by the agent, so
+// on its own it cannot distinguish an observation from a claim. The server ties
+// each fact to a recorded activity of its intent and stores the result beside
+// the payload; only a tie (or an explicit operator statement) is authoritative.
+const (
+	factProvenanceRecorded   = "recorded_activity" // evidence quoted from this intent's activity
+	factProvenanceCaptured   = "captured_traffic"  // the quoted bytes came back from the target through the proxy
+	factProvenanceOperator   = "operator_input"    // told to the agent by the human operator
+	factProvenanceUnverified = "unverified"        // no recorded activity carries the evidence
+)
+
+// factCaptureWindowBefore/After bound the proxy captures considered part of one
+// recorded activity. The activity row is written when the tool call returns, so
+// the matching response lands just before it; the margins absorb slow calls and
+// small clock differences between the two stores.
+const (
+	factCaptureWindowBefore = 10 * time.Minute
+	factCaptureWindowAfter  = 2 * time.Minute
+)
+
+// FactTrafficLookup is the proxy capture store seen from the fact layer. Kept as
+// an interface so the agent does not depend on the traffic package. nil = no
+// capture available, and facts keep the activity-only classification.
+type FactTrafficLookup interface {
+	ResponseContaining(lines []string, fromTS, toTS int64) (id string, ok bool, err error)
+}
+
+// factEvidenceMinRunes keeps trivial fragments (a bare tool name, "200 OK")
+// from tying a fact to unrelated activity. A real evidence line quotes the
+// output; a paraphrase matches nothing, which fails safe (unverified, not
+// authoritative).
+const factEvidenceMinRunes = 12
+
+// factEvidenceMaxLines bounds the lookup cost of one record_fact item.
+const factEvidenceMaxLines = 20
+
+// factEvidenceLines splits a fact's one-line evidence into the substantive lines
+// the server can look for verbatim in the intent's recorded activity.
+func factEvidenceLines(evidence string) []string {
+	out := make([]string, 0, 4)
+	seen := map[string]bool{}
+	for _, raw := range strings.Split(evidence, "\n") {
+		line := strings.TrimSpace(raw)
+		if len([]rune(line)) < factEvidenceMinRunes || seen[line] {
+			continue
+		}
+		seen[line] = true
+		out = append(out, line)
+		if len(out) == factEvidenceMaxLines {
+			break
+		}
+	}
+	return out
+} // factProvenance classifies one fact against the intent's recorded activity.
+// Beyond the activity tie it checks whether the quoted bytes were captured
+// coming back from the target through the proxy, in which case the target
+// authored them and the fact is classified target_response even when the model
+// wrote tool_output (#124 row 1, step 3). A database error keeps the fact
+// (writes must not fail on the check) but marks it unverified, so the
+// conservative outcome is the one that survives.
+func (t *ToolSet) factProvenance(source, evidence string, intent int64) (status string, activityID int64, trafficID string, note string) {
+	if source == factSourceOperatorInput {
+		return factProvenanceOperator, 0, "", ""
+	}
+	if intent <= 0 || t.ts == nil {
+		return factProvenanceUnverified, 0, "", "no intent was recorded, so no activity could corroborate the evidence"
+	}
+	lines := factEvidenceLines(evidence)
+	if len(lines) == 0 {
+		return factProvenanceUnverified, 0, "", "evidence is missing or too short to quote a recorded activity; a fact proves a goal only when its evidence is tied to one"
+	}
+	id, at, ok, err := t.ts.ActivityContainingEvidence(intent, lines)
+	if err != nil {
+		return factProvenanceUnverified, 0, "", "the recorded activity could not be read, so the evidence is unverified"
+	}
+	if !ok {
+		return factProvenanceUnverified, 0, "", "evidence does not quote any line of this intent's recorded activity; quote the output verbatim instead of paraphrasing it"
+	}
+	if t.factTraffic != nil && !at.IsZero() {
+		from, to := at.Add(-factCaptureWindowBefore).Unix(), at.Add(factCaptureWindowAfter).Unix()
+		// A capture miss or an unreadable capture store is not a write failure:
+		// the activity tie stands and the fact stays classified as tool output.
+		if tid, hit, _ := t.factTraffic.ResponseContaining(lines, from, to); hit && tid != "" {
+			return factProvenanceCaptured, id, tid, ""
+		}
+	}
+	return factProvenanceRecorded, id, "", ""
+}
+
 // normalizeFactSource returns the stored source for a record_fact input: empty
 // means inference, a value outside factSources is an error.
 func normalizeFactSource(s string) (string, error) {
@@ -1548,16 +1758,6 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	payload := map[string]any{"summary": it.Summary, "source": source}
-	if it.Detail != "" {
-		payload["detail"] = it.Detail
-	}
-	if e := strings.TrimSpace(it.Evidence); e != "" {
-		payload["evidence"] = e
-	}
-	if c := strings.TrimSpace(it.Confidence); c != "" {
-		payload["confidence"] = c
-	}
 	intent := pid(it.IntentID)
 	if intent <= 0 {
 		intent = defaultIntent
@@ -1567,6 +1767,44 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 		if err != nil || node == nil || node.Kind != db.KindIntent {
 			return 0, fmt.Errorf("intent_id must be an intent of this task (related-task intents are read-only)")
 		}
+	}
+	// Tie the claim to recorded work before storing it (#124 row 1). A fact the
+	// server cannot corroborate loses the authority its declared source and
+	// confidence imply: it is stored as inference/inferred and marked unverified,
+	// so prove_goal refuses it even if the model labelled it observed.
+	confidence := strings.TrimSpace(it.Confidence)
+	prov, provActivity, provTraffic, provNote := t.factProvenance(source, it.Evidence, intent)
+	if prov == factProvenanceUnverified {
+		if source == factSourceTargetResponse || source == factSourceToolOutput {
+			source = factSourceInference
+		}
+		if strings.EqualFold(confidence, "observed") {
+			confidence = "inferred"
+		}
+	}
+	if prov == factProvenanceCaptured {
+		// The matched bytes came back from the target, whichever tool carried
+		// them: relabel from the capture rather than trusting the declaration.
+		source = factSourceTargetResponse
+	}
+	payload := map[string]any{"summary": it.Summary, "source": source, "provenance": prov}
+	if it.Detail != "" {
+		payload["detail"] = it.Detail
+	}
+	if e := strings.TrimSpace(it.Evidence); e != "" {
+		payload["evidence"] = e
+	}
+	if confidence != "" {
+		payload["confidence"] = confidence
+	}
+	if provActivity > 0 {
+		payload["provenance_activity_id"] = provActivity
+	}
+	if provTraffic != "" {
+		payload["provenance_traffic_id"] = provTraffic
+	}
+	if provNote != "" {
+		payload["provenance_note"] = provNote
 	}
 	// a fact is its OWN node kind (distinct from a vuln finding).
 	id, err := t.ts.AddNode(db.KindFact, payload, 5, "confirmed", t.worker, anchors)
@@ -1580,15 +1818,31 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 	return id, nil
 }
 
+// runningIntent is the intent this ToolSet works for (the worker's claimed
+// intent, set by SetOwnerNode), or 0 when the owner node is not an intent
+// (planner: the task root) or unknown.
+func (t *ToolSet) runningIntent() int64 {
+	if t.ts == nil || t.ownerNode <= 0 {
+		return 0
+	}
+	node, err := t.ts.GetNode(t.ownerNode)
+	if err != nil || node == nil || node.Kind != db.KindIntent {
+		return 0
+	}
+	return node.ID
+}
+
 func (t *ToolSet) recordFact() actool.CoreTool {
-	return t.writeExpTool("record_fact", "Write an exploration [fact/conclusion] into the exploration graph, linked to the intent that produced it (intent_id). Used to record exploration results — both [positive conclusions] like fingerprinting/enumeration, and [negative conclusions] like 'port closed'/'parameter not injectable'/'no login entry found'.\n"+
+	return t.writeExpToolRaw("record_fact", "Write an exploration [fact/conclusion] into the exploration graph, linked to the intent that produced it (intent_id). Used to record exploration results — both [positive conclusions] like fingerprinting/enumeration, and [negative conclusions] like 'port closed'/'parameter not injectable'/'no login entry found'.\n"+
 		"⚠️Multiple observations from one exploration must be [consolidated into ONE fact], not split into many; whenever they can be merged into one fact, use one: summary = a one-sentence summary of this conclusion, detail = the related details (may contain multiple concrete items). Example: a fingerprinting intent → one fact {summary:'identified the tech stack and response characteristics of site X', detail:'nginx 1.25 / Vue3 / 200 / title=.. / body_len=..'}, rather than one fact each for status code, fingerprint, and title. One intent usually produces exactly one fact; splitting too finely bloats the graph endlessly.\n"+
-		"★The facts array writes several [mutually distinct] conclusions at once (each may omit intent_id, defaulting to the top-level intent_id). Returns an ids array, same length and order as facts.\n"+
+		"★facts is the only parameter: facts:[{...}] with one item per [mutually distinct] conclusion, usually exactly one item. Returns an ids array, same length and order as facts. An item without intent_id is linked to the intent you are running.\n"+
 		"⚠️Write only conclusions you [actually saw] in tool output — don't extrapolate. evidence and confidence keep inaccurate conclusions from polluting the graph:\n"+
 		"  · evidence = [one line] of key evidence supporting this conclusion (the command + the one or two most proving output lines), **keep it brief** — details belong in detail; don't paste large output blocks here.\n"+
 		"  · confidence = observed (seen directly in output) | inferred (inferred from phenomena).\n"+
-		"  · source = where the content came from: target_response (content the target itself returned: page bodies, headers, error messages, banners, even when a tool fetched it) | tool_output (a tool's own result about the target: port states, scanner verdicts, status codes, timings) | third_party_intel (OSINT, CVE databases, public reports) | operator_input (given by the human operator) | inference (your own reasoning; the default when omitted). Any other value is refused.\n"+
-		"  · **Negative conclusions** (not injectable / port closed / no entry found, etc.) state only \"observation + tentative reading\" — state what you actually saw; whether to abandon the direction is for the planner to decide globally; always provide evidence, mark inferred when the means weren't exhausted or the evidence is weak (including probed only once, looks-like), and mark observed only when truly exhausted and directly seen.",
+		"  · source = where the content came from: target_response (content the target itself returned: page bodies, headers, error messages, banners, even when a tool fetched it) | tool_output (a tool's own result about the target: port states, scanner verdicts, status codes, timings) | third_party_intel (OSINT, CVE databases, public reports) | operator_input (given by the human operator) |       inference (your own reasoning; the default when omitted). Any other value is refused.\n"+
+		"  · **evidence is checked against this intent's recorded activity**: quote the output verbatim rather than paraphrasing it. A fact whose evidence matches no recorded activity is stored as provenance=unverified, its source is downgraded to inference, an observed confidence becomes inferred, and prove_goal refuses it. If the quoted bytes were also captured coming back from the target through the proxy, the server stores source=target_response (provenance=captured_traffic) regardless of the source you declared, because the target authored them.\n"+
+		"  · **Negative conclusions** (not injectable / port closed / no entry found, etc.) state only \"observation + tentative reading\" — state what you actually saw; whether to abandon the direction is for the planner to decide globally; always provide evidence, mark inferred when the means weren't exhausted or the evidence is weak (including probed only once, looks-like), and mark observed only when truly exhausted and directly seen."+
+		recordFactContractNote,
 		recordFactSchema(),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			a, batch, err := decodeRecordFactInput(in)
@@ -1599,7 +1853,12 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 			if !batch {
 				items = []factItem{a.factItem}
 			}
-			defaultIntent := pid(a.factItem.IntentID) // top-level intent_id = batch default
+			// Default intent of the items: a legacy top-level intent_id, else the
+			// intent this worker is running (the published schema has no top level).
+			defaultIntent := pid(a.factItem.IntentID)
+			if defaultIntent <= 0 {
+				defaultIntent = t.runningIntent()
+			}
 
 			ids := make([]int64, len(items))
 			errs := map[string]string{}

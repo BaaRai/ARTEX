@@ -341,6 +341,10 @@ docker compose up -d --build
 # → http://localhost:8787
 ```
 
+`POSTGRES_PASSWORD` is passed to ARTEX as its own variable. The server percent-encodes it into
+the connection URL, so a password may contain `/`, `?`, `%`, `@`, `:` or spaces. In `.env`, quote
+a value that contains `#`, and write `$$` for a literal `$`.
+
 The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
 `sqlmap`, `ripgrep`, `curl`, `npm`, …); `./skills` and `./data` are persisted via bind mounts.
 
@@ -435,6 +439,12 @@ root, paste the key, then click the **↻** button next to *Model* to load the p
 catalog (`GET /v1/models`) and pick a model; models the provider adds later appear on the
 next refresh. For example, [NotHoly](https://notholy.com) (offensive-security models) uses
 base URL `https://api.notholy.com/v1` with an API key from its console.
+
+**Task archive storage**: local disk by default. Set `ARTEX_ARCHIVE_STORAGE=s3` to
+store cold task packages in an S3-compatible bucket and release their local
+package space after verification. Existing local archives remain usable. See
+[Task archive storage](docs/task-archive-storage.md) for configuration, permissions,
+integrity checks, temporary disk requirements and recovery.
 
 **Concurrency**: work agents per task, in "System Settings" (default 3).
 
@@ -544,6 +554,25 @@ a trusted peer can claim any client address.
 ---
 
 ## Operations
+
+### Troubleshooting an empty tool call
+
+In the task's session transcript, expand the affected tool call and compare **Command** and
+**Output**. The `UNTRUSTED_OUTPUT` markers identify the boundary around tool output. They are
+expected and should stay enabled while troubleshooting.
+
+- **Command shows `{}`.** The recorded tool input is an empty JSON object. For a tool that
+  requires a command, this means its command argument was missing. Check which model and version
+  produced the call.
+- **Command shows `(empty)` or `(failed to load)`.** The transcript has no input detail to display
+  or could not fetch it. If the session record contains a command, include that discrepancy in a
+  report.
+- **Output shows `[]`.** This is the recorded result body. Check the row's success or failure
+  indicator and its input separately before drawing conclusions about what ran.
+
+For a recurring problem, share the ARTEX version or commit, the model and version, and a sanitized
+excerpt of the affected input and result. Remove credentials, target data, and other sensitive
+content before sharing.
 
 ### Backups
 

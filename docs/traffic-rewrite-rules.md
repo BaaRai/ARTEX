@@ -4,9 +4,11 @@ A rewrite rule matches a request or a response that goes through the capture pro
 how to change it: the method, the path and query, headers, the body, the status code.
 
 **Status: the capture proxy applies enabled rules to HTTP traffic (request and response phases),
-and records what it did.** Not yet in this change: archive format, a per-replay rule toggle, the web UI,
-and the proof flag. See [Application in the capture proxy](#application-in-the-capture-proxy) for
-what is covered and what is not.
+records what it did, tags bound evidence snapshots, supports per-replay rule opt-in, carries
+rewrite provenance in traffic archive v2, exposes rewrite counters and a rewritten filter/flag on
+`GET /api/traffic`, and shows the filter and badge on the Traffic page.** Not yet in this change:
+the rule-management web UI. See [Application in the capture proxy](#application-in-the-capture-proxy)
+for what is covered and what is not.
 
 Rules are a convenience for the operator, not a security control: a rule that fails leaves the
 message unchanged (fail open).
@@ -207,5 +209,52 @@ the slot may be converted into a tombstone if a new reservation needs the room.
 
 ### Replay
 
-Replay goes through the recording proxy like any other traffic, so the enabled rules apply to a
-replay and the resulting exchange is traced like a captured one. There is no per-replay toggle yet.
+`POST /api/traffic/replay` sends the edited request through the recording proxy so the exchange is
+captured in Traffic, but **bypasses capture rewrite rules by default** (`apply_rules: false`). To
+run enabled capture rules against a replay and trace them like captured traffic, opt in with
+`"apply_rules": true` (or check **Apply capture rewrite rules** in the Replay panel).
+
+When `apply_rules` is false, `traffic.Replay` registers a single-use random 32-byte hex nonce in an
+in-memory registry, attaches the internal header `X-ARTEX-Replay-Nonce: <nonce>`, and removes the
+nonce when the call returns. The capture proxy strips `X-ARTEX-Replay-Nonce` unconditionally in the
+request hook so the target never sees it; only a value matching a registered nonce bypasses both
+request and response rule phases, while any forged header is stripped and ignored.
+
+### Stats
+
+`GET /api/traffic` includes a `rewrite` object exposing the proxy's `RewriteStats` counters since
+start: `large_responses`, `capacity_refusals`, `tombstone_drops`, `conversions`, and `sweeps`.
+
+### Traffic list
+
+Each exchange returned by `GET /api/traffic` carries `"rewritten": true|false`, computed with an
+`EXISTS` check against `exchange_rewrites` for rows with `outcome = 'applied'` (skipped or failed
+rules do not mark an exchange as rewritten).
+
+`GET /api/traffic` accepts an optional `rewritten` query parameter:
+
+- `all` (default when omitted or unrecognized): returns all exchanges.
+- `rewritten` (alias `true`): returns only exchanges with at least one applied rewrite row.
+- `original` (alias `false`): returns only exchanges with no applied rewrite row.
+
+The filter combines with `host`, `method`, `path`, `status`, `q`, `body`, `resp_min`, and
+`resp_max` using `AND`, and `total` and pagination reflect the filtered set. The Traffic page shows
+the filter next to the existing filters and renders a `Rewritten` badge on rewritten rows.
+
+### Task archives (v2)
+
+Task archives export captured traffic into `traffic/traffic.json` using **format version 2**:
+
+- Each `ArchiveExchange` carries optional `rewritten` (`bool`) and `rewrite_rule_ids` (`[]int64`),
+  matching `RewriteInfo` (applied rows only, sorted ascending, distinct). Exchanges with no applied
+  rewrite omit both fields.
+- Output stays deterministic: exchanges are ordered by `(ts, id)`, `rewrite_rule_ids` are sorted
+  and distinct, and `blobs` are sorted so re-exporting the same data produces a byte-identical
+  `traffic.json`.
+- `ImportArchive` accepts versions 1 and 2 and refuses any other version. Version 1 entries import
+  as unrewritten with no rule IDs. Version 2 entries marked `rewritten: true` reconstruct minimal
+  applied rows in `exchange_rewrites` (`phase = 'archived'`, `outcome = 'applied'`,
+  `reason = 'archived'`, `rule_snapshot = NULL`) for each distinct rule ID (or a single `NULL`
+  `rule_id` row when `rewrite_rule_ids` is empty), preserving `RewriteInfo`, `traffic_get`'s
+  `=== REWRITTEN ===` header, evidence-binding provenance, and the traffic list filter without
+  fabricating a rule snapshot or request/response phase. Existing hot rows always win on import.

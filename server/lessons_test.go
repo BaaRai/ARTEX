@@ -36,7 +36,10 @@ func TestTaskLessonsExtractionAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	taskID, _ := strconv.ParseInt(task.ID, 10, 64)
-	defer func() { _ = m.pg.DeleteTask(taskID) }()
+	defer func() {
+		_, _ = m.pg.DeleteFindingsByTask(taskID)
+		_ = m.pg.DeleteTask(taskID)
+	}()
 	defer func() { _, _ = m.pg.Exec(`DELETE FROM rsi_lessons`) }()
 
 	if _, err := m.pg.Exec(`
@@ -138,7 +141,10 @@ func TestTerminalStatusExtractsLessons(t *testing.T) {
 		t.Fatal(err)
 	}
 	taskID, _ := strconv.ParseInt(task.ID, 10, 64)
-	defer func() { _ = m.pg.DeleteTask(taskID) }()
+	defer func() {
+		_, _ = m.pg.DeleteFindingsByTask(taskID)
+		_ = m.pg.DeleteTask(taskID)
+	}()
 	if _, err := m.pg.Exec(`
 INSERT INTO findings(task_id,vulnclass,name,summary,severity,status)
 VALUES ($1,'xss','Reflected XSS','reflected in search','high','confirmed')`, taskID); err != nil {

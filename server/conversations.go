@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -223,7 +224,17 @@ func (s *Server) pgDeleteConversation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.removeConversationSpill(c.ID)
 	writeJSON(w, 200, map[string]any{"deleted": c.ID})
+}
+
+// removeConversationSpill removes the command-output spill directory of a deleted
+// conversation's chat session (<data>/spill/sessions/conv-<id>).
+func (s *Server) removeConversationSpill(id int64) {
+	dir := agent.SessionSpillDir(s.m.dir, s.convBusyKey(id))
+	if err := os.RemoveAll(dir); err != nil {
+		log.Printf("[conv %d] remove the spill directory %s: %v", id, dir, err)
+	}
 }
 
 const maxConversationDeleteBatch = 100
@@ -287,6 +298,7 @@ func (s *Server) pgDeleteConversationsBatch(w http.ResponseWriter, r *http.Reque
 	deletedSet := make(map[int64]struct{}, len(deleted))
 	for _, id := range deleted {
 		deletedSet[id] = struct{}{}
+		s.removeConversationSpill(id)
 	}
 	items := make([]conversationDeleteItem, 0, len(ids))
 	for _, id := range ids {

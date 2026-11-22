@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Autumn-27/artex/agent"
 	pgdb "github.com/Autumn-27/artex/db"
 	"github.com/klauspost/compress/zstd"
 )
@@ -16,11 +17,19 @@ func TestTaskArchivePackageFilesRoundTrip(t *testing.T) {
 	dataDir := t.TempDir()
 	taskID := "42"
 	explorationID := int64(73)
-	taskFile := filepath.Join(dataDir, "tasks", taskID, "uploads", "evidence.txt")
+	// The task directory packs whole: the main agent's run directory and a worker's.
+	taskFile := filepath.Join(dataDir, "tasks", taskID, "main", "uploads", "evidence.txt")
+	workerFile := filepath.Join(dataDir, "tasks", taskID, "i7", "notes.txt")
+	// The task's command-output spills are packed with it, and those of another task stay.
+	spillFile := filepath.Join(agent.TaskSpillDir(dataDir, taskID), "output-1-1.txt")
+	unrelatedSpill := filepath.Join(agent.TaskSpillDir(dataDir, "43"), "output-1-2.txt")
 	transcriptFile := filepath.Join(dataDir, "transcripts", "exp73-worker-1.jsonl")
 	unrelatedTranscript := filepath.Join(dataDir, "transcripts", "exp74-worker-1.jsonl")
 	for path, body := range map[string]string{
 		taskFile:            "task evidence",
+		workerFile:          "worker notes",
+		spillFile:           "spilled output",
+		unrelatedSpill:      "leave me hot",
 		transcriptFile:      "transcript",
 		unrelatedTranscript: "leave me hot",
 	} {
@@ -36,8 +45,13 @@ func TestTaskArchivePackageFilesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(taskFile); !os.IsNotExist(err) {
-		t.Fatalf("task file still hot after staging: %v", err)
+	for _, path := range []string{taskFile, workerFile, spillFile, filepath.Dir(spillFile)} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("task file %s still hot after staging: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(unrelatedSpill); err != nil {
+		t.Fatalf("the spill of another task was staged: %v", err)
 	}
 	if _, err := os.Stat(transcriptFile); !os.IsNotExist(err) {
 		t.Fatalf("task transcript still hot after staging: %v", err)
@@ -76,14 +90,20 @@ func TestTaskArchivePackageFilesRoundTrip(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(extracted, filepath.FromSlash(pgdb.TaskArchiveLLMRecordsPath))); err != nil || !bytes.Equal(got, streamBody) {
 		t.Fatalf("streamed LLM archive payload=%q err=%v", got, err)
 	}
-	installed, err := installTaskArchiveFiles(dataDir, extracted, taskID, 1)
+	// The package holds the run directories under files/tasks/<id>/.
+	for _, rel := range []string{filepath.Join("main", "uploads", "evidence.txt"), filepath.Join("i7", "notes.txt")} {
+		if _, err := os.Stat(filepath.Join(extracted, "files", "tasks", taskID, rel)); err != nil {
+			t.Fatalf("package entry files/tasks/%s/%s: %v", taskID, rel, err)
+		}
+	}
+	installed, err := installTaskArchiveFiles(dataDir, extracted, taskID, 1, ExecPrivilege{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := installed.commit(); err != nil {
 		t.Fatal(err)
 	}
-	for path, want := range map[string]string{taskFile: "task evidence", transcriptFile: "transcript"} {
+	for path, want := range map[string]string{taskFile: "task evidence", workerFile: "worker notes", spillFile: "spilled output", transcriptFile: "transcript"} {
 		got, err := os.ReadFile(path)
 		if err != nil || string(got) != want {
 			t.Fatalf("restored %s = %q, %v; want %q", path, got, err, want)
@@ -129,7 +149,7 @@ func TestTaskArchivePackageSkipsSymlink(t *testing.T) {
 
 func TestTaskArchiveStageJournalRollsBackInterruptedMoves(t *testing.T) {
 	dataDir := t.TempDir()
-	taskFile := filepath.Join(dataDir, "tasks", "42", "evidence.txt")
+	taskFile := filepath.Join(dataDir, "tasks", "42", "main", "evidence.txt")
 	transcriptFile := filepath.Join(dataDir, "transcripts", "exp73-worker.jsonl")
 	for _, path := range []string{taskFile, transcriptFile} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -168,18 +188,18 @@ func TestTaskArchiveStageJournalRollsBackInterruptedMoves(t *testing.T) {
 func TestTaskArchiveRestoreJournalRollsBackInterruptedInstall(t *testing.T) {
 	dataDir := t.TempDir()
 	extracted := filepath.Join(dataDir, "archives", "tasks", ".restore", "11-test")
-	source := filepath.Join(extracted, "files", "tasks", "42", "evidence.txt")
+	source := filepath.Join(extracted, "files", "tasks", "42", "main", "evidence.txt")
 	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(source, []byte("evidence"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := installTaskArchiveFiles(dataDir, extracted, "42", 11)
+	_, err := installTaskArchiveFiles(dataDir, extracted, "42", 11, ExecPrivilege{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination := filepath.Join(dataDir, "tasks", "42", "evidence.txt")
+	destination := filepath.Join(dataDir, "tasks", "42", "main", "evidence.txt")
 	if _, err := os.Stat(destination); err != nil {
 		t.Fatal(err)
 	}

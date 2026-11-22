@@ -154,19 +154,28 @@ func TestTaskArchiveDatabaseRoundTrip(t *testing.T) {
 VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmProfileID, exhaustedAt, chainCreatedAt); err != nil {
 		t.Fatal(err)
 	}
+	var assetID, findingID int64
 	defer func() {
 		_, _ = d.Exec(`DELETE FROM llm_usage WHERE task_id=$1 OR exploration_id=$2`, fmt.Sprint(task.ID), task.ExplorationID)
+		_, _ = d.Exec(`DELETE FROM llm_records WHERE task_id=$1`, fmt.Sprint(task.ID))
 		_, _ = d.Exec(`DELETE FROM skill_usage WHERE task_id=$1 OR exploration_id=$2`, task.ID, task.ExplorationID)
 		_, _ = d.Exec(`DELETE FROM tool_usage WHERE task_id=$1 OR exploration_id=$2`, task.ID, task.ExplorationID)
+		_, _ = d.DeleteFindingsByTask(task.ID)
+		if findingID != 0 {
+			_, _ = d.DeleteFinding(findingID)
+		}
 		_, _ = d.Exec(`DELETE FROM task_archives WHERE task_id=$1`, task.ID)
 		_ = d.DeleteTask(task.ID)
+		if assetID != 0 {
+			_, _ = d.Exec(`DELETE FROM assets WHERE id=$1`, assetID)
+		}
 		_, _ = d.Exec(`DELETE FROM llm_profiles WHERE id=$1`, llmProfileID)
 		_, _ = d.Exec(`DELETE FROM companies WHERE id=$1`, companyID)
 	}()
 	if err := d.SetPaused(task.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	assetID, err := d.Assets().UpsertRootDomain(UpsertRootDomainReq{Domain: fmt.Sprintf("archive-%d.example", task.ID), TaskID: task.ID})
+	assetID, err = d.Assets().UpsertRootDomain(UpsertRootDomainReq{Domain: fmt.Sprintf("archive-%d.example", task.ID), TaskID: task.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,12 +206,19 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.AddFinding(task.ID, nodeID, vulnclass, "archive finding", SeverityCritical, "summary", "evidence", "worker", []int64{assetID}); err != nil {
+	if findingID, err = d.AddFinding(task.ID, nodeID, vulnclass, "archive finding", SeverityCritical, "summary", "evidence", "worker", []int64{assetID}); err != nil {
 		t.Fatal(err)
 	}
 	archive, err := d.QueueTaskArchive(task.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if archive.Storage != "" {
+		t.Fatalf("queued archive without a location has storage %q", archive.Storage)
+	}
+	encoded, err := json.Marshal(archive)
+	if err != nil || bytes.Contains(encoded, []byte(`"storage"`)) {
+		t.Fatalf("unknown storage must be omitted from JSON: %s, %v", encoded, err)
 	}
 	claimed, err := d.ClaimTaskArchiveJob(t.Context())
 	if err != nil || claimed == nil || claimed.ID != archive.ID || claimed.State != Archiving {
@@ -242,7 +258,7 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 		t.Fatalf("hot compaction left nodes=%d assets=%d usage=%d", nodes, assets, usage)
 	}
 	ready, err := d.GetTaskArchive(archive.ID)
-	if err != nil || ready == nil || ready.State != ArchiveReady {
+	if err != nil || ready == nil || ready.State != ArchiveReady || ready.Storage != "local" {
 		t.Fatalf("ready archive = %+v, %v", ready, err)
 	}
 	var stats map[string]any
@@ -515,5 +531,47 @@ func TestFillArchiveDefaults(t *testing.T) {
 	out, err = fillArchiveDefaults("activity", in)
 	if err != nil || string(out) != string(in) {
 		t.Fatalf("activity changed: %s err=%v", out, err)
+	}
+}
+
+// FailTaskArchiveJob fails a job that is still running. A failure reported after
+// the archive committed (the worker recovers a panic in the cleanup that follows
+// the commit) must not turn a ready archive into archive_failed: it could then
+// be neither restored nor deleted.
+func TestFailTaskArchiveJobKeepsCommittedState(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	defer d.Close()
+	task, err := d.CreateTaskWithOptions("late archive failure", "must stay ready", TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = d.Exec(`DELETE FROM task_archives WHERE task_id=$1`, task.ID)
+		_ = d.DeleteTask(task.ID)
+	}()
+	if err := d.SetPaused(task.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := d.QueueTaskArchive(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ state, want string }{{Archiving, ArchiveFailed}, {ArchiveReady, ArchiveReady}} {
+		if _, err := d.Exec(`UPDATE task_archives SET state=$2,error='' WHERE id=$1`, queued.ID, c.state); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.FailTaskArchiveJob(queued.ID, Archiving, errors.New("late failure")); err != nil {
+			t.Fatal(err)
+		}
+		item, err := d.GetTaskArchive(queued.ID)
+		if err != nil || item == nil {
+			t.Fatalf("archive %d: %v", queued.ID, err)
+		}
+		if item.State != c.want || (c.want == ArchiveFailed) != (item.Error == "late failure") {
+			t.Fatalf("failing a job in state %s: state=%s error=%q, want state %s", c.state, item.State, item.Error, c.want)
+		}
 	}
 }

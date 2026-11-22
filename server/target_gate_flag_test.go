@@ -83,6 +83,7 @@ func (g *gateServer) cleanupTask(t *testing.T, id string) {
 		_ = g.m.pg.DeleteTask(n)
 		_, _ = g.m.pg.Exec(`DELETE FROM target_pins WHERE task_id=$1`, n)
 		_, _ = g.m.pg.Exec(`DELETE FROM intercept_pending WHERE task_id=$1`, id)
+		_, _ = g.m.pg.Exec(`DELETE FROM assets WHERE type = 'ip' AND ip = '127.0.0.1'`)
 	})
 }
 
