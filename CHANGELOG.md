@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file. The format is b
 - **Asset URLs drop userinfo when parsing fails**: a URL `url.Parse` rejects is no longer stored unchanged. The `scheme://userinfo@` prefix is removed first, so a password in that prefix does not land in the asset row.
 - **Hook `range` counts against the memory budget**: ranging over a body, slice, string, or map charges the iteration before the loop. A body larger than the hook budget now stops with the memory limit instead of allocating one element at a time with no check.
 - **Chat upload name search stops**: choosing `name`, `name-1`, `name-2`, … now returns an error when the filesystem rejects the path or after 10000 collisions, instead of looping while `Stat` keeps failing.
+- **Uploads do not follow a symlink**: chat and workspace uploads `Lstat` the destination and refuse to write when it is already a symlink. A dangling link is no longer treated as a free name.
 - **Docker Compose database passwords with URL-special characters**: `docker-compose.yml` no longer pastes `POSTGRES_PASSWORD` into `ARTEX_PG_DSN`. The server builds the URL from `ARTEX_PG_HOST`, `ARTEX_PG_PORT`, `ARTEX_PG_USER`, `ARTEX_PG_PASSWORD`, `ARTEX_PG_DBNAME` and `ARTEX_PG_SSLMODE`, percent-encoding the user and password, so `/`, `?`, `%`, `@`, `:` and spaces connect. An explicit `ARTEX_PG_DSN` still wins and is not rewritten. `ARTEX_PG_PASSWORD` is removed from the environment with the other startup secrets (#450).
 
 ## [0.7.0] - 2026-11-21

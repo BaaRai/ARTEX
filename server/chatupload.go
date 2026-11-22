@@ -161,9 +161,10 @@ func uniqueUploadPath(dir, name string) (string, error) {
 }
 
 // uploadPathFree reports whether path can be created. ok is false when a file
-// is already there. Any other Stat error is returned so the caller stops.
+// or a symlink (including a dangling one) is already there. Any other Lstat
+// error is returned so the caller stops.
 func uploadPathFree(path string) (dest string, ok bool, err error) {
-	_, err = os.Stat(path)
+	_, err = os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return path, true, nil
 	}
