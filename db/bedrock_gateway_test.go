@@ -58,4 +58,14 @@ func TestBedrockGatewayHeadersEncryptedAndWriteOnly(t *testing.T) {
 	if err != nil || p.CustomHeaders != "" {
 		t.Fatal("clear did not remove headers")
 	}
+	if _, err := d.SaveProfile(&LLMProfile{ID: id, Name: p.Name, Format: p.Format, BaseURL: p.BaseURL, Model: p.Model, APIKey: "synthetic-token", CustomHeaders: headers}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.SaveProfile(&LLMProfile{ID: id, Name: p.Name, Format: p.Format, BaseURL: "https://other.example.com/bedrock", Model: p.Model}); err != nil {
+		t.Fatal(err)
+	}
+	p, err = d.ProfileByID(id)
+	if err != nil || p.APIKey != "" || p.CustomHeaders != "" {
+		t.Fatal("direct endpoint edit retained gateway credentials")
+	}
 }

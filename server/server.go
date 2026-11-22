@@ -459,9 +459,15 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 	var sessionHeaderKey string
 	var userAgent string
 	var retry db.RetryOverride
+	clearCustomHeaders := format != "bedrock-gateway"
 	if profs, _ := s.m.pg.ListProfiles(); profs != nil {
 		for _, p := range profs {
 			if p.Name == "default" {
+				// A header saved for one gateway must not follow the legacy
+				// endpoint's default profile to another destination.
+				if !sameLLMEndpoint(format, cfg.BaseURL, p.Format, p.BaseURL) {
+					clearCustomHeaders = true
+				}
 				id, priority, poolExclude, streaming = p.ID, p.Priority, p.PoolExclude, p.Streaming
 				maxTokens, maxTokensField = p.MaxTokens, p.MaxTokensField
 				sessionHeaderKey = p.SessionHeaderKey
@@ -477,7 +483,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 		ContextWindowK: cfg.ContextWindowK, ThinkingType: cfg.ThinkingType, ReasoningEffort: cfg.ReasoningEffort, IsDefault: true,
 		Priority: priority, PoolExclude: poolExclude, Streaming: streaming,
 		MaxTokens: maxTokens, MaxTokensField: maxTokensField, SessionHeaderKey: sessionHeaderKey, UserAgent: userAgent,
-		Retry: retry, CustomHeaders: cfg.CustomHeaders,
+		Retry: retry, CustomHeaders: cfg.CustomHeaders, ClearCustomHeaders: clearCustomHeaders,
 	})
 	if err != nil {
 		return err
@@ -1511,17 +1517,19 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg.ContextWindowK = k
 	}
-	// Keyless formats (Ollama) need no key; the others keep/require one.
-	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
-		s.cfgMu.Lock()
-		if sameLLMEndpoint(req.Provider, req.BaseURL, s.llmCfg.Provider(), s.llmCfg.BaseURL) {
+	// A rotated token at the same gateway still uses that gateway's saved
+	// headers. Neither secret follows a changed endpoint.
+	s.cfgMu.Lock()
+	if sameLLMEndpoint(req.Provider, req.BaseURL, s.llmCfg.Provider(), s.llmCfg.BaseURL) {
+		if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 			cfg.APIKey = s.llmCfg.APIKey
-			if cfg.CustomHeaders == "" {
-				cfg.CustomHeaders = s.llmCfg.CustomHeaders
-			}
 		}
-		s.cfgMu.Unlock()
+		if cfg.CustomHeaders == "" && cfg.Format == agent.FormatBedrockGateway {
+			cfg.CustomHeaders = s.llmCfg.CustomHeaders
+		}
 	}
+	s.cfgMu.Unlock()
+	// Keyless formats (Ollama) need no key; the others keep/require one.
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		writeErr(w, 400, "api_key required")
 		return

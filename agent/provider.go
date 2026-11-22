@@ -614,6 +614,16 @@ func ValidateUserAgent(raw string) (string, error) {
 // SSE stream from flooding the log.
 func logTestConnection(c Config, capt *llmrec.Capture) {
 	attempts := capt.Attempts()
+	if c.Format == FormatBedrockGateway {
+		if len(attempts) == 0 {
+			log.Print("[llm-test] bedrock-gateway — no HTTP request was sent")
+			return
+		}
+		for i, a := range attempts {
+			log.Printf("[llm-test] bedrock-gateway — attempt %d/%d HTTP %d", i+1, len(attempts), a.Status)
+		}
+		return
+	}
 	if len(attempts) == 0 {
 		log.Printf("[llm-test] %s / %s @ %s — no HTTP request was ever sent (config resolution or connection setup failed)",
 			c.Provider(), c.Model, c.BaseURL)
@@ -684,6 +694,13 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 	}, "ping")
 	lat := time.Since(start)
 	if err != nil {
+		if c.Format == FormatBedrockGateway {
+			attempts := capt.Attempts()
+			if len(attempts) > 0 && attempts[len(attempts)-1].Status >= 400 {
+				return lat, "", fmt.Errorf("Bedrock gateway returned HTTP %d", attempts[len(attempts)-1].Status)
+			}
+			return lat, "", fmt.Errorf("Bedrock gateway connection failed")
+		}
 		return lat, "", err
 	}
 	// err==nil is not enough: requests that go through while the model emits nothing

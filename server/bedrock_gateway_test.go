@@ -81,4 +81,66 @@ func TestBedrockGatewaySavedProfileAndConnection(t *testing.T) {
 	if err != nil || stored.BaseURL != fake.URL+"/bedrock" {
 		t.Fatal("rejected endpoint edit changed the saved profile")
 	}
+	body, _ = json.Marshal(map[string]any{"id": id, "name": "t-bedrock-server", "format": "bedrock-gateway", "model": "test.model", "base_url": other.URL + "/bedrock", "api_key": "synthetic-new-token"})
+	rec = httptest.NewRecorder()
+	s.pgSaveProfile(rec, httptest.NewRequest(http.MethodPost, "/api/llm/profiles", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("endpoint edit with new token returned HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err = m.pg.ProfileByID(id)
+	if err != nil || stored.BaseURL != other.URL+"/bedrock" || stored.CustomHeaders != "" {
+		t.Fatalf("endpoint edit retained old gateway headers: %v", err)
+	}
+}
+
+func TestLegacyLLMEndpointDoesNotCarryGatewayHeaders(t *testing.T) {
+	skipWithoutDSN(t)
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	const header = "X-Example-Route: synthetic-route"
+	oldBase := "http://127.0.0.1:40111/old"
+	newBase := "http://127.0.0.1:40112/new"
+	id, err := m.pg.SaveProfile(&db.LLMProfile{
+		Name: "default", Format: "bedrock-gateway", Model: "test.model",
+		BaseURL: oldBase, APIKey: "synthetic-old-token", CustomHeaders: header,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = m.pg.Exec(`DELETE FROM llm_profiles WHERE id=$1`, id) })
+	if err := m.pg.SetActiveProfile(id); err != nil {
+		t.Fatal(err)
+	}
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	post := func(baseURL, token string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"provider": "bedrock-gateway", "model": "test.model", "base_url": baseURL, "api_key": token,
+		})
+		rec := httptest.NewRecorder()
+		s.setLLM(rec, httptest.NewRequest(http.MethodPost, "/api/llm", bytes.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("legacy update returned HTTP %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	post(oldBase, "")
+	stored, err := m.pg.ProfileByID(id)
+	if err != nil || stored.CustomHeaders != header {
+		t.Fatalf("same-endpoint update lost gateway headers: %v", err)
+	}
+	post(oldBase, "synthetic-rotated-token")
+	stored, err = m.pg.ProfileByID(id)
+	if err != nil || stored.CustomHeaders != header {
+		t.Fatalf("same-endpoint token rotation lost gateway headers: %v", err)
+	}
+	post(newBase, "synthetic-new-token")
+	stored, err = m.pg.ProfileByID(id)
+	if err != nil || stored.BaseURL != newBase || stored.CustomHeaders != "" {
+		t.Fatalf("endpoint change retained gateway headers: %v", err)
+	}
 }

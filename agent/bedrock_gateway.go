@@ -149,8 +149,36 @@ func (t *bedrockGatewayTransport) RoundTrip(req *http.Request) (*http.Response, 
 		q.Header[name] = append([]string(nil), values...)
 	}
 	resp, err := t.base.RoundTrip(q)
-	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 || !streaming {
+	if err != nil {
 		return resp, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Gateways may echo authorization material in error bodies or headers.
+		// Keep the status for callers and retries without exposing that echo.
+		// Preserve only the quota classification used by the outer transport.
+		quotaExhausted := false
+		if resp.StatusCode == http.StatusTooManyRequests {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			quotaExhausted = IsQuotaExhaustedMessage(string(raw))
+		}
+		_ = resp.Body.Close()
+		message := fmt.Sprintf("Bedrock gateway returned HTTP %d", resp.StatusCode)
+		if quotaExhausted {
+			message += ": quota_exceeded"
+		}
+		body := []byte(fmt.Sprintf(`{"message":%q}`, message))
+		copy := *resp
+		copy.Body = io.NopCloser(bytes.NewReader(body))
+		copy.ContentLength = int64(len(body))
+		copy.Header = make(http.Header)
+		copy.Header.Set("Content-Type", "application/json")
+		if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+			copy.Header.Set("Retry-After", retryAfter)
+		}
+		return &copy, nil
+	}
+	if !streaming {
+		return resp, nil
 	}
 	if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "application/vnd.amazon.eventstream") {
 		resp.Body.Close()
@@ -171,7 +199,7 @@ func (t *bedrockGatewayTransport) RoundTrip(req *http.Request) (*http.Response, 
 				return
 			}
 			if kind := fmt.Sprint(frame.Headers.Get(":message-type")); kind == "exception" || kind == "error" {
-				writer.CloseWithError(fmt.Errorf("Bedrock gateway stream exception: %s", frame.Payload))
+				writer.CloseWithError(errors.New("Bedrock gateway stream exception"))
 				return
 			}
 			if fmt.Sprint(frame.Headers.Get(":message-type")) != "event" || fmt.Sprint(frame.Headers.Get(":event-type")) != "chunk" {

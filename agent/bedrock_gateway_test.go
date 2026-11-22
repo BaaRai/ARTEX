@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -105,7 +106,7 @@ func TestBedrockGatewayCompleteAndStream(t *testing.T) {
 func TestBedrockGatewayStreamExceptionIsAnError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
-		_ = eventstream.NewEncoder().Encode(w, eventstream.Message{Headers: eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("exception")}, {Name: ":event-type", Value: eventstream.StringValue("validationException")}}, Payload: []byte(`{"message":"synthetic failure"}`)})
+		_ = eventstream.NewEncoder().Encode(w, eventstream.Message{Headers: eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("exception")}, {Name: ":event-type", Value: eventstream.StringValue("validationException")}}, Payload: []byte(`{"message":"synthetic-secret"}`)})
 	}))
 	defer server.Close()
 	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL, "synthetic-token", "")
@@ -117,10 +118,62 @@ func TestBedrockGatewayStreamExceptionIsAnError(t *testing.T) {
 	for _, err := range p.Stream(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("hello")}}) {
 		if err != nil {
 			sawError = true
+			if strings.Contains(err.Error(), "synthetic-secret") {
+				t.Fatal("stream exception exposed gateway response body")
+			}
 		}
 	}
 	if !sawError {
 		t.Fatal("stream exception was treated as success")
+	}
+}
+
+func TestBedrockGatewayErrorBodyIsRedacted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"echoed synthetic-token and private-route"}`))
+	}))
+	defer server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL+"/private-route", "synthetic-token", "")
+	cfg.Stream = false
+	_, _, err := TestConnection(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 401") || strings.Contains(err.Error(), "synthetic-token") || strings.Contains(err.Error(), "private-route") {
+		t.Fatalf("unsafe connection error: %v", err)
+	}
+}
+
+func TestBedrockGatewayQuotaClassificationAfterRedaction(t *testing.T) {
+	for _, tc := range []struct {
+		name, upstreamBody string
+		wantStatus         int
+	}{
+		{"exhausted", `{"message":"quota_exceeded synthetic-secret"}`, http.StatusPaymentRequired},
+		{"transient", `{"message":"rate limit reached synthetic-secret"}`, http.StatusTooManyRequests},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(tc.upstreamBody))
+			}))
+			defer server.Close()
+			transport := quotaAwareTransport{base: &bedrockGatewayTransport{
+				base: http.DefaultTransport, baseURL: server.URL, token: "synthetic-token", model: "test.model",
+			}}
+			req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/messages", strings.NewReader(`{"stream":false}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := transport.RoundTrip(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil || resp.StatusCode != tc.wantStatus || strings.Contains(string(body), "synthetic-secret") {
+				t.Fatalf("status=%d body=%q err=%v", resp.StatusCode, body, err)
+			}
+		})
 	}
 }
 
