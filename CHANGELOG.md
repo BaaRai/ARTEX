@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **LLM connection-test logs stay one line**: the response body written by a connection test has CR and LF replaced with spaces before it is logged, so the body cannot start a second log record.
 - **Benchmark judge validation**: grading and the judge's falsification battery require one verdict per ground-truth ID, actual boolean decisions and gates, and matches to the supplied scanner findings. Invalid grading responses use the existing three-attempt budget and abort without writing scores, rather than counting duplicate IDs or truthy strings such as `"false"`.
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
 - **Notification delivery ignores HTTP_PROXY**: the dial guard checks the address it connects to. An environment proxy made that address the proxy, so a link-local target could still be reached. Notification HTTP now connects directly.
