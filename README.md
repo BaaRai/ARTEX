@@ -635,7 +635,19 @@ default; the Docker container publishes on `127.0.0.1`), and the activity stream
 default, so **no `NEXT_PUBLIC_SSE_BASE` is needed**: expose 443 and keep 8787 internal.
 
 SSE keeps a long-lived connection with continuous pushes, so the proxy **must disable buffering**;
-otherwise the browser connects but never receives events. Nginx example:
+otherwise the browser connects but never receives events.
+
+Redirect plain HTTP first, so a bookmarked `http://` URL never reaches the app unencrypted:
+
+```nginx
+server {
+    listen 80;
+    server_name your.domain.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+Then the TLS server:
 
 ```nginx
 server {
@@ -680,6 +692,13 @@ default) to the address ARTEX sees the proxy connect from:
 For a peer in that list, ARTEX reads `X-Forwarded-For` from the right and takes the first address
 that is not a trusted proxy; from any other peer the header is ignored. Trust only proxies you run:
 a trusted peer can claim any client address.
+
+**Security headers**: every response carries `X-Content-Type-Options: nosniff`, a same-origin
+referrer policy and a `frame-ancestors 'self'` CSP; console documents additionally get a
+`Permissions-Policy` and COOP/CORP. `Strict-Transport-Security` is sent only when the request is
+known to be HTTPS: directly over TLS, or via `X-Forwarded-Proto: https` from a trusted proxy. The
+same list above enables it, so with nginx in front, the 443 server answers with HSTS after you set
+`ARTEX_TRUSTED_PROXIES`.
 
 > Only when SSE needs a different origin from the page (e.g. a dedicated subdomain) should you set
 > `NEXT_PUBLIC_SSE_BASE` **at build time** (it is baked into the static bundle during `next build`;

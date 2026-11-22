@@ -602,6 +602,11 @@ func logTestConnection(c Config, capt *llmrec.Capture) {
 // the head of an SSE stream while bounding a runaway response.
 func clipBody(s string) string {
 	s = strings.TrimSpace(s)
+	// One log record per attempt. A body that contains a newline would
+	// otherwise look like a second log line.
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
 	if s == "" {
 		return "(empty)"
 	}
