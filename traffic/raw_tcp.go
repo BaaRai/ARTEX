@@ -63,7 +63,7 @@ func (t *Traffic) spillRawDir(data []byte, previewCap int) (preview []byte, blob
 	sum := sha256.Sum256(data)
 	h := hex.EncodeToString(sum[:])
 	blobDir := filepath.Join(t.dir, "_blobs", "sha256", h[:2])
-	if err := os.MkdirAll(blobDir, 0o755); err != nil {
+	if err := os.MkdirAll(blobDir, 0o700); err != nil {
 		log.Printf("[traffic/socks5] failed to create blob directory: %v", err)
 		return append([]byte(nil), data[:previewCap]...), ""
 	}
@@ -96,7 +96,7 @@ func writeBlobAtomic(blobDir, blobPath, hash string, data []byte) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(0o644); err != nil {
+	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err
 	}
