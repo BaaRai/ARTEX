@@ -57,8 +57,10 @@ printed at startup:
 docker compose logs artex | grep "Setup token"
 ```
 
-> There is no prebuilt Docker image to pull: the image is always built from your checkout.
-> For all installation paths (script, binaries, source, release archives), see [Installation](#installation).
+> Multi-arch release images (`linux/amd64`, `linux/arm64`) are published to GitHub Container
+> Registry at `ghcr.io/baarai/artex` from the next tagged release; v0.7.0 predates the publish
+> step. For pulling the prebuilt image and all other installation paths (script, binaries,
+> source, release archives), see [Installation](#installation).
 
 ---
 
@@ -331,7 +333,9 @@ The UI listens on `127.0.0.1` by default. To reach it from another machine (or f
 ARTEX runs inside WSL), set `ARTEX_BIND_ADDR=0.0.0.0` in `.env` (the setup token still protects the
 first-run claim), or keep loopback and use a reverse proxy or SSH tunnel.
 
-### Option 2: Docker Compose (manual)
+### Option 2: Docker (Compose checkout build or prebuilt GHCR image)
+
+Build from a checkout with Docker Compose:
 
 ```bash
 git clone https://github.com/BaaRai/ARTEX.git
@@ -341,12 +345,78 @@ docker compose up -d --build
 # → http://localhost:8787
 ```
 
-`POSTGRES_PASSWORD` is passed to ARTEX as its own variable. The server percent-encodes it into
-the connection URL, so a password may contain `/`, `?`, `%`, `@`, `:` or spaces. In `.env`, quote
-a value that contains `#`, and write `$$` for a literal `$`.
+The release workflow publishes a multi-arch image (`linux/amd64`, `linux/arm64`) to GitHub
+Container Registry on each `v*` tag, with tags `:latest`, `:v<version>`, and `:<version>`.
+v0.7.0 predates that step, so there is no `artex` package yet: until the next tagged release,
+use the checkout build above, and `docker-compose.ghcr.yml` and the `docker pull` below will
+fail with `denied`. GHCR packages start private; after the first publish the package visibility
+must be set to Public, and the release workflow verifies that the image pulls anonymously and
+fails the job otherwise.
+
+Once the image is published, the standalone container requires an existing PostgreSQL database
+reachable from the container.
+Set the `ARTEX_PG_*` variables below. The example uses Docker Desktop's
+`host.docker.internal` to reach PostgreSQL on the host. On native Linux Docker Engine, add
+`--add-host=host.docker.internal:host-gateway` to `docker run` for a host database, or use
+the reachable hostname of your database server.
+
+```bash
+docker pull ghcr.io/baarai/artex:latest
+
+mkdir -p data keys
+docker run -d --name artex \
+  --security-opt no-new-privileges:true \
+  -p 127.0.0.1:8787:8787 \
+  -p 127.0.0.1:8788:8788 \
+  -e ARTEX_PG_HOST=host.docker.internal \
+  -e ARTEX_PG_PORT=5432 \
+  -e ARTEX_PG_USER=artex \
+  -e ARTEX_PG_PASSWORD='yourpass' \
+  -e ARTEX_PG_DBNAME=artex \
+  -e ARTEX_PG_SSLMODE=disable \
+  -e ARTEX_JWT_KEY_DIR=/app/keys \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/keys:/app/keys" \
+  ghcr.io/baarai/artex:latest
+# → http://localhost:8787  (docker logs artex | grep "Setup token")
+```
+
+In `docker-compose.yml` and `docker-compose.ghcr.yml`, `POSTGRES_PASSWORD` is passed to ARTEX as
+its own variable. The server percent-encodes it into the connection URL, so a password may contain
+`/`, `?`, `%`, `@`, `:` or spaces. In `.env`, quote a value that contains `#`, and write `$$` for a
+literal `$`. The `ARTEX_PG_*` variables take the password raw; quote it in a shell.
 
 The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
-`sqlmap`, `ripgrep`, `curl`, `npm`, …); `./skills` and `./data` are persisted via bind mounts.
+`sqlmap`, `ripgrep`, `curl`, `npm`, …) and built-in `/app/skills`. The GHCR Compose file below
+persists `./keys` and `./data`; it does not mount a host `skills/` directory, so the image's
+built-in skills are used.
+
+#### Compose stack from the prebuilt image
+
+`docker-compose.ghcr.yml` runs the same ARTEX + PostgreSQL stack from the released image, with no
+checkout build. The image is not published yet: v0.7.0 predates the GHCR publish step, so use the
+checkout build above until the next tagged release. Once the first image is published, download
+the file and `.env.example` once:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/BaaRai/ARTEX/main/docker-compose.ghcr.yml
+curl -fsSLO https://raw.githubusercontent.com/BaaRai/ARTEX/main/.env.example
+cp .env.example .env            # set POSTGRES_PASSWORD, optionally an LLM key
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+# → http://localhost:8787  (docker compose -f docker-compose.ghcr.yml logs artex | grep "Setup token")
+```
+
+Update the stack without a git checkout:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Pin a version with `ARTEX_IMAGE_TAG=v0.7.1` in `.env` (or `0.7.1`); unset uses `latest`. To use
+custom skills, copy them into a host directory and add `- ./skills:/app/skills` to the `artex`
+volumes, which overrides the built-in `/app/skills`.
 
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
@@ -409,7 +479,7 @@ runtime supports it.
 
 ## Configuration
 
-**Database** (`config.json`, or the `ARTEX_PG_DSN` environment variable):
+**Database** (`config.json`, `ARTEX_PG_DSN`, or `ARTEX_PG_*` environment variables — see [External PostgreSQL](#external-postgresql)):
 
 ```json
 {
@@ -493,6 +563,70 @@ from the defaults until a worker finishes in this process.
 
 **Common flags**: `./start.sh -addr :8787 -proxy :8788` (`-addr` frontend/API, `-proxy` traffic
 recording proxy).
+
+### External PostgreSQL
+
+ARTEX already supports an external PostgreSQL 16+ instance — the `postgres` service in
+`docker-compose.yml` is only the bundled default. Because the database is startup configuration and
+the system's single source of truth, there is no runtime database switcher in the UI: change the
+environment variables and restart the server to point at another instance.
+
+Configure the connection with either a full connection string or individual parts:
+
+- **`ARTEX_PG_DSN`**: full PostgreSQL connection URL (for example
+  `postgres://artex:pass@db.example.internal:5432/artex?sslmode=require`). When set, it takes
+  precedence over the `ARTEX_PG_*` variables and you are responsible for percent-encoding any
+  URL-special characters in the username or password.
+- **`ARTEX_PG_*` parts** (recommended when passwords contain `/`, `?`, `%`, `@`, `:`, or spaces —
+  ARTEX percent-encodes the user and password and removes `ARTEX_PG_PASSWORD` from the environment
+  at startup):
+  - `ARTEX_PG_HOST` — PostgreSQL host
+  - `ARTEX_PG_PORT` — PostgreSQL port (default `5432`)
+  - `ARTEX_PG_USER` — database user
+  - `ARTEX_PG_PASSWORD` — database password (raw, not URL-encoded)
+  - `ARTEX_PG_DBNAME` — database name
+  - `ARTEX_PG_SSLMODE` — TLS mode (`disable`, `require`, `verify-ca`, `verify-full`)
+
+#### Compose without the bundled `postgres` service
+
+To run ARTEX against an external PostgreSQL server with Docker Compose, remove the `postgres`
+service, the `depends_on` block, and the `pgdata` volume from `docker-compose.yml`, and point
+`artex` at your database:
+
+```yaml
+services:
+  artex:
+    image: ghcr.io/baarai/artex:latest
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      # Option A: individual parts (recommended; percent-encodes special characters)
+      ARTEX_PG_HOST: ${ARTEX_PG_HOST:?Set ARTEX_PG_HOST in .env}
+      ARTEX_PG_PORT: ${ARTEX_PG_PORT:-5432}
+      ARTEX_PG_USER: ${ARTEX_PG_USER:-artex}
+      ARTEX_PG_PASSWORD: ${ARTEX_PG_PASSWORD:?Set ARTEX_PG_PASSWORD in .env}
+      ARTEX_PG_DBNAME: ${ARTEX_PG_DBNAME:-artex}
+      ARTEX_PG_SSLMODE: ${ARTEX_PG_SSLMODE:-require}
+      # Option B: full DSN (overrides ARTEX_PG_* when set)
+      # ARTEX_PG_DSN: ${ARTEX_PG_DSN}
+      ARTEX_JWT_KEY_DIR: /app/keys
+    ports:
+      - "${ARTEX_BIND_ADDR:-127.0.0.1}:8787:8787"
+      - "127.0.0.1:8788:8788"
+    volumes:
+      - ./data:/app/data
+      - ./keys:/app/keys
+    restart: unless-stopped
+```
+
+#### Local disk usage (`data/`)
+
+Moving PostgreSQL to an external host does **not** move the runtime `data/` directory off local
+disk. `data/` still stores spilled HTTP/TCP traffic blobs (`data/traffic/_blobs`), LLM
+transcripts, task working files, and local task archives, so heavy workloads can still fill the
+host disk if `data/` is on a small volume. Mount `data/` on a suitably sized volume, and consider
+setting `ARTEX_ARCHIVE_STORAGE=s3` (see [Task archive storage](docs/task-archive-storage.md)) to
+offload cold task archives to object storage.
 
 ### Reverse proxy deployment (HTTPS / exposing only 443)
 
@@ -647,7 +781,7 @@ The script optionally `git pull`s, then offers **① Docker update** (`docker co
 `docker compose up -d artex`) or **② local build update** (rebuild the frontend static assets, then
 recompile `./artex`; restart the process for it to take effect).
 
-#### Option 2: Docker Compose (manual)
+#### Option 2: Docker (Compose or GHCR image)
 
 ```bash
 cd ARTEX
@@ -655,6 +789,15 @@ git pull
 docker compose build artex
 docker compose up -d artex
 docker image prune -f            # optional
+```
+
+If running the prebuilt `ghcr.io/baarai/artex` container directly, pull the new tag (`docker pull
+ghcr.io/baarai/artex:latest` or a pinned `:v<version>`) and recreate the container with the same
+`/app/data` and `/app/keys` mounts. If you run the prebuilt Compose stack, the update is:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 #### Option 3: prebuilt binaries
