@@ -162,13 +162,20 @@ COPY --from=tools /opt/sqlmap /opt/sqlmap
 COPY --from=tools /opt/nuclei-templates /opt/nuclei-templates
 # Read by nuclei in preference to $HOME/nuclei-templates, so root and the executor
 # resolve the same set. The directory stays root-owned and world-readable; scans
-# never need to write to it.
-ENV NUCLEI_TEMPLATES_DIR=/opt/nuclei-templates
+# never need to write to it. The second variable keeps the set frozen: without it a
+# start with network access runs the routine template update against the public
+# repository, which rewrites the baked tree (and, on a slow link, adds tens of MB to
+# the writable layer for a result the bake already provides).
+ENV NUCLEI_TEMPLATES_DIR=/opt/nuclei-templates \
+    DISABLE_NUCLEI_TEMPLATES_PUBLIC_DOWNLOAD=true
+# -duc is what keeps this a check rather than an update: `nuclei -tl` runs the
+# automatic nuclei/templates update check first, so it could replace the pinned set
+# with the latest release inside the layer we are about to inspect.
 RUN set -eux; \
     ln -s /opt/sqlmap/sqlmap.py /usr/local/bin/sqlmap; \
     nuclei -version >/dev/null; httpx -version; subfinder -version; katana -version; \
     ffuf -V >/dev/null; dalfox --version >/dev/null; sqlmap --version >/dev/null; \
-    templates="$(nuclei -tl -silent | wc -l)"; \
+    templates="$(nuclei -tl -silent -duc | wc -l)"; \
     echo "nuclei templates visible at build time: $templates"; \
     test "$templates" -gt 10000
 
