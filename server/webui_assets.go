@@ -40,11 +40,19 @@ const (
 )
 
 // assetEntry is one embedded file, digested and pre-compressed.
+//
+// etag and gzETag are distinct strong validators, one per representation: bytes
+// on the wire for the raw body differ from those for the gzip body, so a single
+// validator shared by both would let a range or a conditional request validated
+// against one representation be answered from the other. Vary is not a
+// substitute — it only tells caches that the representations differ, it does not
+// make one ETag describe both.
 type assetEntry struct {
-	raw   []byte
-	gz    []byte
-	etag  string
-	ctype string
+	raw    []byte
+	gz     []byte
+	etag   string
+	gzETag string
+	ctype  string
 }
 
 // assetCache holds entries keyed by path within the embedded tree.
@@ -68,6 +76,11 @@ func loadAsset(fsys fs.FS, name string) (*assetEntry, error) {
 			_ = zw.Close()
 			if buf.Len() < len(raw) {
 				e.gz = buf.Bytes()
+				// Digest the compressed bytes ourselves rather than suffixing
+				// the raw validator: the plaintext hash would say nothing about
+				// what this representation actually contains.
+				gzSum := sha256.Sum256(e.gz)
+				e.gzETag = `"` + hex.EncodeToString(gzSum[:16]) + `-gzip"`
 			}
 		}
 	}
@@ -129,19 +142,26 @@ func serveWebAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, name stri
 	}
 	h := w.Header()
 	h.Set("Content-Type", e.ctype)
-	h.Set("ETag", e.etag)
 	h.Add("Vary", "Accept-Encoding")
 	if immutable {
 		h.Set("Cache-Control", immutableValue)
 	} else {
 		h.Set("Cache-Control", revalidateValue)
 	}
+	// Pick the representation first, then publish the validator for it. The raw
+	// and gzip bodies are different entity-tags: sharing one would let a client
+	// that holds the gzip ETag send If-Range and be served raw bytes (or the
+	// reverse) as a 206.
 	body := e.raw
+	etag := e.etag
 	if e.gz != nil && gzipAccepted(r) {
 		h.Set("Content-Encoding", "gzip")
 		body = e.gz
+		etag = e.gzETag
 	}
-	// ServeContent handles Range, HEAD and If-None-Match against our ETag.
+	h.Set("ETag", etag)
+	// ServeContent handles Range, HEAD and If-None-Match against the ETag we
+	// just set for this representation.
 	// Zero modtime: content-hashed assets have no meaningful mtime and we do
 	// not want a second, weaker validator in play.
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
