@@ -437,7 +437,7 @@ func TestLessonWithdrawnMigrationKeepsExistingEvidence(t *testing.T) {
 		`ALTER TABLE rsi_lesson_evidence DROP COLUMN withdrawn_at`,
 		string(migrationSQL),
 		`ALTER TABLE rsi_lesson_evidence DROP COLUMN withdrawn_at`,
-		`DELETE FROM schema_migrations WHERE version IN (12, 13)`,
+		`DELETE FROM schema_migrations WHERE version >= 12`,
 		`INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,status)
 		 VALUES ('legacy-lesson','positive','xss','Confirmed xss: legacy','adopted')`,
 		`INSERT INTO rsi_lesson_evidence(lesson_id,source_kind,source_id,detail)
