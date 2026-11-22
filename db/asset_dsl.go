@@ -499,6 +499,12 @@ func ValidateDSL(dsl string) error {
 // type), for server-side pagination — same WHERE as QueryDSL, without LIMIT/OFFSET.
 // taskID > 0 scopes the count to assets attached to that task.
 func (s *AssetStore) CountDSL(dsl, typ string, taskID int64) (int, error) {
+	return s.CountDSLForCompany(dsl, typ, taskID, 0)
+}
+
+// CountDSLForCompany is CountDSL narrowed to one company's assets (companyID > 0).
+// The company clause is ANDed outside the compiled DSL, so no DSL text can escape it.
+func (s *AssetStore) CountDSLForCompany(dsl, typ string, taskID, companyID int64) (int, error) {
 	node, err := ParseDSL(dsl)
 	if err != nil {
 		return 0, err
@@ -515,6 +521,10 @@ func (s *AssetStore) CountDSL(dsl, typ string, taskID int64) (int, error) {
 		args = append(args, taskID)
 		where += fmt.Sprintf(" AND $%d = ANY(task_ids)", len(args))
 	}
+	if companyID > 0 {
+		args = append(args, companyID)
+		where += fmt.Sprintf(" AND company_id = $%d", len(args))
+	}
 	var n int
 	err = s.db.QueryRow("SELECT count(*) FROM assets WHERE "+where, args...).Scan(&n)
 	return n, err
@@ -525,6 +535,12 @@ func (s *AssetStore) CountDSL(dsl, typ string, taskID int64) (int, error) {
 // taskID > 0 scopes results to assets attached to that task and hydrates each
 // row's per-task source metadata (as QueryByTask does).
 func (s *AssetStore) QueryDSL(dsl, typ string, taskID int64, limit, offset int) ([]*Asset, error) {
+	return s.QueryDSLForCompany(dsl, typ, taskID, 0, limit, offset)
+}
+
+// QueryDSLForCompany is QueryDSL narrowed to one company's assets (companyID > 0).
+// The company clause is ANDed outside the compiled DSL, so no DSL text can escape it.
+func (s *AssetStore) QueryDSLForCompany(dsl, typ string, taskID, companyID int64, limit, offset int) ([]*Asset, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -546,6 +562,10 @@ func (s *AssetStore) QueryDSL(dsl, typ string, taskID int64, limit, offset int) 
 	if taskID > 0 {
 		args = append(args, taskID)
 		where += fmt.Sprintf(" AND $%d = ANY(task_ids)", len(args))
+	}
+	if companyID > 0 {
+		args = append(args, companyID)
+		where += fmt.Sprintf(" AND company_id = $%d", len(args))
 	}
 	args = append(args, limit, offset)
 	q := assetSelectCols + " WHERE " + where +

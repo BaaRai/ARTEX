@@ -2713,5 +2713,12 @@
   "Traffic capture is off by default. Enable it in System settings after setup if you need provable HTTP findings — captured traffic is required for findings to prove goals.": "流量捕获默认关闭。如需可证明的 HTTP 漏洞发现，请在初始化后前往系统设置开启——漏洞证明目标需要已捕获的 HTTP 流量。",
   "Capture is off · required for provable findings": "捕获已关闭 · 可证明漏洞所需",
   "Traffic capture is off: findings stay recorded, but captured HTTP traffic is required for provable findings.": "流量捕获已关闭：漏洞仍会被记录，但证明目标需要已捕获的 HTTP 流量。",
-  "Enable in settings": "前往设置开启"
+  "Enable in settings": "前往设置开启",
+  "Switch company": "切换企业",
+  "All companies": "全部企业",
+  "Every target in view": "显示全部目标",
+  "Search company…": "搜索企业…",
+  "Failed to load companies": "加载企业失败",
+  "No company found": "未找到企业",
+  "Manage companies": "管理企业"
 }
