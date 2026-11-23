@@ -4,32 +4,43 @@ An authorized assessment can opt in to a stable ARTEX User-Agent on supported ta
 
 ## Configure a task
 
-Add `assessment_identification` to the active ARTEX `config.json`, keeping the rest of your configuration. Each key is an existing task ID written as a positive decimal integer without leading zeros. Use an empty string for the base label or a 1–64 character public reference containing only ASCII letters, digits, dots, underscores, or hyphens. ARTEX validates this setting at startup and rejects an invalid file. Restart after editing. Remove a task's entry to disable identification for that task. Tasks absent from the map use their normal User-Agent behavior.
+Add `assessment_identification` to the active ARTEX `config.json`, keeping the rest of your configuration. Each key is an existing task ID written as a positive decimal integer without leading zeros. Each task entry needs a nonempty `origins` list of exact approved HTTP or HTTPS origins. Use the scheme and host, with a port when needed. List each origin explicitly and leave out wildcards, paths, queries, fragments, and credentials. ARTEX matches the URL by scheme, host, and port. Host letter case and an explicitly written default port are treated as equivalent.
+
+Omit `reference` or use an empty string for the base label. A public reference may contain 1–64 ASCII letters, digits, dots, underscores, or hyphens. ARTEX validates this setting at startup and rejects an invalid file. Restart after editing. Remove the task's entry to disable its label.
 
 At startup, ARTEX logs a warning and ignores entries with no live task in the database. They stay off for that process even if a task later receives the ID or is restored. Restart with the task present in the database to apply its entry.
 
 ```json
 {
   "assessment_identification": {
-    "123": "FS-17",
-    "456": ""
+    "123": {
+      "origins": ["https://shop.example.test"],
+      "reference": "FS-17"
+    },
+    "456": {
+      "origins": ["http://status.example.test:8080"]
+    }
   }
 }
 ```
 
-In this example, task `123` uses `ARTEX-Assessment/1.0 (engagement=FS-17)`. Task `456` uses `ARTEX-Assessment/1.0`. Use a reference that both teams can share and that is safe for the receiving service, intermediaries, and their logs. Keep credentials, personal data, and confidential ticket numbers in the private engagement record. See the configuration file search order in the [operations guide](OPS.md#2-configuration-precedence).
+On their listed origins, task `123` uses `ARTEX-Assessment/1.0 (engagement=FS-17)` and task `456` uses `ARTEX-Assessment/1.0`. Use a reference that both teams can share and that is safe for the receiving service, intermediaries, and their logs. Keep credentials, personal data, and confidential ticket numbers in the private engagement record. See the configuration file search order in the [operations guide](OPS.md#2-configuration-precedence).
 
 ## Phase 1 coverage
 
-The first phase covers ARTEX HTTP custom-tool requests with a matching live task ID. It also covers the HTTP enrichment probe if called with that task context. The current production code has no caller that enqueues this probe. Chat requests and editor tests use their normal User-Agent behavior.
+The first phase covers ARTEX HTTP custom-tool requests with a matching live task ID and a listed destination origin. It also covers the HTTP enrichment probe if called with that task context for a listed origin. The current production code has no caller that enqueues this probe. Chat requests and editor tests use their normal User-Agent behavior.
 
-An eligible HTTP custom tool can send the public label to its initial destination even with the target gate or noise profile off. Check the approved scope and initial destination before enabling the label. The HTTP custom tool keeps the generated label on same-origin redirects and removes it at the first cross-origin redirect and on subsequent hops. When enabled, the target gate evaluates each hop under its existing rules. The enrichment probe stops at redirects. Capture can help inspect the request where the route supports it.
+The origin list also applies with the target gate or noise profile off. Check the approved scope and origin list before enabling the label. The HTTP custom tool retains the generated label while a redirect chain stays on its initial origin. A change of origin removes the label for the rest of the chain, even if the next origin is listed. When enabled, the target gate evaluates each hop under its existing rules. The enrichment probe stops at redirects. Capture can help inspect the request where the route supports it.
 
 The HTTP custom tool's existing explicit User-Agent setting takes precedence over the assessment label, including an explicitly empty value. With a noise profile active, a configured `ARTEX_TARGET_USER_AGENT` can still fill an empty value. See [configuration precedence](OPS.md#2-configuration-precedence).
 
-WebFetch uses the Norma client's own User-Agent. Shell and external tools, browser traffic, replay, model and search providers, MCP, and management calls sit outside this phase.
+WebFetch uses the Norma client's own User-Agent. Shell and external tools, browser traffic, model and search providers, MCP, and management calls sit outside this phase.
 
-Phase 1 acceptance uses local HTTP receivers to verify the exact wire value for each covered client, with the noise profile on and off and with direct and recorded routes where supported. Include unconfigured tasks, empty references, explicit User-Agents, same-origin and cross-origin redirects, and requests without a matching task context. Check that a task ID missing at startup stays disabled for that process and that a label applied to one task never carries over to another task or a replay.
+### Manual replay
+
+Manual replay can resend an operator-selected assessment label from a capture even after the URL is edited. Review the destination and headers before sending and remove the label when it is inappropriate for that destination. Automatic label generation applies only to the task request paths above. [Replay behavior](traffic-rewrite-rules.md#replay)
+
+Phase 1 acceptance uses local HTTP receivers to verify the exact wire value for each covered client, with the noise profile on and off and with direct and recorded routes where supported. Include unconfigured tasks, empty references, explicit User-Agents, listed and unlisted destinations, redirects, and requests without a matching task context. Check that a task ID missing at startup stays disabled for that process, generated labels stay within their configured task and origins, and manual replay sends the selected User-Agent without generating an assessment label.
 
 ## WAF triage for SOC, IR, and CIRT
 

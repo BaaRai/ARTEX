@@ -21,6 +21,6 @@
   "_comment_skill_dir": "Skill root directory (one skill per subdirectory, each with a SKILL.md). Precedence: environment variable ARTEX_SKILL_DIR > this field > default (skills/ next to the executable). Leave empty or delete this field to use the default. Relative paths resolve against the current working directory.",
   "skill_dir": "/opt/artex/skills",
 
-  "_comment_assessment_identification": "Leave empty to disable. To opt in, map a live task ID to a public engagement reference or an empty string for the base User-Agent. See docs/assessment-identification.md.",
+  "_comment_assessment_identification": "Leave empty to disable. To opt in, map a live task ID to an object with a nonempty origins list and an optional public reference. See docs/assessment-identification.md.",
   "assessment_identification": {}
 }

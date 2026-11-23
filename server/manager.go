@@ -82,7 +82,7 @@ type Task struct {
 	targetGate  atomic.Bool
 	interceptor *intercept.Interceptor // owner of the target gate, handed to the scope
 
-	assessmentUserAgent string // assigned by the manager before publishing the task
+	assessmentIdentity config.AssessmentIdentity // assigned by the manager before publishing the task
 
 	// pendingTriggers accumulates the concrete changes (worker done / finding) that
 	// fired planning rounds since the last one consumed them. The debounce coalesces
@@ -1034,7 +1034,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 
 func (m *Manager) taskFromPG(pt *pgdb.Task) *Task {
 	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
-	t.assessmentUserAgent = m.assessmentIdentification.UserAgent(t.ID)
+	t.assessmentIdentity = m.assessmentIdentification[t.ID]
 	return t
 }
 
@@ -1045,7 +1045,7 @@ func (m *Manager) taskFromPG(pt *pgdb.Task) *Task {
 func (t *Task) targetScope(wait time.Duration) intercept.TargetScope {
 	return intercept.TargetScope{
 		TaskID: t.ID, Enabled: t.targetGate.Load, WaitBound: wait, Interceptor: t.interceptor,
-		AssessmentUserAgent: t.assessmentUserAgent,
+		AssessmentIdentity: t.assessmentIdentity,
 	}
 }
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
@@ -32,6 +34,16 @@ func runAssessmentHTTPTool(t *testing.T, s *Server, ctx context.Context, spec ht
 	}
 }
 
+func assessmentTaskContext(t *testing.T, id, reference string, origins ...string) context.Context {
+	t.Helper()
+	var identity config.AssessmentIdentity
+	raw := execJSON(t, map[string]any{"reference": reference, "origins": origins})
+	if err := json.Unmarshal(raw, &identity); err != nil {
+		t.Fatal(err)
+	}
+	return gatedCtx(&Task{ID: id, assessmentIdentity: identity}, 0)
+}
+
 func TestAssessmentHTTPToolUserAgent(t *testing.T) {
 	prev := egress.CurrentProfile()
 	t.Cleanup(func() { egress.SetProfile(prev) })
@@ -41,8 +53,15 @@ func TestAssessmentHTTPToolUserAgent(t *testing.T) {
 		t.Fatal("balanced noise profile unavailable")
 	}
 
-	tagged := gatedCtx(&Task{ID: "42", assessmentUserAgent: assessmentTestUA}, 0)
-	base := gatedCtx(&Task{ID: "43", assessmentUserAgent: "ARTEX-Assessment/1.0"}, 0)
+	received := make(chan string, 16)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.UserAgent()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	tagged := assessmentTaskContext(t, "42", "FS-17", srv.URL)
+	base := assessmentTaskContext(t, "43", "", srv.URL)
 	untagged := gatedCtx(&Task{ID: "44"}, 0)
 	conversation := intercept.WithTargetScope(context.Background(), intercept.TargetScope{ConversationID: 42})
 	for _, tc := range []struct {
@@ -70,12 +89,6 @@ func TestAssessmentHTTPToolUserAgent(t *testing.T) {
 				profile = legacy
 			}
 			egress.SetProfile(profile)
-			received := make(chan string, 1)
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				received <- r.UserAgent()
-				w.WriteHeader(http.StatusNoContent)
-			}))
-			t.Cleanup(srv.Close)
 			runAssessmentHTTPTool(t, &Server{}, tc.ctx, httpExec{URL: srv.URL, Headers: tc.headers})
 			select {
 			case got := <-received:
@@ -114,12 +127,17 @@ func TestAssessmentHTTPToolRedirectIdentification(t *testing.T) {
 		}
 	}))
 	t.Cleanup(origin.Close)
-	ctx := gatedCtx(&Task{ID: "42", assessmentUserAgent: assessmentTestUA}, 0)
+	ctx := assessmentTaskContext(t, "42", "FS-17", origin.URL, cross.URL)
 	runAssessmentHTTPTool(t, &Server{}, ctx, httpExec{URL: origin.URL + "/start"})
+	ctx = assessmentTaskContext(t, "42", "FS-17", origin.URL)
+	back := url.QueryEscape(origin.URL + "/return")
+	runAssessmentHTTPTool(t, &Server{}, ctx, httpExec{URL: cross.URL + "/outside?return=" + back})
 	for _, want := range []observation{
 		{"/start", assessmentTestUA},
 		{"/same", assessmentTestUA},
 		{"/cross", goTestUA},
+		{"/return", goTestUA},
+		{"/outside", goTestUA},
 		{"/return", goTestUA},
 	} {
 		select {
@@ -133,6 +151,33 @@ func TestAssessmentHTTPToolRedirectIdentification(t *testing.T) {
 	}
 	if len(received) != 0 {
 		t.Fatalf("unexpected additional redirect requests: %d", len(received))
+	}
+}
+
+func TestAssessmentHTTPToolDoesNotLabelUnicodeOrigin(t *testing.T) {
+	prev := egress.CurrentProfile()
+	egress.SetProfile(egress.Profile{Name: "off"})
+	t.Cleanup(func() { egress.SetProfile(prev) })
+
+	// The local HTTP proxy receives the request without resolving the target.
+	// Unicode case folding of the Kelvin sign must not expand k.example.test.
+	received := make(chan string, 1)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.UserAgent()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(proxy.Close)
+	ctx := assessmentTaskContext(t, "42", "FS-17", "http://k.example.test")
+	runAssessmentHTTPTool(t, &Server{}, ctx, httpExec{
+		URL: "http://K.example.test/check", Proxy: proxy.URL,
+	})
+	select {
+	case got := <-received:
+		if got != goTestUA {
+			t.Errorf("wire User-Agent for Unicode origin = %q, want %q", got, goTestUA)
+		}
+	default:
+		t.Fatal("local proxy received no request")
 	}
 }
 
@@ -161,7 +206,10 @@ func TestAssessmentStartupScopesCurrentTasks(t *testing.T) {
 	untaggedID := strconv.FormatInt(untagged.ID, 10)
 	futureID := strconv.FormatInt(untagged.ID+1, 10)
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
-	cfg := map[string]any{"assessment_identification": map[string]string{taggedID: "FS-17", futureID: "future"}}
+	cfg := map[string]any{"assessment_identification": map[string]any{
+		taggedID: map[string]any{"reference": "FS-17", "origins": []string{"https://shop.example.test"}},
+		futureID: map[string]any{"reference": "future", "origins": []string{"https://shop.example.test"}},
+	}}
 	if err := os.WriteFile(cfgPath, execJSON(t, cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +246,8 @@ func TestAssessmentStartupScopesCurrentTasks(t *testing.T) {
 		if !ok {
 			t.Fatalf("task %s unavailable", tc.id)
 		}
-		if got := task.targetScope(0).AssessmentUserAgent; got != tc.want {
+		scope := task.targetScope(0)
+		if got := scope.AssessmentIdentity.UserAgent(); got != tc.want {
 			t.Errorf("task %s scope User-Agent = %q, want %q", tc.id, got, tc.want)
 		}
 	}
@@ -248,7 +297,7 @@ func TestAssessmentHTTPToolRecordingProxy(t *testing.T) {
 		time.Sleep(15 * time.Millisecond)
 	}
 
-	ctx := gatedCtx(&Task{ID: "42", assessmentUserAgent: assessmentTestUA}, 0)
+	ctx := assessmentTaskContext(t, "42", "FS-17", target.URL)
 	s := &Server{m: &Manager{traffic: tr, trafficOn: true}}
 	const path = "/recorded-identification"
 	runAssessmentHTTPTool(t, s, ctx, httpExec{URL: target.URL + path, UseRecordingProxy: true})

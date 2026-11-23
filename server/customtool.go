@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/guard"
@@ -607,28 +608,11 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 func assessmentRedirectCheck(check func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		previous := via[len(via)-1]
-		if previous.Header.Get("User-Agent") == "" || !sameAssessmentOrigin(previous.URL, req.URL) {
+		if previous.Header.Get("User-Agent") == "" || !config.SameAssessmentOrigin(previous.URL, req.URL) {
 			req.Header.Del("User-Agent")
 		}
 		return check(req, via)
 	}
-}
-
-func sameAssessmentOrigin(a, b *url.URL) bool {
-	// IPv6 zone names are case-sensitive even though host names are not.
-	aHost, aZone, _ := strings.Cut(a.Hostname(), "%")
-	bHost, bZone, _ := strings.Cut(b.Hostname(), "%")
-	return a.Scheme == b.Scheme && strings.EqualFold(aHost, bHost) && aZone == bZone && assessmentPort(a) == assessmentPort(b)
-}
-
-func assessmentPort(u *url.URL) string {
-	if p := u.Port(); p != "" {
-		return p
-	}
-	if u.Scheme == "https" {
-		return "443"
-	}
-	return "80"
 }
 
 // httpToolTransport is the transport of one http tool call, or nil
