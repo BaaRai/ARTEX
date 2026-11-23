@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **A goal URL followed by punctuation is still seeded**: a goal such as `Assess http://juiceshop:3000.` no longer logs `could not parse a target host/IP` and skips the site. Trailing punctuation, including full-width `。` and a closing bracket that has no matching opener, is trimmed from the URL before it is parsed, so `http://[::1]` is left alone. The scheme the goal names is kept and a final period does not end up in the host.
 - **Task timeout triggers fire for every task**: `on_task_timeout` used the task id as a watermark, but tasks time out in deadline order. Once a newer task timed out first, an older task that timed out later was never fired for. Fired timeouts are now kept in a persisted set, like met goals; on first start the set is seeded with the tasks already timed out, so nothing replays.
 - **A named pipe in the task workspace no longer hangs the archive worker**: packing opened every non-directory entry, and opening a FIFO blocks until a writer appears, so the single archive worker stopped there and every later archive, restore and delete job waited behind it. A socket failed the archive instead, and a device was packed but refused on restore. The packer now skips every entry that is neither a directory nor a regular file, as it already did for symlinks.
 - **Task form does not keep test-account secrets on screen**: after a task is created the credential rows are cleared, and the password field is masked.

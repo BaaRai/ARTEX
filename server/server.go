@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/archivestore"
@@ -1945,11 +1946,33 @@ var (
 	reDomain = regexp.MustCompile(`\b((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(?::(\d{1,5}))?`)
 )
 
+// trimURLTail drops sentence punctuation that free text puts after a URL
+// ("Assess http://host:3000."). A closing bracket is dropped only when it has no
+// opener in the URL, so "http://[::1]" keeps its "]".
+func trimURLTail(s string) string {
+	for s != "" {
+		r, size := utf8.DecodeLastRuneInString(s)
+		switch r {
+		case '.', ',', ';', ':', '!', '?', '。', '，', '、', '；', '：', '！', '？', '”', '’':
+		case ')', ']', '}', '>':
+			open := string("([{<"[strings.IndexRune(")]}>", r)])
+			if strings.Count(s, open) >= strings.Count(s, string(r)) {
+				return s
+			}
+		default:
+			return s
+		}
+		s = s[:len(s)-size]
+	}
+	return s
+}
+
 // parseTarget extracts a target (scheme, host, port) from free text, supporting
 // full URLs, IP[:port] and domain[:port]. ok=false when nothing parseable.
 func parseTarget(text string) (scheme, host string, port int, ok bool) {
 	text = strings.TrimSpace(text)
 	if m := reURL.FindString(text); m != "" {
+		m = trimURLTail(m)
 		if u, err := url.Parse(m); err == nil && u.Hostname() != "" {
 			scheme = strings.ToLower(u.Scheme)
 			host = strings.ToLower(u.Hostname())
