@@ -579,6 +579,9 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	client := &http.Client{Timeout: timeoutOr(spec.TimeoutMs, 30000)}
 	// Every redirect hop goes through the target gate, as the rendered URL did.
 	client.CheckRedirect = intercept.RedirectCheck(key)
+	if intercept.ApplyAssessmentUserAgent(req) {
+		client.CheckRedirect = assessmentRedirectCheck(client.CheckRedirect)
+	}
 	// The current egress governor paces every request and redirect hop per host
 	// under the noise profile (off by default: the base transport itself). It is
 	// resolved per request, so a changed profile applies to the next call.
@@ -596,6 +599,36 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	out := map[string]any{"status": resp.StatusCode, "body": string(respBody)}
 	b, _ := json.Marshal(out)
 	return actool.Text(actool.Capture(tc, string(b))), nil
+}
+
+// assessmentRedirectCheck sheds the generated identifier on the first redirect
+// to another origin. net/http copies headers from the initial request for each
+// hop, so check the previous hop to keep the identifier off after that point.
+func assessmentRedirectCheck(check func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		previous := via[len(via)-1]
+		if previous.Header.Get("User-Agent") == "" || !sameAssessmentOrigin(previous.URL, req.URL) {
+			req.Header.Del("User-Agent")
+		}
+		return check(req, via)
+	}
+}
+
+func sameAssessmentOrigin(a, b *url.URL) bool {
+	// IPv6 zone names are case-sensitive even though host names are not.
+	aHost, aZone, _ := strings.Cut(a.Hostname(), "%")
+	bHost, bZone, _ := strings.Cut(b.Hostname(), "%")
+	return a.Scheme == b.Scheme && strings.EqualFold(aHost, bHost) && aZone == bZone && assessmentPort(a) == assessmentPort(b)
+}
+
+func assessmentPort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 // httpToolTransport is the transport of one http tool call, or nil

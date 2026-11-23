@@ -1,5 +1,5 @@
 // Package config loads runtime configuration from a JSON file, with environment
-// variables taking precedence. Currently it carries the PostgreSQL connection.
+// variables taking precedence where supported.
 package config
 
 import (
@@ -29,8 +29,9 @@ type Database struct {
 
 // Config is the on-disk config file shape.
 type Config struct {
-	Database Database `json:"database"`
-	SkillDir string   `json:"skill_dir"`
+	Database                 Database                 `json:"database"`
+	SkillDir                 string                   `json:"skill_dir"`
+	AssessmentIdentification AssessmentIdentification `json:"assessment_identification,omitempty"`
 }
 
 // BaseDir is the directory that anchors all runtime artifacts (config.json and

@@ -97,6 +97,8 @@ type TargetScope struct {
 	Enabled        func() bool
 	WaitBound      time.Duration
 	Interceptor    *Interceptor
+
+	AssessmentUserAgent string // operator-configured identifier of this task only
 }
 
 // WithTargetScope returns a child context carrying the target-gate scope of the
