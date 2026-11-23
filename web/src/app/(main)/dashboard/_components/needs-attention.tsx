@@ -6,6 +6,7 @@ import {
   ArrowRightIcon,
   CheckCircle2Icon,
   CircleIcon,
+  HourglassIcon,
   OctagonAlertIcon,
   ShieldAlertIcon,
   XCircleIcon,
@@ -121,7 +122,8 @@ interface AttentionItem {
 
 /**
  * What needs a person right now, at the top of the dashboard: approvals the agents are blocked
- * on, tasks that failed in the last day, and critical findings nobody has reviewed. Empty = all clear.
+ * on, stalled tasks, tasks that failed in the last day, and critical findings nobody has reviewed.
+ * Empty = all clear.
  */
 export function NeedsAttention({
   loaded,
@@ -139,10 +141,15 @@ export function NeedsAttention({
   if (!loaded) return null;
 
   // Only failures from the last day: an old failed task should not keep the strip lit forever.
+  // A failure with no usable timestamp counts as recent, so a missing field never hides it.
   const since = Date.now() / 1000 - 24 * 3600;
-  const failed = tasks.filter(
-    (t) => (t.status === "failed" || t.status === "timeout") && (t.completed_unix ?? 0) >= since,
-  ).length;
+  // 0 means unset in these fields, so take the first positive one.
+  const failedAt = (t: Task) =>
+    [t.completed_unix, t.last_activity_unix, t.created_unix].find((v) => (v ?? 0) > 0) ?? Number.POSITIVE_INFINITY;
+  const failed = tasks.filter((t) => (t.status === "failed" || t.status === "timeout") && failedAt(t) >= since).length;
+  // engine_mode comes from the task list (server/engine_mode.go): a running intent with no model
+  // call and no activity for over two minutes.
+  const stalled = tasks.filter((t) => t.status === "running" && t.engine_mode === "stalled");
   const unreviewedCritical = findings.filter((f) => f.severity === "critical" && f.status === "pending").length;
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -162,6 +169,17 @@ export function NeedsAttention({
       tone: "text-destructive",
       text: "No active model: agents can't run",
       href: "/system/llm",
+    });
+  if (stalled.length > 0)
+    items.push({
+      key: "stalled",
+      icon: HourglassIcon,
+      tone: "text-warning",
+      text:
+        stalled.length === 1
+          ? `“${stalled[0].name || stalled[0].description || `Task ${stalled[0].id}`}” looks stuck: no activity for over 2 minutes`
+          : `${stalled.length} tasks look stuck: no activity for over 2 minutes`,
+      href: stalled.length === 1 ? `/function/tasks/detail?id=${encodeURIComponent(stalled[0].id)}` : "/function/tasks",
     });
   if (failed > 0)
     items.push({

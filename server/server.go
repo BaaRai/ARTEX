@@ -1099,20 +1099,10 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	paused := s.engine.IsPaused(t.ID)
 	activeCalls := s.engine.ActiveLLMCalls(t.ID)
 	running := s.engine.ReadyFor(t) && s.engine.Started(t.ID) && !paused
-	// A live event-driven engine with no work is healthy idle. Only a persisted
-	// running intent without any corresponding LLM call can be considered stalled.
-	stalled := running && activeCalls == 0 && inFlight > 0 && last > 0 && time.Now().Unix()-last > 120
-
-	// engine_mode follows the spec enum (exploring|paused|stalled|idle).
-	engineMode := "idle"
-	switch {
-	case paused:
-		engineMode = "paused"
-	case stalled:
-		engineMode = "stalled"
-	case running && activeCalls > 0:
-		engineMode = "exploring"
-	}
+	engineMode := engineModeFor(engineModeInput{
+		Paused: paused, Running: running, ActiveCalls: activeCalls, InFlight: inFlight, LastActivity: last,
+	}, time.Now().Unix())
+	stalled := engineMode == "stalled"
 	out["engine_mode"] = engineMode
 
 	out["active_task"] = map[string]any{
@@ -1166,6 +1156,19 @@ func (s *Server) applyTaskMetrics(dto *TaskDTO, t *Task, metric db.TaskListMetri
 	dto.GoalsTotal = metric.Goals.Total
 	dto.GoalsMet = metric.Goals.Met
 	dto.InFlight = metric.RunningIntents
+	// Same engine state /stats reports for the active task, so the list and
+	// dashboard can say "Running · idle" or flag a stalled task without a
+	// per-task stats call. Omitted for tasks that are not live.
+	if dto.Status == "running" || dto.Status == "paused" {
+		paused := s.engine.IsPaused(t.ID)
+		dto.EngineMode = engineModeFor(engineModeInput{
+			Paused:       paused || dto.Status == "paused",
+			Running:      s.engine.ReadyFor(t) && s.engine.Started(t.ID) && !paused,
+			ActiveCalls:  s.engine.ActiveLLMCalls(t.ID),
+			InFlight:     metric.RunningIntents,
+			LastActivity: s.engine.LastActivity(t.ID),
+		}, time.Now().Unix())
+	}
 	dto.Findings = FindingSeverityDTO{
 		Critical: metric.Findings.Critical,
 		High:     metric.Findings.High,

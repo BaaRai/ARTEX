@@ -547,7 +547,7 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs">
-            {(tasksByStatus.running ?? 0) > 0 && <span className="text-info">Exploring {tasksByStatus.running}</span>}
+            {(tasksByStatus.running ?? 0) > 0 && <span className="text-info">Running {tasksByStatus.running}</span>}
             {(tasksByStatus.paused ?? 0) > 0 && <span className="text-warning">Paused {tasksByStatus.paused}</span>}
             {(tasksByStatus.done ?? 0) > 0 && <span className="text-success">Completed {tasksByStatus.done}</span>}
             {tasks.length === 0 && <span className="text-muted-foreground">No tasks</span>}

@@ -51,6 +51,7 @@ type TaskDTO struct {
 	GoalsTotal         int                `json:"goals_total"`
 	GoalsMet           int                `json:"goals_met"`
 	InFlight           int                `json:"in_flight"`                // number of running Workers (intents with state=running)
+	EngineMode         string             `json:"engine_mode,omitempty"`    // exploring | idle | stalled | paused; only for running or paused tasks
 	Findings           FindingSeverityDTO `json:"findings"`                 // findings registered for this task (findings table, bucketed by severity)
 	LLMProfileID       *int64             `json:"llm_profile_id,omitempty"` // LLM profile used for this task; nil = default
 	LLMProfileIDs      []int64            `json:"llm_profile_ids"`
