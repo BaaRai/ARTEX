@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
@@ -220,6 +221,10 @@ func buildEmailMessage(from string, to []string, m Message) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", from)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
+	// RFC 5322 requires Date and recommends Message-ID. Not every submission
+	// server adds them, and spam filters penalize mail without them.
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Message-ID: <%s@%s>\r\n", rand.Text(), messageIDDomain(from))
 	// A non-ASCII subject must be RFC 2047 encoded, otherwise clients display it
 	// as mojibake.
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", htmlTitle(m)))
@@ -236,4 +241,15 @@ func buildEmailMessage(from string, to []string, m Message) (string, error) {
 	}
 	b.WriteString(encoded + "\r\n")
 	return b.String(), nil
+}
+
+// messageIDDomain is the right-hand side of a Message-ID: the sender's domain,
+// or "localhost" when the sender address has none.
+func messageIDDomain(from string) string {
+	if i := strings.LastIndex(from, "@"); i >= 0 {
+		if d := strings.TrimRight(strings.TrimSpace(from[i+1:]), ">"); d != "" {
+			return d
+		}
+	}
+	return "localhost"
 }

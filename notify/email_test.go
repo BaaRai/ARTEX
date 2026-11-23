@@ -5,9 +5,11 @@ import (
 	"context"
 
 	"net"
+	"net/mail"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // This file adds the protocol-level tests for the email channel. Before it,
@@ -184,6 +186,38 @@ func TestEmailSendDeliversFullMessage(t *testing.T) {
 	// All recipients must appear in the To header.
 	if !strings.Contains(body, "a@example.com, b@example.com") {
 		t.Errorf("To header does not include all recipients:\n%s", body)
+	}
+}
+
+// RFC 5322 section 3.6 requires a Date header, and every message should carry
+// a Message-ID. Not every submission server adds them, and spam filters
+// penalize mail without them.
+func TestEmailMessageHasDateAndMessageID(t *testing.T) {
+	ids := map[string]bool{}
+	for range 2 {
+		raw, err := buildEmailMessage("artex@example.com", []string{"a@example.com"}, singleMsg())
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg, err := mail.ReadMessage(strings.NewReader(raw))
+		if err != nil {
+			t.Fatalf("message does not parse: %v\n%s", err, raw)
+		}
+		date, err := msg.Header.Date()
+		if err != nil {
+			t.Fatalf("missing or invalid Date header: %v\n%s", err, raw)
+		}
+		if d := time.Since(date); d < -time.Minute || d > time.Minute {
+			t.Errorf("Date %v is not the send time", date)
+		}
+		id := msg.Header.Get("Message-ID")
+		if !strings.HasPrefix(id, "<") || !strings.HasSuffix(id, "@example.com>") {
+			t.Errorf("Message-ID %q, want <...@example.com>", id)
+		}
+		ids[id] = true
+	}
+	if len(ids) != 2 {
+		t.Errorf("two messages share a Message-ID: %v", ids)
 	}
 }
 
