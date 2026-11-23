@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -139,6 +140,10 @@ func compactIntents(ns []*db.Node, parentsOf, yieldsOf map[int64][]int64) []map[
 // One ToolSet is created per planner/worker run; per-run signals live here.
 type ToolSet struct {
 	findingRecorder FindingRecorder
+	// triage, if set, is an advisory decision-model client used for closed-list
+	// judgements (currently the duplicate check in report_finding). nil = the
+	// judgement is left to the main model, exactly as before. See agent/triage.go.
+	triage TriageClient
 	// trafficProofChecker verifies that a bound snapshot's source_traffic_id
 	// exists in the live capture store during prove_goal. Planner.Plan wires it
 	// from the finding recorder; nil or any error fails closed.
@@ -1525,11 +1530,13 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			"items": obj(map[string]any{"traffic_id": str("a real traffic ID returned by traffic_search"), "role": map[string]any{"type": "string", "enum": []string{"baseline", "proof", "verification", "supporting"}}, "note": str("how this traffic supports the finding's conclusion")}, "traffic_id")},
 		"counterevidence":      str("optional: what you tested that did not work (variants, paths, or bypasses that were blocked or came back negative). Fill it when your confidence is not high; omitting it never blocks reporting."),
 		"confidence_rationale": str("optional: why the conclusion holds (which observation rules out the benign explanation). Fill it when your confidence is not high; omitting it never blocks reporting."),
+		"force_register":       map[string]any{"type": "boolean", "description": "optional: register even though the advisory duplicate check would suppress this finding. Use it only after a suppression when the new evidence is in fact a distinct defect (different endpoint, parameter or root cause); the suppression answer says so and names the finding it matched."},
 	}, "vulnclass", "severity", "summary"), func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 		var a struct {
 			VulnClass, Name, Severity, Summary, Evidence string
 			Counterevidence                              string            `json:"counterevidence"`
 			ConfidenceRationale                          string            `json:"confidence_rationale"`
+			ForceRegister                                bool              `json:"force_register"`
 			IntentID                                     json.RawMessage   `json:"intent_id"`
 			AssetIDs                                     []json.RawMessage `json:"asset_ids"`
 			TrafficRefs                                  []db.TrafficRef   `json:"traffic_refs"`
@@ -1566,6 +1573,32 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			}
 		}
 		input := db.RecordFindingInput{TaskID: t.taskID, ExplorationID: t.ts.ID(), IntentID: pid(a.IntentID), VulnClass: a.VulnClass, Name: a.Name, Severity: a.Severity, Summary: a.Summary, Evidence: a.Evidence, Worker: t.worker, AssetIDs: pidList(a.AssetIDs), Counterevidence: a.Counterevidence, ConfidenceRationale: a.ConfidenceRationale}
+		// Advisory dedup (agent/triage.go): a decision model answers "same defect as
+		// an already registered finding?" in one small request instead of a
+		// main-model turn. A confident duplicate is not registered a second time —
+		// the caller is told which finding to extend. Every failure path (no client,
+		// no existing findings, transport error, low confidence) falls through to
+		// the normal registration below.
+		//
+		// force_register is the way back out of a wrong suppression: without it the
+		// advice "register it again if it is distinct" is unactionable, because the
+		// retry hits the same check and is suppressed again.
+		if a.ForceRegister {
+			log.Printf("[triage] override: force_register set, registering %q without the duplicate check", a.Name)
+		} else if ans, ok := t.triageDuplicate(ctx, input); ok && triageDuplicateHit(ans) {
+			res := map[string]any{
+				"duplicate_of_finding_id":      ans.DuplicateOf,
+				"duplicate_of_finding_node_id": ans.DuplicateOfNode,
+				"triage_confidence":            ans.Confidence,
+				"evidence_status":              "duplicate_not_registered",
+				"note": fmt.Sprintf("Triage matched this finding to already registered finding_id %d (exploration node %d), so no new finding was created. "+
+					"To extend that finding, call update_finding_report with finding_id=%d (it addresses the NODE id, not the findings-table id). "+
+					"If the new evidence is in fact a distinct defect (different endpoint, parameter or root cause), call report_finding again with force_register=true.",
+					ans.DuplicateOf, ans.DuplicateOfNode, ans.DuplicateOfNode),
+			}
+			raw, _ := json.Marshal(res)
+			return actool.Text(fmt.Sprintf("finding matched to existing finding_id %d (node %d, triage confidence %.2f) — not registered again\n%s", ans.DuplicateOf, ans.DuplicateOfNode, ans.Confidence, raw)), nil
+		}
 		var recorded *db.RecordedFinding
 		if t.findingRecorder != nil {
 			recorded, err = t.findingRecorder.Record(ctx, input, refs)

@@ -62,17 +62,20 @@ type WebSearchOpts struct {
 
 type Worker struct {
 	findingRecorder FindingRecorder
-	prov            llm.Provider
-	model           string
-	workDir         string
-	proxyAddr       string
-	proxyCACert     string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
-	factTraffic     FactTrafficLookup // proxy captures for fact provenance (nil = activity-only)
-	webSearch       WebSearchOpts     // web_search tool backend selection (off by default)
-	tx              *transcript.Store // raw LLM conversation persistence (nil = off)
-	window          int               // context window in tokens (for compaction)
-	windowFn        func() int        // optional dynamic task-chain minimum
-	maxTurns        int               // max agent turns per run (0 = unlimited)
+	// triage is the advisory decision-model client for closed-list judgements,
+	// handed to the per-run ToolSet (see agent/triage.go). nil = off.
+	triage      TriageClient
+	prov        llm.Provider
+	model       string
+	workDir     string
+	proxyAddr   string
+	proxyCACert string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
+	factTraffic FactTrafficLookup // proxy captures for fact provenance (nil = activity-only)
+	webSearch   WebSearchOpts     // web_search tool backend selection (off by default)
+	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
+	window      int               // context window in tokens (for compaction)
+	windowFn    func() int        // optional dynamic task-chain minimum
+	maxTurns    int               // max agent turns per run (0 = unlimited)
 	// runTimeout is the wall-clock budget for the main exploration of one intent
 	// (0 = unlimited). When it fires, the run is cut and a settlement round is
 	// forced so already-identified facts get written back instead of being lost.
@@ -532,6 +535,7 @@ func (w *Worker) ExecuteWithMessage(ctx context.Context, name string, taskID int
 func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string), requestID, message string) (harness.TerminalReason, WriteCounts, error) {
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
+	tsx.SetTriageClient(w.triage)
 	tsx.SetFactTraffic(w.factTraffic)
 	tsx.SetTaskID(taskID)
 	coverageEnabled := coverageOn(as, taskID)
