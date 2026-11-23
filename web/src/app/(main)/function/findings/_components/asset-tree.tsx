@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import type { FindingAssetKind, FindingAssetNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { severityText } from "@/lib/status";
 
 // Icons reuse the assets page's type mapping, so the same asset kind looks the same in both places.
 const KIND_ICON: Record<FindingAssetKind, LucideIcon> = {
@@ -362,12 +363,12 @@ function AssetTreeRow({
       </button>
       <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums">
         {node.critical > 0 && (
-          <span className="text-rose-600" title={`Critical ${node.critical}`}>
+          <span className={severityText.critical} title={`Critical ${node.critical}`}>
             {node.critical}
           </span>
         )}
         {node.high > 0 && (
-          <span className="text-red-500" title={`High ${node.high}`}>
+          <span className={severityText.high} title={`High ${node.high}`}>
             {node.high}
           </span>
         )}

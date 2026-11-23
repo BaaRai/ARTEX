@@ -34,6 +34,7 @@ import { taskAssetTypeLabel } from "@/lib/task-assets";
 import type { Edge, ExploreKind, FindingAsset, NewAssetType, TaskNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { setVisibleInterval } from "@/lib/polling";
+import { TermLegend } from "@/components/term";
 
 const PAGE_SIZES = [20, 50, 100];
 const POLL_MS = 8000;
@@ -109,11 +110,11 @@ const REL_LABEL: Record<string, string> = {
 const STATE_META: Record<string, Record<string, { label: string; tone: Tone }>> = {
   fact: {
     origin: { label: "Start", tone: "slate" },
-    confirmed: { label: "Confirmed", tone: "green" },
+    confirmed: { label: "Confirmed", tone: "success" },
     dismissed: { label: "Dismissed", tone: "slate" },
   },
   finding: {
-    confirmed: { label: "Confirmed", tone: "red" },
+    confirmed: { label: "Confirmed", tone: "danger" },
     dismissed: { label: "Excluded", tone: "slate" },
   },
   hint: {
@@ -121,7 +122,7 @@ const STATE_META: Record<string, Record<string, { label: string; tone: Tone }>> 
     consumed: { label: "Adopted", tone: "slate" },
   },
   digest: {
-    active: { label: "Active", tone: "green" },
+    active: { label: "Active", tone: "success" },
     superseded: { label: "Superseded", tone: "slate" },
   },
 };
@@ -598,6 +599,7 @@ export function BroadcastTab({ taskId }: { taskId: string }) {
               </button>
             );
           })}
+          <TermLegend terms={["goal", "intent", "fact", "hint", "digest"]} />
           {kinds.length > 0 && (
             <Button
               variant="ghost"

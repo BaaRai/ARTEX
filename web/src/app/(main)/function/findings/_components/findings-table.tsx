@@ -64,10 +64,10 @@ export const VERIFICATION_STATUSES: VerificationStatus[] = [
 
 // Verification outcome → label/tone, on the same tone tokens StatusBadge uses.
 export const VERIFICATION_META: Record<VerificationStatus, { label: string; tone: Tone }> = {
-  verified: { label: "Verified", tone: "green" },
+  verified: { label: "Verified", tone: "success" },
   unverified: { label: "Unverified", tone: "slate" },
-  blocked: { label: "Blocked", tone: "amber" },
-  not_assessed: { label: "Not assessed", tone: "red" },
+  blocked: { label: "Blocked", tone: "warning" },
+  not_assessed: { label: "Not assessed", tone: "danger" },
   false_positive: { label: "False positive", tone: "neutral" },
 };
 
