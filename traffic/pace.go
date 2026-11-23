@@ -62,6 +62,6 @@ func pace(f *mproxy.Flow) {
 	defer cancel()
 	host := egress.HostKey(f.Request.URL)
 	if err := egress.Wait(ctx, host); err != nil {
-		slog.Warn("pacing request stopped waiting, sending unpaced", "host", host, "err", err)
+		slog.Warn("[traffic] pacing request stopped waiting, sending unpaced", "host", host, "err", err)
 	}
 }

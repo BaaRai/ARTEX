@@ -443,7 +443,7 @@ func (s *Store) RunGC(ctx context.Context) {
 			return
 		case now := <-timer.C:
 			if err := s.Collect(ctx, now); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("evidence cleanup failed", "err", err)
+				slog.Error("[evidence] evidence cleanup failed", "err", err)
 			}
 		}
 	}

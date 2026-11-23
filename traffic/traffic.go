@@ -412,7 +412,7 @@ func (t *Traffic) initIndex() error {
 	}
 	t.incrementalVacuum = mode == autoVacuumIncremental
 	if !t.incrementalVacuum {
-		slog.Warn("index database does not have incremental vacuum enabled: deleting traffic will not shrink index.sqlite; run one storage compaction to convert it", "auto_vacuum", mode)
+		slog.Warn("[traffic] index database does not have incremental vacuum enabled: deleting traffic will not shrink index.sqlite; run one storage compaction to convert it", "auto_vacuum", mode)
 	}
 	if _, err := conn.ExecContext(ctx, indexSchema); err != nil {
 		return err
@@ -421,7 +421,7 @@ func (t *Traffic) initIndex() error {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, ftsSchema); err != nil {
-		slog.Warn("full-text index unavailable; body search will be disabled", "err", err)
+		slog.Warn("[traffic] full-text index unavailable; body search will be disabled", "err", err)
 		return nil
 	}
 	t.fts = true
@@ -623,7 +623,7 @@ func (t *Traffic) maybePassthrough(f *mproxy.Flow, err error) {
 	}
 	until := time.Now().Add(passthroughTTL)
 	if _, loaded := t.pass.LoadOrStore(host, until); !loaded {
-		slog.Warn("MITM failed, falling back to passthrough", "host", host, "ttl", passthroughTTL, "err", err)
+		slog.Warn("[traffic] MITM failed, falling back to passthrough", "host", host, "ttl", passthroughTTL, "err", err)
 	}
 }
 
@@ -740,10 +740,10 @@ func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.T
 	rewritten, ruleIDs := appliedRules(lines)
 	fail := func(step string, err error) {
 		if rewritten {
-			slog.Error("failed to record rewritten exchange", "host", host, "step", step, "rules", ruleIDs)
+			slog.Error("[traffic] failed to record rewritten exchange", "host", host, "step", step, "rules", ruleIDs)
 			return
 		}
-		slog.Error("failed to record exchange", "url", url, "step", step, "err", err)
+		slog.Error("[traffic] failed to record exchange", "url", url, "step", step, "err", err)
 	}
 
 	tx, err := t.db.Begin()
@@ -870,14 +870,14 @@ func tightenBlobPerms(root string) {
 		if d.IsDir() {
 			if info.Mode().Perm() != 0o700 {
 				if err := os.Chmod(path, 0o700); err != nil {
-					slog.Error("failed to restrict blob directory", "path", path, "err", err)
+					slog.Error("[traffic] failed to restrict blob directory", "path", path, "err", err)
 				}
 			}
 			return nil
 		}
 		if info.Mode().IsRegular() && info.Mode().Perm() != 0o600 {
 			if err := os.Chmod(path, 0o600); err != nil {
-				slog.Error("failed to restrict blob", "path", path, "err", err)
+				slog.Error("[traffic] failed to restrict blob", "path", path, "err", err)
 			}
 		}
 		return nil
@@ -911,20 +911,20 @@ func (t *Traffic) spillAt(body []byte, contentType string, maxInline int) stored
 	// the store only ever holds bodies above maxInlineBody, deduplicated by hash.
 	blobDir := filepath.Join(t.dir, "_blobs", "sha256", h[:2])
 	if err := os.MkdirAll(blobDir, 0o700); err != nil {
-		slog.Error("failed to create blob directory", "err", err)
+		slog.Error("[traffic] failed to create blob directory", "err", err)
 		return storedBody{inline: clipBytes(body, blobPreview), index: indexText()}
 	}
 	if err := os.Chmod(blobDir, 0o700); err != nil {
-		slog.Error("failed to restrict blob directory", "err", err)
+		slog.Error("[traffic] failed to restrict blob directory", "err", err)
 	}
 	blobPath := filepath.Join(blobDir, h+".bin")
 	if _, err := os.Stat(blobPath); os.IsNotExist(err) {
 		if err := os.WriteFile(blobPath, body, 0o600); err != nil {
-			slog.Error("failed to write blob", "hash", h, "err", err)
+			slog.Error("[traffic] failed to write blob", "hash", h, "err", err)
 			return storedBody{inline: clipBytes(body, blobPreview), index: indexText()}
 		}
 	} else if err := os.Chmod(blobPath, 0o600); err != nil {
-		slog.Error("failed to restrict blob", "hash", h, "err", err)
+		slog.Error("[traffic] failed to restrict blob", "hash", h, "err", err)
 	}
 	sb := storedBody{hash: h, index: indexText()}
 	if text {
@@ -1607,7 +1607,7 @@ func (t *Traffic) DeleteAll() (deleted int64, reclaimed int64, err error) {
 	if err := t.compactIndex(); err != nil {
 		// The deletion is already durable; compaction is disk space, not
 		// correctness, so it must not turn a completed purge into a failed one.
-		slog.Error("failed to compact index", "err", err)
+		slog.Error("[traffic] failed to compact index", "err", err)
 		return deleted, 0, nil
 	}
 	return deleted, before - t.indexBytes(), nil
@@ -1861,7 +1861,7 @@ func (t *Traffic) reapStage(stageDir string) {
 	}
 	t.reaping.Go(func() {
 		if err := os.RemoveAll(stageDir); err != nil {
-			slog.Error("failed to clean up legacy traffic directory", "dir", stageDir, "err", err)
+			slog.Error("[traffic] failed to clean up legacy traffic directory", "dir", stageDir, "err", err)
 		}
 	})
 }
@@ -2215,7 +2215,7 @@ func (t *Traffic) reclaim() {
 		ctx := context.Background()
 		conn, err := t.db.Conn(ctx)
 		if err != nil {
-			slog.Error("failed to reclaim index space", "step", "get connection", "err", err)
+			slog.Error("[traffic] failed to reclaim index space", "step", "get connection", "err", err)
 			return
 		}
 		defer conn.Close()
@@ -2226,7 +2226,7 @@ func (t *Traffic) reclaim() {
 			progressed, err := t.reclaimChunk(ctx, conn, &merges)
 			t.wmu.Unlock()
 			if err != nil {
-				slog.Error("failed to reclaim index space", "err", err)
+				slog.Error("[traffic] failed to reclaim index space", "err", err)
 				return
 			}
 			if !progressed {
@@ -2236,11 +2236,11 @@ func (t *Traffic) reclaim() {
 				return // shutdown must not wait out the remaining budget
 			}
 			if step+1 >= reclaimMaxSteps {
-				slog.Info("index space reclamation unfinished, will continue on the next deletion", "reason", "step limit", "max_steps", reclaimMaxSteps)
+				slog.Info("[traffic] index space reclamation unfinished, will continue on the next deletion", "reason", "step limit", "max_steps", reclaimMaxSteps)
 				return
 			}
 			if time.Now().After(deadline) {
-				slog.Info("index space reclamation unfinished, will continue on the next deletion", "reason", "time budget", "budget", reclaimBudget)
+				slog.Info("[traffic] index space reclamation unfinished, will continue on the next deletion", "reason", "time budget", "budget", reclaimBudget)
 				return
 			}
 		}
@@ -2250,7 +2250,7 @@ func (t *Traffic) reclaim() {
 		t.wmu.Lock()
 		defer t.wmu.Unlock()
 		if _, err := conn.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
-			slog.Error("failed to truncate WAL", "err", err)
+			slog.Error("[traffic] failed to truncate WAL", "err", err)
 		}
 	})
 }
