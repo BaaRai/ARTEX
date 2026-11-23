@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Task timeout triggers fire for every task**: `on_task_timeout` used the task id as a watermark, but tasks time out in deadline order. Once a newer task timed out first, an older task that timed out later was never fired for. Fired timeouts are now kept in a persisted set, like met goals; on first start the set is seeded with the tasks already timed out, so nothing replays.
 - **LLM connection-test logs stay one line**: the response body written by a connection test has CR and LF replaced with spaces before it is logged, so the body cannot start a second log record.
 - **Benchmark judge validation**: grading and the judge's falsification battery require one verdict per ground-truth ID, actual boolean decisions and gates, and matches to the supplied scanner findings. Invalid grading responses use the existing three-attempt budget and abort without writing scores, rather than counting duplicate IDs or truthy strings such as `"false"`.
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.

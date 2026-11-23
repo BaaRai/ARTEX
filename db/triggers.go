@@ -189,13 +189,14 @@ ORDER BY n.id`, lastID)
 	return out, rows.Err()
 }
 
-// TimedOutTasksSince returns tasks that reached status='timeout' with id > lastID,
-// ordered by id (monotonic watermark → no double-fire across restarts).
-func (d *DB) TimedOutTasksSince(lastID int64) ([]TaskEvent, error) {
+// TimedOutTasks returns all live tasks in status='timeout', ordered by id. Tasks
+// time out in deadline order, not id order, so the scheduler filters out the
+// ones it already fired for via its persisted fired-set, not an id watermark.
+func (d *DB) TimedOutTasks() ([]TaskEvent, error) {
 	rows, err := d.Query(`
 SELECT id, description, goal FROM tasks
-WHERE status='timeout' AND deleted_at IS NULL AND id > $1
-ORDER BY id`, lastID)
+WHERE status='timeout' AND deleted_at IS NULL
+ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +207,7 @@ ORDER BY id`, lastID)
 		if err := rows.Scan(&e.NodeID, &e.TaskDesc, &e.TaskGoal); err != nil {
 			return nil, err
 		}
-		e.TaskID = e.NodeID // task id doubles as NodeID for the watermark
+		e.TaskID = e.NodeID // task id doubles as NodeID for the fired-set
 		e.Summary = e.TaskGoal
 		out = append(out, e)
 	}
