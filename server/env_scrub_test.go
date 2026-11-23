@@ -39,6 +39,24 @@ func TestScrubSecretEnvHidesSecretsFromChildren(t *testing.T) {
 	}
 }
 
+func TestScrubSecretEnvClearsBedrockGatewayCredentials(t *testing.T) {
+	// Preserve every startup secret that ScrubSecretEnv may unset for later tests.
+	for _, k := range secretEnv {
+		t.Setenv(k, os.Getenv(k))
+	}
+	// Set these independently of secretEnv so the test catches missing entries.
+	t.Setenv("ARTEX_LLM_API_KEY", "synthetic-gateway-token")
+	t.Setenv("ARTEX_LLM_CUSTOM_HEADERS", "X-Example-Secret: synthetic-header-value")
+
+	ScrubSecretEnv()
+
+	for _, k := range []string{"ARTEX_LLM_API_KEY", "ARTEX_LLM_CUSTOM_HEADERS"} {
+		if _, ok := os.LookupEnv(k); ok {
+			t.Errorf("%s is still set after ScrubSecretEnv", k)
+		}
+	}
+}
+
 // New must apply the options it receives. An earlier version accepted
 // ...Option and never called them, so the binary kept the secrets in the
 // environment while the unit test above still passed.

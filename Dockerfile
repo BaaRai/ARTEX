@@ -13,7 +13,7 @@
 # ---------------------------------------------------------------- frontend ---
 # Pinned to the Node 22 line the CI/release workflows use. On the build platform
 # only; the frontend static export is architecture-independent.
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS web
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
@@ -26,7 +26,7 @@ RUN npm run build:static
 # GOTOOLCHAIN=local, so a floating 1.26 tag that lags go.mod fails the build;
 # bump this together with the go line in go.mod. The binary is CGO-free, so this
 # stage runs on the build platform and cross-compiles to $TARGETARCH without QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.26.11-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -67,7 +67,7 @@ RUN ARTEX_SKIP_FRONTEND=1 \
 #
 # sqlmap has no release binaries: it is a shallow clone of a pinned tag, checked
 # against the expected commit, which is the same idea.
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS tools
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS tools
 ARG TARGETARCH
 ARG NUCLEI_VERSION=v3.11.1
 ARG NUCLEI_SHA256_AMD64=ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6
@@ -158,12 +158,15 @@ RUN set -eux; \
     test "$count" -gt 10000
 
 # ---------------------------------------------------------------- runtime ---
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 ARG TARGETARCH
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
+      arp-scan arping fping iproute2 netdiscover net-tools nfs-common \
+      python3-impacket python3-paramiko python3-scapy rpcbind sqlite3 xxd \
+      hashcat hydra john ncrack openssh-client ssh-audit sshpass \
     && rm -rf /var/lib/apt/lists/*
 # Node 22 from the official nodejs.org tarball: bookworm's apt nodejs is 18,
 # Playwright requires >=20, and 20 is end-of-life. 22 matches the CI and release

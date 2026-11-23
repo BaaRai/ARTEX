@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/db"
 )
 
@@ -97,6 +98,8 @@ type TargetScope struct {
 	Enabled        func() bool
 	WaitBound      time.Duration
 	Interceptor    *Interceptor
+
+	AssessmentIdentity config.AssessmentIdentity // operator-configured identity of this task only
 }
 
 // WithTargetScope returns a child context carrying the target-gate scope of the

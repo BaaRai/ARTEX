@@ -114,6 +114,7 @@ import type {
   TrafficReplayRequest,
   TrafficReplayResult,
   TrafficResp,
+  TrafficStreamDirection,
   TrafficStreamPage,
   UsageStats,
   WorkspaceFile,
@@ -272,7 +273,15 @@ function interceptPageQuery(page: number, size: number, filter: InterceptApprova
 
 export const api = {
   // Backend application version (injected via ldflags at release, default "dev").
-  health: () => get<{ ok: boolean; service: string; version: string; latest_version?: string }>("/health"),
+  // isolation: result of the startup agent isolation self-test; "degraded" shows a banner on every page.
+  health: () =>
+    get<{
+      ok: boolean;
+      service: string;
+      version: string;
+      latest_version?: string;
+      isolation?: { mode: "isolated" | "degraded"; reason?: string };
+    }>("/health"),
 
   // ---- auth ----
   authStatus: () => get<{ initialized: boolean }>("/auth/status"),
@@ -884,8 +893,10 @@ export const api = {
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
   // One page of a WebSocket/SSE exchange's messages, in order.
-  trafficStream: (id: string, offset = 0, limit = 50) =>
-    get<TrafficStreamPage>(`/traffic/stream?exchange=${encodeURIComponent(id)}&offset=${offset}&limit=${limit}`),
+  trafficStream: (id: string, offset = 0, limit = 50, direction: TrafficStreamDirection = "") =>
+    get<TrafficStreamPage>(
+      `/traffic/stream?exchange=${encodeURIComponent(id)}&offset=${offset}&limit=${limit}${direction ? `&direction=${direction}` : ""}`,
+    ),
   // Raw bytes of one stored blob (a full message payload or an oversized body).
   // The JSON-only `get` cannot carry binary, hence the direct fetch.
   trafficBlob: async (hash: string) => {
@@ -1133,6 +1144,7 @@ export const api = {
     streaming = true, // test with the profile's real streaming mode so "streaming works, non-streaming does not" never leaks into conversations
     session_header_key = "", // non-empty = the test request also carries this custom session header (value is a one-off session id)
     user_agent = "", // non-empty = the test overrides the User-Agent header with this value
+    custom_headers = "",
   ) =>
     // reply = the model's actual reply (truncated); the backend marks a profile that replies with nothing as failed
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string; reply?: string }>("/llm/test", {
@@ -1147,6 +1159,7 @@ export const api = {
       streaming,
       session_header_key,
       user_agent,
+      custom_headers,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
@@ -1169,6 +1182,8 @@ export const api = {
     max_tokens_field?: string; // ""=max_tokens (default) | "max_completion_tokens" (openai format only)
     session_header_key?: string; // non-empty = send this HTTP header on every request, value = the current session id; "" = not sent
     user_agent?: string; // non-empty = override the User-Agent header on every request; "" = keep the default UA
+    custom_headers?: string; // static Bedrock gateway headers; values are write-only
+    clear_custom_headers?: boolean;
     retry?: LLMRetryOverride; // this profile's retry override; all zeros = follow the global retry policy
   }) => post<{ id: number }>("/llm/profiles", p),
   deleteLLMProfile: (id: string) => del<{ deleted: number }>(`/llm/profiles/${id}`),
