@@ -1,0 +1,25 @@
+[Unit]
+Description=ARTEX LLM shim (OAuth reverse proxy to api.anthropic.com)
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=artex
+Group=artex
+WorkingDirectory=/opt/artex
+EnvironmentFile=/etc/artex-llmshim.env
+ExecStart=/opt/artex/artex-llmshim -addr 127.0.0.1:8788
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+KillMode=control-group
+UMask=0002
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=artex-llmshim
+
+[Install]
+WantedBy=multi-user.target
