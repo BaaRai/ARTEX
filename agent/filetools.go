@@ -69,12 +69,32 @@ func (t *confinedFileTool) Call(_ context.Context, in json.RawMessage, tc *actoo
 	if tc != nil {
 		dir = tc.WorkingDir
 	}
-	w, err := openWorkRoot(t.base, dir)
-	if err != nil {
-		return actool.Errorf(fmt.Sprintf("Error: %s cannot run: %v", t.Name(), err)), nil
+	var (
+		res     actool.Result
+		err     error
+		capture bool
+	)
+	// Every file system access of the call, from opening the working directory on,
+	// runs as the executor when the privilege drop is active (filetools_identity.go).
+	idErr := RunAsFileToolIdentity(func() {
+		w, oerr := openWorkRoot(t.base, dir)
+		if oerr != nil {
+			res = actool.Errorf(fmt.Sprintf("Error: %s cannot run: %v", t.Name(), oerr))
+			return
+		}
+		defer w.Close()
+		res, err = t.run(w, in, tc)
+		capture = w.captured
+	})
+	if idErr != nil {
+		return actool.Errorf(fmt.Sprintf("Error: %s cannot run: %v", t.Name(), idErr)), nil
 	}
-	defer w.Close()
-	return t.run(w, in, tc)
+	if capture && err == nil {
+		// Bounded here, with the server's identity: an output over the cap is spilled
+		// to the root-owned spill directory, which the executor cannot write.
+		res = actool.Text(actool.Capture(tc, res.Flatten()))
+	}
+	return res, err
 }
 
 // workRoot is the run's working directory opened as an os.Root. dir is the path the
@@ -82,6 +102,15 @@ func (t *confinedFileTool) Call(_ context.Context, in json.RawMessage, tc *actoo
 type workRoot struct {
 	*os.Root
 	dir string
+	// captured is set by capture: the result text still has to go through
+	// actool.Capture once the call has left the file tool identity.
+	captured bool
+}
+
+// capture returns s unbounded and marks the call for actool.Capture in Call.
+func (w *workRoot) capture(s string) string {
+	w.captured = true
+	return s
 }
 
 var (
@@ -480,7 +509,7 @@ func runConfinedLS(w *workRoot, input json.RawMessage, tc *actool.ToolContext) (
 		}
 		fmt.Fprintf(&b, "%s\t%d bytes\n", e.Name(), size)
 	}
-	return actool.Text(actool.Capture(tc, b.String())), nil
+	return actool.Text(w.capture(b.String())), nil
 }
 
 // ---------- Glob ----------
@@ -544,7 +573,7 @@ func runConfinedGlob(w *workRoot, input json.RawMessage, tc *actool.ToolContext)
 		b.WriteString(m.path)
 		b.WriteByte('\n')
 	}
-	return actool.Text(actool.Capture(tc, b.String())), nil
+	return actool.Text(w.capture(b.String())), nil
 }
 
 // globMatch is the SDK Glob matcher: a pattern without "/" matches the base name,
@@ -707,7 +736,7 @@ func runConfinedGrep(w *workRoot, input json.RawMessage, tc *actool.ToolContext)
 	if more > 0 {
 		out += fmt.Sprintf("... [%d more result(s) — page with offset=%d, or head_limit=0 for all] ...\n", more, in.Offset+len(kept))
 	}
-	return actool.Text(actool.Capture(tc, out)), nil
+	return actool.Text(w.capture(out)), nil
 }
 
 // grepFileTypes maps a ripgrep-style file type to its globs (the SDK's subset).

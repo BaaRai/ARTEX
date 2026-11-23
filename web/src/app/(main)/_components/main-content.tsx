@@ -43,6 +43,8 @@ export function MainContent({ children }: { children: ReactNode }) {
   const [version, setVersion] = useState("");
   // Only set when the backend has the opt-in update check on (ARTEX_UPDATE_CHECK) and found a newer release.
   const [latest, setLatest] = useState("");
+  // Set when the server started with agent isolation degraded (server/isolation.go): the self-test failure.
+  const [degraded, setDegraded] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -51,9 +53,24 @@ export function MainContent({ children }: { children: ReactNode }) {
         setVersion((h.version ?? "").replace(/^v(?=\d)/, ""));
         const l = h.latest_version ?? "";
         setLatest(l && getLocalStorageValue(UPDATE_DISMISSED_KEY) !== l ? l : "");
+        setDegraded(h.isolation?.mode === "degraded" ? (h.isolation.reason ?? "") : null);
       })
       .catch(() => setVersion(""));
   }, []);
+
+  // Not dismissible: it stays as long as the server runs without agent isolation.
+  const isolationBanner =
+    degraded !== null ? (
+      <div
+        role="alert"
+        title={degraded}
+        className="flex shrink-0 items-center justify-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-1 text-destructive text-xs"
+      >
+        {t(
+          "Agent isolation is degraded: agent shells, tools and file tools run with the server's identity and may read its keys, config and database credentials.",
+        )}
+      </div>
+    ) : null;
 
   const updateBanner = latest ? (
     <div className="flex shrink-0 items-center justify-center gap-2 border-b bg-muted/50 px-4 py-1 text-xs">
@@ -77,6 +94,7 @@ export function MainContent({ children }: { children: ReactNode }) {
   if (isFullBleed(pathname)) {
     return (
       <>
+        {isolationBanner}
         {updateBanner}
         {children}
       </>
@@ -85,6 +103,7 @@ export function MainContent({ children }: { children: ReactNode }) {
 
   return (
     <>
+      {isolationBanner}
       {updateBanner}
       <header
         className={cn(
