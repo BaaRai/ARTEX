@@ -8,16 +8,16 @@ import (
 	"testing"
 )
 
-func TestLoadAssessmentIdentification(t *testing.T) {
+func TestLoadTaskUserAgents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("ARTEX_CONFIG", path)
 	cfg, err := Load()
-	if err != nil || len(cfg.AssessmentIdentification) != 0 {
+	if err != nil || len(cfg.TaskUserAgents) != 0 {
 		t.Fatalf("missing file: config = %+v, error = %v", cfg, err)
 	}
 
 	const maxReference = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._"
-	body := `{"assessment_identification":{
+	body := `{"task_user_agents":{
 		"42":{"reference":"FS-17","origins":["https://SHOP.example.test:443/","http://[2001:db8::1]:8080"]},
 		"43":{"reference":"","origins":["https://shop.example.test"]},
 		"44":{"reference":"` + maxReference + `","origins":["https://shop.example.test"]},
@@ -38,12 +38,12 @@ func TestLoadAssessmentIdentification(t *testing.T) {
 		{"46", ""},
 		{"", ""},
 	} {
-		identity := cfg.AssessmentIdentification[tc.taskID]
+		identity := cfg.TaskUserAgents[tc.taskID]
 		if got := identity.UserAgent(); got != tc.want {
 			t.Errorf("task %q: User-Agent = %q, want %q", tc.taskID, got, tc.want)
 		}
 	}
-	identity := cfg.AssessmentIdentification["42"]
+	identity := cfg.TaskUserAgents["42"]
 	for _, tc := range []struct {
 		rawURL string
 		want   bool
@@ -65,7 +65,7 @@ func TestLoadAssessmentIdentification(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidAssessmentIdentification(t *testing.T) {
+func TestLoadRejectsInvalidTaskUserAgents(t *testing.T) {
 	for _, tc := range []struct {
 		name, entries string
 	}{
@@ -94,13 +94,30 @@ func TestLoadRejectsInvalidAssessmentIdentification(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
-			if err := os.WriteFile(path, []byte(`{"assessment_identification":`+tc.entries+`}`), 0o600); err != nil {
+			if err := os.WriteFile(path, []byte(`{"task_user_agents":`+tc.entries+`}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("ARTEX_CONFIG", path)
-			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "assessment_identification") {
-				t.Fatalf("Load() error = %v, want assessment_identification validation error", err)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "task_user_agents") {
+				t.Fatalf("Load() error = %v, want task_user_agents validation error", err)
 			}
 		})
+	}
+}
+
+func TestLoadRejectsOldTaskUserAgentsKey(t *testing.T) {
+	for _, body := range []string{
+		`{"assessment_identification":{"42":{"origins":["https://test.example"]}}}`,
+		`{"assessment_identification":null}`,
+		`{"assessment_identification":{},"task_user_agents":{"42":{"origins":["https://test.example"]}}}`,
+	} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ARTEX_CONFIG", path)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "assessment_identification was replaced by task_user_agents") {
+			t.Fatalf("Load() error = %v, want task_user_agents migration hint", err)
+		}
 	}
 }

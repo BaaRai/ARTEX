@@ -19,18 +19,18 @@ var (
 	asciiDNSLabel       = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 )
 
-// AssessmentIdentification maps opted-in task IDs to their allowed origins and label.
-type AssessmentIdentification map[string]AssessmentIdentity
+// TaskUserAgents maps opted-in task IDs to their allowed origins and label.
+type TaskUserAgents map[string]AssessmentIdentity
 
-func (a *AssessmentIdentification) UnmarshalJSON(data []byte) error {
+func (a *TaskUserAgents) UnmarshalJSON(data []byte) error {
 	var entries map[string]AssessmentIdentity
 	if err := json.Unmarshal(data, &entries); err != nil {
-		return fmt.Errorf("assessment_identification: %w", err)
+		return fmt.Errorf("task_user_agents: %w", err)
 	}
 	for taskID := range entries {
 		id, err := strconv.ParseInt(taskID, 10, 64)
 		if err != nil || id <= 0 || strconv.FormatInt(id, 10) != taskID {
-			return errors.New("assessment_identification task IDs must be positive integers written without a sign or leading zeroes")
+			return errors.New("task_user_agents task IDs must be positive integers written without a sign or leading zeroes")
 		}
 	}
 	*a = entries

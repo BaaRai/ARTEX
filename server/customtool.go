@@ -645,9 +645,11 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 	proxyStr := proxyURLString(spec.Proxy)
 	var caFile string
 	if spec.UseRecordingProxy {
-		if addr := proxyURLString(s.m.ProxyAddr()); addr != "" {
+		if tr := s.m.Traffic(); tr != nil && s.m.TrafficEnabled() {
+			proxyStr = proxyURLString(tr.ProxyAddr())
+			caFile = tr.CACertPath()
+		} else if addr := proxyURLString(s.m.GlobalProxy()); addr != "" {
 			proxyStr = addr
-			caFile = s.m.ProxyCACert()
 		}
 	}
 	if proxyStr == "" {
@@ -659,6 +661,8 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 	}
 	tr := &http.Transport{Proxy: http.ProxyURL(pu)}
 	if caFile != "" {
+		// Keep recorded HTTP requests on separate connections across redirects.
+		tr.DisableKeepAlives = true
 		if pem, err := os.ReadFile(caFile); err == nil {
 			pool := x509.NewCertPool()
 			if pool.AppendCertsFromPEM(pem) {

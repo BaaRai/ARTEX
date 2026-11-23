@@ -194,7 +194,7 @@ func TestAssessmentStartupScopesCurrentTasks(t *testing.T) {
 	t.Cleanup(func() { _ = pg.Close() })
 	addTask := func() *db.Task {
 		t.Helper()
-		task, err := pg.CreateTask("assessment identification fixture", "", nil, 0, 0)
+		task, err := pg.CreateTask("scanner User-Agent fixture", "", nil, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -206,7 +206,7 @@ func TestAssessmentStartupScopesCurrentTasks(t *testing.T) {
 	untaggedID := strconv.FormatInt(untagged.ID, 10)
 	futureID := strconv.FormatInt(untagged.ID+1, 10)
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
-	cfg := map[string]any{"assessment_identification": map[string]any{
+	cfg := map[string]any{"task_user_agents": map[string]any{
 		taggedID: map[string]any{"reference": "FS-17", "origins": []string{"https://shop.example.test"}},
 		futureID: map[string]any{"reference": "future", "origins": []string{"https://shop.example.test"}},
 	}}
@@ -226,7 +226,7 @@ func TestAssessmentStartupScopesCurrentTasks(t *testing.T) {
 		_ = m.Close()
 	})
 	m.LoadExisting()
-	created, err := m.CreateTask("assessment identification fixture created after startup", "", nil, 0, 0)
+	created, err := m.CreateTask("scanner User-Agent fixture created after startup", "", nil, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

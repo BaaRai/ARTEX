@@ -264,7 +264,7 @@ type Manager struct {
 	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
 
-	assessmentIdentification config.AssessmentIdentification // existing tasks verified at startup
+	taskUserAgents config.TaskUserAgents // existing tasks verified at startup
 
 	// Capture-proxy rewrite rules: rewriteMu serializes reloads, rewriteSet is
 	// the snapshot last compiled, rewriteErrors outlives the reloads.
@@ -428,16 +428,16 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	// Reject deferred activation: a configured ID that does not exist at startup
 	// must not start tagging requests if a task is assigned that ID later.
-	for taskID := range cfg.AssessmentIdentification {
+	for taskID := range cfg.TaskUserAgents {
 		id, _ := strconv.ParseInt(taskID, 10, 64) // validated when the config was loaded
 		task, err := pg.GetTask(id)
 		if err != nil {
 			pg.Close()
-			return nil, fmt.Errorf("check assessment_identification task ID %s: %w", taskID, err)
+			return nil, fmt.Errorf("check task_user_agents task ID %s: %w", taskID, err)
 		}
 		if task == nil {
-			log.Printf("[config] assessment_identification task ID %s is unavailable, ignoring its entry", taskID)
-			delete(cfg.AssessmentIdentification, taskID)
+			log.Printf("[config] task_user_agents task ID %s is unavailable, ignoring its entry", taskID)
+			delete(cfg.TaskUserAgents, taskID)
 		}
 	}
 	// Before anything reads a stored secret: load the key, encrypt legacy plaintext.
@@ -458,7 +458,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	m := &Manager{
 		dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg),
-		assessmentIdentification: cfg.AssessmentIdentification,
+		taskUserAgents: cfg.TaskUserAgents,
 	}
 	// Behind any proxy in the path (the recording proxy, the global egress proxy,
 	// or a custom tool's own proxy) the proxy chooses the address, so a target
@@ -1034,7 +1034,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 
 func (m *Manager) taskFromPG(pt *pgdb.Task) *Task {
 	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
-	t.assessmentIdentity = m.assessmentIdentification[t.ID]
+	t.assessmentIdentity = m.taskUserAgents[t.ID]
 	return t
 }
 

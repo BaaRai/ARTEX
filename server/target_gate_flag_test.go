@@ -32,8 +32,13 @@ type gateServer struct {
 
 func newGateServer(t *testing.T) *gateServer {
 	t.Helper()
+	return newGateServerWithProxy(t, "")
+}
+
+func newGateServerWithProxy(t *testing.T, proxyAddr string) *gateServer {
+	t.Helper()
 	skipWithoutDSN(t)
-	m, err := NewManager(t.TempDir(), "")
+	m, err := NewManager(t.TempDir(), proxyAddr)
 	if err != nil {
 		t.Fatal(err)
 	}

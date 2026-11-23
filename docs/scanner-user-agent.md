@@ -1,18 +1,20 @@
-# Assessment identification
+# Scanner User-Agent
 
 An authorized assessment can opt in to a stable ARTEX User-Agent on supported target HTTP requests. A security operations center (SOC), incident response team (IR), or computer incident response team (CIRT) can search for that label in web application firewall (WAF) logs and correlate candidate events with an approved assessment record.
 
 ## Configure a task
 
-Add `assessment_identification` to the active ARTEX `config.json`, keeping the rest of your configuration. Each key is an existing task ID written as a positive decimal integer without leading zeros. Each task entry needs a nonempty `origins` list of exact approved HTTP or HTTPS origins. Use the scheme and host, with a port when needed. List each origin explicitly and leave out wildcards, paths, queries, fragments, and credentials. ARTEX matches the URL by scheme, host, and port. Host letter case and an explicitly written default port are treated as equivalent.
+Add `task_user_agents` to the active ARTEX `config.json`, keeping the rest of your configuration. Each key is an existing task ID written as a positive decimal integer without leading zeros. Each task entry needs a nonempty `origins` list of exact approved HTTP or HTTPS origins. Use the scheme and host, with a port when needed. List each origin explicitly and leave out wildcards, paths, queries, fragments, and credentials. ARTEX matches the URL by scheme, host, and port. Host letter case and an explicitly written default port are treated as equivalent.
 
 Omit `reference` or use an empty string for the base label. A public reference may contain 1–64 ASCII letters, digits, dots, underscores, or hyphens. ARTEX validates this setting at startup and rejects an invalid file. Restart after editing. Remove the task's entry to disable its label.
 
 At startup, ARTEX logs a warning and ignores entries with no live task in the database. They stay off for that process even if a task later receives the ID or is restored. Restart with the task present in the database to apply its entry.
 
+If your configuration has the pre-release key `assessment_identification`, move its entries to `task_user_agents` as shown below. Each entry needs an `origins` list. Remove the old key before restarting.
+
 ```json
 {
-  "assessment_identification": {
+  "task_user_agents": {
     "123": {
       "origins": ["https://shop.example.test"],
       "reference": "FS-17"
