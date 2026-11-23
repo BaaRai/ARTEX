@@ -1160,7 +1160,7 @@ export interface NotificationDelivery {
 export interface LLMProfile {
   id: string;
   name: string;
-  format: "openai" | "anthropic" | "openai-responses" | "ollama";
+  format: "openai" | "anthropic" | "openai-responses" | "ollama" | "bedrock-gateway";
   base_url?: string;
   proxy?: string;
   model: string;
@@ -1195,6 +1195,7 @@ export interface LLMProfile {
   session_header_key?: string;
   // Custom User-Agent: when non-empty, every outbound LLM request overrides its User-Agent header with this value. "" = do not override (keep the default UA).
   user_agent?: string;
+  custom_headers_set?: boolean;
   // This profile's retry overrides (connect / empty response / same-provider safety window). Empty / all zeros = follow the global policy.
   retry?: LLMRetryOverride;
 }

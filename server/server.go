@@ -432,6 +432,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	cfg.UserAgent = p.UserAgent
+	cfg.CustomHeaders = p.CustomHeaders
 	s.applyProfileRetry(&cfg, p)
 	// Ollama profiles run keyless (local server); the other formats need a key.
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
@@ -460,9 +461,15 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 	var sessionHeaderKey string
 	var userAgent string
 	var retry db.RetryOverride
+	clearCustomHeaders := format != "bedrock-gateway"
 	if profs, _ := s.m.pg.ListProfiles(); profs != nil {
 		for _, p := range profs {
 			if p.Name == "default" {
+				// A header saved for one gateway must not follow the legacy
+				// endpoint's default profile to another destination.
+				if !sameLLMEndpoint(format, cfg.BaseURL, p.Format, p.BaseURL) {
+					clearCustomHeaders = true
+				}
 				id, priority, poolExclude, streaming = p.ID, p.Priority, p.PoolExclude, p.Streaming
 				maxTokens, maxTokensField = p.MaxTokens, p.MaxTokensField
 				sessionHeaderKey = p.SessionHeaderKey
@@ -478,7 +485,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 		ContextWindowK: cfg.ContextWindowK, ThinkingType: cfg.ThinkingType, ReasoningEffort: cfg.ReasoningEffort, IsDefault: true,
 		Priority: priority, PoolExclude: poolExclude, Streaming: streaming,
 		MaxTokens: maxTokens, MaxTokensField: maxTokensField, SessionHeaderKey: sessionHeaderKey, UserAgent: userAgent,
-		Retry: retry,
+		Retry: retry, CustomHeaders: cfg.CustomHeaders, ClearCustomHeaders: clearCustomHeaders,
 	})
 	if err != nil {
 		return err
@@ -611,6 +618,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	cfg.UserAgent = p.UserAgent
+	cfg.CustomHeaders = p.CustomHeaders
 	s.applyProfileRetry(&cfg, p)
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		return cfg, false
@@ -1498,6 +1506,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		ContextWindowK  int     `json:"context_window_k"`
 		ThinkingType    string  `json:"thinking_type"`
 		ReasoningEffort string  `json:"reasoning_effort"`
+		CustomHeaders   string  `json:"custom_headers"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1512,18 +1521,26 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	cfg.RatePerSecond, cfg.RatePerMinute = req.RatePerSecond, req.RatePerMinute
 	cfg.ThinkingType = req.ThinkingType
 	cfg.ReasoningEffort = req.ReasoningEffort
+	cfg.CustomHeaders = req.CustomHeaders
 	if k := req.ContextWindowK; k > 0 { // 0 = keep default (200K); cap at 1M
 		if k > 1000 {
 			k = 1000
 		}
 		cfg.ContextWindowK = k
 	}
-	// Keyless formats (Ollama) need no key; the others keep/require one.
-	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
-		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
-		s.cfgMu.Unlock()
+	// A rotated token at the same gateway still uses that gateway's saved
+	// headers. Neither secret follows a changed endpoint.
+	s.cfgMu.Lock()
+	if sameLLMEndpoint(req.Provider, req.BaseURL, s.llmCfg.Provider(), s.llmCfg.BaseURL) {
+		if cfg.APIKey == "" && cfg.NeedsAPIKey() {
+			cfg.APIKey = s.llmCfg.APIKey
+		}
+		if cfg.CustomHeaders == "" && cfg.Format == agent.FormatBedrockGateway {
+			cfg.CustomHeaders = s.llmCfg.CustomHeaders
+		}
 	}
+	s.cfgMu.Unlock()
+	// Keyless formats (Ollama) need no key; the others keep/require one.
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		writeErr(w, 400, "api_key required")
 		return
@@ -1564,6 +1581,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		Streaming        *bool  `json:"streaming"`          // omitted = streaming, the same defaults as when saving a profile
 		SessionHeaderKey string `json:"session_header_key"` // non-empty = the test also sends this custom session header, with a one-off random session id as the value
 		UserAgent        string `json:"user_agent"`         // non-empty = the test overrides the User-Agent header with this value (mirrors production)
+		CustomHeaders    string `json:"custom_headers"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1645,6 +1663,14 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg.UserAgent = ua
+	cfg.CustomHeaders = req.CustomHeaders
+	if stored != nil && cfg.CustomHeaders == "" && sameLLMEndpoint(req.Provider, req.BaseURL, stored.Format, stored.BaseURL) {
+		cfg.CustomHeaders = stored.CustomHeaders
+	}
+	if _, err := agent.ParseBedrockGatewayHeaders(cfg.CustomHeaders); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	// Keyless formats (Ollama) skip the key resolution entirely.
 	if cfg.NeedsAPIKey() {
 		// API key resolution precedence: form input > the named profile's stored key > the global config's key.
@@ -1670,6 +1696,9 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 			if global.APIKey != "" {
 				if sameLLMEndpoint(req.Provider, req.BaseURL, global.Provider(), global.BaseURL) {
 					cfg.APIKey = global.APIKey
+					if cfg.CustomHeaders == "" {
+						cfg.CustomHeaders = global.CustomHeaders
+					}
 				} else {
 					withheld = true
 				}
