@@ -21,7 +21,10 @@ func frontProxy(t *testing.T, upstream *httptest.Server, token string) *httptest
 	if err != nil {
 		t.Fatalf("parse upstream URL: %v", err)
 	}
-	front := httptest.NewServer(newProxy(u, token))
+	// Front the production handler chain (logRequests wraps the proxy in run),
+	// not the bare proxy, so these tests exercise statusRecorder too — e.g. its
+	// Flush delegation, which unbuffered SSE streaming depends on in production.
+	front := httptest.NewServer(logRequests(newProxy(u, token)))
 	t.Cleanup(front.Close)
 	return front
 }
