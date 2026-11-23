@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **A named pipe in the task workspace no longer hangs the archive worker**: packing opened every non-directory entry, and opening a FIFO blocks until a writer appears, so the single archive worker stopped there and every later archive, restore and delete job waited behind it. A socket failed the archive instead, and a device was packed but refused on restore. The packer now skips every entry that is neither a directory nor a regular file, as it already did for symlinks.
 - **Task form does not keep test-account secrets on screen**: after a task is created the credential rows are cleared, and the password field is masked.
 - **LLM connection-test logs stay one line**: the response body written by a connection test has CR and LF replaced with spaces before it is logged, so the body cannot start a second log record.
 - **Benchmark judge validation**: grading and the judge's falsification battery require one verdict per ground-truth ID, actual boolean decisions and gates, and matches to the supplied scanner findings. Invalid grading responses use the existing three-attempt budget and abort without writing scores, rather than counting duplicate IDs or truthy strings such as `"false"`.
