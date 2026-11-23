@@ -67,7 +67,7 @@ const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
 };
 // LLM profile formats. The default in the create form is "anthropic"; "ollama" is the
 // keyless local-server format (base URL defaults to http://127.0.0.1:11434/v1).
-type ProfileFormat = "anthropic" | "openai" | "openai-responses" | "ollama";
+type ProfileFormat = "anthropic" | "openai" | "openai-responses" | "ollama" | "bedrock-gateway";
 const OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1";
 const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: NONE, label: t("Not sent (default)") },
@@ -354,6 +354,8 @@ function ProfileSheet({
   const [maxTokensField, setMaxTokensField] = React.useState(NONE); // which field name carries the cap; NONE = max_tokens
   const [sessionHeaderKey, setSessionHeaderKey] = React.useState(""); // custom session header name; empty = not sent
   const [userAgent, setUserAgent] = React.useState(""); // custom User-Agent; empty = keep the default UA
+  const [customHeaders, setCustomHeaders] = React.useState("");
+  const [clearCustomHeaders, setClearCustomHeaders] = React.useState(false);
   const [retry, setRetry] = React.useState<LLMRetryOverride>(ZERO_OVERRIDE); // retry override for this profile; all 0 = follow the global
   const [testing, setTesting] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -368,7 +370,7 @@ function ProfileSheet({
     if (!open) return;
     setName(profile?.name ?? "");
     setFormat(
-      profile?.format === "openai" || profile?.format === "openai-responses" || profile?.format === "ollama"
+      profile?.format === "openai" || profile?.format === "openai-responses" || profile?.format === "ollama" || profile?.format === "bedrock-gateway"
         ? profile.format
         : "anthropic",
     );
@@ -387,6 +389,8 @@ function ProfileSheet({
     setMaxTokensField(fromStore(profile?.max_tokens_field));
     setSessionHeaderKey(profile?.session_header_key ?? "");
     setUserAgent(profile?.user_agent ?? "");
+    setCustomHeaders("");
+    setClearCustomHeaders(false);
     setRetry(profile?.retry ?? ZERO_OVERRIDE);
     setApiKey("");
     setKeyHint(profile?.api_key_hint ?? "");
@@ -444,6 +448,7 @@ function ProfileSheet({
         streaming,
         sessionHeaderKey.trim(),
         userAgent.trim(),
+        customHeaders,
       );
       // Show the reply too: only when the model demonstrably spoke is this the same as working inside a session.
       if (r.ok)
@@ -488,6 +493,8 @@ function ProfileSheet({
         max_tokens_field: format === "openai" ? toStore(maxTokensField) : "",
         session_header_key: sessionHeaderKey.trim(),
         user_agent: userAgent.trim(),
+        custom_headers: format === "bedrock-gateway" ? customHeaders : "",
+        clear_custom_headers: clearCustomHeaders,
         retry,
       });
       if (isNew) toast.success(t('Created: {name} (use "Set as active" on its card to enable it)', { name: name.trim() }));
@@ -505,8 +512,16 @@ function ProfileSheet({
   }
 
   let keyPlaceholder = "sk-…";
+  let keyLabel = "API Key";
+  let basePlaceholder = "https://api.openai.com/v1";
   if (format === "ollama") {
     keyPlaceholder = t("optional — a local Ollama server runs keyless");
+    keyLabel = t("API Key (optional for Ollama)");
+    basePlaceholder = OLLAMA_DEFAULT_BASE_URL;
+  } else if (format === "bedrock-gateway") {
+    keyLabel = "Bearer token";
+    basePlaceholder = "https://gateway.example.com/bedrock";
+    if (keyHint) keyPlaceholder = t("Set ({hint}); leave empty to keep it", { hint: keyHint });
   } else if (keyHint) {
     keyPlaceholder = t("Set ({hint}); leave empty to keep it", { hint: keyHint });
   }
@@ -555,6 +570,7 @@ function ProfileSheet({
                   <SelectItem value="openai">OpenAI (Chat Completions)</SelectItem>
                   <SelectItem value="openai-responses">OpenAI (Responses API)</SelectItem>
                   <SelectItem value="ollama">{t("Ollama (local, no key needed)")}</SelectItem>
+                  <SelectItem value="bedrock-gateway">Bedrock gateway</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -586,7 +602,7 @@ function ProfileSheet({
                     variant="outline"
                     size="icon"
                     className="shrink-0"
-                    disabled={loadingModels}
+                    disabled={loadingModels || format === "bedrock-gateway"}
                     onClick={loadModels}
                     title={t("Load available models from the API")}
                   >
@@ -634,15 +650,24 @@ function ProfileSheet({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="p-base-url">{t("Base URL (optional)")}</Label>
+            <Label htmlFor="p-base-url">{format === "bedrock-gateway" ? "Gateway base URL (required)" : t("Base URL (optional)")}</Label>
             <Input
               id="p-base-url"
               className="font-mono"
-              placeholder={format === "ollama" ? OLLAMA_DEFAULT_BASE_URL : "https://api.openai.com/v1"}
+              placeholder={basePlaceholder}
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
             />
           </div>
+
+          {format === "bedrock-gateway" && (
+            <div className="grid gap-2">
+              <Label htmlFor="p-custom-headers">Custom gateway headers (optional)</Label>
+              <textarea id="p-custom-headers" className="min-h-20 w-full rounded-md border bg-background px-3 py-2 font-mono text-sm" placeholder="X-Example-Route: demo" value={customHeaders} onChange={(e) => { setCustomHeaders(e.target.value); setClearCustomHeaders(false); }} spellCheck={false} />
+              <p className="text-muted-foreground text-xs">One Name: Value per line. Values are encrypted and cannot be viewed after saving. Leave blank to keep saved headers.</p>
+              {profile?.custom_headers_set && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={clearCustomHeaders} onChange={(e) => { setClearCustomHeaders(e.target.checked); if (e.target.checked) setCustomHeaders(""); }} />Clear saved custom headers</label>}
+            </div>
+          )}
 
           <div className="grid gap-2">
             <Label htmlFor="p-proxy">{t("Proxy (optional)")}</Label>
@@ -698,7 +723,7 @@ function ProfileSheet({
 
           <div className="grid gap-2">
             <Label htmlFor="p-api-key">
-              {format === "ollama" ? t("API Key (optional for Ollama)") : "API Key"}
+              {keyLabel}
             </Label>
             <Input
               id="p-api-key"

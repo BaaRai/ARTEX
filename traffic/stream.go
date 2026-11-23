@@ -523,6 +523,15 @@ type StreamMessage struct {
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
+// StreamMessagePage keeps row totals for pagination separate from message
+// totals for display. Items and Total include any 'meta' limit marker;
+// MessageTotal counts only recorded WebSocket messages or SSE events.
+type StreamMessagePage struct {
+	Items        []StreamMessage `json:"items"`
+	Total        int             `json:"total"`
+	MessageTotal int             `json:"message_total"`
+}
+
 // StreamMessages returns one page of an exchange's stream messages in order.
 // limit is 1..200 (default 50) and offset >= 0. Every payload comes back as at
 // most streamPreview (4 KiB); a longer one lives in the blob store and the row
@@ -555,9 +564,17 @@ func streamDirectionFilter(direction string) (cond string, args []any, err error
 // The 'meta' row (messages dropped past the recorder's limits) is kept in a
 // filtered page. Seq stays the message's position in the whole stream.
 func (t *Traffic) StreamMessagesByDirection(exchangeID, direction string, offset, limit int) ([]StreamMessage, int, error) {
+	page, err := t.StreamMessagePageByDirection(exchangeID, direction, offset, limit)
+	return page.Items, page.Total, err
+}
+
+// StreamMessagePageByDirection returns the same rows and pagination total as
+// StreamMessagesByDirection, plus a message total that excludes limit markers.
+// Both totals cover the entire filtered stream, regardless of offset or limit.
+func (t *Traffic) StreamMessagePageByDirection(exchangeID, direction string, offset, limit int) (StreamMessagePage, error) {
 	cond, dirArgs, err := streamDirectionFilter(direction)
 	if err != nil {
-		return nil, 0, err
+		return StreamMessagePage{}, err
 	}
 	if limit <= 0 {
 		limit = 50
@@ -568,25 +585,26 @@ func (t *Traffic) StreamMessagesByDirection(exchangeID, direction string, offset
 	if offset < 0 {
 		offset = 0
 	}
-	var total int
+	var page StreamMessagePage
 	args := append([]any{exchangeID}, dirArgs...)
-	if err := t.db.QueryRow(`SELECT COUNT(*) FROM stream_messages WHERE exchange_id=?`+cond, args...).Scan(&total); err != nil {
-		return nil, 0, err
+	if err := t.db.QueryRow(`SELECT COUNT(*), COUNT(CASE WHEN direction <> 'meta' THEN 1 END)
+FROM stream_messages WHERE exchange_id=?`+cond, args...).Scan(&page.Total, &page.MessageTotal); err != nil {
+		return StreamMessagePage{}, err
 	}
 	rows, err := t.db.Query(`SELECT seq,ts,direction,kind,event,event_id,retry,size,payload,payload_blob,truncated
 FROM stream_messages WHERE exchange_id=?`+cond+` ORDER BY seq LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
-		return nil, 0, err
+		return StreamMessagePage{}, err
 	}
 	defer rows.Close()
-	out := []StreamMessage{}
+	page.Items = []StreamMessage{}
 	for rows.Next() {
 		var m StreamMessage
 		var payload []byte
 		var blob sql.NullString
 		var truncated int
 		if err := rows.Scan(&m.Seq, &m.TS, &m.Direction, &m.Kind, &m.Event, &m.EventID, &m.Retry, &m.Size, &payload, &blob, &truncated); err != nil {
-			return nil, 0, err
+			return StreamMessagePage{}, err
 		}
 		m.Truncated = truncated != 0
 		m.Blob = blob.String
@@ -610,9 +628,9 @@ FROM stream_messages WHERE exchange_id=?`+cond+` ORDER BY seq LIMIT ? OFFSET ?`,
 		} else {
 			m.Payload = truncateUTF8(payload, streamPreview)
 		}
-		out = append(out, m)
+		page.Items = append(page.Items, m)
 	}
-	return out, total, rows.Err()
+	return page, rows.Err()
 }
 
 // StreamInfo reports how many stream messages an exchange holds and whether it

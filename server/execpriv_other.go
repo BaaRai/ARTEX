@@ -4,6 +4,7 @@ package server
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 )
 
@@ -18,6 +19,10 @@ func execPrivilegeSupported() bool { return false }
 func serverIsRoot() bool { return false }
 
 func applyExecCredential(c *exec.Cmd, p ExecPrivilege) {}
+
+func agentProcessEnv(p ExecPrivilege) []string { return os.Environ() }
+
+func withExecKeep(p ExecPrivilege, env map[string]string) map[string]string { return env }
 
 func prepareExecScript(p ExecPrivilege, path string) error { return nil }
 

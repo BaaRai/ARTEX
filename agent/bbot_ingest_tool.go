@@ -56,10 +56,19 @@ func bbotIntelFact(ev bbotEvent) factItem {
 // reads the file as root while the agent names the path, so an absolute path
 // outside the working directory, "..", a symlink and a hard-linked file are
 // refused. Without a data directory or a working directory it fails closed.
-func openBbotOutput(base, dir, p string) (*os.File, error) {
+func openBbotOutput(base, dir, p string) (f *os.File, err error) {
 	if strings.TrimSpace(base) == "" {
 		return nil, errors.New("no data directory for this run")
 	}
+	// The open runs as the executor when the privilege drop is active
+	// (filetools_identity.go); the descriptor is then read by the server.
+	if idErr := RunAsFileToolIdentity(func() { f, err = openBbotOutputIn(base, dir, p) }); idErr != nil {
+		return nil, idErr
+	}
+	return f, err
+}
+
+func openBbotOutputIn(base, dir, p string) (*os.File, error) {
 	w, err := openWorkRoot(base, dir)
 	if err != nil {
 		return nil, err

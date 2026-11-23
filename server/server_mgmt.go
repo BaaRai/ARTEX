@@ -2121,8 +2121,10 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	// would get wrong — legacy/partial clients that never send it stay streaming.
 	var body struct {
 		db.LLMProfile
-		APIKey    string `json:"api_key"`
-		Streaming *bool  `json:"streaming"`
+		APIKey             string `json:"api_key"`
+		CustomHeaders      string `json:"custom_headers"`
+		ClearCustomHeaders bool   `json:"clear_custom_headers"`
+		Streaming          *bool  `json:"streaming"`
 	}
 	if err := decode(w, r, &body); err != nil {
 		writeErr(w, 400, err.Error())
@@ -2130,6 +2132,35 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	p := body.LLMProfile
 	p.APIKey = body.APIKey
+	p.CustomHeaders = body.CustomHeaders
+	p.ClearCustomHeaders = body.ClearCustomHeaders
+	if p.Format == "bedrock-gateway" {
+		if _, err := agent.ParseBedrockGatewayHeaders(p.CustomHeaders); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if p.ID != 0 {
+			stored, err := pg.ProfileByID(p.ID)
+			if err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			if stored != nil && !sameLLMEndpoint(p.Format, p.BaseURL, stored.Format, stored.BaseURL) {
+				if strings.TrimSpace(p.APIKey) == "" {
+					writeErr(w, 400, "enter the bearer token when changing the Bedrock gateway endpoint")
+					return
+				}
+				if p.CustomHeaders == "" {
+					p.ClearCustomHeaders = true
+				}
+			}
+		}
+	} else if p.CustomHeaders != "" {
+		writeErr(w, 400, "custom headers require the Bedrock gateway format")
+		return
+	} else {
+		p.ClearCustomHeaders = true
+	}
 	p.Streaming = body.Streaming == nil || *body.Streaming
 	// The list returns the proxy masked: the placeholder sent back keeps the
 	// stored proxy and is never stored itself.
@@ -2158,6 +2189,25 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.UserAgent = ua
+	if p.Format == "bedrock-gateway" {
+		validate := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+		validate.CustomHeaders = p.CustomHeaders
+		if p.ID != 0 {
+			stored, _ := pg.ProfileByID(p.ID)
+			if stored != nil && sameLLMEndpoint(p.Format, p.BaseURL, stored.Format, stored.BaseURL) {
+				if validate.APIKey == "" {
+					validate.APIKey = stored.APIKey
+				}
+				if validate.CustomHeaders == "" && !p.ClearCustomHeaders {
+					validate.CustomHeaders = stored.CustomHeaders
+				}
+			}
+		}
+		if _, err := validate.NewProvider(); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
 	id, err := pg.SaveProfile(&p)
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -2590,6 +2640,10 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decode(w, r, &req); err != nil {
 		writeErr(w, 400, err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Provider) == "bedrock-gateway" {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "enter the Bedrock model ID manually; this gateway has no model-list endpoint"})
 		return
 	}
 	// Resolve API key: form input > profile stored key. The stored key is only
