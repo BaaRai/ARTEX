@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Task form does not keep test-account secrets on screen**: after a task is created the credential rows are cleared, and the password field is masked.
 - **LLM connection-test logs stay one line**: the response body written by a connection test has CR and LF replaced with spaces before it is logged, so the body cannot start a second log record.
 - **Benchmark judge validation**: grading and the judge's falsification battery require one verdict per ground-truth ID, actual boolean decisions and gates, and matches to the supplied scanner findings. Invalid grading responses use the existing three-attempt budget and abort without writing scores, rather than counting duplicate IDs or truthy strings such as `"false"`.
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
