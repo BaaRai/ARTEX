@@ -8,19 +8,19 @@ import (
 	"testing"
 )
 
-// The allowlist keeps the named and prefixed variables and the extra names, and
-// drops everything else, secrets under known and unknown names alike.
+// The allowlist keeps the named variables and the extra names, and drops
+// everything else, secrets under known and unknown names alike.
 func TestExecutorEnvAllowlist(t *testing.T) {
 	env := []string{
-		"PATH=/usr/bin", "LANG=C.UTF-8", "LC_ALL=C", "HTTP_PROXY=http://127.0.0.1:8788",
+		"PATH=/usr/bin", "LANG=C.UTF-8", "LC_ALL=C", "LC_CTYPE=C.UTF-8", "HTTP_PROXY=http://127.0.0.1:8788",
 		"SSL_CERT_FILE=/ca.pem", "PLAYWRIGHT_BROWSERS_PATH=/pw", envExecHome + "=/data/exec-home",
 		"ARTEX_PG_DSN=postgres://artex:pw@postgres/artex", "OPENAI_API_KEY=sk-x",
-		"MY_COMPANY_TOKEN=t0k3n", "ARTEX_NOISE_PROFILE=quiet", "MCP_TOKEN=abc",
+		"MY_COMPANY_TOKEN=t0k3n", "LC_REVIEW_SECRET=leak", "ARTEX_NOISE_PROFILE=quiet", "MCP_TOKEN=abc",
 		envExecKeep + "=MCP_TOKEN", "malformed", "=empty-name",
 	}
 	got := strings.Join(executorEnv(env, map[string]bool{"MCP_TOKEN": true}), "|")
 	want := strings.Join([]string{
-		"PATH=/usr/bin", "LANG=C.UTF-8", "LC_ALL=C", "HTTP_PROXY=http://127.0.0.1:8788",
+		"PATH=/usr/bin", "LANG=C.UTF-8", "LC_ALL=C", "LC_CTYPE=C.UTF-8", "HTTP_PROXY=http://127.0.0.1:8788",
 		"SSL_CERT_FILE=/ca.pem", "PLAYWRIGHT_BROWSERS_PATH=/pw", envExecHome + "=/data/exec-home",
 		"MCP_TOKEN=abc",
 	}, "|")

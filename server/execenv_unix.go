@@ -28,6 +28,9 @@ import (
 var executorEnvNames = nameSet(
 	"PATH", "HOME", "XDG_CACHE_HOME",
 	"LANG", "LANGUAGE", "TERM", "TZ", "TMPDIR",
+	"LC_ALL", "LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MONETARY",
+	"LC_MESSAGES", "LC_PAPER", "LC_NAME", "LC_ADDRESS", "LC_TELEPHONE",
+	"LC_MEASUREMENT", "LC_IDENTIFICATION",
 	"PAGER", "GIT_PAGER", "SYSTEMD_PAGER", "DEBIAN_FRONTEND",
 	"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
 	"ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy", "NODE_USE_ENV_PROXY",
@@ -44,25 +47,16 @@ func nameSet(names ...string) map[string]bool {
 	return m
 }
 
-// executorEnvPrefixes are kept by prefix: the locale categories.
-var executorEnvPrefixes = []string{"LC_"}
-
 // envExecKeep lists, comma-separated, names the drop shim keeps besides the
 // allowlist: the variables an MCP stdio server is given in its configuration. It is
 // not kept itself.
 const envExecKeep = "ARTEX_EXEC_KEEP"
 
 // executorEnvAllowed reports whether the variable name crosses to an agent process.
+// The locale categories are the fixed POSIX set: a variable whose name starts with
+// LC_ is not kept by prefix, so a secret cannot cross under an LC_ name.
 func executorEnvAllowed(name string) bool {
-	if executorEnvNames[name] {
-		return true
-	}
-	for _, p := range executorEnvPrefixes {
-		if strings.HasPrefix(name, p) {
-			return true
-		}
-	}
-	return false
+	return executorEnvNames[name]
 }
 
 // executorEnv returns the entries of env an agent process keeps: the allowlisted
