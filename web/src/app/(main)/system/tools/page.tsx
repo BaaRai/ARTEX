@@ -4,6 +4,8 @@ import * as React from "react";
 import { toast } from "sonner";
 import { PlayIcon, PlusIcon, RotateCcwIcon, SaveIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
+import { LoadError } from "@/components/load-error";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +37,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { t } from "@/i18n";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { Agent, Tool } from "@/lib/types";
 
@@ -381,8 +384,15 @@ export default function ToolsPage() {
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [customEdit, setCustomEdit] = React.useState<Tool | "new" | null>(null);
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const reload = React.useCallback(() => {
-    api.tools().then(setTools).catch(() => setTools([]));
+    api
+      .tools()
+      .then((t) => {
+        setTools(t);
+        setLoadError(null);
+      })
+      .catch((e) => setLoadError((e as Error).message));
   }, []);
   React.useEffect(() => {
     reload();
@@ -411,11 +421,11 @@ export default function ToolsPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
+      {loadError && <LoadError what={t("tools")} error={loadError} onRetry={reload} />}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("Tools")}</h1>
-          <p className="text-muted-foreground text-sm">{t("Descriptions/bindings for system tools, plus custom tools (command/script/http)")}</p>
-        </div>
+        <PageHeader
+          description={t("Descriptions and bindings for system tools, plus custom tools (command, script, HTTP)")}
+        />
         <div className="relative w-64">
           <SearchIcon className="text-muted-foreground absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2" />
           <Input
@@ -661,8 +671,14 @@ function CustomToolDialog({
       setSaving(false);
     }
   }
+  const confirmAction = useConfirm();
   async function del() {
     if (!tool) return;
+    const ok = await confirmAction({
+      title: t('Delete custom tool "{name}"?', { name: tool.key }),
+      description: t("Agents can no longer call it. This cannot be undone."),
+    });
+    if (!ok) return;
     try {
       await api.deleteCustomTool(tool.key);
       toast.success(t("Deleted"));

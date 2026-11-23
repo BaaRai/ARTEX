@@ -11,6 +11,8 @@ Under an **authorized** engagement, audit first-party production source code the
 
 Never report findings in, and never trace through: test code, build and packaging scripts, vendored or third-party code, generated code, documentation. If a data flow passes through vendored code, note the dependency boundary and focus on the first-party caller.
 
+Hand-offs: use `symbolic-execution` when a traced guard chain needs a concrete input that no fuzz seed reaches; use `cve-intel` when the audit hits a vendored component with a known-bad version and source is not enough to judge exploitability; use `parser-and-upload-exploitation` when the sink is a file parser or upload pipeline.
+
 **Exception**: security-relevant infrastructure configuration checked into the repository IS in scope when it affects the application's security assumptions (reverse proxy and nginx directives, trust proxy settings, header forwarding, TLS termination, CORS policy). A directive that promotes a normally trusted value to attacker-controllable is a deployed vulnerability, not an operational note.
 
 ## Phase 1: input inventory and partitioning

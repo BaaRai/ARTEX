@@ -23,6 +23,7 @@ import {
   ArrowUpIcon,
   ChevronRightIcon,
   EyeIcon,
+  EyeOffIcon,
   FolderInputIcon,
   GripVerticalIcon,
   Loader2Icon,
@@ -46,7 +47,7 @@ import {
 import { toast } from "sonner";
 
 import { AssetInterceptRulesEditor } from "@/components/asset-intercept-rules-editor";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, TaskStatusBadge } from "@/components/status-badge";
 import { TablePagination } from "@/components/table-pagination";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
 import { TaskTemplateControls } from "@/components/task-template-controls";
@@ -140,6 +141,8 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useActiveCompanyID } from "@/stores/company/company-store";
+import { severityText } from "@/lib/status";
+import { Term } from "@/components/term";
 
 // fmtBytes renders a human file size for the upload manifest.
 function fmtBytes(n: number): string {
@@ -1268,7 +1271,7 @@ const TaskRow = React.memo(function TaskRow({
         {task.goal}
       </TableCell>
       <TableCell>
-        <StatusBadge domain="task" value={task.status} dot />
+        <TaskStatusBadge status={task.status} engineMode={task.engine_mode} />
       </TableCell>
       <TableCell className="text-muted-foreground text-center text-xs tabular-nums">
         {typeof task.goals_total === "number" && task.goals_total > 0 ? (
@@ -1287,13 +1290,13 @@ const TaskRow = React.memo(function TaskRow({
           );
           return (
             <span className="font-medium whitespace-nowrap" title={t("Critical / High / Medium / Low")}>
-              {seg(f.critical, "text-rose-600 dark:text-rose-400")}
+              {seg(f.critical, severityText.critical)}
               <span className="text-muted-foreground">/</span>
-              {seg(f.high, "text-red-600 dark:text-red-400")}
+              {seg(f.high, severityText.high)}
               <span className="text-muted-foreground">/</span>
-              {seg(f.medium, "text-amber-600 dark:text-amber-400")}
+              {seg(f.medium, severityText.medium)}
               <span className="text-muted-foreground">/</span>
-              {seg(f.low, "text-slate-600 dark:text-slate-400")}
+              {seg(f.low, severityText.low)}
             </span>
           );
         })()}
@@ -3169,6 +3172,16 @@ function CreateTaskSheet({
   onCategoriesChanged: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
+  // "New task" links elsewhere (dashboard, setup checklist) arrive as ?new=1: open the form, then
+  // drop the flag so a reload or Back does not reopen it.
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") !== "1") return;
+    setOpen(true);
+    params.delete("new");
+    const rest = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}`);
+  }, []);
   const [name, setName] = React.useState("");
   const [categoryID, setCategoryID] = React.useState<number | undefined>(undefined);
   const [description, setDescription] = React.useState("");
@@ -3187,6 +3200,7 @@ function CreateTaskSheet({
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // asset coverage feature; on by default. Off = no coverage computed/displayed, no scope accumulation, scope-related tools hidden (company links unaffected)
   const [interceptRules, setInterceptRules] = React.useState<AssetInterceptRuleInput[]>([]); // task-level asset intercept rules (this task only, never entering the global table)
   const [credentials, setCredentials] = React.useState<TaskCredentialInput[]>([]); // test accounts declared at creation (#3); an empty password = the agent registers that account and records it
+  const [showCredentialPasswords, setShowCredentialPasswords] = React.useState(false);
   // Method 1, file upload: files are staged under drafts/<draftId>/uploads/ before the task is created, and their absolute paths are appended to the description.
   const [uploading, setUploading] = React.useState(false);
   const [uploadCount, setUploadCount] = React.useState(0);
@@ -3276,6 +3290,8 @@ function CreateTaskSheet({
       setSeedFirstIntent(false);
       setCoverageEnabled(true);
       setInterceptRules([]);
+      setCredentials([]); // never let one task's test accounts leak into the next task
+      setShowCredentialPasswords(false);
       setUploadCount(0);
       draftIdRef.current = "";
       setOpen(false);
@@ -3403,7 +3419,8 @@ function CreateTaskSheet({
                 {t(
                   "Link up to {count} tasks. Live, read-only inheritance of the selected tasks' persistent blackboards, asset scope, and related traffic; the new task writes to its own blackboard.",
                   { count: MAX_SOURCE_TASKS },
-                )}
+                )}{" "}
+                <Term name="blackboard" className="align-middle" />
               </FieldDescription>
             </Field>
             <Field>
@@ -3445,21 +3462,27 @@ function CreateTaskSheet({
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="task-credentials">{t("Test accounts (optional)")}</FieldLabel>
-              <div className="grid gap-2">
+              <FieldLabel id="task-credentials-label">{t("Test accounts (optional)")}</FieldLabel>
+              <fieldset aria-labelledby="task-credentials-label" className="m-0 grid min-w-0 gap-2 border-0 p-0">
                 {credentials.map((c, i) => (
                   <div key={i} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
                     <Input
+                      aria-label={t("Account {n} domain", { n: i + 1 })}
                       placeholder={t("domain (e.g. target.example.com)")}
                       value={c.domain}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, domain: e.target.value } : x)))}
                     />
                     <Input
+                      aria-label={t("Account {n} email or username", { n: i + 1 })}
+                      autoComplete="off"
                       placeholder={t("email or username")}
                       value={c.username}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, username: e.target.value } : x)))}
                     />
                     <Input
+                      aria-label={t("Account {n} password", { n: i + 1 })}
+                      type={showCredentialPasswords ? "text" : "password"}
+                      autoComplete="new-password"
                       placeholder={t("password (empty = agent generates)")}
                       value={c.password}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, password: e.target.value } : x)))}
@@ -3468,12 +3491,13 @@ function CreateTaskSheet({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label={t("Remove account")}
+                      aria-label={t("Remove account {n}", { n: i + 1 })}
                       onClick={() => setCredentials((prev) => prev.filter((_, j) => j !== i))}
                     >
                       <TrashIcon />
                     </Button>
                     <Input
+                      aria-label={`Account ${i + 1} note`}
                       className="sm:col-span-4"
                       placeholder={t("note (optional, e.g. program alias account)")}
                       value={c.note ?? ""}
@@ -3481,16 +3505,31 @@ function CreateTaskSheet({
                     />
                   </div>
                 ))}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="w-fit"
-                  onClick={() => setCredentials((prev) => [...prev, { domain: "", username: "", password: "", note: "" }])}
-                >
-                  <PlusIcon className="size-4" /> {t("Add account")}
-                </Button>
-              </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="w-fit"
+                    onClick={() => setCredentials((prev) => [...prev, { domain: "", username: "", password: "", note: "" }])}
+                  >
+                    <PlusIcon className="size-4" /> {t("Add account")}
+                  </Button>
+                  {credentials.length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="w-fit"
+                      aria-pressed={showCredentialPasswords}
+                      onClick={() => setShowCredentialPasswords((v) => !v)}
+                    >
+                      {showCredentialPasswords ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+                      {showCredentialPasswords ? t("Hide passwords") : t("Show passwords")}
+                    </Button>
+                  )}
+                </div>
+              </fieldset>
               <FieldDescription>
                 {t(
                   "Test accounts reused by the agent for authenticated testing. Leave the password empty to have the agent register that account itself and record the password it chose. Use dedicated test accounts only — anything declared here is sent to the configured LLM provider during the task.",

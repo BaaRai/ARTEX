@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { LoadError } from "@/components/load-error";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,12 +29,14 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t } from "@/i18n";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
 import { setVisibleInterval } from "@/lib/polling";
+import { glossary } from "@/lib/glossary";
 
 // Renders a translated string, turning <b>…</b> spans into bold elements, so a sentence with emphasis stays one key.
 function rich(s: string): React.ReactNode[] {
@@ -100,7 +104,9 @@ function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
     return {
       label: m.cooldown_secs > 0 ? t("Tripped · {cooldown}", { cooldown: cooldownText(m.cooldown_secs) }) : t("Tripped"),
       cls: "border-destructive/50 text-destructive",
-      hint: m.last_error,
+      hint: m.last_error
+        ? `${glossary.tripped}\n\n${t("Last error: {error}", { error: m.last_error })}`
+        : glossary.tripped,
     };
   }
   if (m?.state === "degraded") {
@@ -328,11 +334,14 @@ function ProfileSheet({
   open,
   onOpenChange,
   onSaved,
+  activateIfNew = false,
 }: {
   profile: LLMProfile | null; // null = create
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onSaved: (id: string) => void;
+  /** No profile is active yet: make a newly created one active, or nothing can run. */
+  activateIfNew?: boolean;
 }) {
   const isNew = !profile;
   const [name, setName] = React.useState("");
@@ -490,7 +499,19 @@ function ProfileSheet({
         user_agent: userAgent.trim(),
         retry,
       });
-      if (isNew) toast.success(t('Created: {name} (use "Set as active" on its card to enable it)', { name: name.trim() }));
+      if (isNew && activateIfNew) {
+        try {
+          await api.activateLLMProfile(String(id));
+          toast.success(t("Created {name} and set it as the active profile", { name: name.trim() }));
+        } catch (e) {
+          toast.error(
+            t('Created {name}, but couldn\'t make it active: {error}. Use "Set as active" on its card.', {
+              name: name.trim(),
+              error: (e as Error).message,
+            }),
+          );
+        }
+      } else if (isNew) toast.success(t('Created: {name} (use "Set as active" on its card to enable it)', { name: name.trim() }));
       else
         toast.success(
           profile?.is_default ? t("Saved; the active profile takes effect immediately, no restart needed") : t("Saved"),
@@ -904,6 +925,8 @@ function ProfileSheet({
 
 export default function LLMPage() {
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
+  // True once the list has loaded successfully; until then "no active profile" is unknown, not false.
+  const [profilesLoaded, setProfilesLoaded] = React.useState(false);
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
   const [poolOpen, setPoolOpen] = React.useState(false);
   // The drawer's open flag and its content are stored separately: editing stays put on close, otherwise during the closing animation the title would flash
@@ -923,11 +946,14 @@ export default function LLMPage() {
     }
   }, []);
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const load = React.useCallback(async () => {
     try {
       setProfiles(await api.llmProfiles());
-    } catch {
-      /* ignore */
+      setProfilesLoaded(true);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError((e as Error).message);
     }
     await loadPool();
   }, [loadPool]);
@@ -953,11 +979,17 @@ export default function LLMPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function remove(p: LLMProfile) {
     if (p.is_default) {
       toast.error(t("Cannot delete the active profile"));
       return;
     }
+    const ok = await confirmAction({
+      title: t('Delete model profile "{name}"?', { name: p.name }),
+      description: t("Its key, model and limits are removed. This cannot be undone."),
+    });
+    if (!ok) return;
     try {
       await api.deleteLLMProfile(p.id);
       toast.success(t("Deleted: {name}", { name: p.name }));
@@ -971,15 +1003,13 @@ export default function LLMPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
+      {loadError && <LoadError what={t("model profiles")} error={loadError} onRetry={() => void load()} />}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-semibold text-xl tracking-tight">LLM</h1>
-          <p className="text-muted-foreground text-sm">
-            {t(
-              "Format / model / rate-limit settings shared by all agents. Click a card to edit it; the starred card is the active profile.",
-            )}
-          </p>
-        </div>
+        <PageHeader
+          description={t(
+            "Model profiles shared by all agents: API format, model and rate limits. Click a card to edit it; the starred card is the active profile.",
+          )}
+        />
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setPoolOpen(true)}>
             <ZapIcon /> {t("Pool settings")}
@@ -1097,12 +1127,27 @@ export default function LLMPage() {
                 </Card>
               );
             })}
-            {profiles.length === 0 && (
+            {profiles.length === 0 && !loadError && (
               <div className="col-span-full rounded-lg border border-dashed p-10 text-center text-muted-foreground text-sm">
                 {t('No model profiles yet — click "Create" in the top right to add the first one.')}
               </div>
             )}
           </div>
+
+          <section aria-labelledby="model-references" className="mt-6 grid gap-2">
+            <h2 id="model-references" className="font-semibold text-sm">
+              {t("Model references")}
+            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3">
+              <div className="min-w-0">
+                <p className="font-medium text-sm">Venice · Abliterated Large V2</p>
+                <code className="break-all text-muted-foreground text-xs">abliteration-abliterated-model-large-v2</code>
+              </div>
+              <a href="https://venice.ai/settings/api" className="text-sm underline underline-offset-4">
+                {t("{provider} API dashboard", { provider: "Venice" })}
+              </a>
+            </div>
+          </section>
         </TabsContent>
 
         <TabsContent value="retry" className="mt-4">
@@ -1110,7 +1155,13 @@ export default function LLMPage() {
         </TabsContent>
       </Tabs>
 
-      <ProfileSheet profile={editing} open={editOpen} onOpenChange={setEditOpen} onSaved={() => void load()} />
+      <ProfileSheet
+        profile={editing}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={() => void load()}
+        activateIfNew={profilesLoaded && !profiles.some((p) => p.is_default)}
+      />
       <PoolSheet open={poolOpen} onOpenChange={setPoolOpen} pool={pool} onReload={loadPool} />
     </div>
   );

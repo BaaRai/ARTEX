@@ -1019,7 +1019,7 @@ const ConversationItem = React.memo(function ConversationItem({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => onDelete(conv.id)}>{t("Delete")}</AlertDialogAction>
+            <AlertDialogAction variant="destructive" onClick={() => onDelete(conv.id)}>{t("Delete")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

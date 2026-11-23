@@ -5,6 +5,7 @@ import * as React from "react";
 import { BellIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { NotificationChannel, NotificationFilter, NotificationMeta } from "@/lib/types";
 
@@ -233,7 +235,13 @@ export default function NotifyPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function removeChannel(ch: NotificationChannel) {
+    const ok = await confirmAction({
+      title: t('Delete notification channel "{name}"?', { name: ch.name }),
+      description: t("It stops receiving alerts. This cannot be undone."),
+    });
+    if (!ok) return;
     try {
       await api.notifyDeleteChannel(ch.id);
       toast.success(t("Deleted: {name}", { name: ch.name }));
@@ -301,12 +309,11 @@ export default function NotifyPage() {
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("Notifications")}</h1>
-          <p className="text-muted-foreground text-sm">
-            {t("Push findings to DingTalk / Feishu / WeCom and other channels · each channel has its own delivery timing and filter rules")}
-          </p>
-        </div>
+        <PageHeader
+          description={t(
+            "Push findings to DingTalk, Feishu, WeCom and other channels. Each channel has its own delivery timing and filters.",
+          )}
+        />
         {meta && (
           // A div, not a label: the Switch carries its own aria-label, and wrapping it in a label
           // would associate it with no native control while making the text look like it should toggle.

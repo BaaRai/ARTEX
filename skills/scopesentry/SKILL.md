@@ -7,6 +7,8 @@ description: "Manage the security scanning platform (projects, tasks, templates,
 
 For users with a **deployed ScopeSentry instance**. Connect to the platform through Cursor (or another MCP client); no local source code needed.
 
+Precedence: ScopeSentry owns scanning only when the scope already lives in the platform. For a task with its own `scope.md`, `bbot-recon` and `wordlists-and-content-discovery` run directly and ScopeSentry is used to pull existing platform assets, not to start a parallel scan.
+
 ## 1. Preparation
 
 ### 1.1 Confirm the service is reachable

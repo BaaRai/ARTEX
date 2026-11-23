@@ -74,9 +74,9 @@ BFLA, function level:
 ### Phase 5: REST input validation
 
 - [ ] HTTP method swap on every endpoint.
-- [ ] Content-Type tampering: JSON to XML to multipart (XXE where XML is accepted).
+- [ ] Content-Type tampering: JSON to XML to multipart. XML mechanics (DTD, entities, OOB) belong to `web-vuln-testing` Phase 7; here only the content-type swap and the API error surface.
 - [ ] NoSQL operator injection: `{"username": {"$gt": ""}}`.
-- [ ] SSRF through URL-taking parameters (webhooks, avatar imports, fetchers).
+- [ ] SSRF through URL-taking parameters (webhooks, avatar imports, fetchers). Payload ladder and metadata proof live in `web-vuln-testing` Phase 3; this skill only enumerates API parameters that take a URL.
 - [ ] HTTP parameter pollution: `?role=user&role=admin`.
 - [ ] mass assignment: `is_admin: true` added to request bodies.
 

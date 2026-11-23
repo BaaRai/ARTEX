@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { BarChart3Icon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon, TerminalIcon } from "lucide-react";
+import { BarChart3Icon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { CommandRecord, ToolStat } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -129,11 +130,10 @@ export default function CommandsPage() {
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <TerminalIcon className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">{t("Tool executions")}</h1>
-          <Badge variant="secondary">{total}</Badge>
-        </div>
+        <PageHeader
+          description={t("Every tool call the agents made, with arguments and output")}
+          meta={<Badge variant="secondary">{total}</Badge>}
+        />
       </div>
 
       {/* Toolbar */}

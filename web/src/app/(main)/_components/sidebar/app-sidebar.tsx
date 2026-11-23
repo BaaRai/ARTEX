@@ -41,7 +41,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
-              <Link prefetch={false} href="/function/tasks">
+              <Link prefetch={false} href="/dashboard">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <picture className="contents">
                   <source srcSet="/logo.webp" type="image/webp" />

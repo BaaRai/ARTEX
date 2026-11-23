@@ -19,3 +19,5 @@ bench/.env
 bench/scheduler.py
 bench/entrypoint_v2.sh
 bench/seed_v2.sh
+.local
+secret.key

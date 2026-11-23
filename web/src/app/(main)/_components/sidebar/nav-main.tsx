@@ -1,11 +1,9 @@
 "use client";
 
-import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { ChevronRight } from "lucide-react";
-import { api } from "@/lib/api";
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -28,8 +26,10 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { usePendingApprovals } from "@/hooks/use-pending-approvals";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { findActiveUrl, normalizePath } from "@/navigation/route-meta";
 import type {
   NavBadge,
   NavGroup,
@@ -37,7 +37,6 @@ import type {
   NavMainLinkItem,
   NavMainParentItem,
 } from "@/navigation/sidebar/sidebar-items";
-import { setVisibleInterval } from "@/lib/polling";
 
 interface NavMainProps {
   readonly items: readonly NavGroup[];
@@ -87,29 +86,32 @@ function hasSubItems(item: NavMainItem): item is NavMainParentItem {
 
 export function NavMain({ items }: NavMainProps) {
   const rawPath = usePathname();
-  // Route segments contain Chinese, so the pathname may be percent-encoded; decode it before comparing against nav urls so highlighting hits.
-  const path = (() => {
-    try {
-      return decodeURIComponent(rawPath);
-    } catch {
-      return rawPath;
-    }
-  })();
+  // The pathname may be percent-encoded; decode it before comparing against nav urls.
+  const path = normalizePath(
+    (() => {
+      try {
+        return decodeURIComponent(rawPath);
+      } catch {
+        return rawPath;
+      }
+    })(),
+  );
+  const activeUrl = findActiveUrl(items, path);
 
   const isItemActive = (item: NavMainItem) => {
     if (hasSubItems(item)) {
-      return item.subItems.some((sub) => path.startsWith(sub.url));
+      return item.subItems.some((sub) => sub.url === activeUrl);
     }
 
-    return path === item.url;
+    return item.url === activeUrl;
   };
 
   const isSubItemActive = (url: string) => {
-    return path === url;
+    return url === activeUrl;
   };
 
   const isSubmenuOpen = (item: NavMainParentItem) => {
-    return item.subItems.some((sub) => path.startsWith(sub.url));
+    return item.subItems.some((sub) => sub.url === activeUrl);
   };
 
   return (
@@ -162,45 +164,48 @@ function NavItem({ item, isItemActive, isSubItemActive, isSubmenuOpen }: NavItem
   );
 }
 
-// InterceptPendingBadge polls /api/intercept/pending every 5 s and shows a red
-// count badge when there are unresolved approval requests.
-function InterceptPendingBadge() {
-  const [count, setCount] = React.useState(0);
-  React.useEffect(() => {
-    let live = true;
-    async function poll() {
-      try {
-        const list = await api.interceptPending();
-        if (live) setCount(list.length);
-      } catch { /* ignore */ }
-    }
-    poll();
-    const stopPolling = setVisibleInterval(poll, 5000);
-    return () => { live = false; stopPolling(); };
-  }, []);
+// Count of tool calls waiting for a decision. Shown as a pill when the sidebar is
+// expanded and as a dot on the icon when it is collapsed (the default), so the queue
+// is never invisible. Dark text on amber-400 keeps the number readable.
+function PendingCountBadge({ count }: { count: number }) {
   if (count === 0) return null;
   return (
-    <SidebarMenuBadge className="flex h-4.5 min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white shadow-sm ring-1 ring-amber-400/40">
+    <SidebarMenuBadge
+      aria-hidden
+      className="h-4.5 min-w-[18px] rounded-full bg-amber-400 px-1 font-semibold text-[11px] text-amber-950 leading-none"
+    >
       {count > 99 ? "99+" : count}
     </SidebarMenuBadge>
   );
 }
 
 function NavLinkItem({ item, isActive, showIconFallback }: NavLinkItemProps) {
+  const isApprovals = item.id === "approvals";
+  const pending = usePendingApprovals();
+  const pendingCount = isApprovals ? pending : 0;
+  const label = pendingCount > 0 ? t("{title}, {count} pending", { title: item.title, count: pendingCount }) : item.title;
+
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild aria-disabled={item.disabled} tooltip={item.title} isActive={isActive}>
+      <SidebarMenuButton asChild aria-disabled={item.disabled} tooltip={label} isActive={isActive}>
         <Link
           prefetch={false}
           href={item.url}
           target={item.newTab ? "_blank" : undefined}
           rel={item.newTab ? "noreferrer" : undefined}
+          aria-current={isActive ? "page" : undefined}
+          aria-label={pendingCount > 0 ? label : undefined}
         >
-          <NavLinkIcon item={item} showFallback={showIconFallback} />
+          <span className="relative flex shrink-0">
+            <NavLinkIcon item={item} showFallback={showIconFallback} />
+            {pendingCount > 0 && (
+              <span className="absolute -top-1 -right-1 hidden size-2 rounded-full bg-amber-500 ring-2 ring-sidebar group-data-[collapsible=icon]:block" />
+            )}
+          </span>
           <span>{item.title}</span>
         </Link>
       </SidebarMenuButton>
-      {item.id === "approvals" ? <InterceptPendingBadge /> : <NavItemBadge badge={item.badge} />}
+      {isApprovals ? <PendingCountBadge count={pendingCount} /> : <NavItemBadge badge={item.badge} />}
     </SidebarMenuItem>
   );
 }
@@ -292,6 +297,7 @@ function NavCollapsibleItem({ item, isActive, defaultOpen, isSubItemActive }: Na
                       href={subItem.url}
                       target={subItem.newTab ? "_blank" : undefined}
                       rel={subItem.newTab ? "noreferrer" : undefined}
+                      aria-current={isSubItemActive(subItem.url) ? "page" : undefined}
                     >
                       {SubIcon && <SubIcon />}
                       <span>{subItem.title}</span>

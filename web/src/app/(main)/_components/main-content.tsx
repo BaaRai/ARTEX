@@ -2,14 +2,17 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { X } from "lucide-react";
+import { ShieldAlert, X } from "lucide-react";
 
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { t } from "@/i18n";
+import { APPROVALS_URL, usePendingApprovals } from "@/hooks/use-pending-approvals";
+import { useRouteMeta } from "@/hooks/use-route-meta";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { cn } from "@/lib/utils";
@@ -34,12 +37,46 @@ function isFullBleed(pathname: string) {
   return normalized.startsWith("/function/tasks/");
 }
 
+// One tab title per page ("Findings · ARTEX"), prefixed with the pending-approval count,
+// e.g. "(2) Findings · ARTEX", so a request waiting on a human is visible from another
+// browser tab (requests auto-deny on timeout).
+function useDocumentTitle(base: string, pending: number) {
+  useEffect(() => {
+    const want = pending > 0 ? `(${pending > 99 ? "99+" : pending}) ${base}` : base;
+    document.title = want;
+    // Next.js re-applies the static metadata <title> after hydration and on navigation, which
+    // would silently undo ours; put it back whenever the head's title changes underneath us.
+    const observer = new MutationObserver(() => {
+      if (document.title !== want) document.title = want;
+    });
+    observer.observe(document.head, { subtree: true, childList: true, characterData: true });
+    return () => observer.disconnect();
+  }, [base, pending]);
+}
+
+function PendingApprovalsPill({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <Link
+      prefetch={false}
+      href={APPROVALS_URL}
+      className="inline-flex h-7 items-center gap-1.5 rounded-full border border-amber-500/60 bg-amber-100 px-2.5 font-medium text-amber-950 text-xs hover:bg-amber-200 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 dark:bg-amber-400/15 dark:text-amber-200 dark:hover:bg-amber-400/25"
+    >
+      <ShieldAlert className="size-3.5" aria-hidden />
+      {count} {count === 1 ? "approval" : "approvals"} waiting
+    </Link>
+  );
+}
+
 const RELEASES_URL = "https://github.com/BaaRai/ARTEX/releases";
 const UPDATE_DISMISSED_KEY = "artex-update-dismissed";
 
 export function MainContent({ children }: { children: ReactNode }) {
   const currentUser = useCurrentUser();
   const pathname = usePathname();
+  const pendingApprovals = usePendingApprovals();
+  const route = useRouteMeta();
+  useDocumentTitle(route.documentTitle, pendingApprovals);
   const [version, setVersion] = useState("");
   // Only set when the backend has the opt-in update check on (ARTEX_UPDATE_CHECK) and found a newer release.
   const [latest, setLatest] = useState("");
@@ -102,6 +139,7 @@ export function MainContent({ children }: { children: ReactNode }) {
             <SearchDialog />
           </div>
           <div className="flex items-center gap-2">
+            <PendingApprovalsPill count={pendingApprovals} />
             {version && (
               <span className="font-medium text-muted-foreground text-xs tabular-nums">{t("Version · {version}", { version })}</span>
             )}

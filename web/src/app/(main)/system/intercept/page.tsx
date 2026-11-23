@@ -11,6 +11,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +52,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { intlLocale, t } from "@/i18n";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type {
   InterceptAction,
@@ -61,6 +63,7 @@ import type {
   LLMProfile,
   Tool,
 } from "@/lib/types";
+import { Term } from "@/components/term";
 
 // fmtTokens compacts token counts (1.2k / 3.4M) for approval usage stats.
 function fmtTokens(n: number): string {
@@ -310,7 +313,9 @@ function JudgeCard() {
         <div className="flex items-center gap-2.5">
           <BotIcon className={`h-5 w-5 shrink-0 ${cfg.enabled ? "text-violet-600" : "text-muted-foreground"}`} />
           <div>
-            <p className="text-sm font-semibold leading-tight">{t("Model fallback approval")}</p>
+            <p className="text-sm font-semibold leading-tight">
+              <Term name="modelFallback">{t("Model fallback approval")}</Term>
+            </p>
             <p className="text-xs text-muted-foreground mt-0.5">
               {tRich("Only commands inside the {scope} that {norule} are semantically judged by the model (allow / escalate to human / block)", {
                 scope: <span className="font-medium text-foreground">{t("interception scope")}</span>,
@@ -321,7 +326,12 @@ function JudgeCard() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-xs text-muted-foreground">{cfg.enabled ? t("Enabled") : t("Disabled")}</span>
-          <Switch checked={cfg.enabled} disabled={loading} onCheckedChange={(v) => patch({ enabled: v })} />
+          <Switch
+            aria-label={t("Enable model fallback approval")}
+            checked={cfg.enabled}
+            disabled={loading}
+            onCheckedChange={(v) => patch({ enabled: v })}
+          />
         </div>
       </div>
 
@@ -577,7 +587,14 @@ export default function InterceptPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function handleDelete(id: number) {
+    const rule = rules.find((r) => r.id === id);
+    const ok = await confirmAction({
+      title: rule ? t('Delete interception rule "{name}"?', { name: rule.name }) : t("Delete interception rule?"),
+      description: t("Commands it matched will run without this check. This cannot be undone."),
+    });
+    if (!ok) return;
     try {
       await api.deleteInterceptRule(id);
       toast.success(t("Rule deleted"));
@@ -642,15 +659,11 @@ export default function InterceptPage() {
     <div className="flex flex-1 flex-col gap-5 p-6">
 
       {/* ---- header ---- */}
-      <div className="flex items-center gap-2.5">
-        <ShieldAlertIcon className="h-5 w-5 shrink-0" />
-        <div>
-          <h1 className="text-lg font-semibold leading-tight">{t("Command interception")}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {t("Tools are matched against interception rules before execution; unmatched commands can be judged by the model fallback")}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        description={t(
+          "Tool calls are checked against these rules before they run. Calls no rule matches can go to the model fallback.",
+        )}
+      />
 
       {/* ---- interception scope info bar (shared by rule matching and the model fallback: tools outside the scope are handled by neither) ---- */}
       <div
@@ -689,8 +702,8 @@ export default function InterceptPage() {
 
       <Tabs defaultValue="rules" className="flex-1">
         <TabsList>
-          <TabsTrigger value="rules">{t("Interception rules")}</TabsTrigger>
-          <TabsTrigger value="judge">{t("Model config")}</TabsTrigger>
+          <TabsTrigger value="rules">{t("Rules")}</TabsTrigger>
+          <TabsTrigger value="judge">{t("Model fallback")}</TabsTrigger>
         </TabsList>
 
         {/* ---- tab: interception rules ---- */}
@@ -707,84 +720,94 @@ export default function InterceptPage() {
 
           <Card>
             <CardContent className="p-0">
-          {loading ? (
-            <p className="p-6 text-sm text-muted-foreground">{t("Loading…")}</p>
-          ) : rules.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-              <ShieldAlertIcon className="h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">{t("No rules yet")}</p>
-              <Button size="sm" variant="outline" onClick={openNew}>
-                <PlusIcon className="h-4 w-4" />
-                {t("Create the first rule")}
-              </Button>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[72px]">{t("Priority")}</TableHead>
-                  <TableHead>{t("Name")}</TableHead>
-                  <TableHead className="w-[90px]">{t("Target")}</TableHead>
-                  <TableHead className="w-[80px]">{t("Type")}</TableHead>
-                  <TableHead>{t("Pattern")}</TableHead>
-                  <TableHead className="w-[72px]">{t("Policy")}</TableHead>
-                  <TableHead className="w-[64px] text-center">{t("Enabled")}</TableHead>
-                  <TableHead className="w-[80px]" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rules.map((rule) => (
-                  <TableRow key={rule.id} className={!rule.enabled ? "opacity-40" : ""}>
-                    <TableCell>
-                      <span className="font-mono text-xs tabular-nums">{rule.priority}</span>
-                    </TableCell>
-                    <TableCell className="font-medium text-sm">{rule.name}</TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground">
-                        {rule.match_target === "tool_name" ? t("Tool name") : t("Input content")}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground">
-                        {rule.match_type === "regex" ? t("Regex") : rule.match_type === "argv" ? t("Argv prefix") : t("String")}
-                      </span>
-                    </TableCell>
-                    <TableCell className="max-w-[220px]">
-                      <code className="block truncate rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
-                        {rule.match_type === "argv" ? argvLabel(rule.pattern) : rule.pattern}
-                      </code>
-                    </TableCell>
-                    <TableCell>
-                      <ActionBadge action={rule.action} />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Switch
-                        checked={rule.enabled}
-                        onCheckedChange={() => handleToggle(rule)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-0.5">
-                        <Button
-                          size="icon" variant="ghost" className="h-7 w-7"
-                          onClick={() => openEdit(rule)}
-                        >
-                          <PencilIcon className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="icon" variant="ghost"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(rule.id)}
-                        >
-                          <Trash2Icon className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+              {loading ? (
+                <p className="p-6 text-sm text-muted-foreground">{t("Loading…")}</p>
+              ) : rules.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+                  <ShieldAlertIcon className="h-8 w-8 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">{t("No rules yet")}</p>
+                  <Button size="sm" variant="outline" onClick={openNew}>
+                    <PlusIcon className="h-4 w-4" />
+                    {t("Create the first rule")}
+                  </Button>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-[72px]">{t("Priority")}</TableHead>
+                      <TableHead>{t("Name")}</TableHead>
+                      <TableHead className="w-[90px]">{t("Target")}</TableHead>
+                      <TableHead className="w-[80px]">{t("Type")}</TableHead>
+                      <TableHead>{t("Pattern")}</TableHead>
+                      <TableHead className="w-[72px]">{t("Policy")}</TableHead>
+                      <TableHead className="w-[64px] text-center">{t("Enabled")}</TableHead>
+                      <TableHead className="w-[80px]" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rules.map((rule) => (
+                      <TableRow key={rule.id} className={!rule.enabled ? "opacity-40" : ""}>
+                        <TableCell>
+                          <span className="font-mono text-xs tabular-nums">{rule.priority}</span>
+                        </TableCell>
+                        <TableCell className="font-medium text-sm">{rule.name}</TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">
+                            {rule.match_target === "tool_name" ? t("Tool name") : t("Input content")}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">
+                            {rule.match_type === "regex"
+                              ? t("Regex")
+                              : rule.match_type === "argv"
+                                ? t("Argv prefix")
+                                : t("String")}
+                          </span>
+                        </TableCell>
+                        <TableCell className="max-w-[220px]">
+                          <code className="block truncate rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
+                            {rule.match_type === "argv" ? argvLabel(rule.pattern) : rule.pattern}
+                          </code>
+                        </TableCell>
+                        <TableCell>
+                          <ActionBadge action={rule.action} />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Switch
+                            aria-label={t("Enable rule {name}", { name: rule.name })}
+                            checked={rule.enabled}
+                            onCheckedChange={() => handleToggle(rule)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-0.5">
+                            <Button
+                              aria-label={t("Edit rule {name}", { name: rule.name })}
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={() => openEdit(rule)}
+                            >
+                              <PencilIcon className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              aria-label={t("Delete rule {name}", { name: rule.name })}
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => handleDelete(rule.id)}
+                            >
+                              <Trash2Icon className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

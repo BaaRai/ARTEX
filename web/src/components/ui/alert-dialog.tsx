@@ -155,12 +155,20 @@ function AlertDialogAction({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action> &
   Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
   return (
-    <Button variant={variant} size={size} asChild>
-      <AlertDialogPrimitive.Action
-        data-slot="alert-dialog-action"
-        className={cn(className)}
-        {...props}
-      />
+    <Button
+      variant={variant}
+      size={size}
+      asChild
+      // In a confirm dialog the destructive action is the decision being confirmed, so it
+      // is solid red rather than the light tint used for inline buttons. Passed to Button
+      // (not the inner Action) so tailwind-merge drops the variant's tinted background.
+      className={cn(
+        variant === "destructive" &&
+          "bg-destructive text-white hover:bg-destructive/90 dark:bg-destructive/80 dark:hover:bg-destructive/70",
+        className,
+      )}
+    >
+      <AlertDialogPrimitive.Action data-slot="alert-dialog-action" {...props} />
     </Button>
   )
 }

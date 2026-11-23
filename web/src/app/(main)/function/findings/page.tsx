@@ -40,9 +40,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
-import { statusMeta } from "@/lib/status";
+import { severityText, statusMeta } from "@/lib/status";
 import type {
   ActiveFindingRetest,
   Finding,
@@ -75,6 +76,7 @@ import {
 } from "./_components/findings-table";
 import { setVisibleInterval } from "@/lib/polling";
 import { t } from "@/i18n";
+import { Term } from "@/components/term";
 
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
 
@@ -953,13 +955,13 @@ export default function FindingsPage() {
 
   const statCards = [
     { label: t("Total findings"), value: stats.total, icon: BugIcon },
-    { label: t("Pending"), value: stats.pending, tone: "text-amber-500", icon: ClockIcon },
-    { label: t("Submitted"), value: stats.submitted, tone: "text-amber-500", icon: FileUpIcon },
-    { label: t("Accepted"), value: stats.accepted, tone: "text-emerald-500", icon: CircleCheckIcon },
-    { label: t("Critical"), value: stats.critical, tone: "text-rose-600", icon: ShieldAlertIcon },
-    { label: t("High"), value: stats.high, tone: "text-red-500", icon: TriangleAlertIcon },
-    { label: t("Medium"), value: stats.medium, tone: "text-amber-500", icon: TriangleAlertIcon },
-    { label: t("Low"), value: stats.low, tone: "text-slate-500", icon: InfoIcon },
+    { label: t("Pending"), value: stats.pending, tone: "text-slate-600 dark:text-slate-300", icon: ClockIcon },
+    { label: t("Submitted"), value: stats.submitted, tone: "text-warning", icon: FileUpIcon },
+    { label: t("Accepted"), value: stats.accepted, tone: "text-success", icon: CircleCheckIcon },
+    { label: t("Critical"), value: stats.critical, tone: severityText.critical, icon: ShieldAlertIcon },
+    { label: t("High"), value: stats.high, tone: severityText.high, icon: TriangleAlertIcon },
+    { label: t("Medium"), value: stats.medium, tone: severityText.medium, icon: TriangleAlertIcon },
+    { label: t("Low"), value: stats.low, tone: severityText.low, icon: InfoIcon },
   ];
 
   // The "current filter" count in the export dialog: both views share the same filters, only the counting source differs.
@@ -1020,10 +1022,7 @@ export default function FindingsPage() {
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("Findings")}</h1>
-          <p className="text-muted-foreground text-sm">{t("Cross-task vulnerability overview")}</p>
-        </div>
+        <PageHeader description={t("Vulnerabilities found across all tasks")} />
         <Tabs value={view} onValueChange={(v) => setView(v as FindingView)}>
           <TabsList>
             <TabsTrigger value="flat">{t("All findings")}</TabsTrigger>
@@ -1447,6 +1446,7 @@ export default function FindingsPage() {
           <DialogHeader>
             <DialogTitle>{t("Deepen exploitation")}</DialogTitle>
             <DialogDescription className="break-words">
+              <Term name="deepen" className="mr-1 align-middle" />
               {t(
                 "A priority-10 worker intent will be created in the original task #{id} to run secondary verification based on this vulnerability:",
                 { id: deepenFinding?.task_id ?? "" },
@@ -1459,6 +1459,8 @@ export default function FindingsPage() {
               <FieldLabel htmlFor="finding-deepen-description">{t("Exploitation description")}</FieldLabel>
               <Textarea
                 id="finding-deepen-description"
+                // Focus lands here, not on the glossary icon above, so the dialog opens ready to type.
+                autoFocus
                 value={deepenDescription}
                 onChange={(event) => setDeepenDescription(event.target.value)}
                 maxLength={4000}

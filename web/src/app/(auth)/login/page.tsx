@@ -48,7 +48,7 @@ export default function LoginPage() {
       // localStorage may still hold credentials while the cookie is gone. Sync first, then start a fresh request,
       // so a server-side guard or route cache cannot bounce the redirect back to the login page still in its checking state.
       auth.setToken(token);
-      window.location.replace("/function/tasks");
+      window.location.replace("/dashboard");
       return;
     }
     api
@@ -71,7 +71,7 @@ export default function LoginPage() {
     try {
       const { token } = await api.login("ARTEX", password);
       auth.setToken(token);
-      window.location.replace("/function/tasks");
+      window.location.replace("/dashboard");
     } catch {
       setError(t("Incorrect username or password"));
     } finally {

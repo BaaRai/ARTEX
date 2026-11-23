@@ -1021,7 +1021,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       await latestLoad.current(true);
     }
   };
-  const title = taskId ? t("Interception approval") : t("Approval records");
+  const title = taskId ? t("Interception approval") : t("Approvals");
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">

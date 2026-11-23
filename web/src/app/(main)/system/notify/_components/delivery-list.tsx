@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
+import { SeverityBadge } from "@/components/status-badge";
 import { statusMeta, toneClasses } from "@/lib/status";
 import type { NotificationChannel, NotificationDelivery } from "@/lib/types";
 
@@ -127,9 +128,7 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline" className={toneClasses[statusMeta("severity", d.severity).tone]}>
-                        {statusMeta("severity", d.severity).label}
-                      </Badge>
+                      <SeverityBadge value={d.severity} />
                       <span className="truncate text-sm">{d.title || t("(untitled)")}</span>
                       {d.event_kind === "finding_status_changed" && (
                         <Badge variant="outline" className="shrink-0">

@@ -4,6 +4,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { Bot, PlusIcon, Trash2Icon } from "lucide-react";
 
+import { LoadError } from "@/components/load-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AgentEditor } from "@/components/agent-editor";
 import { t } from "@/i18n";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 
@@ -97,10 +99,10 @@ function AgentGridCard({
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
+              aria-label={t("Delete agent {name}", { name: agent.name })}
               variant="ghost"
               size="icon-sm"
-              className="text-muted-foreground hover:text-destructive absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100"
-              aria-label={t("Delete agent")}
+              className="text-muted-foreground hover:text-destructive absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
             >
               <Trash2Icon className="size-3.5" />
             </Button>
@@ -114,7 +116,9 @@ function AgentGridCard({
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
-              <AlertDialogAction onClick={del}>{t("Delete")}</AlertDialogAction>
+              <AlertDialogAction variant="destructive" onClick={del}>
+                {t("Delete")}
+              </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -216,8 +220,15 @@ export default function AgentsPage() {
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [editKey, setEditKey] = React.useState<string | null>(null);
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const reload = React.useCallback(() => {
-    api.agents().then(setAgents).catch(() => setAgents([]));
+    api
+      .agents()
+      .then((a) => {
+        setAgents(a);
+        setLoadError(null);
+      })
+      .catch((e) => setLoadError((e as Error).message));
   }, []);
   React.useEffect(() => {
     reload();
@@ -227,13 +238,9 @@ export default function AgentsPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
+      {loadError && <LoadError what={t("agents")} error={loadError} onRetry={reload} />}
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("Agent")}</h1>
-          <p className="text-muted-foreground text-sm">
-            {t("Prompts/configs for built-in agents, plus creating and managing custom conversational agents")}
-          </p>
-        </div>
+        <PageHeader description={t("Prompts and settings for the built-in agents, plus your own chat agents")} />
         <CreateAgentDialog
           onCreated={(key) => {
             reload();
@@ -248,7 +255,7 @@ export default function AgentsPage() {
           <CardDescription>{t("{count} total", { count: agents.length })}</CardDescription>
         </CardHeader>
         <CardContent>
-          {agents.length === 0 ? (
+          {agents.length === 0 && !loadError ? (
             <p className="text-muted-foreground py-6 text-center text-sm">{t("(no agents)")}</p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

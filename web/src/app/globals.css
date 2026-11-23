@@ -36,6 +36,13 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-sev-critical: var(--sev-critical);
+  --color-sev-high: var(--sev-high);
+  --color-sev-medium: var(--sev-medium);
+  --color-sev-low: var(--sev-low);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -72,7 +79,17 @@ These serve as the fallback; there is no separate default.css file. */
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* Semantic status and severity colours. One meaning per hue: success green, warning amber
+     (needs a human: paused), info blue (in progress), destructive red (failed). Severity has its
+     own scale so "Medium" never shares a colour with a status. Text use must stay ≥4.5:1. */
+  --success: oklch(0.52 0.13 155);
+  --warning: oklch(0.5 0.14 65);
+  --info: oklch(0.52 0.19 260);
+  --sev-critical: oklch(0.47 0.2 15);
+  --sev-high: oklch(0.55 0.22 28);
+  --sev-medium: oklch(0.5 0.16 45);
+  --sev-low: oklch(0.52 0.13 230);
+  --ring: oklch(0.45 0 0); /* ≥3:1 against the light background at 80% opacity (WCAG 1.4.11) */
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -85,7 +102,7 @@ These serve as the fallback; there is no separate default.css file. */
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: oklch(0.45 0 0);
 
   /* fonts */
   --font-sans: var(--font-geist);
@@ -112,7 +129,14 @@ These serve as the fallback; there is no separate default.css file. */
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --success: oklch(0.77 0.15 160);
+  --warning: oklch(0.82 0.15 80);
+  --info: oklch(0.74 0.14 255);
+  --sev-critical: oklch(0.55 0.22 15);
+  --sev-high: oklch(0.7 0.18 25);
+  --sev-medium: oklch(0.78 0.15 55);
+  --sev-low: oklch(0.76 0.12 230);
+  --ring: oklch(0.8 0 0); /* ≥3:1 against the dark background at 80% opacity */
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -125,12 +149,12 @@ These serve as the fallback; there is no separate default.css file. */
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.8 0 0);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
   }
 
   body {

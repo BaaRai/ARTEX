@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { SSProject, SSTask } from "@/lib/types";
 import { t } from "@/i18n";
@@ -37,10 +38,7 @@ const ASSET_TYPES: { key: string; label: string }[] = [
 export default function AssetSyncPage() {
   return (
     <div className="p-4 md:p-6">
-      <div className="mb-4">
-        <h1 className="font-semibold text-xl">{t("Asset sync")}</h1>
-        <p className="text-muted-foreground text-sm">{t("Sync assets into the store from external data sources")}</p>
-      </div>
+      <PageHeader className="mb-4" description={t("Sync assets into the store from external data sources")} />
       <Tabs defaultValue="scopesentry">
         <TabsList>
           <TabsTrigger value="scopesentry">ScopeSentry</TabsTrigger>

@@ -80,9 +80,9 @@ export const FINDING_REPORT_STATES: FindingReportState[] = [
 
 export const REPORT_STATE_META: Record<FindingReportState, { label: string; tone: Tone }> = {
   none: { label: t("Not submitted"), tone: "slate" },
-  submitted: { label: t("Submitted"), tone: "amber" },
-  accepted: { label: t("Accepted"), tone: "green" },
-  rejected: { label: t("Rejected"), tone: "red" },
+  submitted: { label: t("Submitted"), tone: "warning" },
+  accepted: { label: t("Accepted"), tone: "success" },
+  rejected: { label: t("Rejected"), tone: "danger" },
   duplicate: { label: t("Duplicate report"), tone: "neutral" },
 };
 
@@ -103,10 +103,10 @@ export function ReportStateBadge({ state }: { state?: FindingReportState }) {
 
 // Verification outcome → label/tone, on the same tone tokens StatusBadge uses.
 export const VERIFICATION_META: Record<VerificationStatus, { label: string; tone: Tone }> = {
-  verified: { label: t("Verified"), tone: "green" },
+  verified: { label: t("Verified"), tone: "success" },
   unverified: { label: t("Unverified"), tone: "slate" },
-  blocked: { label: t("Blocked"), tone: "amber" },
-  not_assessed: { label: t("Not assessed"), tone: "red" },
+  blocked: { label: t("Blocked"), tone: "warning" },
+  not_assessed: { label: t("Not assessed"), tone: "danger" },
   false_positive: { label: t("False positive"), tone: "neutral" },
 };
 
@@ -323,7 +323,7 @@ export function FindingsTable({
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   {f.finding_id ? (
                     <Select value={f.status} onValueChange={(v) => onStatusChange(f, v as FindingStatus)}>
-                      <SelectTrigger size="sm" className="h-7 w-full border-none px-1 shadow-none focus-visible:ring-0">
+                      <SelectTrigger size="sm" className="h-7 w-full border-none px-1 shadow-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/80">
                         <StatusBadge domain="finding" value={f.status} dot />
                       </SelectTrigger>
                       <SelectContent position="popper" align="end">
@@ -426,7 +426,7 @@ export function FindingsTable({
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => onDelete(f)}>{t("Delete")}</AlertDialogAction>
+                            <AlertDialogAction variant="destructive" onClick={() => onDelete(f)}>{t("Delete")}</AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>

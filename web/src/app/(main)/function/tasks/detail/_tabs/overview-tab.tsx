@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { toast } from "sonner";
 
 import {
   ActivityIcon,
@@ -20,6 +21,7 @@ import {
   XIcon,
 } from "lucide-react";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +46,7 @@ import type {
 } from "@/lib/types";
 import { setVisibleInterval } from "@/lib/polling";
 import { intlLocale, t } from "@/i18n";
+import { Term } from "@/components/term";
 
 // Compact token count formatting (12345 → 12.3k, 2000000 → 2M).
 function fmtTokens(n: number): string {
@@ -223,11 +226,21 @@ export function OverviewTab({ taskId }: { taskId: string }) {
     }
   };
 
+  const confirmAction = useConfirm();
+  const shorten = (t: string) => (t.length > 80 ? `${t.slice(0, 77)}…` : t);
+
   const removeGoal = async (g: TaskGoal) => {
+    const ok = await confirmAction({
+      title: t("Remove this goal?"),
+      description: t('"{text}" — the planner stops working towards it.', { text: shorten(g.text) }),
+      confirmLabel: t("Remove"),
+    });
+    if (!ok) return;
     setGoals((prev) => prev.filter((x) => x.id !== g.id));
     try {
       await api.deleteGoal(taskId, g.id);
-    } catch {
+    } catch (e) {
+      toast.error(t("Couldn't remove the goal: {error}", { error: (e as Error).message }));
       await loadGoals(); // delete failed: re-fetch to restore
     }
   };
@@ -286,10 +299,17 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   };
 
   const removeConstraint = async (c: TaskConstraint) => {
+    const ok = await confirmAction({
+      title: t("Remove this constraint?"),
+      description: t('"{text}" — the planner and workers no longer have to respect it.', { text: shorten(c.text) }),
+      confirmLabel: t("Remove"),
+    });
+    if (!ok) return;
     setConstraints((prev) => prev.filter((x) => x.id !== c.id));
     try {
       await api.deleteConstraint(taskId, c.id);
-    } catch {
+    } catch (e) {
+      toast.error(t("Couldn't remove the constraint: {error}", { error: (e as Error).message }));
       await loadConstraints(); // delete failed: re-fetch to restore
     }
   };
@@ -526,6 +546,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={goalBusy}
                     />
                     <Button
+                      aria-label={t("Save goal")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -535,6 +556,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       <CheckIcon className="size-3.5 text-emerald-500" />
                     </Button>
                     <Button
+                      aria-label={t("Cancel editing goal")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -554,6 +576,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       </span>
                     )}
                     <Button
+                      aria-label={t("Edit goal")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -563,6 +586,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       <PencilIcon className="size-3.5" />
                     </Button>
                     <Button
+                      aria-label={t("Delete goal")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -654,6 +678,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       autoFocus
                     />
                     <Button
+                      aria-label={t("Save constraint")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -663,6 +688,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       <CheckIcon className="size-3.5 text-emerald-500" />
                     </Button>
                     <Button
+                      aria-label={t("Cancel editing constraint")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -685,6 +711,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                     </span>
                     <span className="min-w-0 flex-1 break-words">{c.text}</span>
                     <Button
+                      aria-label={t("Edit constraint")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -694,6 +721,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       <PencilIcon className="size-3.5" />
                     </Button>
                     <Button
+                      aria-label={t("Delete constraint")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -911,6 +939,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                   <span className="text-muted-foreground shrink-0 text-xs">{SCOPE_SOURCE_LABELS[row.source]}</span>
                   {row.task_id.toString() === taskId ? (
                     <Button
+                      aria-label={t("Remove scope entry")}
                       size="sm"
                       variant="ghost"
                       className="h-6 shrink-0 px-1.5"
@@ -1013,7 +1042,9 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             </div>
             <div>
               <div className="text-2xl font-semibold tabular-nums">{open.length}</div>
-              <div className="text-xs text-muted-foreground">{t("frontier open")}</div>
+              <div className="text-xs text-muted-foreground">
+                <Term name="frontier">{t("Waiting for a worker")}</Term>
+              </div>
             </div>
             <div>
               <div className="text-2xl font-semibold tabular-nums text-red-600">{blocked.length}</div>
@@ -1086,14 +1117,9 @@ export function OverviewTab({ taskId }: { taskId: string }) {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StatCard label={t("Open intents")} value={open.length} icon={ShieldCheckIcon} sub={t("frontier open")} />
+        <StatCard label={t("Open intents")} value={open.length} icon={ShieldCheckIcon} sub={t("waiting for a worker")} />
         <StatCard label={t("Confirmed findings")} value={taskFindings.length} icon={BugIcon} sub={t("this task")} />
-        <StatCard
-          label={t("Total intents")}
-          value={intents.length}
-          icon={AlertTriangleIcon}
-          sub={t("all intents of this task")}
-        />
+        <StatCard label={t("Total intents")} value={intents.length} icon={AlertTriangleIcon} sub={t("all intents of this task")} />
       </div>
     </div>
   );
@@ -1193,11 +1219,19 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
     }
   }
 
+  const confirmAction = useConfirm();
   async function remove(r: AssetInterceptRule) {
+    const ok = await confirmAction({
+      title: t('Remove blocking rule "{pattern}"?', { pattern: r.pattern }),
+      description: t("Targets it blocked can be tested by this task's agents."),
+      confirmLabel: t("Remove"),
+    });
+    if (!ok) return;
     setRules((prev) => prev.filter((x) => x.id !== r.id));
     try {
       await api.deleteTaskInterceptRule(taskId, r.id);
-    } catch {
+    } catch (e) {
+      toast.error(t("Couldn't remove the rule: {error}", { error: (e as Error).message }));
       await load();
     }
   }
@@ -1305,6 +1339,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     disabled={busy}
                   />
                   <Button
+                    aria-label={t("Save rule")}
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5"
@@ -1314,6 +1349,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     <CheckIcon className="size-3.5 text-emerald-500" />
                   </Button>
                   <Button
+                    aria-label={t("Cancel editing rule")}
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5"
@@ -1341,6 +1377,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                   )}
                   <Switch checked={r.enabled} onCheckedChange={() => void toggle(r)} />
                   <Button
+                    aria-label={t("Edit rule")}
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5"
@@ -1350,6 +1387,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     <PencilIcon className="size-3.5" />
                   </Button>
                   <Button
+                    aria-label={t("Delete rule")}
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5"

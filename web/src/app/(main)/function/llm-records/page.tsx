@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  RadioIcon,
   SearchIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -44,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
@@ -266,11 +266,10 @@ export default function LLMRecordsPage() {
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <RadioIcon className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">{t("LLM recording")}</h1>
-          <Badge variant="secondary">{total}</Badge>
-        </div>
+        <PageHeader
+          description={t("Every request the agents sent to a model, with the response")}
+          meta={<Badge variant="secondary">{total}</Badge>}
+        />
       </div>
 
       {/* Toolbar */}

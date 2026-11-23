@@ -25,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -367,6 +368,7 @@ export default function SkillsPage() {
   React.useEffect(() => { load(); }, [load]);
 
   // ── Upload a .zip skill ───────────────────────────────────────────────────
+  const confirmAction = useConfirm();
   async function uploadZip(file: File, overwrite = false) {
     setUploading(true);
     try {
@@ -377,7 +379,13 @@ export default function SkillsPage() {
       const msg = (e as Error).message;
       // offer overwrite when the skill already exists
       if (!overwrite && msg.includes("already exists")) {
-        if (window.confirm(`${msg}\n\n${t("Overwrite the skill with the same name?")}`)) {
+        if (
+          await confirmAction({
+            title: t("Replace the existing skill?"),
+            description: t("{message}. Uploading replaces its files with the ones in this .zip.", { message: msg }),
+            confirmLabel: t("Replace"),
+          })
+        ) {
           await uploadZip(file, true);
           return;
         }
@@ -717,7 +725,7 @@ export default function SkillsPage() {
     <div data-content-padding="false" className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-3 border-b px-4 py-2.5 lg:px-6">
         <div className="flex flex-col gap-0.5">
-          <h1 className="text-sm font-semibold leading-tight">{t("Skill")}</h1>
+          <h1 className="text-sm font-semibold leading-tight">{t("Skills")}</h1>
           <p className="text-muted-foreground text-xs">{t("Skill library · agentskills.io spec · visibility granted per agent")}</p>
         </div>
         {/* Gap list: skills agents invoke by name but missing from the library — direct evidence of what to add. */}

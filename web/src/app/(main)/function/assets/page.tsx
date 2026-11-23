@@ -58,6 +58,7 @@ import {
 } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import { parseCompanyScopeText } from "@/lib/company-scope";
 import { httpHref } from "@/lib/http-href";
@@ -322,9 +323,7 @@ export default function AssetsPage() {
   return (
     <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("Assets")}</h1>
-        </div>
+        <PageHeader description={t("Assets discovered by tasks or synced in, grouped by company")} />
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground tabular-nums">
             {t("{count} assets in total", { count: totalAssets })}

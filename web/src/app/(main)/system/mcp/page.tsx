@@ -4,6 +4,8 @@ import * as React from "react";
 import { toast } from "sonner";
 import { PlusIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
 
+import { LoadError } from "@/components/load-error";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +23,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { intlLocale, t } from "@/i18n";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { MCPServer, MCPTool, Agent } from "@/lib/types";
 
@@ -60,12 +63,14 @@ export default function MCPPage() {
   const [toolsLoading, setToolsLoading] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const load = React.useCallback(() => {
     api.agents().then(setAgents).catch(() => {});
     api
       .mcpServers()
       .then((ss) => {
         setServers(ss);
+        setLoadError(null);
         ss.forEach((s) =>
           api
             .resourceVisibility("mcp", s.id)
@@ -73,7 +78,7 @@ export default function MCPPage() {
             .catch(() => {}),
         );
       })
-      .catch(() => {});
+      .catch((e) => setLoadError((e as Error).message));
   }, []);
   React.useEffect(() => {
     load();
@@ -204,7 +209,13 @@ export default function MCPPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function removeServer(s: MCPServer) {
+    const ok = await confirmAction({
+      title: t('Delete MCP server "{name}"?', { name: s.name }),
+      description: t("Agents lose access to its tools. This cannot be undone."),
+    });
+    if (!ok) return;
     try {
       await api.deleteMcpServer(s.id);
       toast.success(t("Deleted: {name}", { name: s.name }));
@@ -381,10 +392,12 @@ export default function MCPPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">MCP</h1>
-        <p className="text-muted-foreground text-sm">{t("External MCP tool servers · visibility granted per agent")}</p>
-      </div>
+      {loadError && <LoadError what={t("MCP servers")} error={loadError} onRetry={load} />}
+      <PageHeader
+        description={t(
+          "External tool servers (Model Context Protocol). Each agent sees only the servers you grant it.",
+        )}
+      />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <button

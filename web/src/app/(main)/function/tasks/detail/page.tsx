@@ -8,7 +8,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArchiveIcon, ArrowLeftIcon, BrainIcon, CheckIcon, CircleAlertIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import { StatusBadge } from "@/components/status-badge";
+import { LoadError } from "@/components/load-error";
+import { PageBreadcrumbs } from "@/components/page-header";
+import { TaskStatusBadge } from "@/components/status-badge";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -37,7 +39,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { t } from "@/i18n";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
+import { setVisibleInterval } from "@/lib/polling";
 import type { LLMProfile, Task } from "@/lib/types";
 
 import { AssetsTab } from "./_tabs/assets-tab";
@@ -51,7 +54,6 @@ import { OverviewTab } from "./_tabs/overview-tab";
 import { ReportTab } from "./_tabs/report-tab";
 import { RetestsTab } from "./_tabs/retests-tab";
 import { SessionsTab } from "./_tabs/sessions-tab";
-import { setVisibleInterval } from "@/lib/polling";
 
 const TABS = [
   { value: "sessions", label: t("Sessions") },
@@ -103,7 +105,7 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
       : (activeProfile?.name ?? (activeID ? t("Config #{id}", { id: activeID }) : t("Follow default config")));
   const activeIndex = chain.indexOf(activeID);
   const backupCount = activeIndex >= 0 ? Math.max(0, chain.length - activeIndex - 1) : 0;
-  const currentTitle = [currentLabel, activeProfile?.model, backupCount > 0 ? t("{count} backups", { count: backupCount }) : ""]
+  const currentTitle = [currentLabel, activeProfile?.model, backupCount > 0 ? t("{count} backups", { count: backupCount }) : "",]
     .filter(Boolean)
     .join(" · ");
   let editorDescription = t(
@@ -169,7 +171,8 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
         >
           <BrainIcon data-icon="inline-start" />
           <span className="hidden max-w-36 truncate lg:inline">{currentLabel}</span>
-          {!task.llm_rotate && backupCount > 0 && <span className="hidden text-muted-foreground xl:inline">+{backupCount}</span>}
+          {!task.llm_rotate && backupCount > 0 && ( <span className="hidden text-muted-foreground xl:inline">+{backupCount}</span>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent ref={popoverContentRef} align="start" className="w-[min(28rem,calc(100vw-2rem))] gap-4 p-4">
@@ -257,6 +260,8 @@ function TaskDetailInner() {
   }, [id]);
 
   const taskLoadInFlight = React.useRef<string | null>(null);
+  // Only a 404 means the task is gone; any other failure is a load error with Retry.
+  const [loadError, setLoadError] = React.useState<{ notFound: boolean; message: string } | null>(null);
   const load = React.useCallback(() => {
     if (taskLoadInFlight.current === id) return;
     taskLoadInFlight.current = id;
@@ -274,9 +279,11 @@ function TaskDetailInner() {
         }
         setTask(base);
         setPaused(at?.paused ?? base.paused ?? false);
+        setLoadError(null);
       })
-      .catch(() => {
+      .catch((e) => {
         // Keep the last rendered task state during a transient poll failure.
+        setLoadError({ notFound: e instanceof ApiError && e.status === 404, message: (e as Error).message });
       })
       .finally(() => {
         if (taskLoadInFlight.current === id) {
@@ -319,7 +326,15 @@ function TaskDetailInner() {
   if (!task) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-        <p className="text-muted-foreground">{loaded ? t("Task {id} was deleted, archived, or does not exist", { id }) : t("Loading…")}</p>
+        {loaded && loadError && !loadError.notFound ? (
+          <div className="w-full max-w-lg text-left">
+            <LoadError what={t("task {id}", { id })} error={loadError.message} onRetry={load} />
+          </div>
+        ) : (
+          <p className="text-muted-foreground">
+            {loaded ? t("Task {id} was deleted, archived, or does not exist", { id }) : t("Loading…")}
+          </p>
+        )}
         {loaded && (
           <Button asChild variant="outline">
             <Link href="/function/tasks">
@@ -370,9 +385,10 @@ function TaskDetailInner() {
     <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col gap-0">
       {/* Top fixed area */}
       <header className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background/95 px-4 py-2.5 backdrop-blur lg:px-6">
+        <PageBreadcrumbs current={task.name || task.description} />
         <div className="flex items-center gap-2">
           <SidebarTrigger className="-ml-1" />
-          <Button asChild variant="ghost" size="icon" className="size-7">
+          <Button asChild variant="ghost" size="icon" className="size-7" aria-label={t("Back to tasks")}>
             <Link href="/function/tasks">
               <ArrowLeftIcon />
             </Link>
@@ -385,7 +401,7 @@ function TaskDetailInner() {
           </code>
           <Separator orientation="vertical" className="mx-1 hidden h-4 sm:block" />
           <TaskLLMControl task={task} profiles={profiles} onUpdated={load} />
-          <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
+          <TaskStatusBadge status={!terminal && paused ? "paused" : task.status} engineMode={terminal ? undefined : engineMode} />
           {canArchive ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>{archiveTrigger}</AlertDialogTrigger>
@@ -394,7 +410,7 @@ function TaskDetailInner() {
                   <AlertDialogTitle>{t("Archive task #{id}?", { id: task.id })}</AlertDialogTitle>
                   <AlertDialogDescription>
                     {t(
-                      "The task graph, related records, exclusive assets and traffic, working files, and LLM history will be compressed into cold storage. Once archiving completes, restore it from the \"Archived\" tab of the task list.",
+                      'The task graph, related records, exclusive assets and traffic, working files, and LLM history will be compressed into cold storage. Once archiving completes, restore it from the "Archived" tab of the task list.',
                     )}
                   </AlertDialogDescription>
                 </AlertDialogHeader>

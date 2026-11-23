@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/page-header";
 import { sseUrl } from "@/lib/api";
 import { MOCK } from "@/lib/mock/enabled";
 import type { LogLine } from "@/lib/types";
@@ -142,10 +143,7 @@ export default function LogsPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-3">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{t("System logs")}</h1>
-        <p className="text-muted-foreground text-sm">{t("Live backend log stream (planner / worker / database / traffic …)")}</p>
-      </div>
+      <PageHeader description={t("Live backend log stream (planner / worker / database / traffic …)")} />
       <div className="flex flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Input

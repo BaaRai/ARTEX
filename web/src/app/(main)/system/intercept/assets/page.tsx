@@ -5,6 +5,7 @@ import * as React from "react";
 import { BanIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { AssetInterceptKind, AssetInterceptRule } from "@/lib/types";
 
@@ -153,8 +155,15 @@ export default function AssetInterceptPage() {
     }
   }
 
+  const confirmAction = useConfirm();
   async function handleDelete(rule: AssetInterceptRule) {
-    if (!window.confirm(t("Are you sure you want to delete asset interception rule \"{pattern}\"?", { pattern: rule.pattern }))) return;
+    const ok = await confirmAction({
+      title: t('Delete blocking rule "{pattern}"?', { pattern: rule.pattern }),
+      description: rule.builtin
+        ? t("This is a built-in safety rule. Once deleted, targets it blocked can be tested by the agent.")
+        : t("Targets this rule blocked can be tested by the agent again. This cannot be undone."),
+    });
+    if (!ok) return;
     try {
       await api.deleteAssetInterceptRule(rule.id);
       toast.success(t("Rule deleted"));
@@ -178,15 +187,9 @@ export default function AssetInterceptPage() {
   return (
     <div className="flex flex-1 flex-col gap-5 p-6">
       {/* header */}
-      <div className="flex items-center gap-2.5">
-        <BanIcon className="h-5 w-5 shrink-0" />
-        <div>
-          <h1 className="text-lg font-semibold leading-tight">{t("Asset interception")}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {t("Global asset blocklist: matching domains / IPs / URLs / networks are intercepted; no operations run against them")}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        description={t("Domains, IPs, URLs and networks that agents must never touch. Matching requests are blocked.")}
+      />
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
@@ -244,14 +247,25 @@ export default function AssetInterceptPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-center">
-                      <Switch checked={rule.enabled} onCheckedChange={() => handleToggle(rule)} />
+                      <Switch
+                        aria-label={t("Enable rule {name}", { name: rule.pattern })}
+                        checked={rule.enabled}
+                        onCheckedChange={() => handleToggle(rule)}
+                      />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-0.5">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
+                        <Button
+                          aria-label={t("Edit rule {name}", { name: rule.pattern })}
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          onClick={() => openEdit(rule)}
+                        >
                           <PencilIcon className="h-3.5 w-3.5" />
                         </Button>
                         <Button
+                          aria-label={t("Delete rule {name}", { name: rule.pattern })}
                           size="icon"
                           variant="ghost"
                           className="h-7 w-7 text-destructive hover:text-destructive"

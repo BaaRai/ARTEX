@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageBreadcrumbs } from "@/components/page-header";
 import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingReportState, FindingStatus, Severity } from "@/lib/types";
@@ -156,9 +157,10 @@ function FindingDetailInner() {
     <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col gap-0">
       {/* Sticky header */}
       <header className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background/95 px-4 py-2.5 backdrop-blur lg:px-6">
+        <PageBreadcrumbs current={title} />
         <div className="flex flex-wrap items-center gap-2">
           <SidebarTrigger className="-ml-1" />
-          <Button asChild variant="ghost" size="icon" className="size-7">
+          <Button asChild variant="ghost" size="icon" className="size-7" aria-label={t("Back to findings")}>
             <Link href="/function/findings">
               <ArrowLeftIcon />
             </Link>
@@ -282,7 +284,7 @@ function FindingDetailInner() {
                     <StatusBadge domain="severity" value={finding.severity} dot />
                   ) : (
                     <Select value={finding.severity} onValueChange={(v) => changeSeverity(v as Severity)}>
-                      <SelectTrigger size="sm" className="h-7 w-auto border-none px-1 shadow-none focus-visible:ring-0">
+                      <SelectTrigger size="sm" className="h-7 w-auto border-none px-1 shadow-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/80">
                         <StatusBadge domain="severity" value={finding.severity} dot />
                       </SelectTrigger>
                       <SelectContent position="popper" align="end">
@@ -304,7 +306,7 @@ function FindingDetailInner() {
                     <StatusBadge domain="finding" value={finding.status} dot />
                   ) : (
                     <Select value={finding.status} onValueChange={(v) => changeStatus(v as FindingStatus)}>
-                      <SelectTrigger size="sm" className="h-7 w-auto border-none px-1 shadow-none focus-visible:ring-0">
+                      <SelectTrigger size="sm" className="h-7 w-auto border-none px-1 shadow-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/80">
                         <StatusBadge domain="finding" value={finding.status} dot />
                       </SelectTrigger>
                       <SelectContent position="popper" align="end">

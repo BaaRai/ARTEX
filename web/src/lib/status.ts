@@ -3,29 +3,63 @@
 
 import { t } from "@/i18n";
 
-export type Tone = "neutral" | "blue" | "green" | "amber" | "red" | "rose" | "violet" | "slate";
+// Semantic tones map onto the --success / --warning / --info / --destructive / --sev-* tokens
+// in globals.css. Each hue has one meaning:
+//   info (blue)     the system is working on it: running, in progress, sending
+//   success (green) finished well
+//   warning (amber) stopped and waiting on a person: paused
+//   danger (red)    failed or blocked
+//   slate/neutral   waiting its turn or no longer relevant: queued, pending, ignored
+// Severity has its own scale (sev-*) so "Medium" never looks like a status.
+export type Tone =
+  | "neutral"
+  | "slate"
+  | "info"
+  | "success"
+  | "warning"
+  | "danger"
+  | "violet"
+  | "sev-critical"
+  | "sev-high"
+  | "sev-medium"
+  | "sev-low";
 
 export const toneClasses: Record<Tone, string> = {
   neutral: "bg-muted text-muted-foreground border-transparent",
-  blue: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-  green: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-  red: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20",
-  // rose is used for "Critical" — a solid high-emphasis fill clearly above the soft red outline of "High".
-  rose: "bg-rose-600 text-white border-rose-600 dark:bg-rose-600 dark:text-white",
-  violet: "bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/20",
-  slate: "bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/20",
+  slate: "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/25",
+  info: "bg-info/12 text-info border-info/25",
+  success: "bg-success/12 text-success border-success/25",
+  warning: "bg-warning/12 text-warning border-warning/30",
+  danger: "bg-destructive/10 text-destructive border-destructive/25",
+  violet: "bg-violet-500/12 text-violet-700 dark:text-violet-300 border-violet-500/25",
+  // Critical is the only filled badge (plus an icon, see StatusBadge); High is an outline in a
+  // different hue, so the two never read as the same level.
+  "sev-critical": "bg-sev-critical text-white border-sev-critical",
+  "sev-high": "bg-transparent text-sev-high border-sev-high",
+  "sev-medium": "bg-sev-medium/12 text-sev-medium border-sev-medium/30",
+  "sev-low": "bg-sev-low/12 text-sev-low border-sev-low/30",
 };
 
 export const toneDot: Record<Tone, string> = {
   neutral: "bg-muted-foreground",
-  blue: "bg-blue-500",
-  green: "bg-emerald-500",
-  amber: "bg-amber-500",
-  red: "bg-red-500",
-  rose: "bg-white",
-  violet: "bg-violet-500",
   slate: "bg-slate-500",
+  info: "bg-info",
+  success: "bg-success",
+  warning: "bg-warning",
+  danger: "bg-destructive",
+  violet: "bg-violet-500",
+  "sev-critical": "bg-white",
+  "sev-high": "bg-sev-high",
+  "sev-medium": "bg-sev-medium",
+  "sev-low": "bg-sev-low",
+};
+
+/** Text colour for a severity count ("3" critical) where a full badge is too heavy. */
+export const severityText: Record<"critical" | "high" | "medium" | "low", string> = {
+  critical: "text-sev-critical",
+  high: "text-sev-high",
+  medium: "text-sev-medium",
+  low: "text-sev-low",
 };
 
 interface StatusMeta {
@@ -35,11 +69,11 @@ interface StatusMeta {
 
 const intent: Record<string, StatusMeta> = {
   open: { label: t("Open"), tone: "slate" },
-  running: { label: t("Running"), tone: "blue" },
-  paused: { label: t("Paused"), tone: "amber" },
-  done: { label: t("Completed"), tone: "green" },
+  running: { label: t("Running"), tone: "info" },
+  paused: { label: t("Paused"), tone: "warning" },
+  done: { label: t("Completed"), tone: "success" },
   // blocked = model/API/network failures exhausted the retries; this intent barely explored anything (not an interception).
-  blocked: { label: t("Error"), tone: "red" },
+  blocked: { label: t("Error"), tone: "danger" },
   // exhausted = the step/time budget cut the run short midway, only partial results written back (not "direction exhausted").
   exhausted: { label: t("Budget exhausted"), tone: "violet" },
   // stopped = legacy soft-deleted state (kept for historical data).
@@ -50,27 +84,27 @@ const intent: Record<string, StatusMeta> = {
 
 const task: Record<string, StatusMeta> = {
   created: { label: t("Created"), tone: "slate" },
-  queued: { label: t("Queued"), tone: "amber" },
-  running: { label: t("Running"), tone: "blue" },
-  paused: { label: t("Paused"), tone: "amber" },
-  done: { label: t("Completed"), tone: "green" },
-  failed: { label: t("Failed"), tone: "red" },
-  timeout: { label: t("Timed out"), tone: "amber" },
+  queued: { label: t("Queued"), tone: "slate" },
+  running: { label: t("Running"), tone: "info" },
+  paused: { label: t("Paused"), tone: "warning" },
+  done: { label: t("Completed"), tone: "success" },
+  failed: { label: t("Failed"), tone: "danger" },
+  timeout: { label: t("Timed out"), tone: "danger" },
 };
 
 const severity: Record<string, StatusMeta> = {
-  critical: { label: t("Critical"), tone: "rose" },
-  high: { label: t("High"), tone: "red" },
-  medium: { label: t("Medium"), tone: "amber" },
-  low: { label: t("Low"), tone: "slate" },
+  critical: { label: t("Critical"), tone: "sev-critical" },
+  high: { label: t("High"), tone: "sev-high" },
+  medium: { label: t("Medium"), tone: "sev-medium" },
+  low: { label: t("Low"), tone: "sev-low" },
 };
 
 const finding: Record<string, StatusMeta> = {
-  pending: { label: t("Pending"), tone: "amber" },
-  in_progress: { label: t("In progress"), tone: "blue" },
-  confirmed: { label: t("Confirmed"), tone: "red" },
-  resolved: { label: t("Resolved"), tone: "green" },
-  fixed: { label: t("Fixed"), tone: "green" },
+  pending: { label: t("Pending"), tone: "slate" },
+  in_progress: { label: t("In progress"), tone: "info" },
+  confirmed: { label: t("Confirmed"), tone: "danger" },
+  resolved: { label: t("Resolved"), tone: "success" },
+  fixed: { label: t("Fixed"), tone: "success" },
   false_positive: { label: t("False positive"), tone: "slate" },
   ignored: { label: t("Ignored"), tone: "neutral" },
   duplicate: { label: t("Duplicate"), tone: "neutral" },
@@ -78,36 +112,36 @@ const finding: Record<string, StatusMeta> = {
 };
 
 const engine: Record<string, StatusMeta> = {
-  exploring: { label: t("Exploring"), tone: "blue" },
-  paused: { label: t("Paused"), tone: "amber" },
-  stalled: { label: t("Stalled"), tone: "red" },
+  exploring: { label: t("Exploring"), tone: "info" },
+  paused: { label: t("Paused"), tone: "warning" },
+  stalled: { label: t("Stalled"), tone: "danger" },
   idle: { label: t("Idle"), tone: "neutral" },
 };
 
 const goal: Record<string, StatusMeta> = {
-  open: { label: t("In progress"), tone: "blue" },
-  met: { label: t("Met"), tone: "green" },
+  open: { label: t("In progress"), tone: "info" },
+  met: { label: t("Met"), tone: "success" },
   abandoned: { label: t("Abandoned"), tone: "slate" },
 };
 
 const audit: Record<string, StatusMeta> = {
-  allow: { label: t("Allow"), tone: "green" },
-  block: { label: t("Block"), tone: "red" },
+  allow: { label: t("Allow"), tone: "success" },
+  block: { label: t("Block"), tone: "danger" },
 };
 
 const node: Record<string, StatusMeta> = {
   observed: { label: t("Observed"), tone: "slate" },
-  confirmed: { label: t("Confirmed"), tone: "green" },
+  confirmed: { label: t("Confirmed"), tone: "success" },
   tombstoned: { label: t("Tombstoned"), tone: "neutral" },
 };
 
-// Notification delivery states. sending uses blue rather than amber: it is not "a problem"
-// but "claimed and sending now", which must stay distinguishable from pending's waiting.
+// Notification delivery states. sending is info (claimed and sending now), pending is slate
+// (waiting its turn); neither is a problem.
 const delivery: Record<string, StatusMeta> = {
-  pending: { label: t("Pending"), tone: "amber" },
-  sending: { label: t("Sending"), tone: "blue" },
-  sent: { label: t("Sent"), tone: "green" },
-  failed: { label: t("Failed"), tone: "red" },
+  pending: { label: t("Pending"), tone: "slate" },
+  sending: { label: t("Sending"), tone: "info" },
+  sent: { label: t("Sent"), tone: "success" },
+  failed: { label: t("Failed"), tone: "danger" },
   skipped: { label: t("Skipped"), tone: "neutral" },
 };
 
@@ -127,4 +161,21 @@ export type StatusDomain = keyof typeof maps;
 
 export function statusMeta(domain: StatusDomain, key: string): StatusMeta {
   return maps[domain][key] ?? { label: t(key), tone: "neutral" };
+}
+
+/**
+ * One primary status per task. A running task adds what its engine is doing as a sub-label
+ * ("Running · idle"), so the list, the detail page and the dashboard never show two
+ * different words for the same task. A stalled engine turns the badge red.
+ */
+export function taskStatusMeta(status: string, engineMode?: string): StatusMeta & { detail?: string } {
+  const base = statusMeta("task", status);
+  if (status !== "running" || !engineMode) return base;
+  if (engineMode === "paused") return statusMeta("task", "paused");
+  const engineMeta = statusMeta("engine", engineMode);
+  return {
+    ...base,
+    detail: engineMeta.label.toLowerCase(),
+    tone: engineMode === "stalled" ? "danger" : base.tone,
+  };
 }
