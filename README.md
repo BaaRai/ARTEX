@@ -6,7 +6,6 @@
 
 **Autonomous penetration testing that keeps its receipts.**
 
-(upstream: [Autumn-27/ARTEX](https://github.com/Autumn-27), AGPL-3.0)
 
 Self-hosted multi-agent offensive security. A planner explores, workers run real tools,
 and every finding stays bound to the assets and HTTP traffic that prove it.
