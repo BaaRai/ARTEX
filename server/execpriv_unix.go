@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/Autumn-27/artex/agent"
+	"golang.org/x/sys/unix"
 )
 
 // Environment names the shims read. They carry no secret: the executor id, the real
@@ -542,28 +543,76 @@ func shareRestoredTaskDir(p ExecPrivilege, taskDir string) error {
 
 // shareWithExecGroup gives the executor group the tree under root: the group owns
 // each entry and gets read/write (and traverse on directories), and directories set
-// the setgid bit so anything created below them keeps the group.
+// the setgid bit so anything created below them keeps the group. The executor can
+// change entries in a run directory concurrently, so each entry is opened relative
+// to its already-open parent without following a symlink. Ownership and mode changes
+// use the descriptor: replacing a name after the open cannot redirect them to a
+// root-only key outside the run directory.
 func shareWithExecGroup(root string, gid int) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	f, err := os.OpenFile(root, os.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		// Older task directories can contain symlinks. Like WalkDir, leave the
+		// target alone; only the link itself receives the executor group.
+		return os.Lchown(root, -1, gid)
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return shareOpenedExecEntry(f, gid)
+}
+
+func shareOpenedExecEntry(f *os.File, gid int) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Mode().IsRegular() {
+		st, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || st.Nlink > 1 {
+			return fmt.Errorf("refusing to share a file with another hard link")
+		}
+	}
+	if err := f.Chown(-1, gid); err != nil {
+		return err
+	}
+	mode := info.Mode().Perm() | 0o060
+	if info.IsDir() {
+		mode = (info.Mode().Perm() | 0o070) | os.ModeSetgid
+	}
+	if err := f.Chmod(mode); err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name() // one component, relative to the open directory
+		fd, err := unix.Openat(int(f.Fd()), name, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if errors.Is(err, syscall.ELOOP) {
+			if err := unix.Fchownat(int(f.Fd()), name, -1, gid, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+			continue
+		}
 		if err != nil {
-			return err
+			return fmt.Errorf("%s: %w", name, err)
 		}
-		if err := os.Lchown(path, -1, gid); err != nil {
-			return err
+		child := os.NewFile(uintptr(fd), name)
+		childErr := shareOpenedExecEntry(child, gid)
+		closeErr := child.Close()
+		if childErr != nil {
+			return fmt.Errorf("%s: %w", name, childErr)
 		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
+		if closeErr != nil {
+			return fmt.Errorf("%s: %w", name, closeErr)
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		mode := info.Mode().Perm() | 0o060
-		if d.IsDir() {
-			mode = (info.Mode().Perm() | 0o070) | os.ModeSetgid
-		}
-		return os.Chmod(path, mode)
-	})
+	}
+	return nil
 }
 
 // InstallBashShim makes the Bash tool, the interactive shell and background tasks
