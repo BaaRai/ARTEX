@@ -1,9 +1,14 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/agent"
 )
@@ -29,7 +34,42 @@ func (s *Server) triageClient() agent.TriageClient {
 	if strings.TrimSpace(p.BaseURL) == "" || strings.TrimSpace(p.Model) == "" {
 		return nil
 	}
-	return &agent.SystemOneClient{BaseURL: p.BaseURL, APIKey: p.APIKey, Model: p.Model}
+	client := s.triageHTTPClient(p.BaseURL)
+	if client == nil {
+		return nil
+	}
+	return &agent.SystemOneClient{BaseURL: p.BaseURL, APIKey: p.APIKey, Model: p.Model, HTTP: client}
+}
+
+// triageHTTPClient builds the HTTP client for the decision endpoint under the same
+// endpoint guard the model-list path uses (ARTEX_LLM_PRIVATE_ENDPOINTS, private and
+// metadata addresses refused, redirects not followed). A triage profile is a stored
+// base_url: without the guard, pointing it at an internal host makes the server dial
+// that host on every report_finding. A refused base_url returns nil and triage stays
+// off — the same fail-open path as every other triage failure.
+func (s *Server) triageHTTPClient(baseURL string) *http.Client {
+	g := newModelURLGuard(s)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := g.validateURL(ctx, baseURL, "triage"); err != nil {
+		log.Printf("[triage] base_url refused (%v); dedup stays off", err)
+		return nil
+	}
+	var tr *http.Transport
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr = base.Clone()
+	} else {
+		tr = &http.Transport{}
+	}
+	tr.Proxy = nil // a proxy fetches the target itself and would bypass the dial guard
+	tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: g.blockDial}).DialContext
+	return &http.Client{
+		Transport: tr,
+		Timeout:   agent.TriageHTTPTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return fmt.Errorf("triage: redirects are not followed")
+		},
+	}
 }
 
 // applyTriageThreshold pushes the stored threshold into the agent package. Called on

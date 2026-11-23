@@ -4039,6 +4039,26 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		egress.SetProfile(noise)
 	}
+	// Triage settings are checked before either is stored. A profile id that does
+	// not exist resolves to "off" at run time, which reads as a broken dedup rather
+	// than as a rejected setting; a threshold outside 0..1 is silently ignored by
+	// the agent. Reject both here instead of storing them.
+	if req.TriageProfileID != nil {
+		if *req.TriageProfileID < 0 {
+			writeErr(w, 400, "triage_profile_id must be >= 0 (0 turns the duplicate check off)")
+			return
+		}
+		if *req.TriageProfileID > 0 {
+			if p, err := s.m.pg.ProfileByID(*req.TriageProfileID); err != nil || p == nil {
+				writeErr(w, 400, fmt.Sprintf("triage_profile_id %d does not match any LLM profile", *req.TriageProfileID))
+				return
+			}
+		}
+	}
+	if req.TriageMinConfidence != nil && (*req.TriageMinConfidence < 0 || *req.TriageMinConfidence > 1) {
+		writeErr(w, 400, "triage_min_confidence must be between 0 and 1")
+		return
+	}
 	// A masked placeholder echoed back keeps the stored secret, like null.
 	req.BraveKey, req.TavilyKey, req.KeenableKey = keepIfMasked(req.BraveKey), keepIfMasked(req.TavilyKey), keepIfMasked(req.KeenableKey)
 	req.WebSearchProxy, req.GlobalProxy = keepIfMasked(req.WebSearchProxy), keepIfMasked(req.GlobalProxy)

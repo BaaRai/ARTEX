@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
 )
@@ -68,6 +69,11 @@ const (
 // TriageCandidate is a finding reduced to what a dedup question needs.
 type TriageCandidate struct {
 	FindingID int64
+	// NodeID is the exploration node id of the same finding. The agent extends a
+	// finding through update_finding_report, which addresses the NODE, while the
+	// question and the suppression answer carry the findings-table id — both have
+	// to come back to the caller or it passes the wrong one.
+	NodeID    int64
 	Name      string
 	VulnClass string
 	Severity  string
@@ -80,7 +86,9 @@ type TriageCandidate struct {
 // DuplicateAnswer is the parsed verdict: DuplicateOf == 0 means "genuinely distinct".
 type DuplicateAnswer struct {
 	DuplicateOf int64
-	Confidence  float64
+	// DuplicateOfNode is the exploration node id of DuplicateOf (0 when unknown).
+	DuplicateOfNode int64
+	Confidence      float64
 }
 
 // TriageClient answers the closed-list questions the agent asks.
@@ -101,13 +109,15 @@ type SystemOneClient struct {
 // (stage3_width.py 2026-11-22), 3.83-3.96 с на 27B-варианте (этап 0, 2026-11-21); у пула
 // conc=2 и нет очереди, занятость добавляет ожидание. запас ~5x к худшему замеру.
 // при превышении: ошибка -> fail open, находка регистрируется как раньше.
-const triageHTTPTimeout = 20 * time.Second // замер: 0.26-3.96 с наблюдаемо; запас 5x
+// Экспортирован, чтобы сервер, собирающий клиенту guarded-транспорт, брал тот же
+// бюджет, а не заводил второй таймаут с другим числом.
+const TriageHTTPTimeout = 20 * time.Second // замер: 0.26-3.96 с наблюдаемо; запас 5x
 
 func (c *SystemOneClient) http() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: triageHTTPTimeout}
+	return &http.Client{Timeout: TriageHTTPTimeout}
 }
 
 // Duplicate asks which existing finding, if any, is the same defect as cand.
@@ -183,7 +193,7 @@ func buildDuplicateState(cand TriageCandidate, existing []TriageCandidate) strin
 	}
 	out := b.String()
 	if len(out) > triageMaxStateChars {
-		out = out[:triageMaxStateChars]
+		out = cutRunes(out, triageMaxStateChars)
 	}
 	return out
 }
@@ -249,9 +259,24 @@ func parseDuplicateAnswer(raw []byte, existingIDs map[int64]bool) (DuplicateAnsw
 
 func capText(s string, n int) string {
 	if n > 0 && len(s) > n {
-		return s[:n] + "…"
+		return cutRunes(s, n) + "…"
 	}
 	return s
+}
+
+// cutRunes truncates s to at most n BYTES without splitting a multi-byte rune.
+// The caps above are byte budgets (they bound a request), but a byte-index cut
+// through a CJK or Cyrillic summary leaves a broken rune — the JSON encoder then
+// sends U+FFFD and the question loses the tail of the evidence.
+func cutRunes(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 func triageFirstLine(b []byte) string {
@@ -324,8 +349,28 @@ func (t *ToolSet) triageDuplicate(ctx context.Context, in db.RecordFindingInput)
 		log.Printf("[triage] client error (fail open): %v", err)
 		return DuplicateAnswer{}, false
 	}
-	log.Printf("[triage] answer: dup=%d conf=%.2f", ans.DuplicateOf, ans.Confidence)
+	// Carry the node id of the matched finding alongside its findings-table id:
+	// the agent extends a finding through update_finding_report, which takes the
+	// node id, so an answer that names only the table id sends it to the wrong call.
+	ans = withNodeID(ans, existing)
+	log.Printf("[triage] answer: dup=%d node=%d conf=%.2f", ans.DuplicateOf, ans.DuplicateOfNode, ans.Confidence)
 	return ans, true
+}
+
+// withNodeID resolves the exploration node id of the matched finding from the
+// candidates the question offered. Pure, so the mapping is testable without a
+// decision-model round trip.
+func withNodeID(ans DuplicateAnswer, existing []TriageCandidate) DuplicateAnswer {
+	if ans.DuplicateOf <= 0 {
+		return ans
+	}
+	for _, e := range existing {
+		if e.FindingID == ans.DuplicateOf {
+			ans.DuplicateOfNode = e.NodeID
+			break
+		}
+	}
+	return ans
 }
 
 // triageCandidates reduces finding nodes to question candidates: nodes without a
@@ -347,6 +392,7 @@ func triageCandidates(nodes []*db.Node, in db.RecordFindingInput) []TriageCandid
 		_ = json.Unmarshal(n.Payload, &p)
 		out = append(out, TriageCandidate{
 			FindingID: n.FindingID,
+			NodeID:    n.ID,
 			Name:      strField(p, "name"),
 			VulnClass: strField(p, "vulnclass"),
 			Severity:  strField(p, "severity"),
