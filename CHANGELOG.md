@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
-- **Browser capture keeps a bounded request map**: unfinished debugger requests are capped at 500, and a stored request body is cut at the same 256 KiB limit as ingest.
+- **Browser capture keeps a bounded request map**: unfinished debugger requests are capped at 500, and a request that fails to load is dropped instead of waiting for eviction. A stored body longer than 256K JavaScript characters is cut and marked `[truncated by extension]`. That count is UTF-16 code units, not bytes; the server still enforces its byte cap on ingest.
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
 - **Notification delivery ignores HTTP_PROXY**: the dial guard checks the address it connects to. An environment proxy made that address the proxy, so a link-local target could still be reached. Notification HTTP now connects directly.
 - **Captured traffic blobs are owner-only**: HTTP and raw-stream bodies spilled out of the database are written `0600`, and their bucket directory is `0700`. An existing blob is tightened when it is seen again.

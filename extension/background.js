@@ -8,7 +8,9 @@
 // the acceptable failure mode for a manual capture session.
 
 const FLUSH_AT = 10; // entries per batch
-const MAX_BODY = 256 * 1024; // matches the server-side ingest cap
+// JavaScript string length, in UTF-16 code units, not bytes. The server
+// ingest cap is 256 KiB of bytes and remains the backstop.
+const MAX_BODY = 256 * 1024;
 const MAX_TRACKED = 500; // unfinished requests kept in memory
 const SKIP_MIME = ["image/", "font/", "audio/", "video/", "application/octet-stream"];
 
@@ -116,7 +118,6 @@ async function queueExchange(info, response) {
         { requestId: info.requestId }
       );
       if (body && !body.base64Encoded) {
-        reqBody = truncate(reqBody);
         respBody = truncate(body.body || "");
       }
     } catch (_) {
@@ -168,8 +169,7 @@ async function flush() {
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!session.capturing || !source.tabId || source.tabId !== session.tabId) return;
   if (method === "Network.requestWillBeSent") {
-    let postData = params.request.postData || "";
-    if (postData.length > MAX_BODY) postData = postData.slice(0, MAX_BODY);
+    const postData = truncate(params.request.postData || "");
     if (!session.requests.has(params.requestId) && session.requests.size >= MAX_TRACKED) {
       const oldest = session.requests.keys().next().value;
       session.requests.delete(oldest);
@@ -184,6 +184,8 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   } else if (method === "Network.responseReceived") {
     const info = session.requests.get(params.requestId);
     if (info) info.response = params.response;
+  } else if (method === "Network.loadingFailed") {
+    session.requests.delete(params.requestId);
   } else if (method === "Network.loadingFinished") {
     const info = session.requests.get(params.requestId);
     session.requests.delete(params.requestId);
