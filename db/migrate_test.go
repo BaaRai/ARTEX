@@ -140,9 +140,9 @@ func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 		{5, "0005_traffic_rewrite_rules.sql"}, {6, "0006_activity_outbox.sql"}, {7, "0007_finding_report_state.sql"},
 		{8, "0008_traffic_evidence_rewrite_flag.sql"}, {9, "0009_llm_context.sql"}, {10, "0010_dashboard_usage_indexes.sql"},
 		{11, "0011_traffic_tamper_hooks.sql"}, {12, "0012_lesson_withdrawn.sql"},
-		{13, "0013_lesson_evidence_history.sql"}}
+		{13, "0013_lesson_evidence_history.sql"}, {14, "0014_bedrock_gateway_profiles.sql"}}
 	if len(applied) != len(want) {
-		t.Fatalf("schema_migrations = %+v, want versions 1 to 13", applied)
+		t.Fatalf("schema_migrations = %+v, want versions 1 to 14", applied)
 	}
 	for i, w := range want {
 		content, err := fs.ReadFile(migrationsFS(), w.name)
@@ -437,7 +437,7 @@ func TestLessonWithdrawnMigrationKeepsExistingEvidence(t *testing.T) {
 		`ALTER TABLE rsi_lesson_evidence DROP COLUMN withdrawn_at`,
 		string(migrationSQL),
 		`ALTER TABLE rsi_lesson_evidence DROP COLUMN withdrawn_at`,
-		`DELETE FROM schema_migrations WHERE version IN (12, 13)`,
+		`DELETE FROM schema_migrations WHERE version >= 12`,
 		`INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,status)
 		 VALUES ('legacy-lesson','positive','xss','Confirmed xss: legacy','adopted')`,
 		`INSERT INTO rsi_lesson_evidence(lesson_id,source_kind,source_id,detail)

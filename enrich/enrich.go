@@ -248,6 +248,7 @@ func (e *Engine) doHTTP(ctx context.Context, id int64, rawURL string) {
 	if err != nil {
 		return
 	}
+	intercept.ApplyAssessmentUserAgent(req)
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return

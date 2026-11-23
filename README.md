@@ -6,7 +6,6 @@
 
 **Autonomous penetration testing that keeps its receipts.**
 
-(upstream: [Autumn-27/ARTEX](https://github.com/Autumn-27), AGPL-3.0)
 
 Self-hosted multi-agent offensive security. A planner explores, workers run real tools,
 and every finding stays bound to the assets and HTTP traffic that prove it.
@@ -494,7 +493,7 @@ runtime supports it.
 **LLM**: `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`), or configure it in the UI's
 "LLM Configuration" page, which can also add a local Ollama server as a keyless provider (format
 "Ollama", default base URL `http://127.0.0.1:11434/v1`). Optional:
-`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama`), `ARTEX_LLM_MODEL`,
+`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama | bedrock-gateway`), `ARTEX_LLM_MODEL`,
 `ARTEX_LLM_BASE_URL`, `ARTEX_LLM_PROXY`.
 
 **Base URL gotcha**: for the Anthropic format, enter the host **without** `/v1` (for example
@@ -509,6 +508,24 @@ root, paste the key, then click the **↻** button next to *Model* to load the p
 catalog (`GET /v1/models`) and pick a model; models the provider adds later appear on the
 next refresh. For example, [NotHoly](https://notholy.com) (offensive-security models) uses
 base URL `https://api.notholy.com/v1` with an API key from its console.
+
+**Bedrock gateway**: select **Bedrock gateway** in System → LLM for a gateway that
+exposes the Bedrock `InvokeModel` and `InvokeModelWithResponseStream` paths and accepts
+bearer-token authentication. Enter the gateway's base URL (for example,
+`https://gateway.example.com/bedrock`), the full Bedrock model ID, and the token
+in **Bearer token**. If required, enter static headers as one `Name: Value` per line
+in **Custom gateway headers**. ARTEX adds `/model/{model}/invoke` (or
+`/invoke-with-response-stream`), sends `anthropic_version: bedrock-2023-05-31`,
+and decodes Bedrock's binary event stream. Enter the model ID manually; this
+gateway format does not have a model-list operation. The token and custom header
+values are encrypted in the database and are write-only in the UI. Editing the
+gateway URL requires re-entering the token, so saved credentials cannot be sent
+to a different host by changing the URL. This format is for bearer-authenticated
+gateways; direct AWS Bedrock with SigV4 credentials is not supported.
+
+For environment-based setup, set `ARTEX_LLM_PROVIDER=bedrock-gateway`,
+`ARTEX_LLM_BASE_URL`, `ARTEX_LLM_MODEL`, and `ARTEX_LLM_API_KEY`. Optional
+`ARTEX_LLM_CUSTOM_HEADERS` uses the same newline-separated `Name: Value` format.
 
 **Task archive storage**: local disk by default. Set `ARTEX_ARCHIVE_STORAGE=s3` to
 store cold task packages in an S3-compatible bucket and release their local
@@ -539,6 +556,10 @@ nothing launched from Bash is paced. The low-and-slow prompt block supplies the 
 every case.
 The **Target noise** card in System settings sets the profile at runtime (no restart) and shows the
 per-host counters; once saved, that setting takes precedence over `ARTEX_NOISE_PROFILE`.
+
+**Scanner User-Agent (opt-in per task)** adds a stable ARTEX User-Agent to supported
+target requests so defenders can correlate them with an approved assessment. See the
+[configuration and WAF triage guide](docs/scanner-user-agent.md).
 
 **Low-and-slow agent guidance (off by default)**: when a noise profile is set, the planner, worker,
 main agent and chat agents receive a code-owned prompt block with the profile's per-host limits and
@@ -744,7 +765,7 @@ gunzip -c backups/artex-db-<timestamp>.sql.gz | docker compose exec -T postgres 
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
 
-Stored secrets (LLM API keys and proxies, MCP env, task credentials, notification channel config,
+Stored secrets (LLM API keys, proxies and gateway custom headers, MCP env, task credentials, notification channel config,
 Brave/Tavily search keys, web search and global proxies, the execution spec of custom tools, the
 capture-proxy rewrite rules) are
 encrypted in the database with the key in `keys/secret.key` (generated at first start, mode 0600,
@@ -850,7 +871,8 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 - Backend: `go run ./cmd/artex` (without `-tags embedui`, the frontend is not embedded)
 - Frontend: `cd web && npm run dev` (`/api` is reverse-proxied to the backend, with hot reload)
 - Tests: `go test ./...`
-- Reproduce all CI checks locally: `./scripts/verify.sh` (add `--full` for `-race` and the static web build)
+- Reproduce the fast CI checks locally: `./scripts/verify.sh` (add `--full` for `-race` and the static web build; add `--security` for `govulncheck`)
+- Security scan: install `govulncheck` and run `./scripts/verify.sh --security` (CI runs this on every push and pull request)
 - Mock preview (no backend): `cd web && NEXT_PUBLIC_MOCK=1 npm run dev`
 
 ---
@@ -931,7 +953,7 @@ Please report vulnerabilities privately through GitHub Security Advisories; see
 
 Operational security properties:
 
-- **Secrets at rest**: LLM keys/proxies, MCP environment, task credentials, notification config,
+- **Secrets at rest**: LLM keys/proxies/gateway headers, MCP environment, task credentials, notification config,
   search keys, proxies, custom-tool execution specs, capture-proxy rewrite rules and traffic
   evidence snapshots are encrypted
   with AES-256-GCM using `keys/secret.key` (or `ARTEX_SECRET_KEY`). ARTEX refuses to start when
