@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -37,13 +39,28 @@ import (
 // замер: калибровка stage3_calibrate.py 2026-11-22 — recall 1.00 при FP 0.47 на 75
 // жёстких негативах; на истинных дублях в живом прогоне 0.30-0.79. при превышении
 // порога: находка не регистрируется, вызывающий получает finding_id.
-var triageDupMinConfidence = 0.5
+const defaultTriageMinConfidence = 0.5
 
-// SetTriageMinConfidence overrides the suppression threshold (<=0 keeps the default).
+// triageDupMinConfidenceBits holds the threshold as float64 bits. It is written by the
+// settings path (an HTTP goroutine) and read by the report_finding worker, so it is
+// atomic: a plain float global is a data race under -race.
+var triageDupMinConfidenceBits atomic.Uint64
+
+func init() {
+	triageDupMinConfidenceBits.Store(math.Float64bits(defaultTriageMinConfidence))
+}
+
+// SetTriageMinConfidence overrides the suppression threshold. v <= 0 restores the default.
 func SetTriageMinConfidence(v float64) {
-	if v > 0 {
-		triageDupMinConfidence = v
+	if v <= 0 {
+		v = defaultTriageMinConfidence
 	}
+	triageDupMinConfidenceBits.Store(math.Float64bits(v))
+}
+
+// triageDupThreshold returns the current suppression threshold.
+func triageDupThreshold() float64 {
+	return math.Float64frombits(triageDupMinConfidenceBits.Load())
 }
 
 const (
@@ -220,7 +237,7 @@ func duplicateCriteria(existing []TriageCandidate) map[string]any {
 // triageDuplicateHit reports whether an answer should suppress registration.
 // Split out so the threshold is testable without an HTTP round trip.
 func triageDuplicateHit(ans DuplicateAnswer) bool {
-	return ans.DuplicateOf > 0 && ans.Confidence >= triageDupMinConfidence
+	return ans.DuplicateOf > 0 && ans.Confidence >= triageDupThreshold()
 }
 
 // parseDuplicateAnswer reads answers.duplicate_of. A choice that is not one of the

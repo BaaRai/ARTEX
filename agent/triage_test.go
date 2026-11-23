@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Autumn-27/artex/db"
@@ -243,14 +244,14 @@ func TestBuildDuplicateState_Caps(t *testing.T) {
 }
 
 func TestTriageDuplicateHit_Threshold(t *testing.T) {
-	defer SetTriageMinConfidence(0.5) // restore the default for other tests
-	SetTriageMinConfidence(0.5)
+	defer SetTriageMinConfidence(defaultTriageMinConfidence) // restore the default for other tests
+	SetTriageMinConfidence(defaultTriageMinConfidence)
 	cases := []struct {
 		in   DuplicateAnswer
 		want bool
 	}{
 		{DuplicateAnswer{DuplicateOf: 5, Confidence: 0.9}, true},
-		{DuplicateAnswer{DuplicateOf: 5, Confidence: triageDupMinConfidence}, true},
+		{DuplicateAnswer{DuplicateOf: 5, Confidence: defaultTriageMinConfidence}, true},
 		{DuplicateAnswer{DuplicateOf: 5, Confidence: 0.4}, false}, // below the threshold: register as before
 		{DuplicateAnswer{DuplicateOf: 0, Confidence: 0.99}, false},
 	}
@@ -268,5 +269,42 @@ func TestTriageDuplicateHit_Threshold(t *testing.T) {
 	SetTriageMinConfidence(0.9)
 	if triageDuplicateHit(DuplicateAnswer{DuplicateOf: 5, Confidence: 0.30}) {
 		t.Fatal("0.30 must miss at threshold 0.9")
+	}
+}
+
+// The settings path writes the threshold from an HTTP goroutine while report_finding
+// reads it on a worker. Run under -race: a plain float global fails here.
+func TestTriageThresholdConcurrentSetAndRead(t *testing.T) {
+	defer SetTriageMinConfidence(0.5)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			SetTriageMinConfidence(0.3 + 0.4*float64(i%2))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			_ = triageDuplicateHit(DuplicateAnswer{DuplicateOf: 5, Confidence: 0.6})
+		}
+	}()
+	wg.Wait()
+}
+
+func TestSetTriageMinConfidenceZeroRestoresDefault(t *testing.T) {
+	defer SetTriageMinConfidence(defaultTriageMinConfidence)
+	SetTriageMinConfidence(0.9)
+	SetTriageMinConfidence(0)
+	if got := triageDupThreshold(); got != defaultTriageMinConfidence {
+		t.Fatalf("threshold after Set(0) = %v, want %v", got, defaultTriageMinConfidence)
+	}
+	SetTriageMinConfidence(-1)
+	if got := triageDupThreshold(); got != defaultTriageMinConfidence {
+		t.Fatalf("threshold after Set(-1) = %v, want %v", got, defaultTriageMinConfidence)
+	}
+	if !triageDuplicateHit(DuplicateAnswer{DuplicateOf: 5, Confidence: 0.5}) {
+		t.Fatal("0.5 must hit at the restored default")
 	}
 }

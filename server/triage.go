@@ -73,7 +73,8 @@ func (s *Server) triageHTTPClient(baseURL string) *http.Client {
 }
 
 // applyTriageThreshold pushes the stored threshold into the agent package. Called on
-// boot and on a settings change; an unreadable or out-of-range value keeps the default.
+// boot and on a settings change; an unreadable or out-of-range value keeps the current
+// threshold. 0 is in range and means "back to the default" (SetTriageMinConfidence).
 func (s *Server) applyTriageThreshold() {
 	if s.m.pg == nil {
 		return
@@ -82,7 +83,7 @@ func (s *Server) applyTriageThreshold() {
 	if err != nil || !ok {
 		return
 	}
-	if v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil && v > 0 && v <= 1 {
+	if v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil && v >= 0 && v <= 1 {
 		agent.SetTriageMinConfidence(v)
 	}
 }
