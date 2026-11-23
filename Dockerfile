@@ -13,7 +13,7 @@
 # ---------------------------------------------------------------- frontend ---
 # Pinned to the Node 22 line the CI/release workflows use. On the build platform
 # only; the frontend static export is architecture-independent.
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS web
+FROM --platform=$BUILDPLATFORM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS web
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
