@@ -10,19 +10,24 @@ import (
 	"github.com/Autumn-27/norma/llm"
 )
 
-// ContextTelemetryEnv is the opt-in environment flag enabling per-call context
-// size telemetry into llm_context. Off by default: when unset/false, no sizing
-// work runs and no rows are written.
+// ContextTelemetryEnv switches per-call context size telemetry into llm_context.
+//
+// ON by default. Measurement: on the test bench, 15 runs left llm_context EMPTY
+// (0 rows) because the flag was off by default, so the worker's context size was
+// discussed from the task's total tokens, not from a breakdown (2026-11-22).
+// Cost: one row per model call plus length counts; no content is stored (up to about
+// 300 calls per run in the bench logs, so up to about 300 rows).
+// Explicit off switch: ARTEX_CONTEXT_TELEMETRY=0|false|off|no.
 const ContextTelemetryEnv = "ARTEX_CONTEXT_TELEMETRY"
 
-// ContextTelemetryEnabled reports whether ARTEX_CONTEXT_TELEMETRY is enabled
-// (1, true, on, yes; case-insensitive). Default is false.
+// ContextTelemetryEnabled reports whether context telemetry is on. Default true;
+// only an explicit falsy value (0, false, off, no; case-insensitive) turns it off.
 func ContextTelemetryEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(ContextTelemetryEnv))) {
-	case "1", "true", "on", "yes":
-		return true
+	case "0", "false", "off", "no":
+		return false
 	}
-	return false
+	return true
 }
 
 // ContextMetrics holds size-only measurements of an assembled CompletionRequest
