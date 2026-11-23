@@ -639,6 +639,12 @@ func writeTaskArchivePackage(path, payloadDir string, snapshot *pgdb.TaskArchive
 			log.Printf("[task-archive] skipping symlink (unsupported by the archive, other files unaffected): %s", current)
 			return nil
 		}
+		if !entry.IsDir() && !info.Mode().IsRegular() {
+			// A named pipe, socket or device left by a command: opening a pipe blocks until
+			// a writer appears, tar refuses a socket, and the unpacker refuses the rest.
+			log.Printf("[task-archive] skipping a file that is not regular (unsupported by the archive): %s", current)
+			return nil
+		}
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err

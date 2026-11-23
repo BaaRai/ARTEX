@@ -871,7 +871,8 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 - Backend: `go run ./cmd/artex` (without `-tags embedui`, the frontend is not embedded)
 - Frontend: `cd web && npm run dev` (`/api` is reverse-proxied to the backend, with hot reload)
 - Tests: `go test ./...`
-- Reproduce all CI checks locally: `./scripts/verify.sh` (add `--full` for `-race` and the static web build)
+- Reproduce the fast CI checks locally: `./scripts/verify.sh` (add `--full` for `-race` and the static web build; add `--security` for `govulncheck`)
+- Security scan: install `govulncheck` and run `./scripts/verify.sh --security` (CI runs this on every push and pull request)
 - Mock preview (no backend): `cd web && NEXT_PUBLIC_MOCK=1 npm run dev`
 
 ---
