@@ -534,6 +534,10 @@ every case.
 The **Target noise** card in System settings sets the profile at runtime (no restart) and shows the
 per-host counters; once saved, that setting takes precedence over `ARTEX_NOISE_PROFILE`.
 
+**Assessment identification (opt-in per task)** adds a stable ARTEX User-Agent to supported
+target requests so defenders can correlate them with an approved assessment. See the
+[configuration and WAF triage guide](docs/assessment-identification.md).
+
 **Low-and-slow agent guidance (off by default)**: when a noise profile is set, the planner, worker,
 main agent and chat agents receive a code-owned prompt block with the profile's per-host limits and
 exact rate/delay flags for the installed scanners. It tells them to test one host at a time, back
