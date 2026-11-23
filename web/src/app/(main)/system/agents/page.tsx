@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AgentEditor } from "@/components/agent-editor";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 
@@ -231,12 +232,7 @@ export default function AgentsPage() {
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       {loadError && <LoadError what="agents" error={loadError} onRetry={reload} />}
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Agent</h1>
-          <p className="text-muted-foreground text-sm">
-            Prompts/configs for built-in agents, plus creating and managing custom conversational agents
-          </p>
-        </div>
+        <PageHeader description="Prompts and settings for the built-in agents, plus your own chat agents" />
         <CreateAgentDialog
           onCreated={(key) => {
             reload();

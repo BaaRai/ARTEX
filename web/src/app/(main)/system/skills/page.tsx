@@ -712,7 +712,7 @@ export default function SkillsPage() {
     <div data-content-padding="false" className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-3 border-b px-4 py-2.5 lg:px-6">
         <div className="flex flex-col gap-0.5">
-          <h1 className="text-sm font-semibold leading-tight">Skill</h1>
+          <h1 className="text-sm font-semibold leading-tight">Skills</h1>
           <p className="text-muted-foreground text-xs">Skill library · agentskills.io spec · visibility granted per agent</p>
         </div>
         {/* Gap list: skills agents invoke by name but missing from the library — direct evidence of what to add. */}

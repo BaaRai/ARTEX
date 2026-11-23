@@ -50,7 +50,7 @@ export default function SetupPage() {
     try {
       const { token } = await api.initPassword(password, setupToken.trim());
       auth.setToken(token);
-      router.replace("/function/tasks");
+      router.replace("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Initialization failed");
     } finally {

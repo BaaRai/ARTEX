@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { APPROVALS_URL, usePendingApprovals } from "@/hooks/use-pending-approvals";
+import { useRouteMeta } from "@/hooks/use-route-meta";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { cn } from "@/lib/utils";
@@ -35,13 +36,21 @@ function isFullBleed(pathname: string) {
   return normalized.startsWith("/function/tasks/");
 }
 
-// Prefix the tab title with the pending-approval count, e.g. "(2) ARTEX — …", so a request
-// waiting on a human is visible even from another browser tab (requests auto-deny on timeout).
-function usePendingTitle(count: number) {
+// One tab title per page ("Findings · ARTEX"), prefixed with the pending-approval count,
+// e.g. "(2) Findings · ARTEX", so a request waiting on a human is visible from another
+// browser tab (requests auto-deny on timeout).
+function useDocumentTitle(base: string, pending: number) {
   useEffect(() => {
-    const base = document.title.replace(/^\(\d+\+?\)\s*/, "");
-    document.title = count > 0 ? `(${count > 99 ? "99+" : count}) ${base}` : base;
-  }, [count]);
+    const want = pending > 0 ? `(${pending > 99 ? "99+" : pending}) ${base}` : base;
+    document.title = want;
+    // Next.js re-applies the static metadata <title> after hydration and on navigation, which
+    // would silently undo ours; put it back whenever the head's title changes underneath us.
+    const observer = new MutationObserver(() => {
+      if (document.title !== want) document.title = want;
+    });
+    observer.observe(document.head, { subtree: true, childList: true, characterData: true });
+    return () => observer.disconnect();
+  }, [base, pending]);
 }
 
 function PendingApprovalsPill({ count }: { count: number }) {
@@ -65,7 +74,8 @@ export function MainContent({ children }: { children: ReactNode }) {
   const currentUser = useCurrentUser();
   const pathname = usePathname();
   const pendingApprovals = usePendingApprovals();
-  usePendingTitle(pendingApprovals);
+  const route = useRouteMeta();
+  useDocumentTitle(route.documentTitle, pendingApprovals);
   const [version, setVersion] = useState("");
   // Only set when the backend has the opt-in update check on (ARTEX_UPDATE_CHECK) and found a newer release.
   const [latest, setLatest] = useState("");

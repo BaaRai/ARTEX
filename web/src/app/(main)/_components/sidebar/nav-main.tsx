@@ -29,6 +29,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { findActiveUrl, normalizePath } from "@/navigation/route-meta";
 import type {
   NavBadge,
   NavGroup,
@@ -81,33 +82,6 @@ function CollapsedIconFallback({ title }: { title: string }) {
 
 function hasSubItems(item: NavMainItem): item is NavMainParentItem {
   return Boolean(item.subItems?.length);
-}
-
-// The static export uses trailingSlash, so "/function/tasks/" must match "/function/tasks".
-function normalizePath(p: string) {
-  const trimmed = p.replace(/\/+$/, "");
-  return trimmed === "" ? "/" : trimmed;
-}
-
-function matchesUrl(path: string, url: string) {
-  const u = normalizePath(url);
-  return path === u || path.startsWith(`${u}/`);
-}
-
-// The single nav url that owns the current path: the longest matching prefix, so a
-// detail page (/function/tasks/detail) lights up its parent and /system/intercept/assets
-// does not also light up /system/intercept.
-function findActiveUrl(groups: readonly NavGroup[], path: string): string | undefined {
-  let best: string | undefined;
-  for (const group of groups) {
-    for (const item of group.items) {
-      const urls = hasSubItems(item) ? item.subItems.map((s) => s.url) : [item.url];
-      for (const url of urls) {
-        if (matchesUrl(path, url) && (!best || normalizePath(url).length > normalizePath(best).length)) best = url;
-      }
-    }
-  }
-  return best;
 }
 
 export function NavMain({ items }: NavMainProps) {

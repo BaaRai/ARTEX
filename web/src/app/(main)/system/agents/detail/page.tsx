@@ -2,13 +2,10 @@
 
 import * as React from "react";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-import { ArrowLeftIcon } from "lucide-react";
-
 import { AgentEditor } from "@/components/agent-editor";
-import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/page-header";
 
 // Deep-link editor page for one agent. The primary flow is the drawer on
 // /system/agents; this page reuses the same AgentEditor component full-width so a
@@ -19,17 +16,7 @@ function AgentDetailInner() {
 
   return (
     <div className="flex flex-1 flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Button aria-label="Back to agents" asChild variant="ghost" size="icon-sm">
-          <Link href="/system/agents">
-            <ArrowLeftIcon className="size-4" />
-          </Link>
-        </Button>
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Agent</h1>
-          <p className="text-muted-foreground font-mono text-xs">{key}</p>
-        </div>
-      </div>
+      <PageHeader description={<span className="font-mono text-xs">{key}</span>} />
       <div className="flex min-h-0 flex-1 flex-col rounded-lg border">
         <AgentEditor agentKey={key} />
       </div>

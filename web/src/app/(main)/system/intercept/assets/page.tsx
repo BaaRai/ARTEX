@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { AssetInterceptKind, AssetInterceptRule } from "@/lib/types";
 
@@ -185,15 +186,7 @@ export default function AssetInterceptPage() {
   return (
     <div className="flex flex-1 flex-col gap-5 p-6">
       {/* header */}
-      <div className="flex items-center gap-2.5">
-        <BanIcon className="h-5 w-5 shrink-0" />
-        <div>
-          <h1 className="text-lg font-semibold leading-tight">Asset interception</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Global asset blocklist: matching domains / IPs / URLs / networks are intercepted; no operations run against them
-          </p>
-        </div>
-      </div>
+      <PageHeader description="Domains, IPs, URLs and networks that agents must never touch. Matching requests are blocked." />
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
