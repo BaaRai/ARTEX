@@ -114,6 +114,7 @@ import type {
   TrafficReplayRequest,
   TrafficReplayResult,
   TrafficResp,
+  TrafficStreamDirection,
   TrafficStreamPage,
   UsageStats,
   WorkspaceFile,
@@ -884,8 +885,10 @@ export const api = {
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
   // One page of a WebSocket/SSE exchange's messages, in order.
-  trafficStream: (id: string, offset = 0, limit = 50) =>
-    get<TrafficStreamPage>(`/traffic/stream?exchange=${encodeURIComponent(id)}&offset=${offset}&limit=${limit}`),
+  trafficStream: (id: string, offset = 0, limit = 50, direction: TrafficStreamDirection = "") =>
+    get<TrafficStreamPage>(
+      `/traffic/stream?exchange=${encodeURIComponent(id)}&offset=${offset}&limit=${limit}${direction ? `&direction=${direction}` : ""}`,
+    ),
   // Raw bytes of one stored blob (a full message payload or an oversized body).
   // The JSON-only `get` cannot carry binary, hence the direct fetch.
   trafficBlob: async (hash: string) => {

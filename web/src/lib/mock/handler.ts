@@ -2246,7 +2246,22 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/traffic/hosts" && m === "DELETE") return { deleted: (b.hosts as unknown[])?.length ?? 0 };
   if (path === "/traffic/hosts") return { hosts: D.trafficHosts };
   if (path === "/traffic") return D.traffic;
-  if (path === "/traffic/exchange") return D.trafficDetail;
+  if (path === "/traffic/exchange") return D.trafficStreamDetails[q.get("id") ?? ""] ?? D.trafficDetail;
+  if (path === "/traffic/stream") {
+    const direction = (q.get("direction") ?? "").trim().toLowerCase();
+    if (direction && direction !== "c2s" && direction !== "s2c") throw new Error("invalid stream direction");
+    const items = (D.trafficStreamMessages[q.get("exchange") ?? ""] ?? []).filter(
+      (message) => !direction || message.direction === direction || message.direction === "meta",
+    );
+    const offset = Math.max(0, Number(q.get("offset")) || 0);
+    const requestedLimit = Number(q.get("limit"));
+    const limit = requestedLimit > 0 ? Math.min(200, requestedLimit) : 50;
+    return {
+      items: items.slice(offset, offset + limit),
+      total: items.length,
+      message_total: items.filter((message) => message.direction !== "meta").length,
+    };
+  }
   if (path === "/settings" && m === "GET") return D.settings;
   if (path === "/settings" && m === "PUT") return { ...D.settings, ...b };
   if (path === "/settings/web-search/test") return { ok: true, count: 5, backend: D.settings.web_search_backend };
