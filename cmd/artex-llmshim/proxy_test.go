@@ -256,6 +256,10 @@ func TestProxy_TokenNotLogged(t *testing.T) {
 	}
 	resp.Body.Close()
 
+	// Close blocks until outstanding handlers return, so logRequests' trailing
+	// log.Printf has completed before buf is read (no concurrent access).
+	front.Close()
+
 	if strings.Contains(buf.String(), "supersecret-tok") {
 		t.Errorf("log leaked token: %q", buf.String())
 	}
