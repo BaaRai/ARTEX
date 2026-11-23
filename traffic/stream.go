@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/url"
 	"reflect"
 	"strings"
@@ -152,10 +152,10 @@ func (s *sink) startStream(f *mproxy.Flow, kind string) {
 		if rewritten, ruleIDs := appliedRules(lines); rewritten {
 			var re *recordError
 			errors.As(err, &re)
-			log.Printf("[traffic] failed to record a rewritten %s stream of %s (%s; rules %v)", kind, f.Request.URL.Hostname(), re.step, ruleIDs)
+			slog.Error("[traffic] failed to record rewritten stream", "kind", kind, "host", f.Request.URL.Hostname(), "step", re.step, "rules", ruleIDs)
 			return
 		}
-		log.Printf("[traffic] failed to record %s stream %s: %v", kind, f.Request.URL, err)
+		slog.Error("[traffic] failed to record stream", "kind", kind, "url", f.Request.URL.String(), "err", err)
 		return
 	}
 	st.id = id
@@ -200,7 +200,7 @@ func lockLib(v any) (unlock func(), ok bool) {
 	mu := libMutex(v)
 	if mu == nil {
 		libMutexMissing.Do(func() {
-			log.Printf("[traffic] go-mitmproxy stream data has no mu field; stream messages are not recorded")
+			slog.Warn("[traffic] go-mitmproxy stream data has no mu field; stream messages are not recorded")
 		})
 		return nil, false
 	}
@@ -424,7 +424,7 @@ func (t *Traffic) persistStream(st *streamState, rows []streamRow) {
 
 	tx, err := t.db.Begin()
 	if err != nil {
-		log.Printf("[traffic] failed to record stream messages of %s (beginning transaction): %v", st.id, err)
+		slog.Error("[traffic] failed to record stream messages", "exchange_id", st.id, "step", "begin tx", "err", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
@@ -436,12 +436,12 @@ func (t *Traffic) persistStream(st *streamState, rows []streamRow) {
 		if _, err := tx.Exec(`INSERT INTO stream_messages(exchange_id,seq,ts,direction,kind,event,event_id,retry,size,payload,payload_blob,truncated)
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, st.id, p.seq, p.ts, p.direction, p.kind, p.event, p.eventID, p.retry, p.size,
 			inline, nullIfEmpty(p.body.hash), boolInt(p.truncated)); err != nil {
-			log.Printf("[traffic] failed to record stream message %d of %s: %v", p.seq, st.id, err)
+			slog.Error("[traffic] failed to record stream message", "seq", p.seq, "exchange_id", st.id, "err", err)
 			return
 		}
 		if p.body.hash != "" {
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_refs(hash,exchange_id) VALUES(?,?)`, p.body.hash, st.id); err != nil {
-				log.Printf("[traffic] failed to record stream message %d of %s (registering blob reference): %v", p.seq, st.id, err)
+				slog.Error("[traffic] failed to register stream message blob ref", "seq", p.seq, "exchange_id", st.id, "err", err)
 				return
 			}
 		}
@@ -449,12 +449,12 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, st.id, p.seq, p.ts, p.direction, p.kind, p.eve
 	if meta != nil {
 		if _, err := tx.Exec(`INSERT INTO stream_messages(exchange_id,seq,ts,direction,kind,size,payload)
 VALUES(?,?,?,'meta',0,?,?)`, st.id, metaSeq, time.Now().Unix(), len(meta), meta); err != nil {
-			log.Printf("[traffic] failed to record stream limit marker of %s: %v", st.id, err)
+			slog.Error("[traffic] failed to record stream limit marker", "exchange_id", st.id, "err", err)
 			return
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		log.Printf("[traffic] failed to record stream messages of %s (committing): %v", st.id, err)
+		slog.Error("[traffic] failed to record stream messages", "exchange_id", st.id, "step", "commit", "err", err)
 	}
 }
 
@@ -493,12 +493,12 @@ func (t *Traffic) finishStream(st *streamState) {
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
 	if _, err := t.db.Exec(`UPDATE exchanges SET req_len=?, resp_len=? WHERE id=?`, st.reqBytes, st.respBytes, st.id); err != nil {
-		log.Printf("[traffic] failed to record stream sizes of %s: %v", st.id, err)
+		slog.Error("[traffic] failed to record stream sizes", "exchange_id", st.id, "err", err)
 	}
 	if st.dropped {
 		meta := streamMetaPayload(st)
 		if _, err := t.db.Exec(`UPDATE stream_messages SET payload=?, size=? WHERE exchange_id=? AND direction='meta'`, meta, len(meta), st.id); err != nil {
-			log.Printf("[traffic] failed to update stream limit marker of %s: %v", st.id, err)
+			slog.Error("[traffic] failed to update stream limit marker", "exchange_id", st.id, "err", err)
 		}
 	}
 }

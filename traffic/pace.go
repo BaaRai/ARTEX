@@ -2,7 +2,7 @@ package traffic
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -62,6 +62,6 @@ func pace(f *mproxy.Flow) {
 	defer cancel()
 	host := egress.HostKey(f.Request.URL)
 	if err := egress.Wait(ctx, host); err != nil {
-		log.Printf("[traffic] pacing a Bash request to %s stopped waiting (%v); sending it unpaced", host, err)
+		slog.Warn("[traffic] pacing request stopped waiting, sending unpaced", "host", host, "err", err)
 	}
 }

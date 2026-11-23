@@ -445,7 +445,7 @@ func TestRewriteTraceFailureRollsBack(t *testing.T) {
 		}
 	}
 	out := logs.String()
-	if !strings.Contains(out, "failed to record a rewritten exchange of 127.0.0.1 (writing rewrite trace; rules [7])") {
+	if !strings.Contains(out, "failed to record rewritten exchange") || !strings.Contains(out, "host=127.0.0.1") || !strings.Contains(out, "rules=[7]") {
 		t.Fatalf("log: %q", out)
 	}
 	for _, leak := range []string{"secret-path", "XYZ123", "client-path", "forced"} {
@@ -474,7 +474,7 @@ func TestRewriteRequestErrorRedactedAndCleared(t *testing.T) {
 	}
 	waitFor(t, "empty snapshot table", func() bool { e, tb := tr.snaps.counts(); return e == 0 && tb == 0 })
 	out := logs.String()
-	if !strings.Contains(out, "a request to 127.0.0.1 rewritten by rules [3] failed (class transport_error)") {
+	if !strings.Contains(out, "rewritten request failed") || !strings.Contains(out, "host=127.0.0.1") || !strings.Contains(out, "rules=[3]") || !strings.Contains(out, "class=transport_error") {
 		t.Fatalf("log: %q", out)
 	}
 	for _, leak := range []string{"XYZ123", "client-path", dead, "refused"} {
@@ -935,7 +935,7 @@ func TestRewriteSinkRecoverKeepsFlow(t *testing.T) {
 	if n := countRows(t, tr, "exchanges"); n != 1 {
 		t.Fatalf("%d exchanges", n)
 	}
-	if out := logs.String(); !strings.Contains(out, "class panic") || strings.Contains(out, "/p") {
+	if out := logs.String(); !strings.Contains(out, "class=panic") || strings.Contains(out, "/p") {
 		t.Fatalf("log %q", out)
 	}
 }
