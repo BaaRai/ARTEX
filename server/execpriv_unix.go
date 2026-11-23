@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -268,6 +269,11 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if !p.Enabled {
 		return nil
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := setNoNewPrivileges(); err != nil {
+		return fmt.Errorf("set no_new_privs before the agent processes start: %w", err)
 	}
 	gid := int(p.GID)
 	if err := shareRunDirs(dataDir, gid); err != nil {
@@ -692,7 +698,14 @@ func runBashShim(argv []string) {
 // nested shell already running as the executor, whose environment the agent may
 // have set), the environment is first rebuilt from the allowlist (execenv_unix.go)
 // and HOME and XDG_CACHE_HOME move to the executor's home.
+// PR_SET_NO_NEW_PRIVS is set first, before the identity changes. The flag is
+// inherited by the real program and everything it forks. Custom tools take
+// SysProcAttr.Credential in the server and do not pass through this shim, so the
+// flag is a known gap there.
 func enterExecutor(uid, gid int) error {
+	if err := setNoNewPrivsFn(); err != nil {
+		return fmt.Errorf("no_new_privs must be set before the executor identity is applied: %w", err)
+	}
 	if os.Getuid() != uid || os.Getgid() != gid {
 		if err := sealExecutorEnv(); err != nil {
 			return err
