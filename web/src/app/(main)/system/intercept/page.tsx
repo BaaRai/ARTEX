@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type {
   InterceptAction,
@@ -61,6 +62,7 @@ import type {
   LLMProfile,
   Tool,
 } from "@/lib/types";
+import { Term } from "@/components/term";
 
 // fmtTokens compacts token counts (1.2k / 3.4M) for approval usage stats.
 function fmtTokens(n: number): string {
@@ -299,7 +301,9 @@ function JudgeCard() {
         <div className="flex items-center gap-2.5">
           <BotIcon className={`h-5 w-5 shrink-0 ${cfg.enabled ? "text-violet-600" : "text-muted-foreground"}`} />
           <div>
-            <p className="text-sm font-semibold leading-tight">Model fallback approval</p>
+            <p className="text-sm font-semibold leading-tight">
+              <Term name="modelFallback">Model fallback approval</Term>
+            </p>
             <p className="text-xs text-muted-foreground mt-0.5">
               Only commands inside the <span className="font-medium text-foreground">interception scope</span> that <span className="font-medium text-foreground">match no interception rule</span> are semantically judged by the model (allow / escalate to human / block)
             </p>
@@ -635,15 +639,7 @@ export default function InterceptPage() {
     <div className="flex flex-1 flex-col gap-5 p-6">
 
       {/* ---- header ---- */}
-      <div className="flex items-center gap-2.5">
-        <ShieldAlertIcon className="h-5 w-5 shrink-0" />
-        <div>
-          <h1 className="text-lg font-semibold leading-tight">Command interception</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Tools are matched against interception rules before execution; unmatched commands can be judged by the model fallback
-          </p>
-        </div>
-      </div>
+      <PageHeader description="Tool calls are checked against these rules before they run. Calls no rule matches can go to the model fallback." />
 
       {/* ---- interception scope info bar (shared by rule matching and the model fallback: tools outside the scope are handled by neither) ---- */}
       <div
@@ -682,8 +678,8 @@ export default function InterceptPage() {
 
       <Tabs defaultValue="rules" className="flex-1">
         <TabsList>
-          <TabsTrigger value="rules">Interception rules</TabsTrigger>
-          <TabsTrigger value="judge">Model config</TabsTrigger>
+          <TabsTrigger value="rules">Rules</TabsTrigger>
+          <TabsTrigger value="judge">Model fallback</TabsTrigger>
         </TabsList>
 
         {/* ---- tab: interception rules ---- */}

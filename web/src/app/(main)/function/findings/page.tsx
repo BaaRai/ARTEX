@@ -38,9 +38,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
-import { statusMeta } from "@/lib/status";
+import { severityText, statusMeta } from "@/lib/status";
 import type {
   ActiveFindingRetest,
   Finding,
@@ -68,6 +69,7 @@ import {
   VERIFICATION_STATUSES,
 } from "./_components/findings-table";
 import { setVisibleInterval } from "@/lib/polling";
+import { Term } from "@/components/term";
 
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
 
@@ -811,11 +813,11 @@ export default function FindingsPage() {
 
   const statCards = [
     { label: "Total findings", value: stats.total, icon: BugIcon },
-    { label: "Pending", value: stats.pending, tone: "text-amber-500", icon: ClockIcon },
-    { label: "Critical", value: stats.critical, tone: "text-rose-600", icon: ShieldAlertIcon },
-    { label: "High", value: stats.high, tone: "text-red-500", icon: TriangleAlertIcon },
-    { label: "Medium", value: stats.medium, tone: "text-amber-500", icon: TriangleAlertIcon },
-    { label: "Low", value: stats.low, tone: "text-slate-500", icon: InfoIcon },
+    { label: "Pending", value: stats.pending, tone: "text-slate-600 dark:text-slate-300", icon: ClockIcon },
+    { label: "Critical", value: stats.critical, tone: severityText.critical, icon: ShieldAlertIcon },
+    { label: "High", value: stats.high, tone: severityText.high, icon: TriangleAlertIcon },
+    { label: "Medium", value: stats.medium, tone: severityText.medium, icon: TriangleAlertIcon },
+    { label: "Low", value: stats.low, tone: severityText.low, icon: InfoIcon },
   ];
 
   // The "current filter" count in the export dialog: both views share the same filters, only the counting source differs.
@@ -875,10 +877,7 @@ export default function FindingsPage() {
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Findings</h1>
-          <p className="text-muted-foreground text-sm">Cross-task vulnerability overview</p>
-        </div>
+        <PageHeader description="Vulnerabilities found across all tasks" />
         <Tabs value={view} onValueChange={(v) => setView(v as FindingView)}>
           <TabsList>
             <TabsTrigger value="flat">All findings</TabsTrigger>
@@ -1256,6 +1255,7 @@ export default function FindingsPage() {
           <DialogHeader>
             <DialogTitle>Deepen exploitation</DialogTitle>
             <DialogDescription className="break-words">
+              <Term name="deepen" className="mr-1 align-middle" />
               A priority-10 worker intent will be created in the original task #{deepenFinding?.task_id} to run secondary verification based on this vulnerability:
               {deepenFinding?.name || deepenFinding?.vulnclass || deepenFinding?.summary}
             </DialogDescription>
@@ -1265,6 +1265,8 @@ export default function FindingsPage() {
               <FieldLabel htmlFor="finding-deepen-description">Exploitation description</FieldLabel>
               <Textarea
                 id="finding-deepen-description"
+                // Focus lands here, not on the glossary icon above, so the dialog opens ready to type.
+                autoFocus
                 value={deepenDescription}
                 onChange={(event) => setDeepenDescription(event.target.value)}
                 maxLength={4000}

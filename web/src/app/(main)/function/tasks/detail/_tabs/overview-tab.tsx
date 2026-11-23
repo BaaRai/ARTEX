@@ -43,6 +43,7 @@ import type {
   TaskScopeRow,
 } from "@/lib/types";
 import { setVisibleInterval } from "@/lib/polling";
+import { Term } from "@/components/term";
 
 // Compact token count formatting (12345 → 12.3k, 2000000 → 2M).
 function fmtTokens(n: number): string {
@@ -1011,7 +1012,9 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             </div>
             <div>
               <div className="text-2xl font-semibold tabular-nums">{open.length}</div>
-              <div className="text-xs text-muted-foreground">frontier open</div>
+              <div className="text-xs text-muted-foreground">
+                <Term name="frontier">Waiting for a worker</Term>
+              </div>
             </div>
             <div>
               <div className="text-2xl font-semibold tabular-nums text-red-600">{blocked.length}</div>
@@ -1080,7 +1083,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StatCard label="Open intents" value={open.length} icon={ShieldCheckIcon} sub="frontier open" />
+        <StatCard label="Open intents" value={open.length} icon={ShieldCheckIcon} sub="waiting for a worker" />
         <StatCard label="Confirmed findings" value={taskFindings.length} icon={BugIcon} sub="this task" />
         <StatCard label="Total intents" value={intents.length} icon={AlertTriangleIcon} sub="all intents of this task" />
       </div>

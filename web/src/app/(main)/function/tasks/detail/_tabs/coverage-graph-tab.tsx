@@ -27,6 +27,7 @@ import {
 import { api } from "@/lib/api";
 import type { CoverageAssetRef, CoverageAssetRefs, CoverageGraphEdge, CoverageGraphNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { Term } from "@/components/term";
 
 // Default number of children shown per kind under each parent; the rest fold away, and "Show more" pulls in this many each time.
 const FOLD_LIMIT = 20;
@@ -654,7 +655,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
               )}
             </span>
           ) : (
-            <span className="text-muted-foreground">{loading ? "Loading…" : "No in-scope assets yet (anchor the task scope first)"}</span>
+            <span className="text-muted-foreground">{loading ? "Loading…" : <Term name="anchor">No in-scope assets yet. Set the task scope first.</Term>}</span>
           )}
           <Button variant="ghost" size="icon" className="size-6" onClick={fetchGraph} title="Refresh">
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
