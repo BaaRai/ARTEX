@@ -2031,7 +2031,8 @@ func (s *Server) pgSkillVisibility(w http.ResponseWriter, r *http.Request) {
 	}
 	agents, err := pg.SkillAgents(r.PathValue("name"))
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		log.Printf("[skills] visibility for %s: %v", r.PathValue("name"), err)
+		writeErr(w, 500, "failed to load skill visibility")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"agents": idStrings(agents)})
@@ -2052,7 +2053,8 @@ func (s *Server) pgToggleSkillVisibility(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := pg.ToggleSkillVisibility(body.AgentID, body.SkillName, body.Visible); err != nil {
-		writeErr(w, 500, err.Error())
+		log.Printf("[skills] toggle visibility for %s: %v", body.SkillName, err)
+		writeErr(w, 500, "failed to update skill visibility")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})

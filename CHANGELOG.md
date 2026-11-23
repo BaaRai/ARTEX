@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
-- **Skill endpoints no longer return database driver text**: a failure loading skill usage or missing-skill stats is logged on the server and the client receives a fixed message.
+- **Skill endpoints no longer return database driver text**: a failure loading skill usage, missing-skill stats, or skill visibility is logged on the server and the client receives a fixed message.
 - **Live log subscribers can no longer crash the process**: a client disconnect closes its log channel. The sink now delivers a line while it still holds the subscriber lock, so that close cannot land in the middle of the send.
 - **Notification delivery ignores HTTP_PROXY**: the dial guard checks the address it connects to. An environment proxy made that address the proxy, so a link-local target could still be reached. Notification HTTP now connects directly.
 - **Captured traffic blobs are owner-only**: HTTP and raw-stream bodies spilled out of the database are written `0600`, and their bucket directory is `0700`. An existing blob is tightened when it is seen again.
