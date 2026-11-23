@@ -28,12 +28,14 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
 import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
 import { setVisibleInterval } from "@/lib/polling";
+import { glossary } from "@/lib/glossary";
 
 // The thinking switch (thinking.type) and the thinking effort (reasoning_effort) are two [independent] fields,
 // each set on its own — some APIs have no thinking field and activate thinking via the effort parameter alone, hence the decoupling.
@@ -95,7 +97,7 @@ function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
     return {
       label: m.cooldown_secs > 0 ? `Tripped · ${cooldownText(m.cooldown_secs)}` : "Tripped",
       cls: "border-destructive/50 text-destructive",
-      hint: m.last_error,
+      hint: m.last_error ? `${glossary.tripped}\n\nLast error: ${m.last_error}` : glossary.tripped,
     };
   }
   if (m?.state === "degraded") {
@@ -313,11 +315,14 @@ function ProfileSheet({
   open,
   onOpenChange,
   onSaved,
+  activateIfNew = false,
 }: {
   profile: LLMProfile | null; // null = create
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onSaved: (id: string) => void;
+  /** No profile is active yet: make a newly created one active, or nothing can run. */
+  activateIfNew?: boolean;
 }) {
   const isNew = !profile;
   const [name, setName] = React.useState("");
@@ -475,7 +480,14 @@ function ProfileSheet({
         user_agent: userAgent.trim(),
         retry,
       });
-      if (isNew) toast.success(`Created: ${name.trim()} (use "Set as active" on its card to enable it)`);
+      if (isNew && activateIfNew) {
+        try {
+          await api.activateLLMProfile(String(id));
+          toast.success(`Created ${name.trim()} and set it as the active profile`);
+        } catch (e) {
+          toast.error(`Created ${name.trim()}, but couldn't make it active: ${(e as Error).message}. Use "Set as active" on its card.`);
+        }
+      } else if (isNew) toast.success(`Created: ${name.trim()} (use "Set as active" on its card to enable it)`);
       else toast.success(profile?.is_default ? "Saved; the active profile takes effect immediately, no restart needed" : "Saved");
       onSaved(String(id));
       onOpenChange(false);
@@ -874,6 +886,8 @@ function ProfileSheet({
 
 export default function LLMPage() {
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
+  // True once the list has loaded successfully; until then "no active profile" is unknown, not false.
+  const [profilesLoaded, setProfilesLoaded] = React.useState(false);
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
   const [poolOpen, setPoolOpen] = React.useState(false);
   // The drawer's open flag and its content are stored separately: editing stays put on close, otherwise during the closing animation the title would flash
@@ -897,6 +911,7 @@ export default function LLMPage() {
   const load = React.useCallback(async () => {
     try {
       setProfiles(await api.llmProfiles());
+      setProfilesLoaded(true);
       setLoadError(null);
     } catch (e) {
       setLoadError((e as Error).message);
@@ -951,12 +966,7 @@ export default function LLMPage() {
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       {loadError && <LoadError what="model profiles" error={loadError} onRetry={() => void load()} />}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-semibold text-xl tracking-tight">LLM</h1>
-          <p className="text-muted-foreground text-sm">
-            Format / model / rate-limit settings shared by all agents. Click a card to edit it; the starred card is the active profile.
-          </p>
-        </div>
+        <PageHeader description="Model profiles shared by all agents: API format, model and rate limits. Click a card to edit it; the starred card is the active profile." />
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setPoolOpen(true)}>
             <ZapIcon /> Pool settings
@@ -1092,7 +1102,13 @@ export default function LLMPage() {
         </TabsContent>
       </Tabs>
 
-      <ProfileSheet profile={editing} open={editOpen} onOpenChange={setEditOpen} onSaved={() => void load()} />
+      <ProfileSheet
+        profile={editing}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={() => void load()}
+        activateIfNew={profilesLoaded && !profiles.some((p) => p.is_default)}
+      />
       <PoolSheet open={poolOpen} onOpenChange={setPoolOpen} pool={pool} onReload={loadPool} />
     </div>
   );

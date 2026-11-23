@@ -47,7 +47,7 @@ import {
 import { toast } from "sonner";
 
 import { AssetInterceptRulesEditor } from "@/components/asset-intercept-rules-editor";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, TaskStatusBadge } from "@/components/status-badge";
 import { TablePagination } from "@/components/table-pagination";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
 import { TaskTemplateControls } from "@/components/task-template-controls";
@@ -139,6 +139,8 @@ import type {
   TaskStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { severityText } from "@/lib/status";
+import { Term } from "@/components/term";
 
 // fmtBytes renders a human file size for the upload manifest.
 function fmtBytes(n: number): string {
@@ -1213,7 +1215,7 @@ const TaskRow = React.memo(function TaskRow({
         {task.goal}
       </TableCell>
       <TableCell>
-        <StatusBadge domain="task" value={task.status} dot />
+        <TaskStatusBadge status={task.status} engineMode={task.engine_mode} />
       </TableCell>
       <TableCell className="text-muted-foreground text-center text-xs tabular-nums">
         {typeof task.goals_total === "number" && task.goals_total > 0 ? (
@@ -1232,13 +1234,13 @@ const TaskRow = React.memo(function TaskRow({
           );
           return (
             <span className="font-medium whitespace-nowrap" title="Critical / High / Medium / Low">
-              {seg(f.critical, "text-rose-600 dark:text-rose-400")}
+              {seg(f.critical, severityText.critical)}
               <span className="text-muted-foreground">/</span>
-              {seg(f.high, "text-red-600 dark:text-red-400")}
+              {seg(f.high, severityText.high)}
               <span className="text-muted-foreground">/</span>
-              {seg(f.medium, "text-amber-600 dark:text-amber-400")}
+              {seg(f.medium, severityText.medium)}
               <span className="text-muted-foreground">/</span>
-              {seg(f.low, "text-slate-600 dark:text-slate-400")}
+              {seg(f.low, severityText.low)}
             </span>
           );
         })()}
@@ -3076,6 +3078,16 @@ function CreateTaskSheet({
   onCategoriesChanged: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
+  // "New task" links elsewhere (dashboard, setup checklist) arrive as ?new=1: open the form, then
+  // drop the flag so a reload or Back does not reopen it.
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") !== "1") return;
+    setOpen(true);
+    params.delete("new");
+    const rest = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}`);
+  }, []);
   const [name, setName] = React.useState("");
   const [categoryID, setCategoryID] = React.useState<number | undefined>(undefined);
   const [description, setDescription] = React.useState("");
@@ -3309,7 +3321,7 @@ function CreateTaskSheet({
               />
               <FieldDescription>
                 Link up to {MAX_SOURCE_TASKS}{" "}
-                tasks. Live, read-only inheritance of the selected tasks' persistent blackboards, asset scope, and related traffic; the new task writes to its own blackboard.
+                tasks. The new task can read their <Term name="blackboard">blackboards</Term>, asset scope and related traffic live, but writes only to its own.
               </FieldDescription>
             </Field>
             <Field>
