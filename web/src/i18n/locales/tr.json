@@ -214,6 +214,7 @@
   "Agent": "Ajan",
   "Agent \"{name}\" created": "\"{name}\" ajanı oluşturuldu",
   "Agent \"{name}\" deleted": "\"{name}\" ajanı silindi",
+  "Agent isolation is degraded: agent shells, tools and file tools run with the server's identity and may read its keys, config and database credentials.": "Ajan yalıtımı düşürüldü: ajan kabukları, araçları ve dosya araçları sunucunun kimliğiyle çalışıyor ve anahtarlarını, yapılandırmasını ve veritabanı kimlik bilgilerini okuyabilir.",
   "Agent is replying; type /btw to ask a side question…": "Ajan yanıt veriyor; yan soru sormak için /btw yazın…",
   "Agent is running": "Ajan çalışıyor",
   "Agent list": "Ajan listesi",

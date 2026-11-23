@@ -115,16 +115,25 @@ func openScanOutput(root, path string) (*os.File, error) {
 	return openScanOutputFromWorkRoot(&workRoot{Root: r, dir: absRoot}, path)
 }
 
-func openScanOutputInBase(base, dir, path string) (*os.File, error) {
+func openScanOutputInBase(base, dir, path string) (f *os.File, err error) {
 	if strings.TrimSpace(base) == "" {
 		return openScanOutput(dir, path)
 	}
-	w, err := openWorkRoot(base, dir)
-	if err != nil {
-		return nil, err
+	// The open runs as the executor when the privilege drop is active
+	// (filetools_identity.go); the descriptor is then read by the server.
+	idErr := RunAsFileToolIdentity(func() {
+		w, oerr := openWorkRoot(base, dir)
+		if oerr != nil {
+			err = oerr
+			return
+		}
+		defer w.Close()
+		f, err = openScanOutputFromWorkRoot(w, path)
+	})
+	if idErr != nil {
+		return nil, idErr
 	}
-	defer w.Close()
-	return openScanOutputFromWorkRoot(w, path)
+	return f, err
 }
 
 // ingestScanOutput parses a scanner output file written by the agent's own
