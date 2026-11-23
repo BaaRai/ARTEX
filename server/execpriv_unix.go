@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -678,6 +679,9 @@ func RunExecShimIfRequested(argv []string) {
 }
 
 func runBashShim(argv []string) {
+	// PR_SET_NO_NEW_PRIVS is per thread, so the thread that sets it must be the one
+	// that execs. The lock is never released: the process is replaced by exec.
+	runtime.LockOSThread()
 	uid, gid, err := execIDsFromEnv()
 	if err != nil {
 		shimFail(err)
@@ -692,7 +696,15 @@ func runBashShim(argv []string) {
 // nested shell already running as the executor, whose environment the agent may
 // have set), the environment is first rebuilt from the allowlist (execenv_unix.go)
 // and HOME and XDG_CACHE_HOME move to the executor's home.
+// PR_SET_NO_NEW_PRIVS is set first, before the identity changes, on the calling
+// thread. The shims call this with their thread locked (runBashShim, runDropShim),
+// so the same thread goes on to exec the target and the flag is inherited by it and
+// everything it forks. Custom tools take SysProcAttr.Credential in the server and do
+// not pass through this shim, so the flag is a known gap there.
 func enterExecutor(uid, gid int) error {
+	if err := setNoNewPrivsFn(); err != nil {
+		return fmt.Errorf("no_new_privs must be set before the executor identity is applied: %w", err)
+	}
 	if os.Getuid() != uid || os.Getgid() != gid {
 		if err := sealExecutorEnv(); err != nil {
 			return err
@@ -709,6 +721,7 @@ func enterExecutor(uid, gid int) error {
 
 // runDropShim handles: <uid> <gid> -- <command> <args...>.
 func runDropShim(args []string) {
+	runtime.LockOSThread() // same reason as runBashShim: the flag is per thread
 	if len(args) < 3 || args[2] != "--" {
 		shimFail(errors.New("drop shim needs <uid> <gid> -- <command> [args]"))
 	}
