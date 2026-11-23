@@ -1,6 +1,6 @@
 # LLM Context Size Telemetry (P3.5 Phase A)
 
-`ARTEX_CONTEXT_TELEMETRY=1` enables opt-in, size-only per-call telemetry for every `llmrec` `Stream` and `Complete` call. It is **disabled by default**: when off, no request sizing runs and no rows are written to PostgreSQL.
+Size-only per-call telemetry runs for every `llmrec` `Stream` and `Complete` call. It is **on by default**; `ARTEX_CONTEXT_TELEMETRY=0|false|off|no` disables it explicitly, and then no request sizing runs and no rows are written to PostgreSQL.
 
 This phase measures context composition without changing any prompt, compaction policy, or model behavior, so Phases B (`ARTEX_BOUNDED_CONTEXT`) and C (`ARTEX_CACHE_PREFIX` / `ARTEX_COMPACTION_MEMO`) can be evaluated against real numbers first.
 
@@ -10,13 +10,13 @@ This phase measures context composition without changing any prompt, compaction 
 
 | Environment variable | Values | Default |
 |---|---|---|
-| `ARTEX_CONTEXT_TELEMETRY` | `1`, `true`, `on`, `yes` (case-insensitive) | off |
+| `ARTEX_CONTEXT_TELEMETRY` | `0`, `false`, `off`, `no` disable it (case-insensitive); anything else, or unset, keeps it on | on |
 
-Telemetry runs independently of `llm_record` (`recordBodies`): enabling `ARTEX_CONTEXT_TELEMETRY=1` works even when full request/response body recording is disabled, and stores **no prompt, tool, or message content** — only byte lengths, counts, token usage, and metadata.
+Telemetry runs independently of `llm_record` (`recordBodies`): it stays on even when full request/response body recording is disabled, and stores **no prompt, tool, or message content** — only byte lengths, counts, token usage, and metadata.
 
 ### Stopping, retention, and write cost
 
-When `ARTEX_CONTEXT_TELEMETRY=1` is active, each LLM call incurs one lightweight `INSERT` into `llm_context` (~200 bytes/row plus index entries, no bodies), so the table grows by one row per completion call. Unset `ARTEX_CONTEXT_TELEMETRY` (and restart) once the measurement campaign is finished to stop all writes and sizing work, or purge old rows periodically:
+While telemetry is on (the default), each LLM call incurs one lightweight `INSERT` into `llm_context` (~200 bytes/row plus index entries, no bodies), so the table grows by one row per completion call. Set `ARTEX_CONTEXT_TELEMETRY=0` (and restart) once the measurement campaign is finished to stop all writes and sizing work, or purge old rows periodically:
 
 ```sql
 DELETE FROM llm_context WHERE ts < now() - interval '30 days';

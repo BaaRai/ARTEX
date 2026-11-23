@@ -398,7 +398,7 @@ type triggerLookup struct {
 	factIDs       func(int64) string
 	// factOnly renders the «proved but not registered» block: intents that produced
 	// facts and no finding. Nil in tests that do not care about it.
-	factOnly func() string
+	factOnly func(dataEnvelope) string
 }
 
 func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
@@ -406,7 +406,7 @@ func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
 		intentSummary: func(id int64) string { return intentSummary(ts, id) },
 		workerOutput:  func(id int64) string { return workerOutput(ts, id) },
 		factIDs:       func(id int64) string { return factIDsYielded(ts, id) },
-		factOnly:      func() string { return factOnlyBlock(ts) },
+		factOnly:      func(env dataEnvelope) string { return factOnlyBlock(ts, env) },
 	}
 }
 
@@ -415,7 +415,7 @@ func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
 // fact-producing intent register nothing). A fact carries no "this is a defect"
 // flag, so the planner is the only place that can turn one into a finding; without
 // the counter it has to notice by reading every fact again.
-func factOnlyBlock(ts *db.ExplorationStore) string {
+func factOnlyBlock(ts *db.ExplorationStore, env dataEnvelope) string {
 	if ts == nil {
 		return ""
 	}
@@ -424,17 +424,21 @@ func factOnlyBlock(ts *db.ExplorationStore) string {
 		return ""
 	}
 	var b strings.Builder
+	var list strings.Builder
 	b.WriteString("\n\n[Proved but not registered: ")
 	b.WriteString(strconv.Itoa(len(rows)))
 	b.WriteString(" finished intent(s) produced facts and NO finding. For each, decide explicitly: " +
 		"either register the defect as a finding (report_finding, with the executed request as evidence) " +
 		"or state why the fact is not a defect. Facts carry no defect flag — only you can turn one into a finding.]\n")
 	for _, r := range rows {
-		// 140: сводка интента — одно предложение; 140 символов хватает, чтобы отличить
-		// направления друг от друга (полный текст в одной node_detail). Обрезка общая
-		// с триггерами, чтобы блок не стал вторым источником контекста.
-		b.WriteString(fmt.Sprintf("  #%d (%d fact(s)): %s\n", r.IntentID, r.Facts, truncOutput(r.Summary, 140)))
+		// 140: one sentence of intent summary; 140 characters is enough to tell the
+		// directions apart (the full text is in one node_detail). The cut is shared
+		// with the triggers so the block does not become a second context source.
+		fmt.Fprintf(&list, "  #%d (%d fact(s)): %s\n", r.IntentID, r.Facts, truncOutput(r.Summary, 140))
 	}
+	// The summaries come from agent output: they are data and go inside the envelope.
+	b.WriteString(env.wrap("fact_only_intents", strings.TrimRight(list.String(), "\n")))
+	b.WriteString("\n")
 	return b.String()
 }
 
@@ -443,7 +447,7 @@ func factOnlyBlock(ts *db.ExplorationStore) string {
 func plannerSituational(evs []TriggerEvent, look triggerLookup, data map[string]any, env dataEnvelope) string {
 	block := ""
 	if look.factOnly != nil {
-		block = look.factOnly()
+		block = look.factOnly(env)
 	}
 	return env.intro() + renderTriggers(evs, env, look) + renderGraphOverview(data, env) + block
 }

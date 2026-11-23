@@ -12,12 +12,12 @@ import (
 
 // ContextTelemetryEnv switches per-call context size telemetry into llm_context.
 //
-// ON by default. Замер: на стенде, где прошло 15 прогонов, таблица llm_context была
-// ПУСТА (0 строк), потому что флаг выключен по умолчанию — то есть размер контекста
-// воркера обсуждали по суммарным токенам задачи, а не по разбивке (2026-11-22).
-// Стоимость: одна строка на вызов модели и подсчёт длин, содержимое не сохраняется
-// (по логам стенда — до ~300 вызовов на прогон, то есть до ~300 строк).
-// Выключение явное: ARTEX_CONTEXT_TELEMETRY=0|false|off|no.
+// ON by default. Measurement: on the test bench, 15 runs left llm_context EMPTY
+// (0 rows) because the flag was off by default, so the worker's context size was
+// discussed from the task's total tokens, not from a breakdown (2026-11-22).
+// Cost: one row per model call plus length counts; no content is stored (up to about
+// 300 calls per run in the bench logs, so up to about 300 rows).
+// Explicit off switch: ARTEX_CONTEXT_TELEMETRY=0|false|off|no.
 const ContextTelemetryEnv = "ARTEX_CONTEXT_TELEMETRY"
 
 // ContextTelemetryEnabled reports whether context telemetry is on. Default true;

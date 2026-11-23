@@ -1241,6 +1241,7 @@ FROM exploration_edges e
 JOIN exploration_nodes i ON i.id=e.src_id AND i.exploration_id=e.exploration_id
 JOIN exploration_nodes d ON d.id=e.dst_id AND d.exploration_id=e.exploration_id
 WHERE e.exploration_id=$1 AND e.rel=$2 AND d.kind=$3
+  AND i.state IN ('done','blocked','exhausted','stopped')
   AND NOT EXISTS (
     SELECT 1 FROM exploration_edges e2
     JOIN exploration_nodes f ON f.id=e2.dst_id AND f.exploration_id=e2.exploration_id
