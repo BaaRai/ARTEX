@@ -107,10 +107,19 @@ function StreamMessageRow({ message }: { message: TrafficStreamMessage }) {
 
 // StreamMessagesPanel lists the messages of one WebSocket or SSE exchange, a
 // page at a time. It does not poll: Refresh reloads from the start.
-export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; kind: "websocket" | "sse" }) {
+type StreamMessagesProps = { exchangeId: string; kind: "websocket" | "sse" };
+
+export function StreamMessagesPanel(props: StreamMessagesProps) {
+  // A different exchange starts with All directions and its own request state.
+  return <StreamMessages key={props.exchangeId} {...props} />;
+}
+
+function StreamMessages({ exchangeId, kind }: StreamMessagesProps) {
   const [direction, setDirection] = React.useState<TrafficStreamDirection>("");
-  const [{ items, total, loading, loadingMore, error }, setPage] = React.useState(emptyTrafficStreamState);
+  const [{ items, total, messageTotal, loading, loadingMore, error }, setPage] =
+    React.useState(emptyTrafficStreamState);
   const pager = React.useMemo(() => createTrafficStreamPager(api.trafficStream, setPage), []);
+  const messageCount = items.filter((message) => message.type !== "meta").length;
 
   React.useEffect(() => {
     pager.select(exchangeId, direction);
@@ -123,8 +132,8 @@ export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; 
         <span>
           {t("{kind} · {count} of {total} messages", {
             kind: kind === "websocket" ? "WebSocket" : "Server-Sent Events",
-            count: items.length,
-            total,
+            count: messageCount,
+            total: messageTotal,
           })}
         </span>
         <Select
@@ -168,20 +177,20 @@ export function StreamMessagesPanel({ exchangeId, kind }: { exchangeId: string; 
     if (error) {
       return <div className="p-5 text-destructive text-xs">{t("Failed to load messages: {error}", { error })}</div>;
     }
-    if (items.length === 0) {
-      return (
-        <div className="p-5 text-muted-foreground text-xs">
-          {direction ? t("No messages recorded in this direction.") : t("No messages recorded for this stream.")}
-        </div>
-      );
-    }
     return (
       <>
-        <div className="border-t">
-          {items.map((m) => (
-            <StreamMessageRow key={`${exchangeId}:${m.seq}`} message={m} />
-          ))}
-        </div>
+        {messageTotal === 0 && (
+          <div className="p-5 text-muted-foreground text-xs">
+            {direction ? t("No messages recorded in this direction.") : t("No messages recorded for this stream.")}
+          </div>
+        )}
+        {items.length > 0 && (
+          <div className="border-t">
+            {items.map((m) => (
+              <StreamMessageRow key={`${exchangeId}:${m.seq}`} message={m} />
+            ))}
+          </div>
+        )}
         {items.length < total && (
           <div className="flex justify-center p-4">
             <Button variant="outline" size="sm" disabled={loadingMore} onClick={pager.loadMore}>

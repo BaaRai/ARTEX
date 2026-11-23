@@ -982,7 +982,9 @@ export type TrafficStreamDirection = "" | "c2s" | "s2c";
 
 export interface TrafficStreamPage {
   items: TrafficStreamMessage[];
+  // Pagination includes recording-limit rows; the message count does not.
   total: number;
+  message_total: number;
 }
 
 export interface TrafficReplayHeader {

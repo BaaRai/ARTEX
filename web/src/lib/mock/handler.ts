@@ -2256,7 +2256,11 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     const offset = Math.max(0, Number(q.get("offset")) || 0);
     const requestedLimit = Number(q.get("limit"));
     const limit = requestedLimit > 0 ? Math.min(200, requestedLimit) : 50;
-    return { items: items.slice(offset, offset + limit), total: items.length };
+    return {
+      items: items.slice(offset, offset + limit),
+      total: items.length,
+      message_total: items.filter((message) => message.direction !== "meta").length,
+    };
   }
   if (path === "/settings" && m === "GET") return D.settings;
   if (path === "/settings" && m === "PUT") return { ...D.settings, ...b };

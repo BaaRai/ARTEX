@@ -3715,6 +3715,7 @@ func (s *Server) getTrafficExchange(w http.ResponseWriter, r *http.Request) {
 // getTrafficStream returns one page of a WebSocket/SSE exchange's messages in
 // order (limit 1..200, default 50). direction=c2s or s2c keeps one side of the
 // conversation (plus the meta limit marker); any other non-empty value is a 400.
+// total counts rows for pagination; message_total excludes meta limit markers.
 func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
 	tr := s.m.Traffic()
 	if tr == nil {
@@ -3730,7 +3731,7 @@ func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	direction := strings.ToLower(strings.TrimSpace(q.Get("direction")))
-	msgs, total, err := tr.StreamMessagesByDirection(id, direction, offset, limit)
+	page, err := tr.StreamMessagePageByDirection(id, direction, offset, limit)
 	if errors.Is(err, traffic.ErrBadStreamDirection) {
 		writeErr(w, 400, err.Error())
 		return
@@ -3739,7 +3740,7 @@ func (s *Server) getTrafficStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": msgs, "total": total})
+	writeJSON(w, 200, page)
 }
 
 // maxReplayRequestBytes bounds the replay request body (JSON, with the payload

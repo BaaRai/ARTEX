@@ -3,13 +3,14 @@ import type { TrafficStreamDirection, TrafficStreamMessage, TrafficStreamPage } 
 export interface TrafficStreamState {
   items: TrafficStreamMessage[];
   total: number;
+  messageTotal: number;
   loading: boolean;
   loadingMore: boolean;
   error: string | null;
 }
 
 export function emptyTrafficStreamState(): TrafficStreamState {
-  return { items: [], total: 0, loading: true, loadingMore: false, error: null };
+  return { items: [], total: 0, messageTotal: 0, loading: true, loadingMore: false, error: null };
 }
 
 type FetchPage = (
@@ -35,7 +36,7 @@ export function createTrafficStreamPager(fetchPage: FetchPage, onChange: (state:
   async function load(offset: number) {
     const gen = ++generation;
     update({
-      ...(offset === 0 ? { items: [], total: 0 } : {}),
+      ...(offset === 0 ? { items: [], total: 0, messageTotal: 0 } : {}),
       loading: offset === 0,
       loadingMore: offset > 0,
       error: null,
@@ -46,6 +47,7 @@ export function createTrafficStreamPager(fetchPage: FetchPage, onChange: (state:
       update({
         items: offset === 0 ? (page.items ?? []) : [...state.items, ...(page.items ?? [])],
         total: page.total ?? 0,
+        messageTotal: page.message_total,
         loading: false,
         loadingMore: false,
       });
