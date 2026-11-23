@@ -344,6 +344,12 @@ docker compose up -d --build
 # → http://localhost:8787
 ```
 
+The checkout build needs the Docker **buildx** plugin (BuildKit). Docker Desktop and
+get.docker.com include it; distro packages and Homebrew's docker CLI (Colima) may not. If
+`docker buildx version` fails, install `docker-buildx-plugin` or `docker-buildx`, or on macOS
+`brew install docker-buildx`. Without it the build stops at the first stage with
+`failed to parse platform`.
+
 The release workflow publishes a multi-arch image (`linux/amd64`, `linux/arm64`) to GitHub
 Container Registry on each `v*` tag, with tags `:latest`, `:v<version>`, and `:<version>`.
 v0.7.0 predates that step, so there is no `artex` package yet: until the next tagged release,
