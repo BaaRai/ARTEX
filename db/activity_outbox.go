@@ -3,7 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 // activityOutboxMaxAttempts is how many times a row may fail AppendActivity
@@ -94,7 +94,7 @@ func (s *ExplorationStore) FlushActivityOutbox() (int, error) {
 			_ = tx.Rollback()
 			next := it.attempts + 1
 			if next >= activityOutboxMaxAttempts {
-				log.Printf("[activity] outbox %d for exploration %d dropped after %d attempts: %v", it.id, s.expID, next, err)
+				slog.Error("[activity] outbox entry dropped", "outbox_id", it.id, "exploration_id", s.expID, "attempts", next, "err", err)
 				if _, delErr := s.db.Exec(`DELETE FROM activity_outbox WHERE id=$1`, it.id); delErr != nil {
 					return stored, delErr
 				}
