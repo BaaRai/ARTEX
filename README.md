@@ -977,9 +977,9 @@ Operational security properties:
 
 ---
 
-## About this fork
+## About this project
 
-This repository is the English translation and continuation of ARTEX, originally by [Autumn-27](https://github.com/Autumn-27). The upstream repository is no longer public, so the link points to the author profile. Changes in this fork are tracked in [CHANGELOG.md](CHANGELOG.md), under the same AGPL-3.0 license.
+This repository is the actively maintained community continuation of ARTEX, originally by [Autumn-27](https://github.com/Autumn-27). It diverges from the original with its own features and fixes, tracked in [CHANGELOG.md](CHANGELOG.md), under the same AGPL-3.0 license. The original repository is no longer public, so the link points to the author profile.
 
 ---
 
