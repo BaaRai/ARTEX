@@ -75,6 +75,7 @@ import {
 } from "./_components/findings-table";
 import { setVisibleInterval } from "@/lib/polling";
 import { t } from "@/i18n";
+import { CountUp } from "@/components/count-up";
 
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
 
@@ -1042,7 +1043,7 @@ export default function FindingsPage() {
                   <CardDescription>{stat.label}</CardDescription>
                   <CardTitle className={cn("flex items-center gap-2 text-2xl tabular-nums", stat.tone)}>
                     <StatIcon className="size-5" aria-hidden="true" />
-                    {stat.value}
+                    <CountUp value={stat.value} />
                   </CardTitle>
                 </CardHeader>
               </Card>
