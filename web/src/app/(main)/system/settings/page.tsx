@@ -340,6 +340,22 @@ export default function SystemSettingsPage() {
           </CardContent>
         </Card>
 
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">{t("Standalone Codex sign-in")}</CardTitle>
+            <CardDescription>
+              {t("Install the Codex CLI, then run these commands in PowerShell from your Windows checkout.")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-x-auto rounded-md bg-muted p-3 text-sm">
+              <code>{String.raw`.\scripts\codex-sign-in.ps1 login
+.\scripts\codex-sign-in.ps1 status
+.\scripts\codex-sign-in.ps1 logout`}</code>
+            </pre>
+          </CardContent>
+        </Card>
+
         <NoiseProfileCard />
 
         <Card className="mb-4 break-inside-avoid md:mb-6">

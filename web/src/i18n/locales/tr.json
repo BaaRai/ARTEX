@@ -1,4 +1,6 @@
 {
+  "Standalone Codex sign-in": "Bağımsız Codex oturumu",
+  "Install the Codex CLI, then run these commands in PowerShell from your Windows checkout.": "Codex CLI'ı yükleyin, ardından Windows'ta deponun kök dizininde bu komutları PowerShell ile çalıştırın.",
   "- removed": "- kaldırıldı",
   "-1 = a broken stream goes straight to the outer intent rerun": "-1 = kopan akış doğrudan dıştaki niyet yeniden çalıştırmasına gider",
   "-1 = hand the empty response through as-is": "-1 = boş yanıtı olduğu gibi ilet",

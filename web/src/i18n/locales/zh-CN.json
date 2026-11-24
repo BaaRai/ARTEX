@@ -1,4 +1,6 @@
 {
+  "Standalone Codex sign-in": "独立的 Codex 登录",
+  "Install the Codex CLI, then run these commands in PowerShell from your Windows checkout.": "安装 Codex CLI，然后在 Windows 上从仓库根目录使用 PowerShell 运行这些命令。",
   "- removed": "- 删除",
   "-1 = a broken stream goes straight to the outer intent rerun": "-1 = 断流直接交给外层的意图重跑",
   "-1 = hand the empty response through as-is": "-1 = 空响应直接原样交出",
