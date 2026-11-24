@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-11-24",
+  "sources": [
+    {
+      "source": "attack",
+      "title": "MITRE ATT&CK Enterprise",
+      "license": "MITRE ATT&CK Terms of Use",
+      "license_url": "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/LICENSE.txt",
+      "source_url": "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json",
+      "retrieved_at": "2026-11-24",
+      "sha256": "539a843a7b53ed9749740b2123dddae3726b1a4831841c32aca740b011b910b5",
+      "entries": 706,
+      "data_file": "data/attack.json"
+    },
+    {
+      "source": "wstg",
+      "title": "OWASP Web Security Testing Guide",
+      "license": "CC-BY-SA-4.0",
+      "license_url": "https://raw.githubusercontent.com/OWASP/wstg/master/LICENSE",
+      "source_url": "https://raw.githubusercontent.com/OWASP/wstg/master/checklists/checklist.json",
+      "retrieved_at": "2026-11-24",
+      "sha256": "c87aaa4566b6dae46e217b2630eb0c4eed9ff8317d094bc9dd2a22e8c19cb21c",
+      "entries": 133,
+      "data_file": "data/wstg.json"
+    },
+    {
+      "source": "cwe",
+      "title": "MITRE Common Weakness Enumeration",
+      "license": "MITRE CWE Terms of Use",
+      "license_url": "https://cwe.mitre.org/about/termsofuse.html",
+      "source_url": "https://cwe.mitre.org/data/csv/1000.csv",
+      "retrieved_at": "2026-11-24",
+      "sha256": "b3b8fc1bb6e2398ce4f1a7b0f5f74949f6cd568a26190d203e1103c3aafa6ff5",
+      "entries": 956,
+      "data_file": "data/cwe.json"
+    }
+  ]
+}

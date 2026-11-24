@@ -711,6 +711,9 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// node_detail: once a worker has an intent_id/node id, it can look up that node's
 		// full detail (pairs with the review above).
 		t.nodeDetail(),
+		// knowledge_lookup: cite a stable ATT&CK/WSTG/CWE id when reporting a
+		// finding or a fact, or look up a test while executing an intent.
+		t.knowledgeLookup(),
 		// The following tools are still [not given] to workers, reserved for
 		// planner/main (reading context, cross-work retrospection are planning duties; a
 		// worker only executes and writes back its single intent):
