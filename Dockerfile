@@ -164,10 +164,31 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
-      arp-scan arping fping iproute2 netdiscover net-tools nfs-common \
+      libcap2-bin arp-scan arping fping iproute2 netdiscover net-tools nfs-common \
       python3-impacket python3-paramiko python3-scapy rpcbind sqlite3 xxd \
       hashcat hydra john ncrack openssh-client ssh-audit sshpass \
     && rm -rf /var/lib/apt/lists/*
+# Patch netdiscover to not check for being run as root (capabilities is all that it actually needs to run):
+# TODO: this will be made obsolete by option -R available in netdiscover 0.21.
+# When Debian updates to that version, this patch can be dropped.
+RUN python3 - <<'EOF'
+off = 0x1899c5
+orig = bytes([0x0f, 0x84, 0x69, 0xfd, 0xff, 0xff])
+new  = bytes([0xe9, 0x6a, 0xfd, 0xff, 0xff, 0x90])
+with open('/usr/sbin/netdiscover', 'r+b') as f:
+    f.seek(off)
+    cur = f.read(6)
+    assert cur == orig, f"unexpected bytes at 0x{off:x}: {cur.hex(' ')}"
+    f.seek(off)
+    f.write(new)
+print("patched 0x%x: %s -> %s" % (off, cur.hex(' '), new.hex(' ')))
+print("jmp rel check: 0x%x + 0xfffffd6a = 0x%x (expect 0x189734)" % (0x1899ca, (0x1899ca + (0x6a - 0x100000000)) & 0xffffffff))
+EOF
+# Enable required capabilities on network tools that need them when docker-compose.host-network.yml is used
+RUN setcap cap_net_raw,cap_net_admin+eip /usr/sbin/arping \
+      cap_net_raw,cap_net_admin+eip /usr/sbin/arp-scan \
+      cap_net_raw,cap_net_admin+eip /usr/sbin/netdiscover
+
 # Node 22 from the official nodejs.org tarball: bookworm's apt nodejs is 18,
 # Playwright requires >=20, and 20 is end-of-life. 22 matches the CI and release
 # workflows. Verified against a digest pinned here rather than against the fetched

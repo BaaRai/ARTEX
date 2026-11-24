@@ -64,6 +64,27 @@ docker compose logs artex | grep "Setup token"
 > step. For pulling the prebuilt image and all other installation paths (script, binaries,
 > source, release archives), see [Installation](#installation).
 
+## Host network mode for LAN scanning
+
+By default, ARTEX runs on an isolated Docker virtual network, without direct
+access to the host interface and ability to send and receive ARP packets on the
+LAN.
+
+If you need direct access to the local LAN segment with the ability to use
+layer 2 protocols such as ARP (for e.g. ARP scanning), a dedicated override
+compose config is provided.
+
+Take note that this comes with a security tradeoff: the Docker container that
+runs ARTEX won't be dropping some privileges and will be more exposed to direct
+attacks on the local network in this configuration.
+
+In order to run in this configuration, supply the explicit list of config files
+to `docker compose`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host-network.yml up -d --build
+```
+
 ---
 
 ## Multi-provider workers

@@ -1,0 +1,20 @@
+services:
+  postgres:
+    ports:
+      # Bind only to the host's loopback interface so Postgres stays hidden from the LAN
+      - "127.0.0.1:5432:5432"
+  artex:
+    # We need to re-enable file capabilities for tools like arping to work:
+    security_opt: !reset []
+    network_mode: host
+    ports: !reset []
+    networks: !reset []
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      # Overrides ARTEX_PG_HOST from the base file while preserving all other variables
+      ARTEX_PG_HOST: 127.0.0.1
+      # Disable setting PR_SET_NO_NEW_PRIVS, enabling capability attributes set
+      # on binaries to work:
+      ARTEX_EXEC_ALLOW_FILE_CAPS: "1"
