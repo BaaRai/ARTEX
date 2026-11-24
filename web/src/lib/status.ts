@@ -3,13 +3,14 @@
 
 import { t } from "@/i18n";
 
-export type Tone = "neutral" | "blue" | "green" | "amber" | "red" | "rose" | "violet" | "slate";
+export type Tone = "neutral" | "blue" | "green" | "amber" | "orange" | "red" | "rose" | "violet" | "slate";
 
 export const toneClasses: Record<Tone, string> = {
   neutral: "bg-muted text-muted-foreground border-transparent",
   blue: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
   green: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
   amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  orange: "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/20",
   red: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20",
   // rose is used for "Critical" — a solid high-emphasis fill clearly above the soft red outline of "High".
   rose: "bg-rose-600 text-white border-rose-600 dark:bg-rose-600 dark:text-white",
@@ -22,6 +23,7 @@ export const toneDot: Record<Tone, string> = {
   blue: "bg-blue-500",
   green: "bg-emerald-500",
   amber: "bg-amber-500",
+  orange: "bg-orange-500",
   red: "bg-red-500",
   rose: "bg-white",
   violet: "bg-violet-500",
@@ -60,7 +62,7 @@ const task: Record<string, StatusMeta> = {
 
 const severity: Record<string, StatusMeta> = {
   critical: { label: t("Critical"), tone: "rose" },
-  high: { label: t("High"), tone: "red" },
+  high: { label: t("High"), tone: "orange" },
   medium: { label: t("Medium"), tone: "amber" },
   low: { label: t("Low"), tone: "slate" },
 };
