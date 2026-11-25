@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -23,7 +23,7 @@ import (
 // no base_url/model returns nil, and report_finding behaves exactly as before.
 func (s *Server) triageClient() agent.TriageClient {
 	id := s.triageProfileID()
-	log.Printf("[triage] triageClient: profile_id=%d", id)
+	slog.Info("[triage] initialized triage client", "profile_id", id)
 	if id <= 0 {
 		return nil
 	}
@@ -52,7 +52,7 @@ func (s *Server) triageHTTPClient(baseURL string) *http.Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := g.validateURL(ctx, baseURL, "triage"); err != nil {
-		log.Printf("[triage] base_url refused (%v); dedup stays off", err)
+		slog.Warn("[triage] base_url refused, dedup stays off", "err", err)
 		return nil
 	}
 	var tr *http.Transport
