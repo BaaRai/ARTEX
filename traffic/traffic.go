@@ -245,6 +245,9 @@ type Traffic struct {
 	// build without FTS5: recording and metadata search still work, body search
 	// degrades to unsupported rather than erroring.
 	fts bool
+	// ftsq writes the full-text index off the request path (fts_queue.go). Nil
+	// when fts is off, and on a zero value, where recording indexes inline.
+	ftsq *ftsQueue
 	// reaping tracks background reclamation of legacy trees and index space, so
 	// shutdown and tests can wait for it instead of racing it.
 	reaping sync.WaitGroup
@@ -325,6 +328,9 @@ func Open(dir, addr string) (*Traffic, error) {
 	if err := t.initIndex(); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if t.fts {
+		t.ftsq = newFTSQueue(t)
 	}
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
@@ -582,6 +588,9 @@ func (t *Traffic) Close() error {
 	}
 	t.reaping.Wait()
 	t.sweeping.Wait()
+	if t.ftsq != nil {
+		t.ftsq.close()
+	}
 	return t.db.Close()
 }
 
@@ -711,6 +720,14 @@ const unavailableMarker = "[original request unavailable]\n"
 // so there is never a rewritten exchange without its trace. Without trace
 // lines this is exactly what record always wrote.
 func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.TraceLine) {
+	// The index job is queued after writeViews releases wmu: the indexer needs
+	// wmu, and a full queue makes add wait for it.
+	if job := t.writeViews(rq, rs, lines); job != nil {
+		t.ftsq.add(*job)
+	}
+}
+
+func (t *Traffic) writeViews(rq requestView, rs responseView, lines []rewrite.TraceLine) *ftsJob {
 	// The write lock covers blob + index writes, so DeleteHost (and its blob GC)
 	// can run under the same lock without racing a concurrent record.
 	t.wmu.Lock()
@@ -749,7 +766,7 @@ func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.T
 	tx, err := t.db.Begin()
 	if err != nil {
 		fail("beginning transaction", err)
-		return
+		return nil
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
@@ -757,7 +774,7 @@ func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.T
 	// exchange it replaces must not stay attached to this one.
 	if _, err := tx.Exec(`DELETE FROM exchange_rewrites WHERE exchange_id=?`, id); err != nil {
 		fail("clearing rewrite trace", err)
-		return
+		return nil
 	}
 	// path stays empty for db-resident exchanges; a non-empty path marks a legacy
 	// row whose bodies still live in the old on-disk tree (see Get).
@@ -767,19 +784,19 @@ VALUES(?,?,?,?,?,?,?,?,?,?,'')`,
 		len(rq.body), len(rs.body))
 	if err != nil {
 		fail("writing index", err)
-		return
+		return nil
 	}
 	rowid, err := res.LastInsertId()
 	if err != nil {
 		fail("fetching rowid", err)
-		return
+		return nil
 	}
 
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO exchange_bodies(id,req_head,req_body,req_blob,resp_head,resp_body,resp_blob)
 VALUES(?,?,?,?,?,?,?)`,
 		id, reqHead, reqB.inline, nullIfEmpty(reqB.hash), respHead, respB.inline, nullIfEmpty(respB.hash)); err != nil {
 		fail("writing body", err)
-		return
+		return nil
 	}
 
 	for _, h := range []string{reqB.hash, respB.hash} {
@@ -788,7 +805,7 @@ VALUES(?,?,?,?,?,?,?)`,
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_refs(hash,exchange_id) VALUES(?,?)`, h, id); err != nil {
 			fail("registering blob reference", err)
-			return
+			return nil
 		}
 	}
 
@@ -796,23 +813,28 @@ VALUES(?,?,?,?,?,?,?)`,
 		var re *recordError
 		errors.As(err, &re)
 		fail(re.step, re.err)
-		return
+		return nil
 	}
 
+	var job *ftsJob
 	if t.fts {
 		// The index is fed from memory, so a body that spilled to _blobs is still
 		// fully searchable even though only its preview is stored inline. Only the
 		// recorded views are indexed, never a value a rule wrote.
 		idx := strings.Join([]string{url, reqHead, reqB.index, respHead, respB.index}, "\n")
-		if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowid, idx); err != nil {
+		if t.ftsq != nil {
+			job = &ftsJob{rowid: rowid, id: id, text: idx}
+		} else if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowid, idx); err != nil {
 			fail("writing full-text index", err)
-			return
+			return nil
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		fail("committing", err)
+		return nil
 	}
+	return job
 }
 
 // appliedRules reports whether a trace rewrote its exchange, with the ids of
@@ -1251,6 +1273,9 @@ func (t *Traffic) ftsFilter(term string) (cond string, arg any, ok bool) {
 	term = strings.TrimSpace(term)
 	if !t.fts || utf8.RuneCountInString(term) < minTrigram {
 		return "", nil, false
+	}
+	if t.ftsq != nil {
+		t.ftsq.wait()
 	}
 	return `rowid IN (SELECT rowid FROM ex_fts WHERE ex_fts MATCH ?)`, ftsQuote(term), true
 }
