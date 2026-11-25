@@ -53,18 +53,27 @@ import { RetestsTab } from "./_tabs/retests-tab";
 import { SessionsTab } from "./_tabs/sessions-tab";
 import { setVisibleInterval } from "@/lib/polling";
 
-const TABS = [
-  { value: "sessions", label: t("Sessions") },
-  { value: "overview", label: t("Overview") },
-  { value: "graph", label: t("Exploration graph") },
-  { value: "broadcast", label: t("Broadcast") },
-  { value: "findings", label: t("Findings") },
-  { value: "retests", label: t("Retests") },
-  { value: "assets", label: t("Test assets") },
-  { value: "credentials", label: t("Credentials") },
-  { value: "coverage", label: t("Asset coverage") },
-  { value: "intercept", label: t("Interception approval") },
-  { value: "report", label: t("Report") },
+// One entry per tab: its trigger label and the content it renders.
+const TABS: { value: string; label: string; render: (taskId: string, task: Task | null) => React.ReactNode }[] = [
+  {
+    value: "sessions",
+    label: t("Sessions"),
+    render: (taskId, task) => <SessionsTab taskId={taskId} taskPaused={task?.status === "paused"} />,
+  },
+  { value: "overview", label: t("Overview"), render: (taskId) => <OverviewTab taskId={taskId} /> },
+  { value: "graph", label: t("Exploration graph"), render: (taskId) => <GraphTab taskId={taskId} /> },
+  { value: "broadcast", label: t("Broadcast"), render: (taskId) => <BroadcastTab taskId={taskId} /> },
+  { value: "findings", label: t("Findings"), render: (taskId) => <FindingsTab taskId={taskId} /> },
+  { value: "retests", label: t("Retests"), render: (taskId) => <RetestsTab key={taskId} taskId={taskId} /> },
+  { value: "assets", label: t("Test assets"), render: (taskId) => <AssetsTab taskId={taskId} /> },
+  { value: "credentials", label: t("Credentials"), render: (taskId) => <CredentialsTab taskId={taskId} /> },
+  {
+    value: "coverage",
+    label: t("Asset coverage"),
+    render: (taskId, task) => <CoverageGraphTab taskId={taskId} coverageEnabled={task?.coverage_enabled !== false} />,
+  },
+  { value: "intercept", label: t("Interception approval"), render: (taskId) => <InterceptTab taskId={taskId} /> },
+  { value: "report", label: t("Report"), render: (taskId) => <ReportTab taskId={taskId} /> },
 ];
 
 function taskProfileIDs(task: Task): string[] {
@@ -437,39 +446,11 @@ function TaskDetailInner() {
 
       {/* Tab content */}
       <div className="flex-1 p-4 lg:p-6">
-        <TabsContent value="sessions" className="mt-0">
-          <SessionsTab taskId={id} taskPaused={task?.status === "paused"} />
-        </TabsContent>
-        <TabsContent value="overview" className="mt-0">
-          <OverviewTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="graph" className="mt-0">
-          <GraphTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="broadcast" className="mt-0">
-          <BroadcastTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="findings" className="mt-0">
-          <FindingsTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="retests" className="mt-0">
-          <RetestsTab key={id} taskId={id} />
-        </TabsContent>
-        <TabsContent value="assets" className="mt-0">
-          <AssetsTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="credentials" className="mt-0">
-          <CredentialsTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="coverage" className="mt-0">
-          <CoverageGraphTab taskId={id} coverageEnabled={task?.coverage_enabled !== false} />
-        </TabsContent>
-        <TabsContent value="intercept" className="mt-0">
-          <InterceptTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="report" className="mt-0">
-          <ReportTab taskId={id} />
-        </TabsContent>
+        {TABS.map((tabItem) => (
+          <TabsContent key={tabItem.value} value={tabItem.value} className="mt-0">
+            {tabItem.render(id, task)}
+          </TabsContent>
+        ))}
       </div>
     </Tabs>
   );

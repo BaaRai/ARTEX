@@ -1603,6 +1603,20 @@ const ARCHIVE_PROCESSING_STATES = new Set<TaskArchiveState>([
 
 const ARCHIVE_FAILED_STATES = new Set<TaskArchiveState>(["archive_failed", "restore_failed", "delete_failed"]);
 
+// Order of the states in the archive panel's status filter.
+const ARCHIVE_FILTER_STATES: TaskArchiveState[] = [
+  "archive_queued",
+  "archiving",
+  "ready",
+  "restore_queued",
+  "restoring",
+  "delete_queued",
+  "deleting",
+  "archive_failed",
+  "restore_failed",
+  "delete_failed",
+];
+
 function archiveStateLabel(state: TaskArchiveState): string {
   const labels: Record<TaskArchiveState, string> = {
     archive_queued: t("Archive queued"),
@@ -1867,16 +1881,11 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
             <SelectContent>
               <SelectGroup>
                 <SelectItem value="all">{t("All statuses")}</SelectItem>
-                <SelectItem value="archive_queued">{t("Archive queued")}</SelectItem>
-                <SelectItem value="archiving">{t("Archiving")}</SelectItem>
-                <SelectItem value="ready">{t("Restorable")}</SelectItem>
-                <SelectItem value="restore_queued">{t("Restore queued")}</SelectItem>
-                <SelectItem value="restoring">{t("Restoring")}</SelectItem>
-                <SelectItem value="delete_queued">{t("Delete queued")}</SelectItem>
-                <SelectItem value="deleting">{t("Deleting")}</SelectItem>
-                <SelectItem value="archive_failed">{t("Archive failed")}</SelectItem>
-                <SelectItem value="restore_failed">{t("Restore failed")}</SelectItem>
-                <SelectItem value="delete_failed">{t("Delete failed")}</SelectItem>
+                {ARCHIVE_FILTER_STATES.map((state) => (
+                  <SelectItem key={state} value={state}>
+                    {archiveStateLabel(state)}
+                  </SelectItem>
+                ))}
               </SelectGroup>
             </SelectContent>
           </Select>
