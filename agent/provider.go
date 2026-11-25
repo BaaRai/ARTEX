@@ -696,6 +696,9 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 		MaxTurns:       1,
 		MaxTokens:      8192,
 		NonStreaming:   !c.Stream, // use this profile's real send/receive mode for the connection test
+		// Without this the SDK still adds TaskOutput/TaskStop/TaskList/Monitor, and
+		// some models answer the test with a call to one of them instead of OK.
+		DisableBackgroundTasks: true,
 	}, "ping")
 	lat := time.Since(start)
 	if err != nil {
