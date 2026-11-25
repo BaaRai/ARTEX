@@ -2724,5 +2724,10 @@
   "Search company…": "搜索企业…",
   "Failed to load companies": "加载企业失败",
   "No company found": "未找到企业",
-  "Manage companies": "管理企业"
+  "Manage companies": "管理企业",
+  "Input price": "输入价格",
+  "Output price": "输出价格",
+  "Cache read price": "缓存读取价格",
+  "Cache write price": "缓存写入价格",
+  "Optional. EUR per 1M tokens, used to compute the cost of this profile's token usage. 0 = not priced.": "可选。每 100 万 Token 的价格（欧元），用于计算该配置的 Token 用量费用。0 = 未定价。"
 }

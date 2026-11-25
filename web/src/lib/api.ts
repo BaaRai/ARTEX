@@ -1173,6 +1173,11 @@ export const api = {
     rate_per_second?: number;
     rate_per_minute?: number;
     context_window_k?: number;
+    // Cost ledger, EUR per 1M tokens; 0 = unset. Sent on every save, which rewrites all four.
+    price_input_per_m?: number;
+    price_output_per_m?: number;
+    price_cache_read_per_m?: number;
+    price_cache_write_per_m?: number;
     thinking_type?: string; // ""(not sent)|"disabled"|"enabled"
     reasoning_effort?: string; // ""(not sent)|"low"|"medium"|"high"|"xhigh"|"max"
     priority?: number; // pool order position; higher is used first

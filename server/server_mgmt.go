@@ -2178,6 +2178,11 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	if p.MaxTokens < 0 {
 		p.MaxTokens = 0
 	}
+	for _, price := range []*float64{&p.PriceInputPerM, &p.PriceOutputPerM, &p.PriceCacheReadPerM, &p.PriceCacheWritePerM} {
+		if *price < 0 {
+			*price = 0
+		}
+	}
 	if p.Format != "openai" || p.MaxTokensField != llm.MaxTokensFieldCompletion {
 		p.MaxTokensField = ""
 	}

@@ -1,6 +1,11 @@
 package server
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Autumn-27/artex/db"
@@ -59,4 +64,52 @@ func TestCostLedgerEurOnUsage(t *testing.T) {
 	if d := *got - want; d > 0.001 || d < -0.001 {
 		t.Fatalf("cost_eur = %v, want %v", *got, want)
 	}
+}
+
+// Prices saved through the profile API come back in the profile list, so the
+// settings dialog can show them and send them back unchanged on the next save.
+// A negative price is stored as unset.
+func TestProfilePricesThroughAPI(t *testing.T) {
+	skipWithoutDSN(t)
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.Close() })
+	if m.pg == nil {
+		db.SkipNoPG(t)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+
+	body, _ := json.Marshal(map[string]any{
+		"name": "price-api-test", "format": "openai", "model": "m", "api_key": "k",
+		"price_input_per_m": 2.5, "price_output_per_m": 10, "price_cache_read_per_m": -1,
+	})
+	rec := httptest.NewRecorder()
+	s.pgSaveProfile(rec, httptest.NewRequest(http.MethodPost, "/api/llm/profiles", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save: HTTP %d %s", rec.Code, rec.Body.String())
+	}
+	var saved struct{ ID int64 }
+	_ = json.Unmarshal(rec.Body.Bytes(), &saved)
+	t.Cleanup(func() { _, _ = m.pg.Exec("DELETE FROM llm_profiles WHERE id=$1", saved.ID) })
+
+	rec = httptest.NewRecorder()
+	s.pgListProfiles(rec, httptest.NewRequest(http.MethodGet, "/api/llm/profiles", nil))
+	var list struct{ Profiles []LLMProfileDTO }
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range list.Profiles {
+		if p.Name != "price-api-test" {
+			continue
+		}
+		if p.PriceInputPerM != 2.5 || p.PriceOutputPerM != 10 || p.PriceCacheReadPerM != 0 || p.PriceCacheWritePerM != 0 {
+			t.Fatalf("listed prices = %v %v %v %v; want 2.5 10 0 0", p.PriceInputPerM, p.PriceOutputPerM, p.PriceCacheReadPerM, p.PriceCacheWritePerM)
+		}
+		return
+	}
+	t.Fatal("saved profile missing from the list")
 }

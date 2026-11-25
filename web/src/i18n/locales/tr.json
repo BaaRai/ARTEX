@@ -2724,5 +2724,10 @@
   "Search company…": "Şirket ara…",
   "Failed to load companies": "Şirketler yüklenemedi",
   "No company found": "Şirket bulunamadı",
-  "Manage companies": "Şirketleri yönet"
+  "Manage companies": "Şirketleri yönet",
+  "Input price": "Girdi fiyatı",
+  "Output price": "Çıktı fiyatı",
+  "Cache read price": "Önbellek okuma fiyatı",
+  "Cache write price": "Önbellek yazma fiyatı",
+  "Optional. EUR per 1M tokens, used to compute the cost of this profile's token usage. 0 = not priced.": "İsteğe bağlı. 1M token başına EUR; bu profilin token kullanımının maliyetini hesaplamak için kullanılır. 0 = fiyatlandırılmamış."
 }
