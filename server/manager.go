@@ -27,10 +27,10 @@ import (
 	"github.com/Autumn-27/artex/enrich"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
-	netproxy "golang.org/x/net/proxy"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/artex/traffic/rewrite"
 	actool "github.com/Autumn-27/norma/tool"
+	netproxy "golang.org/x/net/proxy"
 )
 
 // Task is one engagement: a description + goal + its own exploration store,
@@ -1007,9 +1007,9 @@ type ProxyPoolEntry struct {
 
 // ProxyPoolRotation values.
 const (
-	ProxyPoolRotationNone      = "none"        // use the active proxy only (or direct if none active)
-	ProxyPoolRotationOnFailure = "on_failure"  // rotate to the next enabled proxy on failure
-	ProxyPoolRotationTimed     = "timed"       // rotate on a timer
+	ProxyPoolRotationNone      = "none"       // use the active proxy only (or direct if none active)
+	ProxyPoolRotationOnFailure = "on_failure" // rotate to the next enabled proxy on failure
+	ProxyPoolRotationTimed     = "timed"      // rotate on a timer
 )
 
 var proxyPoolRotations = map[string]bool{

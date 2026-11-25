@@ -3959,8 +3959,8 @@ func (s *Server) settingsPayload() map[string]any {
 		"notify_public_base_url":     notifyPublicBaseURL(s.m.pg),
 		"notify_digest_interval_min": notifyDigestIntervalMin(s.m.pg),
 		// Restored proxy pool: list of egress proxies + rotation strategy.
-		"proxy_pool":           s.proxyPoolPayload(),
-		"proxy_pool_rotation":  s.m.ProxyPoolRotation(),
+		"proxy_pool":          s.proxyPoolPayload(),
+		"proxy_pool_rotation": s.m.ProxyPoolRotation(),
 		// Render limits of IM messages; 0 = no truncation.
 		"notify_summary_max_runes": limits.SummaryRunes,
 		"notify_assets_max_shown":  limits.AssetsShown,
@@ -4313,8 +4313,8 @@ func (s *Server) getProxyPool(w http.ResponseWriter, r *http.Request) {
 		pool = []ProxyPoolEntry{}
 	}
 	writeJSON(w, 200, map[string]any{
-		"proxy_pool":    pool,
-		"rotation":      s.m.ProxyPoolRotation(),
+		"proxy_pool": pool,
+		"rotation":   s.m.ProxyPoolRotation(),
 	})
 }
 
