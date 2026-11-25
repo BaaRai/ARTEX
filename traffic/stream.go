@@ -81,12 +81,12 @@ func (s *sink) SSEStart(f *mproxy.Flow)       { s.startStream(f, "sse") }
 
 func (s *sink) WebSocketMessage(f *mproxy.Flow) {
 	st := s.stream(f)
-	if st == nil || f.WebScoket == nil {
+	if st == nil || f.WebSocket == nil {
 		return
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	s.t.persistStream(st, wsMessagesSince(f.WebScoket, st))
+	s.t.persistStream(st, wsMessagesSince(f.WebSocket, st))
 }
 
 func (s *sink) SSEMessage(f *mproxy.Flow) {
@@ -107,8 +107,8 @@ func (s *sink) WebSocketEnd(f *mproxy.Flow) {
 	st := v.(*streamState)
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if f.WebScoket != nil {
-		s.t.persistStream(st, wsMessagesSince(f.WebScoket, st))
+	if f.WebSocket != nil {
+		s.t.persistStream(st, wsMessagesSince(f.WebSocket, st))
 	}
 	s.t.finishStream(st)
 }
