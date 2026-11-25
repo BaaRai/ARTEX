@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,6 +27,7 @@ import (
 	"github.com/Autumn-27/artex/enrich"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
+	netproxy "golang.org/x/net/proxy"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/artex/traffic/rewrite"
 	actool "github.com/Autumn-27/norma/tool"
@@ -985,6 +989,240 @@ func (m *Manager) SetGlobalProxy(raw string) error {
 	// Keep the browser MCP's egress in sync with the new global proxy too.
 	m.syncBrowserMCPProxy()
 	return nil
+}
+
+// ProxyPoolEntry is one egress proxy in the restored pool (0.7.x regression fix).
+// Only one entry may be active at a time; activation is handled by
+// SetProxyPoolEntry which deactivates every other entry first.
+type ProxyPoolEntry struct {
+	ID         int64  `json:"id"`
+	Address    string `json:"address"`
+	Enabled    bool   `json:"enabled"`
+	Active     bool   `json:"active"`
+	LastTested int64  `json:"last_tested,omitempty"` // unix seconds, 0 = never tested
+	EgressIP   string `json:"egress_ip,omitempty"`
+	FailCount  int    `json:"fail_count,omitempty"`
+	CreatedAt  int64  `json:"created_at,omitempty"` // unix seconds
+}
+
+// ProxyPoolRotation values.
+const (
+	ProxyPoolRotationNone      = "none"        // use the active proxy only (or direct if none active)
+	ProxyPoolRotationOnFailure = "on_failure"  // rotate to the next enabled proxy on failure
+	ProxyPoolRotationTimed     = "timed"       // rotate on a timer
+)
+
+var proxyPoolRotations = map[string]bool{
+	ProxyPoolRotationNone:      true,
+	ProxyPoolRotationOnFailure: true,
+	ProxyPoolRotationTimed:     true,
+}
+
+// settingProxyPoolRotation is the stored rotation strategy key.
+const settingProxyPoolRotation = "proxy_pool_rotation"
+
+// ProxyPool lists every pool entry, newest first.
+func (m *Manager) ProxyPool() ([]ProxyPoolEntry, error) {
+	rows, err := m.pg.Query(`
+		SELECT id, address, enabled, active,
+		       COALESCE(EXTRACT(EPOCH FROM last_tested)::bigint, 0),
+		       egress_ip, fail_count,
+		       COALESCE(EXTRACT(EPOCH FROM created_at)::bigint, 0)
+		FROM proxy_pool ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close() //nolint:errcheck
+	var out []ProxyPoolEntry
+	for rows.Next() {
+		var e ProxyPoolEntry
+		if err := rows.Scan(&e.ID, &e.Address, &e.Enabled, &e.Active, &e.LastTested, &e.EgressIP, &e.FailCount, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []ProxyPoolEntry{}
+	}
+	return out, nil
+}
+
+// ProxyPoolRotation returns the stored rotation strategy (default "none").
+func (m *Manager) ProxyPoolRotation() string {
+	v, _, err := m.pg.GetSetting(settingProxyPoolRotation)
+	if err != nil || v == "" {
+		return ProxyPoolRotationNone
+	}
+	if !proxyPoolRotations[v] {
+		return ProxyPoolRotationNone
+	}
+	return v
+}
+
+// SetProxyPoolRotation persists the rotation strategy.
+func (m *Manager) SetProxyPoolRotation(strategy string) error {
+	strategy = strings.TrimSpace(strategy)
+	if strategy == "" {
+		strategy = ProxyPoolRotationNone
+	}
+	if !proxyPoolRotations[strategy] {
+		return fmt.Errorf("unknown proxy pool rotation %q (use none, on_failure or timed)", strategy)
+	}
+	return m.pg.SetSetting(settingProxyPoolRotation, strategy)
+}
+
+// AddProxyPoolEntry validates, persists and returns a new pool entry. An empty
+// address is rejected; duplicates (same address) are rejected.
+func (m *Manager) AddProxyPoolEntry(address string) (int64, error) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return 0, errors.New("proxy address is required")
+	}
+	if _, err := traffic.ValidateProxyURL(address); err != nil {
+		return 0, err
+	}
+	// Reject exact duplicates so the pool never holds the same proxy twice.
+	var exists int
+	if err := m.pg.QueryRow(`SELECT COUNT(*) FROM proxy_pool WHERE address=$1`, address).Scan(&exists); err != nil {
+		return 0, err
+	}
+	if exists > 0 {
+		return 0, fmt.Errorf("proxy %q is already in the pool", address)
+	}
+	var id int64
+	if err := m.pg.QueryRow(`
+		INSERT INTO proxy_pool(address, enabled, active, created_at, updated_at)
+		VALUES ($1, true, false, now(), now())
+		RETURNING id`, address).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// DeleteProxyPoolEntry removes one pool entry by id. It is a no-op (not an
+// error) when the id does not exist.
+func (m *Manager) DeleteProxyPoolEntry(id int64) error {
+	res, err := m.pg.Exec(`DELETE FROM proxy_pool WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil
+	}
+	return nil
+}
+
+// SetProxyPoolEntry toggles enabled and/or active on one entry. Activating an
+// entry deactivates every other entry (only one proxy may be active at a time).
+func (m *Manager) SetProxyPoolEntry(id int64, enabled, active *bool) error {
+	tx, err := m.pg.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if active != nil && *active {
+		if _, err := tx.Exec(`UPDATE proxy_pool SET active=false, updated_at=now() WHERE active`); err != nil {
+			return err
+		}
+	}
+	if enabled != nil {
+		if _, err := tx.Exec(`UPDATE proxy_pool SET enabled=$1, updated_at=now() WHERE id=$2`, *enabled, id); err != nil {
+			return err
+		}
+	}
+	if active != nil {
+		if _, err := tx.Exec(`UPDATE proxy_pool SET active=$1, updated_at=now() WHERE id=$2`, *active, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// proxyTransport builds an *http.Transport that dials through the given proxy
+// URL (http/https/socks5, optional user:pass). Empty = direct transport.
+func proxyTransport(raw string) (*http.Transport, error) {
+	raw = strings.TrimSpace(raw)
+	tr := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 10 * time.Second,
+		}).DialContext,
+	}
+	if raw == "" {
+		return tr, nil
+	}
+	pu, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse proxy %q: %w", raw, err)
+	}
+	switch pu.Scheme {
+	case "http", "https":
+		tr.Proxy = http.ProxyURL(pu)
+	case "socks5":
+		var auth *netproxy.Auth
+		if pu.User != nil {
+			pw, _ := pu.User.Password()
+			auth = &netproxy.Auth{User: pu.User.Username(), Password: pw}
+		}
+		dialer, err := netproxy.SOCKS5("tcp", net.JoinHostPort(pu.Hostname(), pu.Port()), auth, netproxy.Direct)
+		if err != nil {
+			return nil, fmt.Errorf("build socks5 dialer for %q: %w", raw, err)
+		}
+		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.Dial(network, addr)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported proxy scheme %q (use http, https or socks5)", pu.Scheme)
+	}
+	return tr, nil
+}
+
+// TestProxyPoolEntry makes a real request through the proxy and reports the
+// egress IP observed at the far end, so users can verify a proxy before using it.
+func (m *Manager) TestProxyPoolEntry(address string) (string, error) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return "", errors.New("proxy address is required")
+	}
+	if _, err := traffic.ValidateProxyURL(address); err != nil {
+		return "", err
+	}
+	tr, err := proxyTransport(address)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, "https://api.ipify.org?format=json", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "ARTEX proxy-pool test")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("egress test through %s failed: %w", address, err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("egress test through %s: HTTP %d", address, resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		IP string `json:"ip"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("parse egress IP response: %w", err)
+	}
+	if out.IP == "" {
+		return "", fmt.Errorf("egress test through %s: no IP returned", address)
+	}
+	return out.IP, nil
 }
 
 func (m *Manager) Close() error {

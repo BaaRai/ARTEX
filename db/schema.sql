@@ -367,6 +367,23 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Proxy pool (restored in 0.7.x): list of egress proxies with enable/disable,
+-- active selection, last-test timestamp, detected egress IP and failure count.
+CREATE TABLE IF NOT EXISTS proxy_pool (
+    id          BIGSERIAL PRIMARY KEY,
+    address     TEXT NOT NULL,
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    active      BOOLEAN NOT NULL DEFAULT false,
+    last_tested TIMESTAMPTZ,
+    egress_ip   TEXT,
+    fail_count  INTEGER NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_pool_active   ON proxy_pool(active)   WHERE active;
+CREATE INDEX IF NOT EXISTS idx_proxy_pool_enabled  ON proxy_pool(enabled)  WHERE enabled;
+
 CREATE TABLE IF NOT EXISTS llm_profiles (
     id               BIGSERIAL PRIMARY KEY,
     name             TEXT NOT NULL UNIQUE,

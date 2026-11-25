@@ -1066,6 +1066,21 @@ export interface Settings {
   notify_assets_max_shown?: number; // asset names listed per finding, 0-50, default 3
   // Target noise profile; the stored setting wins over ARTEX_NOISE_PROFILE. Applies to the next request.
   noise_profile?: NoiseProfileName;
+  // Restored proxy pool (0.7.x regression fix): the current pool entries and the
+  // rotation strategy. Entries are managed via /api/settings/proxy-pool.
+  proxy_pool?: ProxyPoolEntry[];    // list of egress proxies (newest first)
+  proxy_pool_rotation?: string; // "none" | "on_failure" | "timed"
+}
+
+export interface ProxyPoolEntry {
+  id: number;          // pool row id
+  address: string;     // http/https/socks5 URL, optionally user:pass
+  enabled: boolean;    // whether this proxy is a candidate for use
+  active: boolean;     // whether this is the single active proxy (only one at a time)
+  last_tested?: number; // unix seconds of the last egress test, 0 = never
+  egress_ip?: string;  // egress IP observed at the last successful test
+  fail_count?: number;  // consecutive failed egress tests
+  created_at?: number;  // unix seconds
 }
 
 export type NoiseProfileName = "off" | "quiet" | "balanced" | "aggressive";

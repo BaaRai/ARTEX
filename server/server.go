@@ -927,6 +927,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("GET /api/settings/noise", s.noiseStatus) // current noise profile + per-host counters (no reset)
+	// Proxy pool (restored 0.7.x feature): CRUD + egress-IP test + rotation strategy.
+	mux.HandleFunc("GET /api/settings/proxy-pool", s.getProxyPool)
+	mux.HandleFunc("POST /api/settings/proxy-pool", s.postProxyPool)
+	mux.HandleFunc("DELETE /api/settings/proxy-pool/{id}", s.deleteProxyPool)
+	mux.HandleFunc("PATCH /api/settings/proxy-pool/{id}", s.patchProxyPool)
+	mux.HandleFunc("POST /api/settings/proxy-pool/test", s.testProxyPool)
+	mux.HandleFunc("PUT /api/settings/proxy-pool/rotation", s.putProxyPoolRotation)
 	// Vulnerability IM push. Channels are "multi-instance + per-instance filter rules" resources, so they get their own group of
 	// REST endpoints instead of being stuffed into the flat /api/settings key-value store.
 	mux.HandleFunc("GET /api/notify/meta", s.notifyMeta)
@@ -3951,12 +3958,24 @@ func (s *Server) settingsPayload() map[string]any {
 		"notify_enabled":             s.m.pg.GetBool(settingNotifyEnabled, true),
 		"notify_public_base_url":     notifyPublicBaseURL(s.m.pg),
 		"notify_digest_interval_min": notifyDigestIntervalMin(s.m.pg),
+		// Restored proxy pool: list of egress proxies + rotation strategy.
+		"proxy_pool":           s.proxyPoolPayload(),
+		"proxy_pool_rotation":  s.m.ProxyPoolRotation(),
 		// Render limits of IM messages; 0 = no truncation.
 		"notify_summary_max_runes": limits.SummaryRunes,
 		"notify_assets_max_shown":  limits.AssetsShown,
 		// Effective target noise profile (off by default): the stored setting, else ARTEX_NOISE_PROFILE.
 		"noise_profile": egress.CurrentProfile().Name,
 	}
+}
+
+// proxyPoolPayload returns the pool list for the settings payload, never nil.
+func (s *Server) proxyPoolPayload() []ProxyPoolEntry {
+	pool, err := s.m.ProxyPool()
+	if err != nil || pool == nil {
+		return []ProxyPoolEntry{}
+	}
+	return pool
 }
 
 // notifyPublicBaseURL reads the external address used in push backlinks.
@@ -4276,6 +4295,117 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, s.settingsPayload())
+}
+
+// proxyPoolID parses the {id} path segment of a proxy-pool route.
+func proxyPoolID(r *http.Request) (int64, error) {
+	return strconv.ParseInt(r.PathValue("id"), 10, 64)
+}
+
+// getProxyPool lists the restored proxy pool entries plus the rotation strategy.
+func (s *Server) getProxyPool(w http.ResponseWriter, r *http.Request) {
+	pool, err := s.m.ProxyPool()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if pool == nil {
+		pool = []ProxyPoolEntry{}
+	}
+	writeJSON(w, 200, map[string]any{
+		"proxy_pool":    pool,
+		"rotation":      s.m.ProxyPoolRotation(),
+	})
+}
+
+// postProxyPool adds one entry to the proxy pool. Body: { address }.
+func (s *Server) postProxyPool(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	id, err := s.m.AddProxyPoolEntry(req.Address)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id})
+}
+
+// deleteProxyPool removes one pool entry by id.
+func (s *Server) deleteProxyPool(w http.ResponseWriter, r *http.Request) {
+	id, err := proxyPoolID(r)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := s.m.DeleteProxyPoolEntry(id); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": true})
+}
+
+// patchProxyPool toggles enabled and/or active on one pool entry. Body: { enabled?, active? }.
+func (s *Server) patchProxyPool(w http.ResponseWriter, r *http.Request) {
+	id, err := proxyPoolID(r)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+		Active  *bool `json:"active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.Enabled == nil && req.Active == nil {
+		writeErr(w, 400, "nothing to update (send enabled and/or active)")
+		return
+	}
+	if err := s.m.SetProxyPoolEntry(id, req.Enabled, req.Active); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// testProxyPool runs a real egress-IP test through a proxy. Body: { address }.
+func (s *Server) testProxyPool(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	ip, err := s.m.TestProxyPoolEntry(req.Address)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"egress_ip": ip})
+}
+
+// putProxyPoolRotation sets the pool rotation strategy. Body: { rotation }.
+func (s *Server) putProxyPoolRotation(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Rotation string `json:"rotation"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := s.m.SetProxyPoolRotation(req.Rotation); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"rotation": s.m.ProxyPoolRotation()})
 }
 
 // testWebSearch runs a real "test" search with the given (or currently saved)

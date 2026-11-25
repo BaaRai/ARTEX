@@ -77,6 +77,7 @@ import type {
   PromptVersion,
   SessionTokenUsage,
   Settings,
+  ProxyPoolEntry,
   Severity,
   SkillCall,
   SkillItem,
@@ -1018,6 +1019,20 @@ export const api = {
     tavily_search_api_key?: string;
     keenable_search_api_key?: string;
   }) => post<{ ok: boolean; error?: string; count?: number; backend?: string }>(`/settings/web-search/test`, patch),
+
+  // ---- Restored proxy pool (0.7.x regression fix) ----
+  proxyPool: () => get<{ proxy_pool: ProxyPoolEntry[]; rotation: string }>(`/settings/proxy-pool`).then((r) => ({
+    proxy_pool: arr(r.proxy_pool),
+    rotation: r.rotation ?? "none",
+  })),
+  addProxyPool: (address: string) => post<{ id: number }>(`/settings/proxy-pool`, { address }),
+  deleteProxyPool: (id: number) => del<{ deleted: boolean }>(`/settings/proxy-pool/${id}`),
+  patchProxyPool: (id: number, fields: { enabled?: boolean; active?: boolean }) =>
+    patch<{ ok: boolean }>(`/settings/proxy-pool/${id}`, fields),
+  testProxyPool: (address: string) =>
+    post<{ egress_ip: string }>(`/settings/proxy-pool/test`, { address }),
+  putProxyPoolRotation: (rotation: string) =>
+    put<{ rotation: string }>(`/settings/proxy-pool/rotation`, { rotation }),
 
   // ---- Vulnerability IM push ----
   // Channels are multi-instance resources (several bots of the same kind, each with its own

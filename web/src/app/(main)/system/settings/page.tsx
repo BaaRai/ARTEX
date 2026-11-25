@@ -17,6 +17,7 @@ import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSend
 import type { Settings } from "@/lib/types";
 
 import { NoiseProfileCard } from "./noise-profile-card";
+import { ProxyPoolCard } from "./proxy-pool-card";
 
 // Renders a translated string, turning <b>…</b> and <code>…</code> spans into elements, so a sentence with emphasis stays one key.
 function rich(s: string): React.ReactNode[] {
@@ -424,6 +425,8 @@ export default function SystemSettingsPage() {
             </p>
           </CardContent>
         </Card>
+
+        <ProxyPoolCard />
 
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
