@@ -36,6 +36,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatShortDateTime } from "@/lib/format";
 import { statusMeta, type Tone, toneClasses } from "@/lib/status";
 import type {
   ActiveFindingRetest,
@@ -46,7 +47,7 @@ import type {
   VerificationStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { intlLocale, t } from "@/i18n";
+import { t } from "@/i18n";
 
 export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
 
@@ -153,15 +154,6 @@ export function findingRowKey(finding: Finding): string {
 
 export function isSameFinding(left: Finding, right: Finding): boolean {
   return findingRowKey(left) === findingRowKey(right);
-}
-
-export function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString(intlLocale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 const COLUMN_COUNT = 10;
@@ -374,7 +366,9 @@ export function FindingsTable({
                     <span className="text-muted-foreground">—</span>
                   )}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground tabular-nums">{fmtTime(f.ts)}</TableCell>
+                <TableCell className="text-xs text-muted-foreground tabular-nums">
+                  {formatShortDateTime(f.ts, { seconds: false })}
+                </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-1">
                     {retest ? (

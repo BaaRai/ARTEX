@@ -52,6 +52,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useSideQuestions } from "@/hooks/use-side-questions";
 import { api, sseUrl } from "@/lib/api";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
+import { formatBytes, formatDurationMs, formatTokens } from "@/lib/format";
 import { MOCK } from "@/lib/mock/enabled";
 import { isBtwCommand } from "@/lib/side-questions";
 import { taskAssetSourceLabel, taskAssetTypeLabel } from "@/lib/task-assets";
@@ -77,13 +78,6 @@ import { intlLocale, t } from "@/i18n";
 // so fall back to the model id rather than rendering an empty badge.
 function resolutionLabel(r: TaskLLMResolution): string {
   return r.name || r.model || t("Unnamed config");
-}
-
-// fmtBytes renders a human file size for attachment chips (mirrors transcript.tsx).
-function fmtBytes(n: number): string {
-  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
-  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`;
-  return `${n} B`;
 }
 
 // ── Reliability model (see docs/task-session-history-sse-remediation.md) ──────────
@@ -197,13 +191,6 @@ function statusIcon(status: SessionStatus) {
   }
 }
 
-// fmtTokens renders a compact token count (1234 → 1.2k, 2_000_000 → 2M).
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
-  return String(n);
-}
-
 const TokenMetrics = React.forwardRef<
   HTMLSpanElement,
   React.ComponentPropsWithoutRef<"span"> & {
@@ -225,7 +212,7 @@ const TokenMetrics = React.forwardRef<
         <React.Fragment key={names[index]}>
           <span>{names[index]}</span>
           <Badge variant="secondary" className="h-5 px-1.5 font-mono tabular-nums">
-            {fmtTokens(value)}
+            {formatTokens(value)}
           </Badge>
         </React.Fragment>
       ))}
@@ -233,16 +220,6 @@ const TokenMetrics = React.forwardRef<
   );
 });
 TokenMetrics.displayName = "TokenMetrics";
-
-// fmtDuration renders an elapsed milliseconds span compactly (90s → 1m30s).
-function fmtDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h${String(m % 60).padStart(2, "0")}m`;
-}
 
 const roleMeta = {
   mainagent: { label: t("Main Agent"), icon: UserIcon },
@@ -1863,7 +1840,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
                 {runDuration != null && (
                   <span className="inline-flex items-center gap-1" title={t("Run duration (first step → last step)")}>
                     <ClockIcon className="size-3" />
-                    {fmtDuration(runDuration)}
+                    {formatDurationMs(runDuration)}
                   </span>
                 )}
                 {isMain && <span>{t("Interactive")}</span>}
@@ -1961,7 +1938,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
                       >
                         <PaperclipIcon className="size-3 shrink-0 text-primary" />
                         <span className="max-w-[160px] truncate">{a.name}</span>
-                        <span className="text-muted-foreground">{fmtBytes(a.size)}</span>
+                        <span className="text-muted-foreground">{formatBytes(a.size)}</span>
                         <button
                           type="button"
                           className="ml-0.5 text-muted-foreground hover:text-foreground"
