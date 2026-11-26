@@ -2125,6 +2125,12 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		CustomHeaders      string `json:"custom_headers"`
 		ClearCustomHeaders bool   `json:"clear_custom_headers"`
 		Streaming          *bool  `json:"streaming"`
+		// Prices shadow the embedded fields so an omitted one keeps the stored
+		// value instead of resetting it to 0 (every save rewrites all four).
+		PriceInputPerM      *float64 `json:"price_input_per_m"`
+		PriceOutputPerM     *float64 `json:"price_output_per_m"`
+		PriceCacheReadPerM  *float64 `json:"price_cache_read_per_m"`
+		PriceCacheWritePerM *float64 `json:"price_cache_write_per_m"`
 	}
 	if err := decode(w, r, &body); err != nil {
 		writeErr(w, 400, err.Error())
@@ -2178,6 +2184,32 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	if p.MaxTokens < 0 {
 		p.MaxTokens = 0
 	}
+	var stored *db.LLMProfile
+	if p.ID != 0 && (body.PriceInputPerM == nil || body.PriceOutputPerM == nil || body.PriceCacheReadPerM == nil || body.PriceCacheWritePerM == nil) {
+		var err error
+		if stored, err = pg.ProfileByID(p.ID); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	var old db.LLMProfile
+	if stored != nil {
+		old = *stored
+	}
+	price := func(in, out *float64, kept float64) {
+		switch {
+		case in != nil:
+			*out = max(*in, 0)
+		case stored != nil:
+			*out = kept
+		default:
+			*out = 0
+		}
+	}
+	price(body.PriceInputPerM, &p.PriceInputPerM, old.PriceInputPerM)
+	price(body.PriceOutputPerM, &p.PriceOutputPerM, old.PriceOutputPerM)
+	price(body.PriceCacheReadPerM, &p.PriceCacheReadPerM, old.PriceCacheReadPerM)
+	price(body.PriceCacheWritePerM, &p.PriceCacheWritePerM, old.PriceCacheWritePerM)
 	if p.Format != "openai" || p.MaxTokensField != llm.MaxTokensFieldCompletion {
 		p.MaxTokensField = ""
 	}
