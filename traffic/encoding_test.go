@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -104,5 +105,41 @@ func TestDecodeBodyIsBounded(t *testing.T) {
 	out, ok := decodeBody(http.Header{"Content-Encoding": {"gzip"}}, buf.Bytes(), maxIndexBody)
 	if !ok || len(out) != maxIndexBody {
 		t.Fatalf("decodeBody returned %d bytes, ok=%v; want %d", len(out), ok, maxIndexBody)
+	}
+}
+
+// TestTruncatedCompressedBodyIsIndexed covers a capture cut short mid-stream:
+// the text decoded before the cut is still indexed.
+func TestTruncatedCompressedBodyIsIndexed(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	io.WriteString(gz, compressedPage)
+	for i := range 4096 {
+		fmt.Fprintf(gz, "row %d\n", i)
+	}
+	gz.Close()
+	cut := buf.Bytes()[:buf.Len()/2]
+
+	tr, _ := openTraffic(t)
+	f := newFlow("api.example.com", "GET", "/cut", nil, cut)
+	f.Response.Header.Set("Content-Type", "text/html")
+	f.Response.Header.Set("Content-Encoding", "gzip")
+	tr.record(f)
+	hits, err := tr.query("api.example.com", "", "root:x:0", 0, 10)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("body search for text of a truncated gzip response: %d rows, err=%v; want 1", len(hits), err)
+	}
+}
+
+// TestIndexBodySkipsBinaryContentType keeps an encoded body with a binary
+// content type out of the index without decoding it.
+func TestIndexBodySkipsBinaryContentType(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	io.WriteString(gz, compressedPage)
+	gz.Close()
+	h := http.Header{"Content-Encoding": {"gzip"}, "Content-Type": {"image/png"}}
+	if text, ok := indexBody(h, buf.Bytes()); ok || text != "" {
+		t.Fatalf("indexBody on an image/png body = (%q, %v), want (\"\", false)", text, ok)
 	}
 }
