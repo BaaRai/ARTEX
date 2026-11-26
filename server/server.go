@@ -276,7 +276,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			return a.TaskTimeoutWrapupMaxTurns, true
 		})
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
-		domainReg := buildDomainReg(m.Assets())
+		domainReg := s.buildDomainReg()
 		wireTools(m.pg, domainReg)   // built-in tools table: filter per agent + override description/schema + inject defaults
 		seedPrompts(m.pg)            // seed built-in agent default prompt bodies into agent_prompts (only when empty)
 		warnBrokenSkills(s.skillDir) // surface skills whose frontmatter silently failed to parse

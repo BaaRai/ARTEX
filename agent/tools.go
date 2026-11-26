@@ -324,6 +324,8 @@ func (t *ToolSet) ListWorkerTracesTool() actool.CoreTool   { return t.listWorker
 func (t *ToolSet) SearchWorkerTracesTool() actool.CoreTool { return t.searchAllWorkerTraces() }
 func (t *ToolSet) NodeDetailTool() actool.CoreTool         { return t.nodeDetail() }
 func (t *ToolSet) AddHintTool() actool.CoreTool            { return t.addHint() }
+func (t *ToolSet) SetGoalsTool() actool.CoreTool           { return t.setGoals() }
+func (t *ToolSet) SetConstraintsTool() actool.CoreTool     { return t.setConstraints() }
 
 // SetEnrich wires the async enrichment engine (DNS/HTTP auto-completion).
 func (t *ToolSet) SetEnrich(e EnrichTrigger) { t.enrich = e }
@@ -2002,6 +2004,7 @@ func (t *ToolSet) setGoals() actool.CoreTool {
 			"★Batch preferred: put multiple goals in the goals array in a single submission; the returned ids match it in length and order (failed items get id=0, details in errors). For a single goal, omit goals and pass the top-level text.\n"+
 			"vulnclass is optional: the corresponding vulnerability class (e.g. SQLi/IDOR); leave empty for business-logic goals. Whether a goal is met is judged and marked met by the system; this tool only adds.",
 		obj(map[string]any{
+			"task_id":   str("optional: target task id (required when called from a task-less chat agent such as Auto)"),
 			"goals":     map[string]any{"type": "array", "description": "[Prefer this] array of goals to add, processed in order. Each element: text (required, an independently verifiable final goal) + vulnclass (optional). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
 			"text":      str("[single] one independently verifiable final goal"),
 			"vulnclass": str("[single] the corresponding vulnerability class (if clear), e.g. SQLi/IDOR; may be empty for business-logic goals"),
@@ -2103,6 +2106,7 @@ func (t *ToolSet) setConstraints() actool.CoreTool {
 			"★Batch preferred: put multiple constraints in the constraints array in a single submission; the returned ids match it in length and order (failed items get id=0, details in errors). For a single constraint, omit constraints and pass the top-level text/type.\n"+
 			"Register only constraints [explicitly stated] in the task goal/description — don't invent any; when unsure about the type, use deny (more conservative).",
 		obj(map[string]any{
+			"task_id":     str("optional: target task id (required when called from a task-less chat agent such as Auto)"),
 			"constraints": map[string]any{"type": "array", "description": "[Prefer this] array of constraints to add, processed in order. Each element: text (required, one constraint) + type (allow|deny). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
 			"text":        str("[single] the content of one operation constraint"),
 			"type":        str("[single] allow or deny; defaults to deny when omitted"),
