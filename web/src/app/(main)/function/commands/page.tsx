@@ -13,19 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import { formatShortDateTime } from "@/lib/format";
 import type { CommandRecord, ToolStat } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { intlLocale, t } from "@/i18n";
-
-function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString(intlLocale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { t } from "@/i18n";
 
 // toolInput renders a tool's raw input for display. Bash's {"command":"..."} is
 // unwrapped to the bare command; other tools show their pretty-printed JSON args.
@@ -235,7 +226,7 @@ export default function CommandsPage() {
                       onClick={() => setSelected(cmd)}
                     >
                       <TableCell className="text-xs text-muted-foreground tabular-nums">
-                        {fmtTime(cmd.created_at)}
+                        {formatShortDateTime(cmd.created_at)}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-muted-foreground">#{cmd.exploration_id}</TableCell>
                       <TableCell>
@@ -340,7 +331,7 @@ export default function CommandsPage() {
             <>
               <SheetHeader className="border-b px-5 py-4">
                 <SheetTitle className="pr-8">{t("Tool execution details")}</SheetTitle>
-                <SheetDescription>{fmtTime(selected.created_at)}</SheetDescription>
+                <SheetDescription>{formatShortDateTime(selected.created_at)}</SheetDescription>
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   <Badge variant="outline" className="text-xs font-mono">
                     #{selected.exploration_id}

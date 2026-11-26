@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -242,7 +242,7 @@ func (s *Server) seedPythonInterpreter() {
 	}
 	if p := detectPython(); p != "" {
 		_ = s.m.pg.SetSetting(settingPythonInterp, p)
-		log.Printf("[custom-tool] auto-detected python interpreter: %s", p)
+		slog.Info("[custom-tool] auto-detected python interpreter", "path", p)
 	}
 }
 
@@ -692,13 +692,35 @@ func identity(s string) string { return s }
 // shellQuote single-quotes a value for safe shell interpolation.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// renderTemplate replaces {name} placeholders with each param's rendered value.
+// renderTemplate replaces each {name} in the original template. The inserted
+// text is not scanned again, so a value that contains {other} stays literal.
 func renderTemplate(tmpl string, params map[string]any, quote func(string) string) string {
-	out := tmpl
-	for k, v := range params {
-		out = strings.ReplaceAll(out, "{"+k+"}", quote(valToStr(v)))
+	var b strings.Builder
+	b.Grow(len(tmpl))
+	for i := 0; i < len(tmpl); {
+		start := strings.IndexByte(tmpl[i:], '{')
+		if start < 0 {
+			b.WriteString(tmpl[i:])
+			break
+		}
+		start += i
+		b.WriteString(tmpl[i:start])
+		end := strings.IndexByte(tmpl[start+1:], '}')
+		if end < 0 {
+			b.WriteString(tmpl[start:])
+			break
+		}
+		end += start + 1
+		name := tmpl[start+1 : end]
+		if v, ok := params[name]; ok {
+			b.WriteString(quote(valToStr(v)))
+			i = end + 1
+			continue
+		}
+		b.WriteByte('{')
+		i = start + 1
 	}
-	return out
+	return b.String()
 }
 
 // valToStr renders a param value: scalars as-is, arrays/objects as compact JSON.

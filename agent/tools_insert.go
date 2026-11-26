@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/url"
 	"strconv"
@@ -129,7 +129,7 @@ func insertAssetsRuleLoadFailure(err error) (actool.Result, bool) {
 	if err == nil {
 		return actool.Result{}, false
 	}
-	log.Printf("[insert_assets] intercept rules unavailable: %v", err)
+	slog.Warn("[insert_assets] intercept rules unavailable", "err", err)
 	return actool.Errorf("asset intercept rules are unavailable; insertion refused"), true
 }
 
