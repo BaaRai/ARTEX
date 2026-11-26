@@ -76,12 +76,15 @@ services:
     volumes:
       # Docker-managed named volumes, NOT host bind mounts. At startup the server runs
       # as root and chowns/chmods these paths so the uid-10001 agent executor cannot
-      # write to them; the agent-isolation self-test then refuses to start if it can
-      # (PR #510, fail-closed privilege drop). A Windows/WSL bind mount of a project
-      # path is forced world-writable (0777) and silently ignores chown/chmod, so the
-      # self-test fails and the server crash-loops. Named volumes live on the Linux VM's
-      # ext4, where those permission changes take effect, so isolation holds. They
-      # persist across rebuilds. Inspect/back up the data dir on the host with, e.g.:
+      # write to them; the agent-isolation self-test then refuses to start if it still
+      # can (PR #510, fail-closed privilege drop). On a VM-backed Docker host the server
+      # cannot lock a host bind mount down, so the self-test fails and the server
+      # crash-loops: Docker Desktop for Windows/WSL forces the mount world-writable
+      # (0777) and ignores chown/chmod, while Docker Desktop for macOS serves it as a
+      # "fakeowner" filesystem that reports root:root 0755 but does not enforce it, so
+      # uid 10001 can still create files. Named volumes live inside the Docker VM's own
+      # filesystem, where the server's chown/chmod take effect, so isolation holds. They
+      # persist across rebuilds. Inspect/back up on the host with, e.g.:
       #   docker compose cp artex:/app/data ./data
       - data:/app/data
       # JWT signing key and secret key (jwt.key, secret.key); persisting keeps users
@@ -89,9 +92,9 @@ services:
       - keys:/app/keys
       # skills/ is intentionally NOT mounted: the container uses the image's baked
       # /app/skills (root-owned, not agent-writable, and refreshed on every `--build`).
-      # On Windows a host mount can't be made non-world-writable, which would break the
-      # skill-approval guarantee; editing skills now takes a rebuild instead of a live
-      # host edit.
+      # A host skills mount can't be made non-world-writable on a VM-backed host, which
+      # would break the skill-approval guarantee; edit skills by rebuilding the image,
+      # or copy them into a skills volume with `docker compose cp ./skills/. artex:/app/skills`.
     restart: unless-stopped
 
 volumes:

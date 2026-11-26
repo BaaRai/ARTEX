@@ -371,7 +371,6 @@ the reachable hostname of your database server.
 ```bash
 docker pull ghcr.io/baarai/artex:latest
 
-mkdir -p data keys
 docker run -d --name artex \
   --security-opt no-new-privileges:true \
   -p 127.0.0.1:8787:8787 \
@@ -383,9 +382,12 @@ docker run -d --name artex \
   -e ARTEX_PG_DBNAME=artex \
   -e ARTEX_PG_SSLMODE=disable \
   -e ARTEX_JWT_KEY_DIR=/app/keys \
-  -v "$PWD/data:/app/data" \
-  -v "$PWD/keys:/app/keys" \
+  -v artex_data:/app/data \
+  -v artex_keys:/app/keys \
   ghcr.io/baarai/artex:latest
+# Named volumes (not host bind mounts): agent isolation fails closed when /app/data
+# and /app/keys are host-mounted on a VM-backed Docker host (Docker Desktop on Windows
+# or macOS). Retrieve their contents with `docker cp artex:/app/data ./data`.
 # → http://localhost:8787  (docker logs artex | grep "Setup token")
 ```
 
@@ -396,8 +398,9 @@ literal `$`. The `ARTEX_PG_*` variables take the password raw; quote it in a she
 
 The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
 `sqlmap`, `ripgrep`, `curl`, `npm`, …) and built-in `/app/skills`. The GHCR Compose file below
-persists `./keys` and `./data`; it does not mount a host `skills/` directory, so the image's
-built-in skills are used.
+persists `keys` and `data` in Docker-managed named volumes (not host bind mounts, so agent
+isolation holds on VM-backed Docker hosts); it does not mount a host `skills/` directory, so the
+image's built-in skills are used.
 
 #### Compose stack from the prebuilt image
 
@@ -423,8 +426,10 @@ docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 Pin a version with `ARTEX_IMAGE_TAG=v0.7.1` in `.env` (or `0.7.1`); unset uses `latest`. To use
-custom skills, copy them into a host directory and add `- ./skills:/app/skills` to the `artex`
-volumes, which overrides the built-in `/app/skills`.
+custom skills, add a `skills:/app/skills` named volume to the `artex` service and copy your skill
+directory into it with `docker compose -f docker-compose.ghcr.yml cp ./skills/. artex:/app/skills`,
+which overrides the built-in `/app/skills`. (A host `- ./skills:/app/skills` bind mount also works
+on native Linux, but breaks the agent-isolation self-test on VM-backed Docker hosts.)
 
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
@@ -644,19 +649,27 @@ services:
       - "${ARTEX_BIND_ADDR:-127.0.0.1}:8787:8787"
       - "127.0.0.1:8788:8788"
     volumes:
-      - ./data:/app/data
-      - ./keys:/app/keys
+      # Named volumes, not host bind mounts, so agent isolation holds on VM-backed
+      # Docker hosts (Docker Desktop on Windows and macOS). See docker-compose.yml.
+      - data:/app/data
+      - keys:/app/keys
     restart: unless-stopped
+
+volumes:
+  data:
+  keys:
 ```
 
 #### Local disk usage (`data/`)
 
-Moving PostgreSQL to an external host does **not** move the runtime `data/` directory off local
-disk. `data/` still stores spilled HTTP/TCP traffic blobs (`data/traffic/_blobs`), LLM
+Moving PostgreSQL to an external host does **not** move the runtime `/app/data` directory off local
+disk. The `data` volume still stores spilled HTTP/TCP traffic blobs (`data/traffic/_blobs`), LLM
 transcripts, task working files, and local task archives, so heavy workloads can still fill the
-host disk if `data/` is on a small volume. Mount `data/` on a suitably sized volume, and consider
-setting `ARTEX_ARCHIVE_STORAGE=s3` (see [Task archive storage](docs/task-archive-storage.md)) to
-offload cold task archives to object storage.
+host disk if its backing disk is small. Put the `data` named volume on a suitably sized disk
+(configure the volume's driver/location, or override it with a host bind mount on native Linux where
+that does not trip the agent-isolation self-test), and consider setting `ARTEX_ARCHIVE_STORAGE=s3`
+(see [Task archive storage](docs/task-archive-storage.md)) to offload cold task archives to object
+storage.
 
 ### Reverse proxy deployment (HTTPS / exposing only 443)
 
@@ -767,6 +780,11 @@ scripts/backup.sh --with-data          # db dump + data/ archive, keep 14
 scripts/backup.sh --keep 7             # db only, keep 7
 ```
 
+`--with-data` archives a host `data/` directory, which exists for the binary and source installs.
+With the Docker Compose stack, `data` and `keys` are named volumes: copy them out first (for example
+`docker compose cp artex:/app/data ./data` and `docker compose cp artex:/app/keys ./keys`) and
+archive those copies.
+
 Restore into a running stack:
 
 ```bash
@@ -791,12 +809,34 @@ Daily cron example (03:20, operator crontab):
 
 ### Updating and upgrading
 
-> Upgrading swaps the program and never touches data: the Postgres volume `pgdata`, `./data`
-> (traffic index, task files, transcripts), `./keys` (`jwt.key`, `secret.key`) and `./skills` are
-> preserved. **No manual database step is needed**: on every start ARTEX applies its embedded
-> `schema.sql` baseline, then any pending numbered migration from `db/migrations/`, in order, each
-> in its own transaction. Restarting the new binary is the upgrade. Back up `./data`, `keys/` and
-> the database before upgrading.
+> Upgrading swaps the program and never touches data: the `pgdata`, `data` (traffic index, task
+> files, transcripts) and `keys` (`jwt.key`, `secret.key`) volumes are preserved, and skills come
+> from the rebuilt image. **No manual database step is needed**: on every start ARTEX applies its
+> embedded `schema.sql` baseline, then any pending numbered migration from `db/migrations/`, in
+> order, each in its own transaction. Restarting the new binary is the upgrade. Back up the `data`
+> and `keys` volumes and the database before upgrading.
+
+#### Migrating a host-mounted install to named volumes
+
+Earlier versions bind-mounted `./data` and `./keys` from the project directory. The Compose files
+now use Docker-managed named volumes instead, so agent isolation holds on VM-backed Docker hosts
+(Docker Desktop on Windows and macOS). If you already ran ARTEX with the old host-mounted layout,
+a plain `git pull && docker compose up -d` would start against **empty** `data` and `keys` volumes:
+task history and transcripts vanish from the UI, the regenerated `jwt.key` signs everyone out, and —
+if `ARTEX_SECRET_KEY` is unset — the new `keys/secret.key` cannot read secrets encrypted with the
+old one. Copy your existing host directories into the new volumes once, before the first `up`:
+
+```bash
+git pull
+docker compose create artex                 # create the container + empty volumes without starting it
+docker compose cp ./keys/. artex:/app/keys  # existing jwt.key / secret.key
+docker compose cp ./data/. artex:/app/data  # existing traffic index, tasks, transcripts
+docker compose up -d                        # start with your data in place
+```
+
+The old `./data` and `./keys` directories can be kept as a backup or removed afterwards. Native
+Linux installs that prefer host-visible directories can instead override the `data`/`keys` volumes
+with bind mounts in a `docker-compose.override.yml`, where host mounts do not trip the self-test.
 
 **Update banner (opt-in, off by default)**: start ARTEX with `ARTEX_UPDATE_CHECK=1` to ask the
 public GitHub releases API for the latest tag, at most once per 24 hours (cached in memory; a
@@ -817,7 +857,7 @@ git reset --hard origin/main
 git stash pop             # only if you stashed
 ```
 
-Your data is unaffected: `./data`, the `pgdata` volume and `./skills` are not part of git history.
+Your data is unaffected: the `data`, `keys` and `pgdata` volumes are not part of git history.
 
 #### Option 1: one-click update script
 

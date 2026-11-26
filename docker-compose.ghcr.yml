@@ -10,8 +10,11 @@
 #
 # Set POSTGRES_PASSWORD in .env. Pin the image with ARTEX_IMAGE_TAG=v0.7.1 in
 # .env; unset uses latest. The image carries the built-in /app/skills; this file
-# does not mount a host skills/ directory. To use custom skills, copy them into a
-# host directory and add `- ./skills:/app/skills` to the artex volumes.
+# does not mount a host skills/ directory. data/ and keys/ are Docker-managed named
+# volumes rather than host bind mounts so agent isolation holds on VM-backed Docker
+# hosts (Docker Desktop on Windows and macOS); see docker-compose.yml for why. To use
+# custom skills, copy them into a skills volume with
+# `docker compose -f docker-compose.ghcr.yml cp ./skills/. artex:/app/skills`.
 services:
   postgres:
     image: postgres:16-alpine
@@ -75,9 +78,13 @@ services:
       - "${ARTEX_BIND_ADDR:-127.0.0.1}:8787:8787"
       - "127.0.0.1:8788:8788"
     volumes:
-      - ./data:/app/data
-      - ./keys:/app/keys
+      # Named volumes, not host bind mounts: agent isolation fails closed on a
+      # VM-backed Docker host when these are host-mounted (see docker-compose.yml).
+      - data:/app/data
+      - keys:/app/keys
     restart: unless-stopped
 
 volumes:
   pgdata:
+  data:
+  keys:
