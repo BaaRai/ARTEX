@@ -52,7 +52,7 @@ func logConfigSnapshot(s configSnapshot) {
 		slog.Warn("[config] snapshot unavailable", "err", err)
 		return
 	}
-	slog.Info("[config] snapshot", "config", string(b))
+	slog.Info("[config] snapshot " + string(b))
 }
 
 // version is the build version, injected at release time via
