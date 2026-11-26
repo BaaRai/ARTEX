@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
+	"unicode/utf16"
 
 	"github.com/Autumn-27/artex/notify"
 )
@@ -28,8 +29,9 @@ const (
 	telegramClientWindow = telegramPollWindow + 15*time.Second
 	// telegramPollLimit caps one getUpdates batch.
 	telegramPollLimit = 50
-	// telegramTextLimit is the Bot API message limit (4096 characters). The
-	// reply is cut a little earlier to leave room for the ellipsis.
+	// telegramTextLimit is where a reply is cut, in UTF-16 code units: the Bot
+	// API limit is 4096 characters counted in UTF-16, and the cut is a little
+	// earlier to leave a margin.
 	telegramTextLimit = 4000
 	// telegramBodyLimit caps a response body; 50 text updates fit well inside.
 	telegramBodyLimit = 1 << 20
@@ -67,6 +69,13 @@ func (telegramTransport) Validate(cfg map[string]any) error {
 	if base := cfgString(cfg, "base_url"); base != "" {
 		if err := notify.ValidateEndpointURL(base); err != nil {
 			return fmt.Errorf("invalid API URL: %w", err)
+		}
+		// The token is in the URL path, and the responses are the updates the
+		// bridge acts on: over plain http both could be read or forged on the
+		// network path. http is only for a local test server, behind the same
+		// opt-in as other local targets.
+		if u, err := url.Parse(base); err == nil && strings.EqualFold(u.Scheme, "http") && !notify.AllowLocalTargets() {
+			return fmt.Errorf("the API URL must use https (http is allowed only with %s=1, for a local test server)", notify.AllowLocalTargetsEnv)
 		}
 	}
 	return nil
@@ -157,7 +166,7 @@ func (t telegramTransport) Send(ctx context.Context, cfg map[string]any, chatID,
 	}
 	body := map[string]any{
 		"chat_id": chatID,
-		"text":    truncateRunes(text, telegramTextLimit),
+		"text":    truncateUTF16(text, telegramTextLimit),
 		// Plain text on purpose: no parse_mode, so agent output can never be
 		// rejected for a stray markup character or render as a link.
 		"link_preview_options": map[string]any{"is_disabled": true},
@@ -255,11 +264,30 @@ func cfgString(cfg map[string]any, key string) string {
 	return strings.TrimSpace(s)
 }
 
-// truncateRunes cuts s to at most n runes, marking the cut.
-func truncateRunes(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
+// truncateUTF16 cuts s to at most n UTF-16 code units, marking the cut.
+// Telegram counts the message limit in UTF-16 units, so a character outside
+// the Basic Multilingual Plane (most emoji) counts twice. The cut never
+// splits a character.
+func truncateUTF16(s string, n int) string {
+	if utf16Len(s) <= n {
 		return s
 	}
-	r := []rune(s)
-	return string(r[:n-1]) + "…"
+	used := 0
+	for i, r := range s {
+		// range yields U+FFFD for invalid UTF-8, so RuneLen is 1 or 2 here.
+		w := utf16.RuneLen(r)
+		if used+w > n-1 { // n-1: one unit is kept for the ellipsis
+			return s[:i] + "…"
+		}
+		used += w
+	}
+	return s
+}
+
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += utf16.RuneLen(r)
+	}
+	return n
 }

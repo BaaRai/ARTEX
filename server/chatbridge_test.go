@@ -160,6 +160,15 @@ func TestChatBridgeRunnerStep(t *testing.T) {
 		}
 	}
 
+	// Saving the same bot's configuration keeps the refusal memory: a chat
+	// refused before the save is not refused a second time.
+	r.Reload(fakeBridgeKind)
+	fake.updates = []chatbridge.Update{{ID: 32, ChatID: "777", UserID: "8", Text: "hello?", Date: time.Now()}}
+	r.step(ctx, fakeBridgeKind)
+	if got := fake.sent["777"]; len(got) != 1 {
+		t.Fatalf("after a save, refused chat replies = %q, want no second refusal", got)
+	}
+
 	// Disabling turns the bridge off.
 	if _, err := pg.SaveChatBridge(ctx, &db.ChatBridge{Kind: fakeBridgeKind, Enabled: false, Config: json.RawMessage(`{}`)}, false); err != nil {
 		t.Fatal(err)
@@ -205,9 +214,16 @@ func TestChatBridgeRunnerBackoff(t *testing.T) {
 	if st := r.Status(fakeBridgeKind); st.State != "error" || st.LastError == "" {
 		t.Fatalf("status = %+v", st)
 	}
+	// A retry_after from the server is capped.
+	fake.pollErr = &chatbridge.RetryAfterError{After: 3 * time.Hour, Msg: "rate limited"}
+	if wait := r.step(ctx, fakeBridgeKind); wait != chatBridgeMaxRetry {
+		t.Fatalf("huge retry-after wait = %v, want the cap %v", wait, chatBridgeMaxRetry)
+	}
 	r.Reload(fakeBridgeKind)
 	fake.pollErr = nil
-	if wait := r.step(ctx, fakeBridgeKind); wait != 0 || r.Status(fakeBridgeKind).State != "online" {
+	// An empty poll pauses briefly, so an API that ignores the long-poll
+	// timeout cannot spin the loop.
+	if wait := r.step(ctx, fakeBridgeKind); wait != chatBridgeEmptyPollWait || r.Status(fakeBridgeKind).State != "online" {
 		t.Fatalf("after reload: wait %v status %+v", wait, r.Status(fakeBridgeKind))
 	}
 }

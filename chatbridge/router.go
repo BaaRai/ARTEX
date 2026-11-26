@@ -141,12 +141,31 @@ func (r *Router) refuse(chatID string) (Decision, string) {
 		return DecisionMuted, ""
 	}
 	if len(r.refused) >= maxRefusedChats {
-		// A flood of distinct chats: stop answering any new one rather than
-		// grow without bound or forget earlier refusals.
-		return DecisionMuted, ""
+		// A flood of distinct chats: start over rather than grow without
+		// bound. Muting every new chat instead would also mute the operator's
+		// own chat, which then never learns its ID. The cost is that a chat
+		// refused before the reset can get one more refusal.
+		clear(r.refused)
 	}
 	r.refused[chatID] = true
 	return DecisionRefused, "This chat is not allowed to use this ARTEX bot. If it is yours, add chat ID " + chatID + " to the allowlist in ARTEX (System → Chat bot)."
+}
+
+// KeepRefusals carries the refusal memory of a previous router over, so
+// saving the configuration of the same bot does not refuse every stranger a
+// second time. Call it before the router is in use.
+func (r *Router) KeepRefusals(prev *Router) {
+	if prev == nil || prev == r {
+		return
+	}
+	prev.mu.Lock()
+	defer prev.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.refused = make(map[string]bool, len(prev.refused))
+	for id := range prev.refused {
+		r.refused[id] = true
+	}
 }
 
 func (r *Router) help() string {

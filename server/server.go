@@ -292,8 +292,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		// Vulnerability IM push delivery engine. Sits beside the Scheduler but independent: push latency demands (3s)
 		// differ from the triggers' business cadence, and neither's failures drag the other down — a stuck push must not affect agent triggers.
 		go newNotifier(s).Run(s.ctx)
-		// Inbound chat bridges: an operator drives ARTEX from a chat app. Off until a bridge is enabled
-		// with a non-empty chat allowlist; long polling only, so no inbound port is opened.
+		// Inbound chat bridges: an operator drives ARTEX from a chat app. Off until a bridge is enabled,
+		// and only allowlisted chats are served; long polling only, so no inbound port is opened.
 		s.chatBridges = newChatBridgeRunner(m.pg)
 		go s.chatBridges.Run(s.ctx)
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence

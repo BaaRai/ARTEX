@@ -70,11 +70,32 @@ func TestRouteRefusalMemoryIsBounded(t *testing.T) {
 	for i := 0; i < maxRefusedChats; i++ {
 		r.Route(context.Background(), KindTelegram, nil, msg("c"+itoa(i), "hi"))
 	}
-	if d, reply := r.Route(context.Background(), KindTelegram, nil, msg("brand-new", "hi")); d != DecisionMuted || reply != "" {
+	// Past the cap the memory starts over: a new chat (it may be the
+	// operator's own) still gets its refusal with the chat ID.
+	if d, reply := r.Route(context.Background(), KindTelegram, nil, msg("brand-new", "hi")); d != DecisionRefused || !strings.Contains(reply, "brand-new") {
 		t.Fatalf("over the cap: got %v %q", d, reply)
 	}
 	if len(r.refused) > maxRefusedChats {
 		t.Fatalf("refused set grew to %d", len(r.refused))
+	}
+	if d, _ := r.Route(context.Background(), KindTelegram, nil, msg("brand-new", "again")); d != DecisionMuted {
+		t.Fatalf("after the reset: got %v, want muted", d)
+	}
+}
+
+func TestRouterKeepRefusals(t *testing.T) {
+	prev := testRouter()
+	prev.Route(context.Background(), KindTelegram, nil, msg("555", "hi"))
+	next := testRouter()
+	next.KeepRefusals(prev)
+	if d, reply := next.Route(context.Background(), KindTelegram, nil, msg("555", "hi")); d != DecisionMuted || reply != "" {
+		t.Fatalf("carried refusal: got %v %q", d, reply)
+	}
+	if d, _ := next.Route(context.Background(), KindTelegram, nil, msg("556", "hi")); d != DecisionRefused {
+		t.Fatalf("new chat: got %v", d)
+	}
+	if d, _ := prev.Route(context.Background(), KindTelegram, nil, msg("556", "hi")); d != DecisionRefused {
+		t.Fatalf("the previous router must not share the new memory: got %v", d)
 	}
 }
 

@@ -79,6 +79,45 @@ func TestTelegramValidate(t *testing.T) {
 	if err := tr.Validate(map[string]any{"bot_token": testToken}); err != nil {
 		t.Fatalf("valid config refused: %v", err)
 	}
+	if err := tr.Validate(map[string]any{"bot_token": testToken, "base_url": "https://bot-api.example.com"}); err != nil {
+		t.Fatalf("https base_url refused: %v", err)
+	}
+}
+
+func TestTelegramValidateRequiresHTTPS(t *testing.T) {
+	tr := telegramTransport{}
+	cfg := map[string]any{"bot_token": testToken, "base_url": "http://bot-api.example.com"}
+	t.Setenv(notify.AllowLocalTargetsEnv, "")
+	if err := tr.Validate(cfg); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("plain http base_url: err = %v, want an https error", err)
+	}
+	t.Setenv(notify.AllowLocalTargetsEnv, "1")
+	if err := tr.Validate(cfg); err != nil {
+		t.Fatalf("plain http with the local opt-in: %v", err)
+	}
+}
+
+func TestTruncateUTF16(t *testing.T) {
+	cases := []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"hello", 5, "hello"},
+		{"hello!", 5, "hell…"},
+		{"éééééé", 5, "éééé…"},
+		// An emoji is two UTF-16 units and is never split.
+		{"ab😀cd", 5, "ab😀…"},
+		{"ab😀cd", 4, "ab…"},
+	}
+	for _, c := range cases {
+		if got := truncateUTF16(c.in, c.n); got != c.want {
+			t.Errorf("truncateUTF16(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+		}
+		if got := truncateUTF16(c.in, c.n); utf16Len(got) > c.n {
+			t.Errorf("truncateUTF16(%q, %d) is %d units", c.in, c.n, utf16Len(got))
+		}
+	}
 }
 
 func TestTelegramPollParsesAndSendsOffset(t *testing.T) {
@@ -124,8 +163,17 @@ func TestTelegramSendIsPlainTextAndTruncated(t *testing.T) {
 		t.Fatal("replies must be sent as plain text")
 	}
 	text, _ := body["text"].(string)
-	if n := len([]rune(text)); n != telegramTextLimit || !strings.HasSuffix(text, "…") {
-		t.Fatalf("text has %d runes, suffix %q", n, text[len(text)-3:])
+	if n := utf16Len(text); n != telegramTextLimit || !strings.HasSuffix(text, "…") {
+		t.Fatalf("text has %d UTF-16 units, suffix %q", n, text[len(text)-3:])
+	}
+
+	// Emoji count twice toward Telegram's limit.
+	if err := (telegramTransport{}).Send(context.Background(), cfg, "100", strings.Repeat("😀", telegramTextLimit)); err != nil {
+		t.Fatal(err)
+	}
+	text, _ = f.bodies["sendMessage"]["text"].(string)
+	if n := utf16Len(text); n > telegramTextLimit || !strings.HasSuffix(text, "…") {
+		t.Fatalf("emoji text has %d UTF-16 units, over the limit %d", n, telegramTextLimit)
 	}
 	if body["chat_id"] != "100" {
 		t.Fatalf("chat_id = %v", body["chat_id"])

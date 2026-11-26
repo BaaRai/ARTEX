@@ -33,6 +33,8 @@ const (
 	chatBridgeMinRetry = 2 * time.Second
 	chatBridgeMaxRetry = time.Minute
 	chatBridgeSendWait = 15 * time.Second
+	// chatBridgeEmptyPollWait is the pause after a poll that returned nothing.
+	chatBridgeEmptyPollWait = time.Second
 )
 
 // chatBridgeStatus is the live state shown in the UI ("bot online").
@@ -200,6 +202,7 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 	r.mu.Lock()
 	known := st.sig == sig && st.router != nil
 	router := st.router
+	prevBot := st.status.Bot
 	r.mu.Unlock()
 	if !known {
 		r.setState(kind, "connecting")
@@ -207,7 +210,12 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 		if err != nil {
 			return r.fail(kind, err)
 		}
+		prev := router
 		router = &chatbridge.Router{BotUserName: me.UserName, Commands: r.commands(kind)}
+		if prevBot != nil && prevBot.ID == me.ID {
+			// Same bot, new settings: chats it already refused stay refused.
+			router.KeepRefusals(prev)
+		}
 		r.mu.Lock()
 		st.sig, st.router = sig, router
 		st.status.Bot = &me
@@ -234,7 +242,10 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 		var ra *chatbridge.RetryAfterError
 		if errors.As(err, &ra) {
 			r.fail(kind, err)
-			return ra.After
+			// The wait comes from the server. Cap it so a broken or hostile
+			// API address cannot park the bridge for hours; polling early
+			// only earns another 429 with a fresh retry_after.
+			return min(max(ra.After, chatBridgeMinRetry), chatBridgeMaxRetry)
 		}
 		return r.fail(kind, err)
 	}
@@ -243,7 +254,10 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 	st.status.State, st.status.LastPollAt, st.retry = "online", &now, 0
 	r.mu.Unlock()
 	if len(updates) == 0 {
-		return 0
+		// A real long poll returns empty only after its window, so this
+		// pause costs nothing there; it keeps a self-hosted Bot API that
+		// ignores the timeout from spinning the loop.
+		return chatBridgeEmptyPollWait
 	}
 
 	next := b.PollOffset

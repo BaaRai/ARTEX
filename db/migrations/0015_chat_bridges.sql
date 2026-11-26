@@ -3,10 +3,11 @@
 -- part of a task archive.
 --
 -- config is sealed at rest by db/secrets.go (it holds the bot token) and
--- masked in API responses. allowed_chats is the mandatory allowlist of chat
--- ids, a JSON array of strings; the server refuses to enable a bridge while
--- it is empty. poll_offset is the transport's update cursor, committed before
--- an update is acted on so a restart never replays a command.
+-- masked in API responses. allowed_chats is the allowlist of chat ids, a JSON
+-- array of strings. Only listed chats are served; an empty list serves none
+-- and only tells each chat its ID. poll_offset is the transport's update
+-- cursor, committed before an update is acted on so a restart never replays
+-- a command.
 --
 -- config_version grows on every save. The poller writes its cursor only for
 -- the version it read, so a cursor of the old bot can never land on a row

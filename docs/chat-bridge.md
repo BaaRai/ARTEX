@@ -26,14 +26,17 @@ Outbound notifications (pushing findings to a chat) are a separate feature under
 ## Security model
 
 - **Only allowlisted chats are served.** A chat that is not listed gets one refusal line, naming its
-  chat ID, and is then ignored for the life of the process. An empty allowlist serves no chat at all;
-  that is the state a new bot starts in while you collect chat IDs. Allowing a group allows every
-  member of that group.
+  chat ID, and is then ignored. The bot remembers up to 1024 refused chats, across saves of the same
+  bot; past that it starts over, so a chat may be refused one more time but a new chat always learns
+  its ID. An empty allowlist serves no chat at all; that is the state a new bot starts in while you
+  collect chat IDs. Allowing a group allows every member of that group.
 - **No inbound port.** The bot uses long polling (`getUpdates`) over outbound HTTPS.
 - **The token is a secret.** It is encrypted at rest with `keys/secret.key` like other stored
   secrets, shown masked in the UI and API, and never written to logs or error messages (errors keep
   only the scheme and host of the API address). Changing the API address requires entering the
-  token again, so a stored token is never sent to a new host.
+  token again, so a stored token is never sent to a new host. The API address must use `https`:
+  the token travels in the URL path, and the replies are the updates the bot acts on. Plain `http`
+  is accepted only with `ARTEX_NOTIFY_ALLOW_LOCAL=1`, for a local test server.
 - **Same network guard as notifications.** Calls refuse loopback and link-local addresses (including
   cloud metadata) unless `ARTEX_NOTIFY_ALLOW_LOCAL=1`, and never follow a cross-host redirect.
 - **No replays.** The update cursor is committed before a batch is acted on, so a crash loses a
@@ -59,5 +62,5 @@ All routes require the administrator JWT.
 
 `config` follows the notification channel convention: a masked value sent back unchanged keeps the
 stored secret, and an empty string clears a field. Telegram's fields are `bot_token` and the
-optional `base_url` (for a self-hosted Bot API server). The live `status.state` is `off`,
+optional `base_url` (an `https` address of a self-hosted Bot API server). The live `status.state` is `off`,
 `connecting`, `online` or `error`, with `last_error` when it fails.

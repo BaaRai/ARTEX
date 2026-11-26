@@ -324,3 +324,7 @@ func RedactTransportError(err error) string { return redactTransportError(err) }
 // ValidateEndpointURL checks a configured platform address the way the
 // channels do: http(s) only, a host, and no loopback or link-local literal.
 func ValidateEndpointURL(raw string) error { return validateHTTPURL(raw) }
+
+// AllowLocalTargets reports whether ARTEX_NOTIFY_ALLOW_LOCAL is set, the
+// explicit opt-in for local and test endpoints.
+func AllowLocalTargets() bool { return allowLocalTargets() }
