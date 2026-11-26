@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ApprovalDetail } from "@/components/approval-records";
 import { reportsBashExit127 } from "@/lib/bash-exit-status";
+import { formatBytes } from "@/lib/format";
 import type { Activity, InterceptPending } from "@/lib/types";
 
 // ---- per-agent lane color (planner + work#1/#2/#3 …) ---------------------------
@@ -565,18 +566,6 @@ function MessageBlock({
   );
 }
 
-// UserRow renders a right-aligned chat bubble: either a human turn (the message you
-// sent the main agent) or, in a worker session, the LLM-generated intent that leads
-// it (intent=true) — same bubble, but a target icon instead of the human avatar.
-// summary is a truncated first line, so the full message is pulled from the detail
-// and shown in full (bubble is whitespace-pre-wrap, so long/multi-line text wraps).
-// fmtBytes renders a human file size for attachment chips.
-function fmtBytes(n: number): string {
-  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
-  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`;
-  return `${n} B`;
-}
-
 type MsgAttachment = { name: string; path: string; size: number };
 
 // parseUserBody splits a user turn's body into text + attachments. The backend stores
@@ -598,6 +587,11 @@ function parseUserBody(body: string): { text: string; attachments: MsgAttachment
   return { text: body, attachments: [] };
 }
 
+// UserRow renders a right-aligned chat bubble: either a human turn (the message you
+// sent the main agent) or, in a worker session, the LLM-generated intent that leads
+// it (intent=true) — same bubble, but a target icon instead of the human avatar.
+// summary is a truncated first line, so the full message is pulled from the detail
+// and shown in full (bubble is whitespace-pre-wrap, so long/multi-line text wraps).
 function UserRow({ step, intent, getDetail }: { step: Activity; intent?: boolean; getDetail: (seq: number) => Promise<string> }) {
   const Icon = intent ? CrosshairIcon : UserIcon;
   const [ref, inView] = useInView();
@@ -641,7 +635,7 @@ function UserRow({ step, intent, getDetail }: { step: Activity; intent?: boolean
               >
                 <PaperclipIcon className="size-3 shrink-0 text-primary" />
                 <span className="max-w-[180px] truncate font-medium">{a.name}</span>
-                <span className="shrink-0 text-muted-foreground">{fmtBytes(a.size)}</span>
+                <span className="shrink-0 text-muted-foreground">{formatBytes(a.size)}</span>
               </div>
             ))}
           </div>

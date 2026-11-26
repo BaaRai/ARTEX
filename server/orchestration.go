@@ -169,9 +169,32 @@ func (s *Server) delegateToTask(ctx context.Context, in json.RawMessage, pick fu
 	if s.m.Assets() != nil {
 		tsx.SetAssetStore(s.m.Assets(), s.m.Assets().Companies())
 	}
-	tsx.SetNotify(t.Notify)         // generic wake-up (write ops without a dedicated callback go through it; no-op for read tools)
-	tsx.SetNotifyHint(t.NotifyHint) // add_hint → records an "orchestrator added N strategic hints: ..." entry and wakes the planner
+	tsx.SetNotify(t.Notify)                       // generic wake-up (write ops without a dedicated callback go through it; no-op for read tools)
+	tsx.SetResumeTask(func() { s.reviveTask(t) }) // set_goals → pulls a completed/paused task back to running
+	tsx.SetNotifyGoal(t.NotifyGoal)               // set_goals → records a goal-added trigger and wakes the planner
+	tsx.SetNotifyHint(t.NotifyHint)               // add_hint → records an "orchestrator added N strategic hints: ..." entry and wakes the planner
 	return pick(tsx).Call(ctx, inner, nil)
+}
+
+// buildDomainReg extends buildDomainReg(as) with task_id-delegating wrappers
+// for set_goals and set_constraints so task-less orchestration agents (Auto)
+// can manage goals and constraints on existing tasks via the same tool keys
+// without colliding with per-task MainAgent/Goals instances.
+func (s *Server) buildDomainReg() map[string]actool.CoreTool {
+	reg := buildDomainReg(s.m.Assets())
+	if reg == nil {
+		reg = make(map[string]actool.CoreTool)
+	}
+	ts := agent.NewToolSet(nil, "")
+	sg := ts.SetGoalsTool()
+	reg["set_goals"] = wrTool("set_goals", sg.Description(), sg.InputSchema(), func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+		return s.delegateToTask(ctx, in, (*agent.ToolSet).SetGoalsTool)
+	})
+	sc := ts.SetConstraintsTool()
+	reg["set_constraints"] = wrTool("set_constraints", sc.Description(), sc.InputSchema(), func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+		return s.delegateToTask(ctx, in, (*agent.ToolSet).SetConstraintsTool)
+	})
+	return reg
 }
 
 // --- tools ---
@@ -252,7 +275,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			"llm_profile_id":         map[string]any{"type": "integer", "description": "optional: the LLM profile id this subtask's planner/worker uses (see list_llm_profiles); empty inherits the parent task, then falls back to the global active profile"},
 			"timeout_seconds":        map[string]any{"type": "integer", "description": "optional: task-level timeout (seconds). When it fires, a graceful wrap-up runs and the task enters the timeout terminal state; empty or 0 = no time limit"},
 			"plan_heartbeat_seconds": map[string]any{"type": "integer", "description": "optional: planner heartbeat interval (seconds). When this much time has passed since the last planning round ended/the task started with no trigger in between → run one planning round (deadlock backstop + wakes the planner to supervise in-flight workers). Empty or 0 = default 600 (10min);"},
-			"seed_first_intent":      map[string]any{"type": "boolean", "description": "optional: enable for simple tasks to issue one seed intent at creation (content = description + goal) so a worker can start testing right away without waiting for the first planner round; default false (the standard plan-then-execute flow)."},
+			"seed_first_intent":      map[string]any{"type": "boolean", "description": "optional: pass true to issue one seed intent at creation (content = description + goal) so a worker starts immediately without waiting for the first planner round (Auto should pass true when dispatching a user target/objective); default false (the standard plan-then-execute flow)."},
 		}, "description", "goal"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
@@ -552,6 +575,7 @@ func (s *Server) seedOrchestrationTools() {
 	}
 	s.refreshBuiltinToolSchemas()
 	s.seedAutoDefaultBindings()
+	s.seedAutoGoalConstraintBindings()
 	s.seedPlannerDefaultBindings()
 	s.seedPlannerListAssetsBinding()
 	s.seedCompanyScopeRebind()
@@ -562,7 +586,8 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedAutoReportFindingBinding()
 	s.unbindGoalMetDefault()
 	s.reseedGoalsPrompt()             // goals prompt gains the "extract operation constraints" step → old DBs append a new default version (one-time)
-	s.reseedMainAgentPrompt()         // mainagent prompt gains "after goals are met, ask via add_intent whether to register a goal" (one-time)
+	s.reseedMainAgentPrompt()         // mainagent prompt updated to orchestration-only (no shell/file/HTTP tools) → old DBs append a new default version (one-time)
+	s.reseedAutoPrompt()              // auto prompt hardened with explicit spawn_task(seed_first_intent=true) dispatch rules (one-time)
 	s.reseedPlannerPrompt()           // planner prompt: rewrites the "zero intents" justification rules + adds quantitative acceptance checks (one-time)
 	s.reseedWorkerPrompt()            // worker prompt: adds the evidence bar for negative conclusions (one-time)
 	s.seedReporterAgent()             // seeds the "report writer" agent + tool bindings + finding trigger (one-time)
@@ -746,7 +771,7 @@ func (s *Server) reseedGoalsPrompt() {
 // in history, and users who customized can recover from the version record. settings flag guard → done only once. Fresh DBs need nothing
 // (SeedPromptIfEmpty already seeds the latest default). Structurally identical to reseedGoalsPrompt.
 func (s *Server) reseedMainAgentPrompt() {
-	const flag = "mainagent_prompt_goalless_intent_v1"
+	const flag = "mainagent_prompt_orchestrator_v2"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}
@@ -767,7 +792,33 @@ func (s *Server) reseedMainAgentPrompt() {
 		log.Printf("[prompts] failed to refresh mainagent prompt to the new default: %v", err)
 		return
 	}
-	log.Printf("[prompts] mainagent prompt: appended a new default version (adds the ask-about-registering-a-goal-after-met step, one-time)")
+	log.Printf("[prompts] mainagent prompt: appended a new default version (orchestration-only rules, one-time)")
+}
+
+// reseedAutoPrompt refreshes the Auto agent prompt to the hardened orchestration
+// default on existing DBs (once per flag; old versions remain in prompt history).
+func (s *Server) reseedAutoPrompt() {
+	const flag = "auto_prompt_orchestrator_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	a, err := s.m.pg.GetAgentByKey("auto")
+	if err != nil || a == nil {
+		return
+	}
+	tmpl := agent.BuiltinPromptSeeds()["auto"]
+	if tmpl == "" {
+		return
+	}
+	if cur, err := s.m.pg.CurrentPrompt(a.ID); err == nil && cur == tmpl {
+		return
+	}
+	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
+		log.Printf("[prompts] failed to refresh auto prompt to the new default: %v", err)
+		return
+	}
+	log.Printf("[prompts] auto prompt: appended a new default version (explicit dispatch rules, one-time)")
 }
 
 // reseedPlannerPrompt refreshes the planner prompt to [the current code default] — the default body was slimmed down and "restraint" demoted to
@@ -1088,11 +1139,38 @@ func (s *Server) seedAutoDefaultBindings() {
 		keys = append(keys, t.Name())
 	}
 	keys = append(keys, platformToolKeys...)
-	// Asset tools: Auto operating the platform often views/registers assets and manages company scopes.
-	keys = append(keys, "insert_assets", "add_company_scope", "list_assets")
+	// Asset & task-goal tools: Auto operating the platform views/registers assets,
+	// manages company scopes, and adds goals/constraints to existing tasks.
+	keys = append(keys, "insert_assets", "add_company_scope", "list_assets", "set_goals", "set_constraints")
 	if err := s.m.pg.AddAgentToToolBinding("auto", keys); err != nil {
 		log.Printf("[auto] default binding failed: %v", err)
 		return
+	}
+	_ = s.m.pg.SetSetting(flag, "true")
+}
+
+// seedAutoGoalConstraintBindings binds set_goals and set_constraints onto "auto"
+// and refreshes their stored schemas (adding the optional task_id property) ONCE
+// on existing DBs. Fresh DBs already get both from BuiltinToolSeeds().
+func (s *Server) seedAutoGoalConstraintBindings() {
+	const flag = "auto_goal_constraint_bindings_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	if err := s.m.pg.AddAgentToToolBinding("auto", []string{"set_goals", "set_constraints"}); err != nil {
+		log.Printf("[auto] set_goals/set_constraints default binding failed: %v", err)
+		return
+	}
+	refresh := map[string]bool{"set_goals": true, "set_constraints": true}
+	for _, sd := range agent.BuiltinToolSeeds() {
+		if !refresh[sd.Key] {
+			continue
+		}
+		schema, _ := json.Marshal(sd.Schema)
+		if err := s.m.pg.RefreshToolDefaults(sd.Key, sd.Desc, schema); err != nil {
+			log.Printf("[tools] refresh %s schema failed: %v", sd.Key, err)
+			return
+		}
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
 }
