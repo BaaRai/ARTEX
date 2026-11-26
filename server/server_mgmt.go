@@ -86,10 +86,18 @@ func pathInt(r *http.Request, name string) (int64, bool) {
 	return n, err == nil
 }
 
-// decodeMaxBytes is the default JSON body cap. Multipart uploads are not capped
-// here; those handlers set their own limit. A smaller MaxBytesReader installed
-// by a handler still wins, because it sits inside this one.
+// decodeMaxBytes is the default JSON body cap. Multipart uploads get the larger
+// maxMultipartBodyBytes here instead; the upload handlers set their own,
+// tighter limit. A smaller MaxBytesReader installed by a handler still wins,
+// because it sits inside this one.
 const decodeMaxBytes = 32 << 20
+
+// maxMultipartBodyBytes caps any request that declares a multipart Content-Type.
+// It is the largest limit an upload handler sets (chat attachments; workspace
+// uploads and skill zips are smaller), so no real upload is refused, while a
+// handler that decodes JSON straight from r.Body can no longer be handed an
+// unbounded body just by labelling the request multipart.
+const maxMultipartBodyBytes = maxChatUpload + chatUploadMultipartOverhead
 
 // limitedBody records a MaxBytesError so a later 400 can be answered as 413.
 type limitedBody struct {
@@ -128,10 +136,17 @@ func (b *bodyLimitWriter) Unwrap() http.ResponseWriter { return b.ResponseWriter
 
 // limitRequestBody caps a non-multipart body at decodeMaxBytes and passes the
 // real ResponseWriter into MaxBytesReader. A handler that then answers 400 for
-// that read is rewritten to 413.
+// that read is rewritten to 413. A multipart body gets the plain upload-sized
+// cap instead: it is not a limitedBody, so decode still applies the JSON cap
+// if a JSON handler receives it, and upload handlers keep their own messages.
 func limitRequestBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body == nil || r.Body == http.NoBody || isMultipart(r) {
+		if r.Body == nil || r.Body == http.NoBody {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if isMultipart(r) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxMultipartBodyBytes)
 			next.ServeHTTP(w, r)
 			return
 		}
