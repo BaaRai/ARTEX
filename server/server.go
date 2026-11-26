@@ -1593,6 +1593,9 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		SessionHeaderKey string `json:"session_header_key"` // non-empty = the test also sends this custom session header, with a one-off random session id as the value
 		UserAgent        string `json:"user_agent"`         // non-empty = the test overrides the User-Agent header with this value (mirrors production)
 		CustomHeaders    string `json:"custom_headers"`
+		// Which request key carries the output cap (openai format only): "" = max_tokens,
+		// "max_completion_tokens" = the newer key. Omitted (nil) = the stored profile's choice.
+		MaxTokensField *string `json:"max_tokens_field"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1650,6 +1653,18 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// here already, instead of discovering mid-conversation that "the profile that passed the test cannot run at all".
 	if req.Streaming != nil {
 		cfg.Stream = *req.Streaming
+	}
+	// The output-cap key follows the profile as well: OpenAI reasoning models reject
+	// max_tokens with unsupported_parameter, so a profile set to max_completion_tokens
+	// must be tested with that key, or the test 400s while conversations would work.
+	// Same normalization as saving a profile: only openai + the known value survives.
+	if req.MaxTokensField != nil {
+		cfg.MaxTokensField = strings.TrimSpace(*req.MaxTokensField)
+	} else if stored != nil {
+		cfg.MaxTokensField = stored.MaxTokensField
+	}
+	if cfg.Format != llm.FormatOpenAI || cfg.MaxTokensField != llm.MaxTokensFieldCompletion {
+		cfg.MaxTokensField = ""
 	}
 	// The custom session header name follows that profile too: when non-empty, the test request also sends it (value is a one-off random session id,
 	// see TestConnection). Endpoints like opencode zen that mandate x-opencode-session return
