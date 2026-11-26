@@ -2421,12 +2421,14 @@ func (t *Traffic) query(host, contains, bodyContains string, page, limit int) ([
 			authority := net.JoinHostPort(hostName, port)
 			prefixes := []string{"%://" + authority}
 			// Clients leave a default port out of the Host header, so a capture
-			// of https://host:443 is recorded as https://host.
+			// of https://host:443 is recorded as https://host, and a WebSocket
+			// over it as wss://host.
+			bare := strings.TrimSuffix(authority, ":"+port)
 			switch port {
 			case "80":
-				prefixes = append(prefixes, "http://"+strings.TrimSuffix(authority, ":80"))
+				prefixes = append(prefixes, "http://"+bare, "ws://"+bare)
 			case "443":
-				prefixes = append(prefixes, "https://"+strings.TrimSuffix(authority, ":443"))
+				prefixes = append(prefixes, "https://"+bare, "wss://"+bare)
 			}
 			var conds []string
 			for _, p := range prefixes {

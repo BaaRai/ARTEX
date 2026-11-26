@@ -455,6 +455,11 @@ func TestQueryHostDefaultPort(t *testing.T) {
 	v6 := newFlow("x", "GET", "/", nil, []byte("v6"))
 	v6.Request.URL, _ = url.Parse("https://[2001:db8::1]/admin")
 	tr.record(v6)
+	ws := newFlow("x", "GET", "/", nil, nil)
+	ws.Request.URL, _ = url.Parse("https://chat.example.com/socket")
+	if _, err := tr.recordStreamStart(flowRequestView(ws.Request), responseView{}, "websocket", nil); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tc := range []struct {
 		host string
@@ -466,6 +471,7 @@ func TestQueryHostDefaultPort(t *testing.T) {
 		{host: "http://shop.example.com:80/", want: "http://shop.example.com/plain"},
 		{host: "shop.example.com:8443", want: "http://shop.example.com:8443/alt"},
 		{host: "[2001:db8::1]:443", want: "https://[2001:db8::1]/admin"},
+		{host: "chat.example.com:443", want: "wss://chat.example.com/socket"},
 	} {
 		rows, err := tr.query(tc.host, "", "", 0, 10)
 		if err != nil {
