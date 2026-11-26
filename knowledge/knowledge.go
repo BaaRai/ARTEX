@@ -204,7 +204,7 @@ func (p *Pack) Search(source, query string, limit int) ([]Entry, int, error) {
 		case strings.Contains(name, lowerQuery):
 			score += 3
 		}
-		if strings.HasPrefix(id, strings.ToUpper(q)) {
+		if strings.HasPrefix(id, lowerQuery) {
 			score += 2
 		}
 		hits = append(hits, hit{entry: e, score: score})

@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -86,10 +86,18 @@ func pathInt(r *http.Request, name string) (int64, bool) {
 	return n, err == nil
 }
 
-// decodeMaxBytes is the default JSON body cap. Multipart uploads are not capped
-// here; those handlers set their own limit. A smaller MaxBytesReader installed
-// by a handler still wins, because it sits inside this one.
+// decodeMaxBytes is the default JSON body cap. Multipart uploads get the larger
+// maxMultipartBodyBytes here instead; the upload handlers set their own,
+// tighter limit. A smaller MaxBytesReader installed by a handler still wins,
+// because it sits inside this one.
 const decodeMaxBytes = 32 << 20
+
+// maxMultipartBodyBytes caps any request that declares a multipart Content-Type.
+// It is the largest limit an upload handler sets (chat attachments; workspace
+// uploads and skill zips are smaller), so no real upload is refused, while a
+// handler that decodes JSON straight from r.Body can no longer be handed an
+// unbounded body just by labelling the request multipart.
+const maxMultipartBodyBytes = maxChatUpload + chatUploadMultipartOverhead
 
 // limitedBody records a MaxBytesError so a later 400 can be answered as 413.
 type limitedBody struct {
@@ -128,10 +136,17 @@ func (b *bodyLimitWriter) Unwrap() http.ResponseWriter { return b.ResponseWriter
 
 // limitRequestBody caps a non-multipart body at decodeMaxBytes and passes the
 // real ResponseWriter into MaxBytesReader. A handler that then answers 400 for
-// that read is rewritten to 413.
+// that read is rewritten to 413. A multipart body gets the plain upload-sized
+// cap instead: it is not a limitedBody, so decode still applies the JSON cap
+// if a JSON handler receives it, and upload handlers keep their own messages.
 func limitRequestBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body == nil || r.Body == http.NoBody || isMultipart(r) {
+		if r.Body == nil || r.Body == http.NoBody {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if isMultipart(r) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxMultipartBodyBytes)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -207,7 +222,7 @@ func (s *Server) abortTaskDelete(taskID string) {
 			state := task.lifecycleSnapshot()
 			keepPaused = state.Paused || state.Queued
 			if getErr != nil {
-				log.Printf("[task-delete] task %s failed to read persisted state, restoring the barrier from in-memory state: %v", taskID, getErr)
+				slog.Warn("[task-delete] failed to read persisted state, restoring barrier from in-memory state", "task_id", taskID, "err", getErr)
 			}
 		} else if getErr == nil {
 			// The request targeted a task that does not exist. Do not retain a
@@ -361,7 +376,7 @@ func (s *Server) pgCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	// starter prompt so the editor shows something editable from the start.
 	if err := pg.SeedPromptIfEmpty(a.ID, agent.DefaultAssistantPrompt); err != nil {
-		log.Printf("[agents] failed to seed starter prompt for %s: %v", a.Key, err)
+		slog.Error("[agents] failed to seed starter prompt", "agent", a.Key, "err", err)
 	}
 	writeJSON(w, 200, agentDTO(a))
 }
@@ -409,10 +424,10 @@ func (s *Server) pgDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := pg.RemoveAgentFromToolBindings(a.Key); err != nil {
-		log.Printf("[agents] failed to clean up tool bindings for %s: %v", a.Key, err)
+		slog.Error("[agents] failed to clean up tool bindings", "agent", a.Key, "err", err)
 	}
 	if err := pg.DeleteTriggersForAgent(a.Key); err != nil {
-		log.Printf("[agents] failed to clean up triggers for %s: %v", a.Key, err)
+		slog.Error("[agents] failed to clean up triggers", "agent", a.Key, "err", err)
 	}
 	writeJSON(w, 200, map[string]any{"deleted": a.Key})
 }
@@ -850,7 +865,7 @@ func (s *Server) pgListTools(w http.ResponseWriter, r *http.Request) {
 	// catalog query, so agent assembly never pays for this aggregate.
 	counts, countErr := pg.ToolUsageCounts()
 	if countErr != nil {
-		log.Printf("[tools] failed to read call stats: %v", countErr)
+		slog.Warn("[tools] failed to read call stats", "err", countErr)
 	} else {
 		for _, tool := range ts {
 			tool.Calls = counts[tool.Key]
@@ -1071,7 +1086,7 @@ func (s *Server) pgSaveMCP(w http.ResponseWriter, r *http.Request) {
 		m.ID = id
 		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 		if derr := s.discoverAndCacheMCP(ctx, &m); derr != nil {
-			log.Printf("[mcp] tool discovery after adding %s failed: %v", m.Name, derr)
+			slog.Error("[mcp] tool discovery failed after adding mcp", "mcp", m.Name, "err", derr)
 		}
 		cancel()
 	}
@@ -1182,7 +1197,7 @@ func (s *Server) fsListSkills(w http.ResponseWriter, r *http.Request) {
 	if s.m.pg != nil {
 		stats, err := s.m.pg.SkillStats()
 		if err != nil {
-			log.Printf("[skills] failed to read call stats: %v", err)
+			slog.Warn("[skills] failed to read call stats", "err", err)
 		}
 		for _, st := range stats {
 			statBySkill[st.Skill] = st
@@ -1227,7 +1242,8 @@ func (s *Server) fsSkillUsage(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	calls, err := pg.RecentSkillCalls(name, limit)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		slog.Error("[skills] failed to read recent calls", "skill", name, "err", err)
+		writeErr(w, 500, "failed to load skill usage")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"calls": calls})
@@ -1243,7 +1259,8 @@ func (s *Server) fsMissingSkills(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	missing, err := pg.MissingSkillStats(limit)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		slog.Error("[skills] failed to read missing stats", "err", err)
+		writeErr(w, 500, "failed to load missing skills")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"missing": missing})
@@ -1437,7 +1454,7 @@ func warnBrokenSkills(dir string) {
 		if s.Dir == "" || s.Name == filepath.Base(s.Dir) {
 			continue
 		}
-		log.Printf("[skill] %s: frontmatter did not parse (loaded under the directory name; description and mcps are empty) - fix the YAML in %s", s.Name, filepath.Join(s.Dir, "SKILL.md"))
+		slog.Warn("[skill] frontmatter did not parse (loaded under directory name; fix YAML in SKILL.md)", "skill", s.Name, "path", filepath.Join(s.Dir, "SKILL.md"))
 	}
 }
 
@@ -2029,7 +2046,8 @@ func (s *Server) pgSkillVisibility(w http.ResponseWriter, r *http.Request) {
 	}
 	agents, err := pg.SkillAgents(r.PathValue("name"))
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		slog.Error("[skills] failed to read visibility", "skill", r.PathValue("name"), "err", err)
+		writeErr(w, 500, "failed to load skill visibility")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"agents": idStrings(agents)})
@@ -2050,7 +2068,8 @@ func (s *Server) pgToggleSkillVisibility(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := pg.ToggleSkillVisibility(body.AgentID, body.SkillName, body.Visible); err != nil {
-		writeErr(w, 500, err.Error())
+		slog.Error("[skills] failed to toggle visibility", "skill", body.SkillName, "err", err)
+		writeErr(w, 500, "failed to update skill visibility")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -2125,6 +2144,12 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		CustomHeaders      string `json:"custom_headers"`
 		ClearCustomHeaders bool   `json:"clear_custom_headers"`
 		Streaming          *bool  `json:"streaming"`
+		// Prices shadow the embedded fields so an omitted one keeps the stored
+		// value instead of resetting it to 0 (every save rewrites all four).
+		PriceInputPerM      *float64 `json:"price_input_per_m"`
+		PriceOutputPerM     *float64 `json:"price_output_per_m"`
+		PriceCacheReadPerM  *float64 `json:"price_cache_read_per_m"`
+		PriceCacheWritePerM *float64 `json:"price_cache_write_per_m"`
 	}
 	if err := decode(w, r, &body); err != nil {
 		writeErr(w, 400, err.Error())
@@ -2178,6 +2203,32 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	if p.MaxTokens < 0 {
 		p.MaxTokens = 0
 	}
+	var stored *db.LLMProfile
+	if p.ID != 0 && (body.PriceInputPerM == nil || body.PriceOutputPerM == nil || body.PriceCacheReadPerM == nil || body.PriceCacheWritePerM == nil) {
+		var err error
+		if stored, err = pg.ProfileByID(p.ID); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	var old db.LLMProfile
+	if stored != nil {
+		old = *stored
+	}
+	price := func(in, out *float64, kept float64) {
+		switch {
+		case in != nil:
+			*out = max(*in, 0)
+		case stored != nil:
+			*out = kept
+		default:
+			*out = 0
+		}
+	}
+	price(body.PriceInputPerM, &p.PriceInputPerM, old.PriceInputPerM)
+	price(body.PriceOutputPerM, &p.PriceOutputPerM, old.PriceOutputPerM)
+	price(body.PriceCacheReadPerM, &p.PriceCacheReadPerM, old.PriceCacheReadPerM)
+	price(body.PriceCacheWritePerM, &p.PriceCacheWritePerM, old.PriceCacheWritePerM)
 	if p.Format != "openai" || p.MaxTokensField != llm.MaxTokensFieldCompletion {
 		p.MaxTokensField = ""
 	}
@@ -2298,7 +2349,7 @@ func (s *Server) restoreTasksAfterProfileDelete(pg *db.DB) {
 				// paused task remains paused and terminal tasks remain immutable.
 				if !isTerminalStatus(task.lifecycleSnapshot().Status) && s.taskRuntimeAvailable(task, "planner", "worker") {
 					if _, reopenErr := task.Store.ReopenIntentsByBlockedReason(db.IntentBlockedLLMQuota); reopenErr != nil {
-						log.Printf("[llm-profile] task %s reopen quota-blocked intents after profile delete: %v", task.ID, reopenErr)
+						slog.Warn("[llm-profile] reopen quota-blocked intents failed after profile delete", "task_id", task.ID, "err", reopenErr)
 					}
 				}
 				task.Notify()

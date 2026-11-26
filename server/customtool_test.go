@@ -33,9 +33,23 @@ func TestRenderTemplateCommand(t *testing.T) {
 
 func TestRenderTemplateHTTP(t *testing.T) {
 	// http: identity (no shell quoting) — raw substitution into url/body.
-	got := renderTemplate("https://x/submit?flag={flag}", map[string]any{"flag": "CTF{abc}"}, identity)
+	// abc is a real param; braces inside the flag value must stay literal.
+	got := renderTemplate("https://x/submit?flag={flag}", map[string]any{
+		"flag": "CTF{abc}",
+		"abc":  "nope",
+	}, identity)
 	if got != "https://x/submit?flag=CTF{abc}" {
 		t.Fatalf("http render: %q", got)
+	}
+}
+
+func TestRenderTemplateDoesNotRescanValues(t *testing.T) {
+	got := renderTemplate("cmd {a} {missing}", map[string]any{
+		"a": "{b}",
+		"b": "; id",
+	}, shellQuote)
+	if got != "cmd '{b}' {missing}" {
+		t.Fatalf("render = %q", got)
 	}
 }
 

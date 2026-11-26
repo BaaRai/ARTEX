@@ -136,3 +136,36 @@ func TestEveryEntryHasNameAndURL(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchRanksIDPrefixHigher(t *testing.T) {
+	p, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Construct a small pack where one entry's ID has prefix "t105" and another
+	// only mentions "t105" in its description, with an alphabetically earlier ID.
+	// Without the lowerQuery fix, both get score 1 and "A000" sorts first.
+	custom := &Pack{
+		sources: map[string]*source{
+			"attack": {
+				entries: []Entry{
+					{ID: "A000", Name: "Unrelated Alpha", Description: "mentions t105 in text"},
+					{ID: "T1059", Name: "Command and Scripting Interpreter", Description: "shell execution"},
+				},
+				byID: map[string]int{"A000": 0, "T1059": 1},
+			},
+		},
+		names: []string{"attack"},
+	}
+	_ = p
+	got, total, err := custom.Search("attack", "T105", 5)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if total != 2 || len(got) != 2 {
+		t.Fatalf("got %d (total %d), want 2", len(got), total)
+	}
+	if got[0].ID != "T1059" {
+		t.Fatalf("first match = %s, want T1059 ranked ahead of description-only match A000", got[0].ID)
+	}
+}

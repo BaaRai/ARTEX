@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -247,19 +247,19 @@ func (d *DB) DeleteNotificationChannel(ctx context.Context, id int64) error {
 func RecordNotificationEventTx(ctx context.Context, tx *sql.Tx, kind string, findingID int64, snap notify.Snapshot) bool {
 	raw, err := json.Marshal(snap)
 	if err != nil {
-		log.Printf("[notify] failed to serialize delivery event finding=%d: %v", findingID, err)
+		slog.Error("[notify] failed to serialize delivery event", "finding", findingID, "err", err)
 		return false
 	}
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT notify_event`); err != nil {
-		log.Printf("[notify] failed to create savepoint finding=%d: %v", findingID, err)
+		slog.Error("[notify] failed to create savepoint", "finding", findingID, "err", err)
 		return false
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_events(kind,finding_id,snapshot) VALUES($1,$2,$3)`,
 		kind, findingID, string(raw)); err != nil {
-		log.Printf("[notify] failed to write delivery event finding=%d (finding record unaffected): %v", findingID, err)
+		slog.Error("[notify] failed to write delivery event (finding record unaffected)", "finding", findingID, "err", err)
 		// Roll back to the savepoint, rescuing the transaction from the aborted state.
 		if _, rbErr := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT notify_event`); rbErr != nil {
-			log.Printf("[notify] failed to roll back to savepoint finding=%d: %v", findingID, rbErr)
+			slog.Error("[notify] failed to roll back to savepoint", "finding", findingID, "err", rbErr)
 		}
 		return false
 	}

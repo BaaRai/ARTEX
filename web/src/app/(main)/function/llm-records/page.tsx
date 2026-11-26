@@ -44,29 +44,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatShortDateTime, formatTokens } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { intlLocale, t } from "@/i18n";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { LLMRecordItem, LLMRecordDetail, LLMTask } from "@/lib/types";
-
-function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString(intlLocale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 function fmtLatency(ms: number) {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function fmtTokens(n: number) {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
 }
 
 function tryFormatJSON(s: string): string {
@@ -424,7 +410,7 @@ export default function LLMRecordsPage() {
                       onClick={() => setSelected(rec)}
                     >
                       <TableCell className="text-xs text-muted-foreground tabular-nums">
-                        {fmtTime(rec.ts)}
+                        {formatShortDateTime(rec.ts)}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-muted-foreground">
                         {rec.task_id ? `#${rec.task_id}` : "-"}
@@ -447,7 +433,7 @@ export default function LLMRecordsPage() {
                       </TableCell>
                       <TableCell>
                         <span className="text-xs">
-                          {fmtTokens(rec.input_tokens)} / {fmtTokens(rec.output_tokens)}
+                          {formatTokens(rec.input_tokens)} / {formatTokens(rec.output_tokens)}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -484,9 +470,7 @@ export default function LLMRecordsPage() {
                   {t("Task #{id}", { id: selected.task_id })}
                 </Badge>
               )}
-              <span className="text-xs text-muted-foreground">
-                {fmtTime(selected.ts)}
-              </span>
+              <span className="text-xs text-muted-foreground">{formatShortDateTime(selected.ts)}</span>
               <span className={cn("text-xs", selected.latency_ms > 30000 && "text-amber-500")}>
                 {fmtLatency(selected.latency_ms)}
               </span>

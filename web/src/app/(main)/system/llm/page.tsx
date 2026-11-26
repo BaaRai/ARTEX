@@ -345,6 +345,7 @@ function ProfileSheet({
   const [rps, setRps] = React.useState("0");
   const [rpm, setRpm] = React.useState("0");
   const [cw, setCw] = React.useState("0"); // context window (K tokens); 0 = default 200K
+  const [prices, setPrices] = React.useState({ input: "0", output: "0", cacheRead: "0", cacheWrite: "0" }); // EUR per 1M tokens; 0 = unset
   const [thinkingType, setThinkingType] = React.useState(NONE);
   const [effort, setEffort] = React.useState(NONE);
   const [priority, setPriority] = React.useState("0"); // pool order; higher = tried earlier
@@ -380,6 +381,12 @@ function ProfileSheet({
     setRps(String(profile?.rate_per_second ?? 0));
     setRpm(String(profile?.rate_per_minute ?? 0));
     setCw(String(profile?.context_window_k ?? 0));
+    setPrices({
+      input: String(profile?.price_input_per_m ?? 0),
+      output: String(profile?.price_output_per_m ?? 0),
+      cacheRead: String(profile?.price_cache_read_per_m ?? 0),
+      cacheWrite: String(profile?.price_cache_write_per_m ?? 0),
+    });
     setThinkingType(fromStore(profile?.thinking_type));
     setEffort(fromStore(profile?.reasoning_effort));
     setPriority(String(profile?.priority ?? 0));
@@ -449,6 +456,8 @@ function ProfileSheet({
         sessionHeaderKey.trim(),
         userAgent.trim(),
         customHeaders,
+        // Test with the output-cap key the profile would actually send (OpenAI reasoning models reject max_tokens).
+        format === "openai" ? toStore(maxTokensField) : "",
       );
       // Show the reply too: only when the model demonstrably spoke is this the same as working inside a session.
       if (r.ok)
@@ -482,6 +491,10 @@ function ProfileSheet({
         rate_per_second: Number(rps) || 0,
         rate_per_minute: Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
+        price_input_per_m: Math.max(0, Number(prices.input) || 0),
+        price_output_per_m: Math.max(0, Number(prices.output) || 0),
+        price_cache_read_per_m: Math.max(0, Number(prices.cacheRead) || 0),
+        price_cache_write_per_m: Math.max(0, Number(prices.cacheWrite) || 0),
         thinking_type: toStore(thinkingType),
         reasoning_effort: toStore(effort),
         priority: Number(priority) || 0,
@@ -767,6 +780,32 @@ function ProfileSheet({
             {t(
               "Rate limits of 0 mean unlimited, shared across all agents. The context window is in K (thousand tokens); 0 = the 200K default, capped at 1000 (i.e. 1M). Setting it too high keeps compression from ever triggering.",
             )}
+          </p>
+
+          <div className="grid gap-4 sm:grid-cols-4">
+            {(
+              [
+                ["input", t("Input price")],
+                ["output", t("Output price")],
+                ["cacheRead", t("Cache read price")],
+                ["cacheWrite", t("Cache write price")],
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key} className="grid gap-2">
+                <Label htmlFor={`p-price-${key}`}>{label}</Label>
+                <Input
+                  id={`p-price-${key}`}
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={prices[key]}
+                  onChange={(e) => setPrices((p) => ({ ...p, [key]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
+          <p className="-mt-2 text-muted-foreground text-xs">
+            {t("Optional. EUR per 1M tokens, used to compute the cost of this profile's token usage. 0 = not priced.")}
           </p>
 
           <div className="grid gap-3 rounded-lg border p-3">
