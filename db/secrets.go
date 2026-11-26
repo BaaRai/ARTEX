@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,7 +83,9 @@ var (
 	colMCPEnv      = secretColumn{"mcp_servers", "env", true, ""}
 	colCredPass    = secretColumn{"task_credentials", "password", false, ""}
 	colNotifConfig = secretColumn{"notification_channels", "config", true, ""}
-	colToolExec    = secretColumn{"tools", "exec", true, ""} // system=false rows: headers, proxy, body, code, command
+	// Inbound chat bridges: the config carries the bot token.
+	colChatBridgeConfig = secretColumn{"chat_bridges", "config", true, ""}
+	colToolExec         = secretColumn{"tools", "exec", true, ""} // system=false rows: headers, proxy, body, code, command
 	// Evidence head blocks carry the captured Cookie and Authorization headers.
 	colEvReqHead  = secretColumn{"traffic_evidence_snapshots", "req_head", false, ""}
 	colEvRespHead = secretColumn{"traffic_evidence_snapshots", "resp_head", false, ""}
@@ -96,7 +98,7 @@ var (
 	colHookSource      = secretColumn{"traffic_tamper_hooks", "source", false, ""}
 	colHookVerMatchers = secretColumn{"traffic_tamper_hook_versions", "matchers", true, ""}
 	colHookVerSource   = secretColumn{"traffic_tamper_hook_versions", "source", false, ""}
-	secretColumns      = append([]secretColumn{colLLMKey, colLLMProxy, colLLMHeaders, colMCPEnv, colCredPass, colNotifConfig, colToolExec, colEvReqHead, colEvRespHead, colRewriteMatchers, colRewriteActions, colHookMatchers, colHookSource, colHookVerMatchers, colHookVerSource}, secretSettingColumns()...)
+	secretColumns      = append([]secretColumn{colLLMKey, colLLMProxy, colLLMHeaders, colMCPEnv, colCredPass, colNotifConfig, colChatBridgeConfig, colToolExec, colEvReqHead, colEvRespHead, colRewriteMatchers, colRewriteActions, colHookMatchers, colHookSource, colHookVerMatchers, colHookVerSource}, secretSettingColumns()...)
 )
 
 // secretSettingKeys are the settings stored encrypted, AAD "settings.<key>".
@@ -306,7 +308,7 @@ func (d *DB) InitSecrets(keyDir string) error {
 		if err != nil {
 			return err
 		}
-		log.Printf("[secrets] at-rest encryption ready; backfill encrypted %d plaintext value(s)", n)
+		slog.Info("[secrets] at-rest encryption ready", "backfilled_plaintext_values", n)
 		activeSecretBox.Store(box)
 		sub := deriveSubKey(key, trafficTraceDomain)
 		trafficTraceKey.Store(&sub)
@@ -362,7 +364,7 @@ func loadSecretKey(ctx context.Context, conn *sql.Conn, keyDir string) ([]byte, 
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("write secret key: %w", err)
 	}
-	log.Printf("[secrets] new secret key written to %s", path)
+	slog.Info("[secrets] new secret key written", "path", path)
 	return key, nil
 }
 
