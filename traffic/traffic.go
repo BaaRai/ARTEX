@@ -2510,7 +2510,7 @@ func (t *Traffic) Tools() []actool.CoreTool {
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"host":          map[string]any{"type": "string", "description": "Filter by host (required; e.g. '107.172.96.177', '107.172.96.177:8082', or 'http://107.172.96.177:8082/path')"},
+				"host":          map[string]any{"type": "string", "description": "Filter by host (required; e.g. '192.0.2.10', '192.0.2.10:8082', or 'http://192.0.2.10:8082/path')"},
 				"contains":      map[string]any{"type": "string", "description": "URL substring filter (optional, e.g. 'api' / 'login')"},
 				"body_contains": map[string]any{"type": "string", "description": "Full-text body search (optional, at least 3 characters); matches request/response headers and bodies, e.g. 'password' / 'root:x:0' / 'internal test'"},
 				"limit":         map[string]any{"type": "integer", "description": "Page size, default 3, max 10"},
