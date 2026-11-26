@@ -266,7 +266,7 @@ func (s *AssetStore) isScopeExpansion(taskID int64, candidate TaskScope) (bool, 
 			if r.Kind == "company" && r.CompanyID != nil && *r.CompanyID > 0 {
 				var matched int
 				err := s.db.QueryRow(
-					`SELECT 1 FROM company_scope WHERE company_id=$1 AND kind IN ('root_domain','subdomain') AND ($2 = value OR $2 LIKE '%.' || value) LIMIT 1`,
+					`SELECT 1 FROM company_scope WHERE company_id=$1 AND kind='domain' AND ($2 = domain OR right($2, length(domain)+1) = '.' || domain) LIMIT 1`,
 					*r.CompanyID, candidate.Domain,
 				).Scan(&matched)
 				if err == nil && matched == 1 {

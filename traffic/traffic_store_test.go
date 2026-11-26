@@ -442,6 +442,51 @@ func TestQueryHostPortAndURLForms(t *testing.T) {
 	}
 }
 
+// TestQueryHostDefaultPort covers captures of default-port targets: clients
+// leave :80 and :443 out of the Host header, so the recorded URL carries no
+// port, and a search naming that port must still find them.
+func TestQueryHostDefaultPort(t *testing.T) {
+	tr, _ := openTraffic(t)
+	tls := newFlow("x", "GET", "/", nil, []byte("tls"))
+	tls.Request.URL, _ = url.Parse("https://shop.example.com/login")
+	tr.record(tls)
+	tr.record(newFlow("shop.example.com", "GET", "/plain", nil, []byte("plain")))
+	tr.record(newFlow("shop.example.com:8443", "GET", "/alt", nil, []byte("alt")))
+	v6 := newFlow("x", "GET", "/", nil, []byte("v6"))
+	v6.Request.URL, _ = url.Parse("https://[2001:db8::1]/admin")
+	tr.record(v6)
+	ws := newFlow("x", "GET", "/", nil, nil)
+	ws.Request.URL, _ = url.Parse("https://chat.example.com/socket")
+	if _, err := tr.recordStreamStart(flowRequestView(ws.Request), responseView{}, "websocket", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		host string
+		want string
+	}{
+		{host: "shop.example.com:443", want: "https://shop.example.com/login"},
+		{host: "https://shop.example.com:443/login", want: "https://shop.example.com/login"},
+		{host: "shop.example.com:80", want: "http://shop.example.com/plain"},
+		{host: "http://shop.example.com:80/", want: "http://shop.example.com/plain"},
+		{host: "shop.example.com:8443", want: "http://shop.example.com:8443/alt"},
+		{host: "[2001:db8::1]:443", want: "https://[2001:db8::1]/admin"},
+		{host: "chat.example.com:443", want: "wss://chat.example.com/socket"},
+	} {
+		rows, err := tr.query(tc.host, "", "", 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || rows[0].URL != tc.want {
+			var got []string
+			for _, r := range rows {
+				got = append(got, r.URL)
+			}
+			t.Errorf("query(%q) = %v, want [%s]", tc.host, got, tc.want)
+		}
+	}
+}
+
 func TestNormalizeSearchHost(t *testing.T) {
 	for _, tc := range []struct {
 		raw, host, port string

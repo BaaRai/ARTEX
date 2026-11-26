@@ -711,6 +711,10 @@ const unavailableMarker = "[original request unavailable]\n"
 // so there is never a rewritten exchange without its trace. Without trace
 // lines this is exactly what record always wrote.
 func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.TraceLine) {
+	// Decoding a compressed body is CPU work on up to maxIndexBody bytes each;
+	// it runs before the write lock so concurrent records do not wait on it.
+	reqIdx, reqDecoded := indexBody(rq.header, rq.body)
+	respIdx, respDecoded := indexBody(rs.header, rs.body)
 	// The write lock covers blob + index writes, so DeleteHost (and its blob GC)
 	// can run under the same lock without racing a concurrent record.
 	t.wmu.Lock()
@@ -733,6 +737,12 @@ func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.T
 	// work and must not sit inside the SQLite write lock.
 	reqB := t.spill(rq.body, rq.header.Get("Content-Type"))
 	respB := t.spill(rs.body, ct)
+	if reqDecoded {
+		reqB.index = reqIdx
+	}
+	if respDecoded {
+		respB.index = respIdx
+	}
 	trace := t.spillTrace(lines)
 
 	// A rewritten exchange is logged by host, step and rule ids only: its URL
@@ -1234,13 +1244,30 @@ ORDER BY ts DESC LIMIT 8`, fromTS, toTS, arg)
 		}
 		for _, cand := range ids {
 			_, resp, gerr := t.Get(cand)
-			if gerr != nil || !strings.Contains(resp, line) {
+			if gerr != nil {
 				continue
 			}
-			return cand, true, nil
+			if strings.Contains(resp, line) || t.decodedResponseContains(cand, line) {
+				return cand, true, nil
+			}
 		}
 	}
 	return "", false, nil
+}
+
+// decodedResponseContains reports whether the decoded body of a compressed
+// response contains line. Get returns the body as recorded, which for a
+// Content-Encoding response is the compressed bytes.
+func (t *Traffic) decodedResponseContains(id, line string) bool {
+	_, _, respHead, respBody, err := t.loadFullExchange(id, "")
+	if err != nil {
+		return false
+	}
+	_, _, headers := parseStoredResponseHead(respHead)
+	h := http.Header{}
+	h.Set("Content-Encoding", findHeaderValue(headers, "Content-Encoding"))
+	dec, ok := decodeBody(h, respBody, maxIndexBody)
+	return ok && strings.Contains(string(dec), line)
 }
 
 // ftsFilter builds the SQL condition restricting rows to those whose indexed
@@ -2419,12 +2446,23 @@ func (t *Traffic) query(host, contains, bodyContains string, page, limit int) ([
 			// so constrain the original URL authority as a compatibility fallback.
 			// New and old captures therefore share the same search contract.
 			authority := net.JoinHostPort(hostName, port)
-			q += ` AND (url LIKE ? OR url LIKE ? OR url LIKE ?)`
-			args = append(args,
-				"%://"+authority+"/%",
-				"%://"+authority+"?%",
-				"%://"+authority,
-			)
+			prefixes := []string{"%://" + authority}
+			// Clients leave a default port out of the Host header, so a capture
+			// of https://host:443 is recorded as https://host, and a WebSocket
+			// over it as wss://host.
+			bare := strings.TrimSuffix(authority, ":"+port)
+			switch port {
+			case "80":
+				prefixes = append(prefixes, "http://"+bare, "ws://"+bare)
+			case "443":
+				prefixes = append(prefixes, "https://"+bare, "wss://"+bare)
+			}
+			var conds []string
+			for _, p := range prefixes {
+				conds = append(conds, `url LIKE ? OR url LIKE ? OR url LIKE ?`)
+				args = append(args, p+"/%", p+"?%", p)
+			}
+			q += ` AND (` + strings.Join(conds, ` OR `) + `)`
 		}
 	}
 	if contains != "" {

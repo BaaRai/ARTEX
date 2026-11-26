@@ -38,11 +38,13 @@ type ToolSeed struct {
 // Call.
 //
 // Deliberately EXCLUDES the SDK general tools actool.DefaultTools() (Read/Write/
-// Edit/MultiEdit/LS/Glob/Grep/Bash): every agent always has them, there is no
-// "bind to whom" trade-off, and most of their documentation lives in Prompt() (this
-// table only covers Description(), which would create misleading half-coverage).
-// Not seeded → no DB row → ToolResolve passes them through untouched, behavior
-// identical to before. Only artex's own domain tools enter the table as manageable.
+// Edit/MultiEdit/LS/Glob/Grep/Bash): whether an agent receives them is decided
+// by its role in code (execution agents — planner/worker/pentest/custom — get
+// them; pure orchestration agents — auto and mainagent — do not), and most of
+// their documentation lives in Prompt() (this table only covers Description(),
+// which would create misleading half-coverage). Not seeded → no DB row →
+// ToolResolve passes them through untouched for agents whose base includes them.
+// Only artex's own domain tools enter the table as manageable.
 func builtinToolsByAgent() map[string][]actool.CoreTool {
 	ts := NewToolSet(nil, "")
 	return map[string][]actool.CoreTool{
@@ -54,10 +56,11 @@ func builtinToolsByAgent() map[string][]actool.CoreTool {
 		// into the store. Shares the same managed tools with mainagent; the web UI can
 		// edit description/schema and check them per agent.
 		"goals": {ts.setGoals(), ts.setConstraints()},
-		// auto binds the finding-reporting + asset-management tools by default; other
-		// domain tools can be checked on demand in the UI.
-		// New databases are seeded from here; old databases are migrated by seedAutoDefaultBindings.
-		"auto": {ts.addFinding(), ts.insertAssets(), ts.addCompanyScope(), ts.listAssets(), ts.listCompanies()},
+		// auto binds the orchestration/goal/constraint + finding/asset tools by default;
+		// other domain tools can be checked on demand in the UI.
+		// New databases are seeded from here; old databases are migrated by seedAutoDefaultBindings
+		// and seedAutoGoalConstraintBindings.
+		"auto": {ts.addFinding(), ts.insertAssets(), ts.addCompanyScope(), ts.listAssets(), ts.listCompanies(), ts.setGoals(), ts.setConstraints()},
 		// pentest (solo pentest agent) binds by default: list assets / insert assets /
 		// report finding / list findings / list companies.
 		// New databases are seeded from here; old databases are migrated by seedPentestDefaultBindings.

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -106,18 +106,18 @@ func (p *Pool) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[
 			}
 			lastErr = failed
 			if tripped, msg := p.health.RecordCall(ctx, m.ID, true, false, failed); tripped {
-				log.Printf("[llmpool] profile %q(%s) breaker tripped: %s", m.Name, m.Model, msg)
+				slog.Warn("[llmpool] profile breaker tripped", "profile", m.Name, "model", m.Model, "reason", msg)
 			}
 			if i+1 < len(order) {
 				n := order[i+1]
-				log.Printf("[llmpool] LLM failover: %q(%s) → %q(%s), reason: %s",
-					m.Name, m.Model, n.Name, n.Model, trimErr(failed))
+				slog.Warn("[llmpool] LLM failover", "from_profile", m.Name, "from_model", m.Model,
+					"to_profile", n.Name, "to_model", n.Model, "reason", trimErr(failed))
 			}
 		}
 		if lastErr == nil {
 			lastErr = ErrExhausted
 		}
-		log.Printf("[llmpool] failover chain exhausted (all %d profiles failed), last error: %s", len(order), trimErr(lastErr))
+		slog.Error("[llmpool] failover chain exhausted, all profiles failed", "profiles", len(order), "last_err", trimErr(lastErr))
 		yield(llm.StreamEvent{}, fmt.Errorf("%w: %v", ErrExhausted, lastErr))
 	}
 }
@@ -145,18 +145,18 @@ func (p *Pool) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Mes
 		}
 		lastErr = err
 		if tripped, msg := p.health.RecordCall(ctx, m.ID, false, false, err); tripped {
-			log.Printf("[llmpool] profile %q(%s) breaker tripped: %s", m.Name, m.Model, msg)
+			slog.Warn("[llmpool] profile breaker tripped", "profile", m.Name, "model", m.Model, "reason", msg)
 		}
 		if i+1 < len(order) {
 			n := order[i+1]
-			log.Printf("[llmpool] LLM failover: %q(%s) → %q(%s), reason: %s",
-				m.Name, m.Model, n.Name, n.Model, trimErr(err))
+			slog.Warn("[llmpool] LLM failover", "from_profile", m.Name, "from_model", m.Model,
+				"to_profile", n.Name, "to_model", n.Model, "reason", trimErr(err))
 		}
 	}
 	if lastErr == nil {
 		lastErr = ErrExhausted
 	}
-	log.Printf("[llmpool] failover chain exhausted (all %d profiles failed), last error: %s", len(order), trimErr(lastErr))
+	slog.Error("[llmpool] failover chain exhausted, all profiles failed", "profiles", len(order), "last_err", trimErr(lastErr))
 	return llm.Message{}, "", llm.Usage{}, fmt.Errorf("%w: %v", ErrExhausted, lastErr)
 }
 
