@@ -264,6 +264,49 @@ RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "@playwright/cli@
     && playwright install --with-deps chromium \
     && "$(npm root -g)/@playwright/mcp/node_modules/.bin/playwright-core" install chromium \
     && rm -rf /var/lib/apt/lists/*
+# Solidity security tooling. Keep Slither on the image's Python 3.12, but install
+# Mythril with its supported Python 3.10 runtime: Mythril 0.24.8 only declares
+# support for Python 3.7-3.10. uv manages that isolated interpreter and tool env.
+ARG SLITHER_VERSION=0.11.3
+ARG MYTHRIL_VERSION=0.24.8
+ARG ECHIDNA_VERSION=2.4.0
+ARG HARDHAT_VERSION=3.22.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3-venv python3-dev build-essential libffi-dev libssl-dev libgmp-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    python3 -m venv /opt/slither; \
+    /opt/slither/bin/pip install --no-cache-dir --upgrade pip; \
+    /opt/slither/bin/pip install --no-cache-dir "slither-analyzer==${SLITHER_VERSION}"; \
+    ln -s /opt/slither/bin/slither /usr/local/bin/slither; \
+    ln -s /opt/slither/bin/solc-select /usr/local/bin/solc-select; \
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh; \
+    uv python install 3.10; \
+    uv tool install \
+    --python 3.10 \
+    --with "setuptools<81" \
+    "mythril==${MYTHRIL_VERSION}" && \
+    ln -s /root/.local/bin/myth /usr/local/bin/myth; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) ECHIDNA_ARCH=x86_64 ;; \
+      arm64) ECHIDNA_ARCH=aarch64 ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    asset="echidna-${ECHIDNA_VERSION}-${ECHIDNA_ARCH}-linux.tar.gz"; \
+    curl -fsSL "https://github.com/crytic/echidna/releases/download/v${ECHIDNA_VERSION}/${asset}" -o "/tmp/${asset}"; \
+    mkdir -p /tmp/echidna; \
+    tar -xzf "/tmp/${asset}" -C /tmp/echidna; \
+    binary="$(find /tmp/echidna -type f -name echidna -print -quit)"; \
+    test -n "$binary"; \
+    install -m 0755 "$binary" /usr/local/bin/echidna; \
+    rm -rf /tmp/echidna "/tmp/${asset}"; \
+    curl -fsSL https://foundry.paradigm.xyz | bash; \
+    /root/.foundry/bin/foundryup; \
+    npm install --global "hardhat@${HARDHAT_VERSION}"; \
+    slither --version; myth --version; echidna --version; \
+    /root/.foundry/bin/forge --version; hardhat --version
+ENV PATH="/root/.foundry/bin:/root/.local/bin:${PATH}"
+
 # Agent processes run as the executor with HOME and XDG_CACHE_HOME in the data
 # directory (server/execpriv_unix.go); the browsers installed above stay in root's
 # cache, which /root's 0711 lets the executor reach.
