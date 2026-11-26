@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/Autumn-27/artex/agent"
+	"golang.org/x/sys/unix"
 )
 
 // Environment names the shims read. They carry no secret: the executor id, the real
@@ -277,6 +279,13 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		func(base, dir string) error { return makeSpillDir(base, dir, gid) },
 		func(dir string) error { return shareSpillFiles(dir, gid) },
 	)
+	// The file tools open the paths the agent names inside the server: they do it as
+	// the executor too (agent/filetools_identity.go).
+	if agent.FileToolIdentitySupported() {
+		agent.SetFileToolIdentity(&agent.FileToolIdentity{UID: p.UID, GID: p.GID})
+	} else {
+		log.Printf("[exec] the agent's file tools keep the server's identity on this platform: only their path confinement applies")
+	}
 	if err := prepareExecHome(*p, dataDir); err != nil {
 		return fmt.Errorf("prepare the executor home: %w", err)
 	}
@@ -295,12 +304,20 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		}
 		path := filepath.Join(keyDir, name)
 		if _, err := os.Stat(path); err == nil {
+			if err := ownByRoot(path); err != nil {
+				return fmt.Errorf("restrict %s to root: %w", path, err)
+			}
 			if err := os.Chmod(path, 0o600); err != nil {
 				return fmt.Errorf("restrict %s to root: %w", path, err)
 			}
 		}
 	}
 	if configPath != "" {
+		if _, err := os.Stat(configPath); err == nil {
+			if err := ownByRoot(configPath); err != nil {
+				return fmt.Errorf("restrict %s to root: %w", configPath, err)
+			}
+		}
 		if fi, err := os.Stat(configPath); err == nil && fi.Mode().Perm()&0o077 != 0 {
 			if err := os.Chmod(configPath, 0o600); err != nil {
 				return fmt.Errorf("restrict %s to root: %w", configPath, err)
@@ -312,6 +329,26 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 	// the executor can write what the server puts in a run directory.
 	syscall.Umask(0o002)
 	log.Printf("[exec] agent processes run as uid %d gid %d; the run directories under %s are shared with that group", p.UID, p.GID, tasks)
+	return nil
+}
+
+// ownByRoot makes root the owner of a key or config file that another user owns:
+// mode 0600 alone leaves the file readable by its owner, which could be the
+// executor uid (a file created by an agent process, or on the host under the uid
+// the executor has in the container).
+func ownByRoot(path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid == 0 {
+		return nil
+	}
+	if err := os.Chown(path, 0, -1); err != nil {
+		return err
+	}
+	log.Printf("[exec] %s was owned by uid %d; it is now owned by root", path, st.Uid)
 	return nil
 }
 
@@ -507,28 +544,76 @@ func shareRestoredTaskDir(p ExecPrivilege, taskDir string) error {
 
 // shareWithExecGroup gives the executor group the tree under root: the group owns
 // each entry and gets read/write (and traverse on directories), and directories set
-// the setgid bit so anything created below them keeps the group.
+// the setgid bit so anything created below them keeps the group. The executor can
+// change entries in a run directory concurrently, so each entry is opened relative
+// to its already-open parent without following a symlink. Ownership and mode changes
+// use the descriptor: replacing a name after the open cannot redirect them to a
+// root-only key outside the run directory.
 func shareWithExecGroup(root string, gid int) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	f, err := os.OpenFile(root, os.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		// Older task directories can contain symlinks. Like WalkDir, leave the
+		// target alone; only the link itself receives the executor group.
+		return os.Lchown(root, -1, gid)
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return shareOpenedExecEntry(f, gid)
+}
+
+func shareOpenedExecEntry(f *os.File, gid int) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Mode().IsRegular() {
+		st, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || st.Nlink > 1 {
+			return fmt.Errorf("refusing to share a file with another hard link")
+		}
+	}
+	if err := f.Chown(-1, gid); err != nil {
+		return err
+	}
+	mode := info.Mode().Perm() | 0o060
+	if info.IsDir() {
+		mode = (info.Mode().Perm() | 0o070) | os.ModeSetgid
+	}
+	if err := f.Chmod(mode); err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name() // one component, relative to the open directory
+		fd, err := unix.Openat(int(f.Fd()), name, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if errors.Is(err, syscall.ELOOP) {
+			if err := unix.Fchownat(int(f.Fd()), name, -1, gid, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+			continue
+		}
 		if err != nil {
-			return err
+			return fmt.Errorf("%s: %w", name, err)
 		}
-		if err := os.Lchown(path, -1, gid); err != nil {
-			return err
+		child := os.NewFile(uintptr(fd), name)
+		childErr := shareOpenedExecEntry(child, gid)
+		closeErr := child.Close()
+		if childErr != nil {
+			return fmt.Errorf("%s: %w", name, childErr)
 		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
+		if closeErr != nil {
+			return fmt.Errorf("%s: %w", name, closeErr)
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		mode := info.Mode().Perm() | 0o060
-		if d.IsDir() {
-			mode = (info.Mode().Perm() | 0o070) | os.ModeSetgid
-		}
-		return os.Chmod(path, mode)
-	})
+	}
+	return nil
 }
 
 // InstallBashShim makes the Bash tool, the interactive shell and background tasks
@@ -576,7 +661,8 @@ func InstallBashShim(p ExecPrivilege) error {
 
 // RunExecShimIfRequested makes the process a privilege-drop shim when it was started
 // as one: as bash through the PATH shim, or as artex __artex-exec-drop for an MCP
-// stdio command. It exits or execs the target; it returns only for an ordinary start.
+// stdio command; or the isolation self-test probe (isolation_unix.go). It exits or
+// execs the target; it returns only for an ordinary start.
 func RunExecShimIfRequested(argv []string) {
 	if len(argv) == 0 {
 		return
@@ -587,9 +673,15 @@ func RunExecShimIfRequested(argv []string) {
 	if len(argv) >= 2 && argv[1] == execDropArg {
 		runDropShim(argv[2:])
 	}
+	if len(argv) >= 2 && argv[1] == isolationProbeArg {
+		runIsolationProbeMain()
+	}
 }
 
 func runBashShim(argv []string) {
+	// PR_SET_NO_NEW_PRIVS is per thread, so the thread that sets it must be the one
+	// that execs. The lock is never released: the process is replaced by exec.
+	runtime.LockOSThread()
 	uid, gid, err := execIDsFromEnv()
 	if err != nil {
 		shimFail(err)
@@ -601,10 +693,22 @@ func runBashShim(argv []string) {
 }
 
 // enterExecutor drops to uid and gid. When this call performs the switch (not in a
-// nested shell already running as the executor, whose HOME the agent may have set),
-// HOME and XDG_CACHE_HOME move to the executor's home first.
+// nested shell already running as the executor, whose environment the agent may
+// have set), the environment is first rebuilt from the allowlist (execenv_unix.go)
+// and HOME and XDG_CACHE_HOME move to the executor's home.
+// PR_SET_NO_NEW_PRIVS is set first, before the identity changes, on the calling
+// thread. The shims call this with their thread locked (runBashShim, runDropShim),
+// so the same thread goes on to exec the target and the flag is inherited by it and
+// everything it forks. Custom tools take SysProcAttr.Credential in the server and do
+// not pass through this shim, so the flag is a known gap there.
 func enterExecutor(uid, gid int) error {
+	if err := setNoNewPrivsFn(); err != nil {
+		return fmt.Errorf("no_new_privs must be set before the executor identity is applied: %w", err)
+	}
 	if os.Getuid() != uid || os.Getgid() != gid {
+		if err := sealExecutorEnv(); err != nil {
+			return err
+		}
 		for _, kv := range execHomeEnv() {
 			k, v, _ := strings.Cut(kv, "=")
 			if err := os.Setenv(k, v); err != nil {
@@ -617,6 +721,7 @@ func enterExecutor(uid, gid int) error {
 
 // runDropShim handles: <uid> <gid> -- <command> <args...>.
 func runDropShim(args []string) {
+	runtime.LockOSThread() // same reason as runBashShim: the flag is per thread
 	if len(args) < 3 || args[2] != "--" {
 		shimFail(errors.New("drop shim needs <uid> <gid> -- <command> [args]"))
 	}

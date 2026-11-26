@@ -40,6 +40,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { parseCompanyScopeText } from "@/lib/company-scope";
+import { formatBytes } from "@/lib/format";
+import { httpStatusTone } from "@/lib/status";
 import { taskAssetSourceLabel } from "@/lib/task-assets";
 import type { Asset, NewAssetType } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -102,21 +104,6 @@ function MethodBadge({ method }: { method: string }) {
       {normalized || "—"}
     </span>
   );
-}
-
-function statusTone(code: number) {
-  if (code >= 500) return "text-red-500";
-  if (code >= 400) return "text-amber-500";
-  if (code >= 300) return "text-blue-500";
-  if (code >= 200) return "text-emerald-500";
-  return "text-muted-foreground";
-}
-
-function fmtBytes(value?: number | null) {
-  if (!value || !Number.isFinite(value) || value <= 0) return "—";
-  const units = ["B", "KB", "MB"];
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-  return `${index === 0 ? value : (value / 1024 ** index).toFixed(1)} ${units[index]}`;
 }
 
 function Chips({ items, mono }: { items: string[]; mono?: boolean }) {
@@ -641,7 +628,10 @@ export function AssetsTab({ taskId }: { taskId: string }) {
                   <TableCell>
                     {asset.status_code != null ? (
                       <span
-                        className={cn("font-mono font-semibold text-xs tabular-nums", statusTone(asset.status_code))}
+                        className={cn(
+                          "font-mono font-semibold text-xs tabular-nums",
+                          httpStatusTone(asset.status_code),
+                        )}
                       >
                         {asset.status_code}
                       </span>
@@ -650,7 +640,9 @@ export function AssetsTab({ taskId }: { taskId: string }) {
                     )}
                   </TableCell>
                   <TableCell className="max-w-48 truncate text-xs">{asset.page_title || "—"}</TableCell>
-                  <TableCell className="text-xs tabular-nums">{fmtBytes(asset.content_length)}</TableCell>
+                  <TableCell className="text-xs tabular-nums">
+                    {formatBytes(asset.content_length, { empty: "—" })}
+                  </TableCell>
                   <TableCell>
                     <Chips items={asset.technologies ?? []} />
                   </TableCell>

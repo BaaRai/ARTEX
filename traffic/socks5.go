@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -157,7 +157,7 @@ func SOCKS5ConfigFromEnv() (SOCKS5Config, bool) {
 	case "1", "true", "on", "yes":
 		enableUDP = true
 	default:
-		log.Printf("[traffic] %s=%q is not a boolean; leaving SOCKS5 UDP disabled", SOCKS5UDPEnabledEnv, rawUDP)
+		slog.Warn("[traffic] non-boolean SOCKS5 UDP env value, leaving disabled", "env", SOCKS5UDPEnabledEnv, "value", rawUDP)
 	}
 
 	switch rawEnabled {
@@ -179,7 +179,7 @@ func SOCKS5ConfigFromEnv() (SOCKS5Config, bool) {
 		}
 		return SOCKS5Config{Addr: addr, EnableUDP: enableUDP}, true
 	default:
-		log.Printf("[traffic] %s=%q is not a boolean; leaving SOCKS5 disabled", SOCKS5EnabledEnv, rawEnabled)
+		slog.Warn("[traffic] non-boolean SOCKS5 env value, leaving disabled", "env", SOCKS5EnabledEnv, "value", rawEnabled)
 		return SOCKS5Config{}, false
 	}
 }
@@ -343,7 +343,7 @@ func (s *socks5Server) serve() {
 			if errors.As(err, &ne) && ne.Timeout() {
 				continue
 			}
-			log.Printf("[traffic/socks5] accept error: %v", err)
+			slog.Error("[traffic/socks5] socks5 accept error", "err", err)
 			return
 		}
 		if !s.trackConn(conn) {
@@ -447,7 +447,7 @@ func (s *socks5Server) handleConn(client net.Conn) {
 func (s *socks5Server) recordCapture(rec RawTCPCapture) {
 	if s.t != nil && s.t.db != nil {
 		if _, err := s.t.RecordRawTCPStream(rec, s.cfg.PreviewBytes); err != nil {
-			log.Printf("[traffic/socks5] failed to record raw tcp stream %s:%d: %v", rec.Host, rec.Port, err)
+			slog.Error("[traffic/socks5] failed to record raw tcp stream", "host", rec.Host, "port", rec.Port, "err", err)
 		}
 	}
 	if s.cfg.OnRecord != nil {
@@ -478,16 +478,23 @@ func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 		}
 	}
 
+	// Credentials are never verified (the username only carries the pace marker),
+	// so username/password grants no more trust than no-auth: both are accepted
+	// from loopback clients only. A non-loopback client is refused whichever
+	// method it offers, so a non-loopback bind is not an open proxy.
+	if !isLoopbackRemote(conn.RemoteAddr()) {
+		_, _ = conn.Write([]byte{socks5Version, socks5AuthNoAccept})
+		return false, false
+	}
 	// Prefer username/password when offered so clients carrying the pace marker
 	// (egress.PaceUser) can pass it through without requiring real credentials.
-	// Accept no-auth for loopback clients.
 	if hasUserPass {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthUserPass}); err != nil {
 			return false, false
 		}
 		return readSOCKS5UserPass(conn)
 	}
-	if hasNone && isLoopbackRemote(conn.RemoteAddr()) {
+	if hasNone {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthNone}); err != nil {
 			return false, false
 		}
@@ -498,8 +505,9 @@ func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 }
 
 // readSOCKS5UserPass parses an RFC 1929 username/password subnegotiation.
-// Credentials are never required (any username/password succeeds); a username
-// equal to egress.PaceUser marks the connection as paced.
+// Credentials are never verified (any username/password succeeds, which is why
+// negotiateAuth only offers this method to loopback clients); a username equal
+// to egress.PaceUser marks the connection as paced.
 func readSOCKS5UserPass(conn net.Conn) (paced bool, ok bool) {
 	var head [2]byte
 	if _, err := io.ReadFull(conn, head[:]); err != nil {

@@ -91,6 +91,56 @@ func TestStreamMessagesByDirectionKeepsMetaRow(t *testing.T) {
 	}
 }
 
+func TestStreamMessagePageCounts(t *testing.T) {
+	tr, id := directionStream(t, 2)
+	if _, err := tr.db.Exec(`INSERT INTO stream_messages(exchange_id,seq,ts,direction,kind,size,payload)
+VALUES(?,5,1,'meta',0,2,'{}')`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, exchange, direction string
+		offset, total, messages   int
+		seq                       int64
+	}{
+		{"all first page", id, "", 0, 5, 4, 1},
+		{"client first page", id, "c2s", 0, 3, 2, 1},
+		{"server first page", id, "s2c", 0, 3, 2, 2},
+		{"client warning page", id, "c2s", 2, 3, 2, 5},
+		{"server past last page", id, "s2c", 3, 3, 2, 0},
+		{"unknown exchange", "missing", "c2s", 0, 0, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Limit 1 keeps the warning off the first page: the message total
+			// must describe the whole filtered stream, not only loaded rows.
+			page, err := tr.StreamMessagePageByDirection(tc.exchange, tc.direction, tc.offset, 1)
+			if err != nil || page.Total != tc.total || page.MessageTotal != tc.messages {
+				t.Fatalf("page = %+v, err %v; want total %d and message total %d", page, err, tc.total, tc.messages)
+			}
+			if tc.seq == 0 {
+				if page.Items == nil || len(page.Items) != 0 {
+					t.Fatalf("items = %+v, want []", page.Items)
+				}
+			} else if len(page.Items) != 1 || page.Items[0].Seq != tc.seq {
+				t.Fatalf("items = %+v, want seq %d", page.Items, tc.seq)
+			}
+			if tc.seq == 5 && page.Items[0].Type != "meta" {
+				t.Fatalf("warning page = %+v, want meta row", page.Items)
+			}
+		})
+	}
+
+	// A direction with no recorded messages still returns its warning, with a
+	// raw pagination total of one and a displayed message total of zero.
+	if _, err := tr.db.Exec(`DELETE FROM stream_messages WHERE exchange_id=? AND direction='c2s'`, id); err != nil {
+		t.Fatal(err)
+	}
+	page, err := tr.StreamMessagePageByDirection(id, "c2s", 0, 50)
+	if err != nil || page.Total != 1 || page.MessageTotal != 0 || len(page.Items) != 1 || page.Items[0].Type != "meta" {
+		t.Fatalf("warning-only page = %+v, err %v", page, err)
+	}
+}
+
 func TestTrafficMessagesToolDirection(t *testing.T) {
 	tr, id := directionStream(t, 2)
 

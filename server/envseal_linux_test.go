@@ -55,6 +55,9 @@ func TestSealedEnvironmentHandoff(t *testing.T) {
 		"ARTEX_SECRET_KEY":  "",
 		"ANTHROPIC_API_KEY": "sk-ant-test",
 		"OPENAI_API_KEY":    "=leading-equals",
+		// The Bedrock gateway reads a bearer token and supports multiline headers.
+		"ARTEX_LLM_API_KEY":        "synthetic-gateway-token",
+		"ARTEX_LLM_CUSTOM_HEADERS": "X-Example-Secret: synthetic-header-value\nX-Example-Route: demo",
 		// Proxy and endpoint URLs can carry credentials in their userinfo.
 		"ARTEX_LLM_PROXY":                    "http://proxyuser:proxypass@proxy.internal:3128",
 		"ARTEX_LLM_BASE_URL":                 "https://apiuser:apipass@llm.internal/v1",

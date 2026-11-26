@@ -82,15 +82,33 @@ install_docker_linux(){
       sudo apt-get install -y "$p" && break
     fi
   done
+  # docker.io only suggests buildx on some releases, and the image build needs it.
+  for p in docker-buildx-plugin docker-buildx; do
+    if apt-cache madison "$p" 2>/dev/null | grep -q .; then
+      sudo apt-get install -y "$p" && break
+    fi
+  done
   # Kali (and some others) don't start services on package install.
   if command -v systemctl >/dev/null 2>&1; then
     sudo systemctl enable --now docker || true
   fi
 }
 
+# The Dockerfile uses --platform=$BUILDPLATFORM, which needs BuildKit. Without the
+# buildx plugin Compose only warns, falls back to the legacy builder and fails on
+# the first FROM with 'failed to parse platform'.
+ensure_buildx(){
+  docker buildx version >/dev/null 2>&1 && return
+  case "$(uname -s)" in
+    Darwin) die "docker buildx not detected; the image build needs it. Docker Desktop includes it; with Homebrew's docker CLI (e.g. Colima) run 'brew install docker-buildx' and register the plugin as its caveats describe" ;;
+    *)      die "docker buildx not detected; the image build needs it. Install docker-buildx-plugin (Docker's repo) or docker-buildx (distro repo) and retry" ;;
+  esac
+}
+
 # ── 1) All-Docker ───────────────────────────────
 install_docker(){
   ensure_docker
+  ensure_buildx
   if [ ! -f .env ]; then
     cp .env.example .env 2>/dev/null || true
     local pw key

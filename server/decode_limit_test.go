@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -49,6 +50,63 @@ func TestRawJSONBodyOverTheCapIs413(t *testing.T) {
 	h.ServeHTTP(large, req)
 	if large.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status=%d body=%s, want 413", large.Code, large.Body.String())
+	}
+}
+
+func TestMultipartLabelDoesNotUncapTheBody(t *testing.T) {
+	// A JSON handler reading r.Body directly, reached with a multipart
+	// Content-Type, must still hit a cap rather than read without limit.
+	var readErr error
+	h := limitRequestBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, readErr = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	r := httptest.NewRequest(http.MethodPost, "/", io.LimitReader(zeroReader{}, maxMultipartBodyBytes+1))
+	r.Header.Set("Content-Type", "multipart/form-data; boundary=abc")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	var tooLarge *http.MaxBytesError
+	if !errors.As(readErr, &tooLarge) || tooLarge.Limit != maxMultipartBodyBytes {
+		t.Fatalf("read err=%v, want MaxBytesError at %d", readErr, maxMultipartBodyBytes)
+	}
+}
+
+func TestMultipartCapCoversEveryUploadHandler(t *testing.T) {
+	for name, limit := range map[string]int64{
+		"chat upload":      maxChatUpload + chatUploadMultipartOverhead,
+		"workspace upload": maxWorkspaceUpload,
+		"skill zip":        maxSkillZipBytes,
+	} {
+		if limit > maxMultipartBodyBytes {
+			t.Fatalf("%s limit %d exceeds maxMultipartBodyBytes %d: real uploads would be refused", name, limit, maxMultipartBodyBytes)
+		}
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+func TestInsertAssetsCapsMultipartBody(t *testing.T) {
+	s := &Server{m: &Manager{}}
+	h := limitRequestBody(http.HandlerFunc(s.insertAssets))
+
+	large := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/assets", strings.NewReader(`{"assets":[{"type":"`+strings.Repeat("a", decodeMaxBytes)+`"}]}`))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=abc")
+	h.ServeHTTP(large, req)
+	if large.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d body=%s, want 413", large.Code, large.Body.String())
+	}
+
+	small := httptest.NewRecorder()
+	ok := httptest.NewRequest(http.MethodPost, "/api/assets", strings.NewReader(`{"assets":[]}`))
+	ok.Header.Set("Content-Type", "multipart/form-data; boundary=abc")
+	h.ServeHTTP(small, ok)
+	if small.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s, want 503 without a store", small.Code, small.Body.String())
 	}
 }
 

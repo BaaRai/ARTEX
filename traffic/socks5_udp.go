@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/url"
 	"strconv"
@@ -438,8 +438,7 @@ func (s *socks5Server) recordUDPCapture(rec RawUDPCapture) {
 	}
 	if s.t != nil && s.t.db != nil {
 		if _, err := s.t.RecordRawUDPDatagram(rec, s.cfg.UDPPreviewBytes); err != nil {
-			log.Printf("[traffic/socks5-udp] failed to record datagram assoc=%s dst=%s:%d: %v",
-				rec.AssociationID, rec.Host, rec.Port, err)
+			slog.Error("[traffic/socks5-udp] failed to record UDP datagram", "assoc", rec.AssociationID, "dst_host", rec.Host, "dst_port", rec.Port, "err", err)
 		}
 	}
 }

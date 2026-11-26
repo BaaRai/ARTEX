@@ -3,7 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
-	"log"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 
@@ -54,7 +54,7 @@ func toolOutputDir(base, runDir, spillDir string) string {
 		return filepath.Join(runDir, "cmd-output")
 	}
 	if err := spillDirMaker(base, spillDir); err != nil {
-		log.Printf("[agent] spill directory %s: %v", spillDir, err)
+		slog.Warn("[agent] spill directory creation failed", "dir", spillDir, "err", err)
 		return ""
 	}
 	return spillDir
@@ -100,7 +100,7 @@ func (h spillHooks) PreToolUse(ctx context.Context, name string, input []byte) (
 func (h spillHooks) PostToolUse(ctx context.Context, name string, input, result []byte, isErr bool) {
 	if bytes.Contains(result, spillMarker) {
 		if err := h.share(h.dir); err != nil {
-			log.Printf("[agent] share the spill files in %s: %v", h.dir, err)
+			slog.Warn("[agent] failed to share spill files", "dir", h.dir, "err", err)
 		}
 	}
 	if h.inner != nil {

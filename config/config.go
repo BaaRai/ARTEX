@@ -1,5 +1,5 @@
 // Package config loads runtime configuration from a JSON file, with environment
-// variables taking precedence. Currently it carries the PostgreSQL connection.
+// variables taking precedence where supported.
 package config
 
 import (
@@ -29,8 +29,9 @@ type Database struct {
 
 // Config is the on-disk config file shape.
 type Config struct {
-	Database Database `json:"database"`
-	SkillDir string   `json:"skill_dir"`
+	Database       Database       `json:"database"`
+	SkillDir       string         `json:"skill_dir"`
+	TaskUserAgents TaskUserAgents `json:"task_user_agents,omitempty"`
 }
 
 // BaseDir is the directory that anchors all runtime artifacts (config.json and
@@ -116,19 +117,25 @@ func Path() string {
 // callers fall back to defaults). A file that exists but cannot be read or parsed
 // is an error: ignoring it would run with defaults the operator did not choose.
 func Load() (Config, error) {
-	var c Config
 	path := Path()
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return c, nil
+		return Config{}, nil
 	}
 	if err != nil {
-		return c, fmt.Errorf("read config file %s: %w", path, err)
+		return Config{}, fmt.Errorf("read config file %s: %w", path, err)
 	}
-	if err := json.Unmarshal(b, &c); err != nil {
+	var disk struct {
+		Config
+		LegacyTaskUserAgents json.RawMessage `json:"assessment_identification"`
+	}
+	if err := json.Unmarshal(b, &disk); err != nil {
 		return Config{}, fmt.Errorf("parse config file %s: %w", path, err)
 	}
-	return c, nil
+	if disk.LegacyTaskUserAgents != nil {
+		return Config{}, fmt.Errorf("parse config file %s: assessment_identification was replaced by task_user_agents. Move each task entry to task_user_agents with its origins list", path)
+	}
+	return disk.Config, nil
 }
 
 // SkillDir returns the skill root directory with precedence:
@@ -253,8 +260,8 @@ var libpqPassword = regexp.MustCompile(`(?i)\b(password)\s*=\s*(?:'[^']*'|"[^"]*
 
 // Redact is a log-safe view of a PostgreSQL DSN. It masks URL userinfo
 // passwords, `?password=` query values, and libpq `password=` keywords.
-// Unrecognised input still runs the keyword mask so a parse failure cannot
-// print the secret.
+// Unrecognised input still runs the userinfo and keyword masks so a parse
+// failure cannot print the secret.
 func Redact(dsn string) string {
 	if dsn == "" {
 		return dsn
@@ -271,6 +278,15 @@ func Redact(dsn string) string {
 			u.RawQuery = q.Encode()
 		}
 		return u.String()
+	}
+	// A URL whose password has an unencoded # / ? or % does not parse; its
+	// password still runs from the first : after the scheme to the last @.
+	if i := strings.Index(dsn, "://"); i >= 0 {
+		if at := strings.LastIndex(dsn, "@"); at > i {
+			if c := strings.Index(dsn[i+3:at], ":"); c >= 0 {
+				dsn = dsn[:i+3+c+1] + "****" + dsn[at:]
+			}
+		}
 	}
 	return libpqPassword.ReplaceAllString(dsn, `${1}=****`)
 }

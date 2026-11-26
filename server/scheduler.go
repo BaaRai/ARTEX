@@ -28,7 +28,7 @@ type Scheduler struct {
 const (
 	schedKeyLastFinding    = "last_finding_id"    // watermark: max finding node id fired for
 	schedKeyFiredGoals     = "fired_goals"        // JSON array of goal node ids already fired
-	schedKeyLastTimeout    = "last_timeout_id"    // watermark: max task id fired for task timeout
+	schedKeyFiredTimeouts  = "fired_timeouts"     // JSON array of task ids already fired for task timeout
 	schedKeyLastToolCall   = "last_toolcall_id"   // watermark: max activity id fired for tool call
 	schedKeyLastTaskCreate = "last_taskcreate_id" // watermark: max task id fired for task create
 )
@@ -77,18 +77,16 @@ func (sc *Scheduler) init() {
 				set[e.NodeID] = true
 			}
 		}
-		sc.saveFiredGoalSet(set)
+		sc.saveFiredSet(schedKeyFiredGoals, set)
 	}
-	if sc.mustState(schedKeyLastTimeout) == "" {
-		var maxID int64
-		if evs, err := sc.pg.TimedOutTasksSince(0); err == nil {
+	if sc.mustState(schedKeyFiredTimeouts) == "" {
+		set := map[int64]bool{}
+		if evs, err := sc.pg.TimedOutTasks(); err == nil {
 			for _, e := range evs {
-				if e.NodeID > maxID {
-					maxID = e.NodeID
-				}
+				set[e.NodeID] = true
 			}
 		}
-		_ = sc.pg.SetSchedState(schedKeyLastTimeout, strconv.FormatInt(maxID, 10))
+		sc.saveFiredSet(schedKeyFiredTimeouts, set)
 	}
 	if sc.mustState(schedKeyLastToolCall) == "" {
 		var maxID int64
@@ -195,7 +193,7 @@ func (sc *Scheduler) fireGoals(triggers []*db.AgentTrigger) {
 	}
 	// Mark goals as consumed whether or not a trigger is active, so enabling an
 	// on_goal_met trigger later doesn't replay every already-met goal.
-	fired := sc.firedGoalSet()
+	fired := sc.firedSet(schedKeyFiredGoals)
 	changed := false
 	for _, e := range events {
 		if fired[e.NodeID] {
@@ -212,12 +210,14 @@ func (sc *Scheduler) fireGoals(triggers []*db.AgentTrigger) {
 		}
 	}
 	if changed {
-		sc.saveFiredGoalSet(fired)
+		sc.saveFiredSet(schedKeyFiredGoals, fired)
 	}
 }
 
 // fireTaskTimeouts fires on_task_timeout triggers for tasks that newly reached
-// status='timeout' above the persisted watermark (task id → no double-fire).
+// status='timeout'. Tasks time out in deadline order, not id order, so fired
+// tasks are kept in a persisted set (like goals) rather than an id watermark:
+// a watermark would skip an older task that times out after a newer one.
 func (sc *Scheduler) fireTaskTimeouts(triggers []*db.AgentTrigger) {
 	var want []*db.AgentTrigger
 	for _, tr := range triggers {
@@ -225,17 +225,8 @@ func (sc *Scheduler) fireTaskTimeouts(triggers []*db.AgentTrigger) {
 			want = append(want, tr)
 		}
 	}
-	last, _ := strconv.ParseInt(sc.mustState(schedKeyLastTimeout), 10, 64)
-	events, err := sc.pg.TimedOutTasksSince(last)
-	if err != nil || len(events) == 0 {
-		return
-	}
-	// Advance the watermark even with no active trigger — see fireFindings.
-	maxID := last
-	for _, e := range events {
-		if e.NodeID > maxID {
-			maxID = e.NodeID
-		}
+	// Consume the timeouts even with no active trigger — see fireFindings.
+	for _, e := range sc.newTaskTimeouts() {
 		if len(want) == 0 {
 			continue
 		}
@@ -244,7 +235,28 @@ func (sc *Scheduler) fireTaskTimeouts(triggers []*db.AgentTrigger) {
 			sc.s.StartTriggeredRun(tr.AgentKey, fmt.Sprintf("Timeout trigger · task#%d", e.TaskID), tr.TaskTimeoutMessage+msgCtx, e.TaskID, true, e.TaskDesc, e.TaskGoal)
 		}
 	}
-	_ = sc.pg.SetSchedState(schedKeyLastTimeout, strconv.FormatInt(maxID, 10))
+}
+
+// newTaskTimeouts returns the timed-out tasks not fired for yet and records
+// them as consumed.
+func (sc *Scheduler) newTaskTimeouts() []db.TaskEvent {
+	events, err := sc.pg.TimedOutTasks()
+	if err != nil || len(events) == 0 {
+		return nil
+	}
+	fired := sc.firedSet(schedKeyFiredTimeouts)
+	var out []db.TaskEvent
+	for _, e := range events {
+		if fired[e.NodeID] {
+			continue
+		}
+		fired[e.NodeID] = true
+		out = append(out, e)
+	}
+	if len(out) > 0 {
+		sc.saveFiredSet(schedKeyFiredTimeouts, fired)
+	}
+	return out
 }
 
 // fireTaskCreates fires on_task_create triggers for tasks newly created above the
@@ -347,9 +359,9 @@ func (sc *Scheduler) mustState(key string) string {
 	return v
 }
 
-func (sc *Scheduler) firedGoalSet() map[int64]bool {
+func (sc *Scheduler) firedSet(key string) map[int64]bool {
 	out := map[int64]bool{}
-	raw := sc.mustState(schedKeyFiredGoals)
+	raw := sc.mustState(key)
 	if raw == "" {
 		return out
 	}
@@ -362,13 +374,13 @@ func (sc *Scheduler) firedGoalSet() map[int64]bool {
 	return out
 }
 
-func (sc *Scheduler) saveFiredGoalSet(set map[int64]bool) {
+func (sc *Scheduler) saveFiredSet(key string, set map[int64]bool) {
 	ids := make([]int64, 0, len(set))
 	for id := range set {
 		ids = append(ids, id)
 	}
 	b, _ := json.Marshal(ids)
-	if err := sc.pg.SetSchedState(schedKeyFiredGoals, string(b)); err != nil {
-		log.Printf("[scheduler] save fired goals failed: %v", err)
+	if err := sc.pg.SetSchedState(key, string(b)); err != nil {
+		log.Printf("[scheduler] save %s failed: %v", key, err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -23,6 +24,7 @@ import (
 // into the frontier. It is the sole intent generator.
 type Planner struct {
 	findingRecorder   FindingRecorder
+	triage            TriageClient // advisory decision-model client (agent/triage.go); nil = off
 	prov              llm.Provider
 	model             string
 	tx                *transcript.Store                      // raw LLM conversation persistence (nil = off)
@@ -394,6 +396,9 @@ type triggerLookup struct {
 	intentSummary func(int64) string
 	workerOutput  func(int64) string
 	factIDs       func(int64) string
+	// factOnly renders the «proved but not registered» block: intents that produced
+	// facts and no finding. Nil in tests that do not care about it.
+	factOnly func(dataEnvelope) string
 }
 
 func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
@@ -401,13 +406,50 @@ func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
 		intentSummary: func(id int64) string { return intentSummary(ts, id) },
 		workerOutput:  func(id int64) string { return workerOutput(ts, id) },
 		factIDs:       func(id int64) string { return factIDsYielded(ts, id) },
+		factOnly:      func(env dataEnvelope) string { return factOnlyBlock(ts, env) },
 	}
+}
+
+// factOnlyBlock names the intents whose work proved something and registered no
+// finding — the defect the run record shows plainly (three runs in twelve had every
+// fact-producing intent register nothing). A fact carries no "this is a defect"
+// flag, so the planner is the only place that can turn one into a finding; without
+// the counter it has to notice by reading every fact again.
+func factOnlyBlock(ts *db.ExplorationStore, env dataEnvelope) string {
+	if ts == nil {
+		return ""
+	}
+	rows, err := ts.FactOnlyIntents(0)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	var list strings.Builder
+	b.WriteString("\n\n[Proved but not registered: ")
+	b.WriteString(strconv.Itoa(len(rows)))
+	b.WriteString(" finished intent(s) produced facts and NO finding. For each, decide explicitly: " +
+		"either register the defect as a finding (report_finding, with the executed request as evidence) " +
+		"or state why the fact is not a defect. Facts carry no defect flag — only you can turn one into a finding.]\n")
+	for _, r := range rows {
+		// 140: one sentence of intent summary; 140 characters is enough to tell the
+		// directions apart (the full text is in one node_detail). The cut is shared
+		// with the triggers so the block does not become a second context source.
+		fmt.Fprintf(&list, "  #%d (%d fact(s)): %s\n", r.IntentID, r.Facts, truncOutput(r.Summary, 140))
+	}
+	// The summaries come from agent output: they are data and go inside the envelope.
+	b.WriteString(env.wrap("fact_only_intents", strings.TrimRight(list.String(), "\n")))
+	b.WriteString("\n")
+	return b.String()
 }
 
 // plannerSituational is the planner's situational block for one round: the
 // envelope intro, the triggers, then the overview, all framed with env.
 func plannerSituational(evs []TriggerEvent, look triggerLookup, data map[string]any, env dataEnvelope) string {
-	return env.intro() + renderTriggers(evs, env, look) + renderGraphOverview(data, env)
+	block := ""
+	if look.factOnly != nil {
+		block = look.factOnly(env)
+	}
+	return env.intro() + renderTriggers(evs, env, look) + renderGraphOverview(data, env) + block
 }
 
 // plannerDefaultTmpl is the built-in EDITABLE body (section [A]) of the planner
@@ -482,6 +524,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	p.compactor.OnPlannerRound(ctx, ts)
 	tsx := NewToolSet(ts, "planner")
 	tsx.SetFindingRecorder(p.findingRecorder)
+	tsx.SetTriageClient(p.triage)
 	// The host's finding recorder owns the live capture; prove_goal checks bound
 	// traffic_refs against it. No checker means finding proofs are refused.
 	if c, ok := p.findingRecorder.(TrafficCaptureChecker); ok {

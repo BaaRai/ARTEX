@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -47,7 +48,7 @@ func check() error {
 		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := s.Delete(cleanup, uri); err != nil {
-			log.Printf("test object cleanup failed for %s: %v", uri, err)
+			slog.Warn("test object cleanup failed", "uri", uri, "err", err)
 		}
 	}()
 	if err := s.Upload(ctx, uri, file, checksum); err != nil {

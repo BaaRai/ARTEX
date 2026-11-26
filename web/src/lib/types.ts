@@ -978,9 +978,13 @@ export interface TrafficStreamMessage {
   truncated?: boolean;
 }
 
+export type TrafficStreamDirection = "" | "c2s" | "s2c";
+
 export interface TrafficStreamPage {
   items: TrafficStreamMessage[];
+  // Pagination includes recording-limit rows; the message count does not.
   total: number;
+  message_total: number;
 }
 
 export interface TrafficReplayHeader {
@@ -1156,7 +1160,7 @@ export interface NotificationDelivery {
 export interface LLMProfile {
   id: string;
   name: string;
-  format: "openai" | "anthropic" | "openai-responses" | "ollama";
+  format: "openai" | "anthropic" | "openai-responses" | "ollama" | "bedrock-gateway";
   base_url?: string;
   proxy?: string;
   model: string;
@@ -1191,6 +1195,7 @@ export interface LLMProfile {
   session_header_key?: string;
   // Custom User-Agent: when non-empty, every outbound LLM request overrides its User-Agent header with this value. "" = do not override (keep the default UA).
   user_agent?: string;
+  custom_headers_set?: boolean;
   // This profile's retry overrides (connect / empty response / same-provider safety window). Empty / all zeros = follow the global policy.
   retry?: LLMRetryOverride;
 }
@@ -1866,4 +1871,33 @@ export interface TamperTraceLine {
 export interface TamperDryRunResult extends TamperDryRunIO {
   changed: boolean;
   lines: TamperTraceLine[] | null;
+}
+
+// ---- Inbound chat bridge (drive ARTEX from a chat app) ----
+export interface ChatBridgeIdentity {
+  id: string;
+  username: string;
+  name: string;
+}
+
+export interface ChatBridgeStatus {
+  // off: disabled or not configured; connecting: checking the token; online: polling; error: see last_error.
+  state: "off" | "connecting" | "online" | "error";
+  bot?: ChatBridgeIdentity;
+  last_error?: string;
+  last_error_at?: string;
+  last_poll_at?: string;
+  last_update_at?: string;
+}
+
+export interface ChatBridge {
+  kind: string;
+  configured: boolean;
+  enabled: boolean;
+  // Masked: credential fields come back as "__masked__…"; sending them back unchanged keeps the stored value.
+  config: Record<string, unknown>;
+  allowed_chats: string[];
+  secret_keys: string[];
+  status: ChatBridgeStatus;
+  updated_at?: string;
 }

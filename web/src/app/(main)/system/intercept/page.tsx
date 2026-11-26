@@ -52,6 +52,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
+import { formatTokens } from "@/lib/format";
 import type {
   InterceptAction,
   InterceptRule,
@@ -61,13 +62,6 @@ import type {
   LLMProfile,
   Tool,
 } from "@/lib/types";
-
-// fmtTokens compacts token counts (1.2k / 3.4M) for approval usage stats.
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
-  return String(n);
-}
 
 // tRich translates a sentence whose {placeholders} are rendered as React nodes (e.g. emphasised spans or code).
 function tRich(key: string, nodes: Record<string, React.ReactNode>): React.ReactNode[] {
@@ -101,7 +95,11 @@ function JudgeSparkbars({ daily }: { daily: JudgeDayUsage[] }) {
         return (
           <div
             key={d.date}
-            title={t("{date} · {calls} calls · {tokens} tokens", { date: d.date, calls: d.calls, tokens: fmtTokens(total) })}
+            title={t("{date} · {calls} calls · {tokens} tokens", {
+              date: d.date,
+              calls: d.calls,
+              tokens: formatTokens(total),
+            })}
             className="min-w-[2px] flex-1 rounded-sm bg-violet-500/60 hover:bg-violet-500"
             style={{ height: `${h}%` }}
           />
@@ -342,10 +340,10 @@ function JudgeCard() {
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               <JudgeStat label={t("Approval calls")} value={usage.calls.toLocaleString(intlLocale)} />
-              <JudgeStat label={t("Input tokens")} value={fmtTokens(usage.input_tokens)} />
-              <JudgeStat label={t("Output tokens")} value={fmtTokens(usage.output_tokens)} />
-              <JudgeStat label={t("Cache read")} value={fmtTokens(usage.cache_read_tokens)} />
-              <JudgeStat label={t("Cache write")} value={fmtTokens(usage.cache_write_tokens)} />
+              <JudgeStat label={t("Input tokens")} value={formatTokens(usage.input_tokens)} />
+              <JudgeStat label={t("Output tokens")} value={formatTokens(usage.output_tokens)} />
+              <JudgeStat label={t("Cache read")} value={formatTokens(usage.cache_read_tokens)} />
+              <JudgeStat label={t("Cache write")} value={formatTokens(usage.cache_write_tokens)} />
             </div>
             {usage.daily.length > 0 && (
               <div className="mt-4">

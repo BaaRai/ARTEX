@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Keep the digest-pinned base images current. Dependabot preserves the tag
+  # (e.g. node:22-bookworm-slim) and bumps the @sha256 digest when the tag moves.
+  # Version jumps are pinned on purpose and ignored: node stays on the runtime
+  # LTS line (major), python stays on the Debian Bookworm interpreter the skills
+  # are built against (minor and major), and the Go image stays aligned with
+  # go.mod and the CI (minor and major). Patch updates and digest refreshes keep
+  # coming through.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(docker)"
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "golang"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

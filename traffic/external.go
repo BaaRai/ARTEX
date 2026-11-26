@@ -2,7 +2,7 @@ package traffic
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -69,7 +69,7 @@ func (t *Traffic) RecordExternal(e ExternalExchange) error {
 	id := fmt.Sprintf("%d-%04d", now.Unix(), n%10000)
 
 	if err := t.insertExchange(id, now.Unix(), host, method, db.TemplatePath(u.EscapedPath()), u.String(), status, respCT, len(e.RequestBody), len(e.ResponseBody), reqHead, reqB, respHead, respB); err != nil {
-		log.Printf("[traffic] failed to ingest %s: %v", u.String(), err)
+		slog.Error("[traffic] failed to ingest external exchange", "url", u.String(), "err", err)
 		return err
 	}
 	return nil

@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -48,10 +49,10 @@ type configSnapshot struct {
 func logConfigSnapshot(s configSnapshot) {
 	b, err := json.Marshal(s)
 	if err != nil {
-		log.Printf("[config] snapshot unavailable: %v", err)
+		slog.Warn("[config] snapshot unavailable", "err", err)
 		return
 	}
-	log.Printf("[config] snapshot %s", b)
+	slog.Info("[config] snapshot " + string(b))
 }
 
 // version is the build version, injected at release time via
@@ -105,6 +106,8 @@ func run() int {
 		// A negative uid turns the drop off; 0 (root) is refused.
 		execUID = flag.Int("exec-uid", server.DefaultExecUID, "uid that agent processes run as (Bash, shell, custom tools, MCP stdio); -1 turns the drop off")
 		execGID = flag.Int("exec-gid", server.DefaultExecGID, "gid that agent processes run as")
+		// Development escape of the isolation self-test, off by default.
+		devNoIsolation = flag.Bool(server.DevNoIsolationFlag, false, "DEVELOPMENT ONLY: on Linux as root, start even when the agent isolation self-test fails; agent processes and file tools may then read the server's keys, config and database credentials")
 	)
 	flag.Parse()
 
@@ -130,7 +133,7 @@ func run() int {
 
 	skillDir, err := config.SkillDir()
 	if err != nil {
-		log.Printf("[config] %v", err)
+		slog.Error("[config] skill directory unavailable", "err", err)
 		return 1
 	}
 	if abs, e := filepath.Abs(skillDir); e == nil {
@@ -141,7 +144,7 @@ func run() int {
 	// Proxies whose X-Forwarded-For the login rate limit reads; empty trusts none.
 	trusted, err := server.ParseTrustedProxies(os.Getenv("ARTEX_TRUSTED_PROXIES"))
 	if err != nil {
-		log.Printf("[config] ARTEX_TRUSTED_PROXIES: %v", err)
+		slog.Error("[config] invalid ARTEX_TRUSTED_PROXIES", "err", err)
 		return 1
 	}
 	trustedAddrs := make([]string, 0, len(trusted))
@@ -176,15 +179,26 @@ func run() int {
 	// server/execpriv.go). An explicit option that cannot be applied stops the start.
 	priv, err := server.ResolveExecPrivilege(*execUID, *execGID, flagWasSet("exec-uid") || flagWasSet("exec-gid"))
 	if err != nil {
-		log.Printf("[config] %v", err)
+		slog.Error("[config] resolve exec privilege failed", "err", err)
 		return 1
 	}
 	if err := server.PrepareExecPrivilege(&priv, *dataDir, config.KeyDir(), config.Path()); err != nil {
-		log.Printf("[config] %v", err)
+		slog.Error("[config] prepare exec privilege failed", "err", err)
 		return 1
 	}
 	if err := server.InstallBashShim(priv); err != nil {
-		log.Printf("[config] %v", err)
+		slog.Error("[config] install bash shim failed", "err", err)
+		return 1
+	}
+	// Before the stores open and any agent runs: check that the isolation above holds
+	// (server/isolation.go). On Linux as root a failure stops the start unless the
+	// escape is set; elsewhere the server starts degraded and says so.
+	selfTest := server.IsolationSelfTest(priv, server.IsolationTargets{
+		DataDir: *dataDir, KeyDir: keyDir, ConfigPath: cfgPath, SkillDir: skillDir, DSN: dsn,
+	})
+	isolation, err := server.EnforceIsolation(runtime.GOOS, priv, selfTest, *devNoIsolation)
+	if err != nil {
+		slog.Error("[config] enforce isolation failed", "err", err)
 		return 1
 	}
 
@@ -199,7 +213,7 @@ func run() int {
 	}
 	defer mgr.Close()
 
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv))
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation))
 	// ReadTimeout bounds how long the request headers and body may take to arrive.
 	// It does not limit how long a handler runs, so an event stream stays open.
 	// WriteTimeout is left unset: a write deadline would cut that stream.
@@ -212,7 +226,7 @@ func run() int {
 	}
 
 	go func() {
-		log.Printf("ARTEX %s backend listening on %s (data=%s, workers=%d)", version, *addr, *dataDir, mgr.Workers())
+		slog.Info("ARTEX backend listening", "version", version, "addr", *addr, "data", *dataDir, "workers", mgr.Workers())
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("serve: %v", err)
 		}
@@ -221,7 +235,7 @@ func run() int {
 	// Wait for a stop signal.
 	<-ctx.Done()
 
-	log.Println("shutting down...")
+	slog.Info("shutting down")
 	// Close the listener before draining. Otherwise a request accepted during
 	// the drain can start a detached run, and mgr.Close runs while that run
 	// is still writing.
@@ -229,13 +243,13 @@ func run() int {
 	httpErr := httpSrv.Shutdown(shutdownCtx)
 	cancel()
 	if httpErr != nil {
-		log.Printf("http shutdown: %v", httpErr)
+		slog.Error("http shutdown failed", "err", httpErr)
 	}
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	drainErr := srv.Wait(drainCtx)
 	drainCancel()
 	if drainErr != nil {
-		log.Printf("task drain: %v", drainErr)
+		slog.Error("task drain failed", "err", drainErr)
 	}
 	// The health writer flushes on ctx.Done(). Wait for it before the deferred
 	// store close, so the last cooling window is not written at a closed database.

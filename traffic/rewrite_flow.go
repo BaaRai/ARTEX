@@ -3,7 +3,7 @@ package traffic
 import (
 	"database/sql"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -219,7 +219,7 @@ func (t *snapTable) convertLocked(cost int64) bool {
 	t.tombs++
 	*victim = reqSnap{done: victim.done, rules: victim.rules, host: victim.host, tomb: true, reason: reasonOriginalUnavailable, ruleIDs: ids}
 	t.conversions.Add(1)
-	log.Printf("[traffic] rewrite snapshot of a request to %s (rules %v) released under pressure: its exchange will be recorded as original request unavailable", victim.host, ids)
+	slog.Warn("[traffic] rewrite snapshot released under pressure, exchange recorded as original request unavailable", "host", victim.host, "rules", ids)
 	return true
 }
 
@@ -239,7 +239,7 @@ func (t *snapTable) refuseLocked(k flowKey, e *reqSnap) {
 	}
 	if now := t.now(); now.Sub(t.lastFullLog) >= time.Minute {
 		t.lastFullLog = now
-		log.Printf("[traffic] rewrite snapshot table full: requests are sent without rewriting (%d refused, %d without a trace so far)", t.capacity.Load(), t.tombDrops.Load())
+		slog.Warn("[traffic] rewrite snapshot table full, requests sent without rewriting", "refused", t.capacity.Load(), "without_trace", t.tombDrops.Load())
 	}
 }
 
@@ -469,7 +469,7 @@ func (s *sink) Request(f *mproxy.Flow) {
 	host := f.Request.URL.Hostname()
 	defer func() {
 		if recover() != nil {
-			log.Printf("[traffic] rewrite rules stopped on a request to %s (class %s): it is sent as the client sent it", host, rewrite.ErrClassPanic)
+			slog.Error("[traffic] rewrite rules panicked on request, sent as-is", "host", host, "class", rewrite.ErrClassPanic)
 		}
 	}()
 	in := rewrite.Input{Request: engineRequest(f.Request), IsBinary: rulesIsBinary}
@@ -541,7 +541,7 @@ func (s *sink) applyResponse(f *mproxy.Flow, set *rewrite.Set, hooks *HookSet, i
 	defer func() {
 		if recover() != nil {
 			res = rewrite.Result{}
-			log.Printf("[traffic] rewrite rules stopped on a response from %s (class %s): it is sent as the target sent it", f.Request.URL.Hostname(), rewrite.ErrClassPanic)
+			slog.Error("[traffic] rewrite rules panicked on response, sent as-is", "host", f.Request.URL.Hostname(), "class", rewrite.ErrClassPanic)
 		}
 	}()
 	r := set.Apply(rewrite.PhaseResponse, in)
@@ -614,7 +614,7 @@ func (s *sink) applyRequestTrace(f *mproxy.Flow, set *rewrite.Set, hooks *HookSe
 	defer func() {
 		if recover() != nil {
 			lines = nil
-			log.Printf("[traffic] rewrite rules stopped on a request to %s (class %s)", f.Request.URL.Hostname(), rewrite.ErrClassPanic)
+			slog.Error("[traffic] rewrite rules panicked on request", "host", f.Request.URL.Hostname(), "class", rewrite.ErrClassPanic)
 		}
 	}()
 	in := rewrite.Input{Request: req, IsBinary: rulesIsBinary}
@@ -649,7 +649,7 @@ func (s *sink) RequestError(f *mproxy.Flow, err error) {
 			for _, id := range ids {
 				snap.rules.NoteError(id, rewrite.ErrClassTransport)
 			}
-			log.Printf("[traffic] a request to %s rewritten by rules %v failed (class %s); the host stays intercepted", snap.host, ids, rewrite.ErrClassTransport)
+			slog.Warn("[traffic] rewritten request failed, host stays intercepted", "host", snap.host, "rules", ids, "class", rewrite.ErrClassTransport)
 			return
 		}
 	}
@@ -675,7 +675,7 @@ func (s *sink) StreamResponseModifier(f *mproxy.Flow, in io.Reader) (out io.Read
 		return in
 	}
 	s.t.snaps.largeResponses.Add(1)
-	log.Printf("[traffic] the response to a request to %s with rewrite rules %v reached %d MiB: passed through, not recorded", snap.host, snap.appliedRuleIDs(), libraryStreamBody>>20)
+	slog.Warn("[traffic] large response passed through, not recorded", "host", snap.host, "rules", snap.appliedRuleIDs(), "size_mib", libraryStreamBody>>20)
 	return in
 }
 
