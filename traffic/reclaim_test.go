@@ -84,6 +84,7 @@ func TestReclaimMergesFTSTombstones(t *testing.T) {
 			tr.record(newFlow(host, "GET", fmt.Sprintf("/p/%d", i), nil,
 				[]byte(strings.Repeat("secret token chinese body padding ", 200))))
 		}
+		tr.ftsq.wait() // the delete must find indexed rows, or there are no tombstones to merge
 		if _, err := tr.DeleteHostsExact([]string{host}); err != nil {
 			t.Fatal(err)
 		}

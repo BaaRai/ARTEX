@@ -20,9 +20,11 @@ import (
 
 // ChatAgent is the generic, task-independent conversational runner behind the chat
 // page. It generalizes MainAgent.Chat: any agent (built-in OR a custom one, by
-// key) can be chatted with, multi-turn history resumed from the transcript. It is
-// a PURE ASSISTANT — base tools are the SDK DefaultTools (Bash/Read/Write/Edit/
-// LS/Glob/Grep) plus whatever skills/MCP the key is made visible; NO pentest
+// key) can be chatted with, multi-turn history resumed from the transcript.
+// Execution chat agents (solo pentest, custom assistants) start with the SDK
+// DefaultTools (Bash/Read/Write/Edit/LS/Glob/Grep) plus WebFetch and visible
+// skills/MCP. Orchestration chat agents (auto) get no DefaultTools and no
+// WebFetch — only their bound orchestration/platform/domain tools. NO pentest
 // graph/task context is injected (that stays exclusive to MainAgent).
 type ChatAgent struct {
 	prov           llm.Provider
@@ -83,15 +85,46 @@ func chatWorkDirSpec(workDir string) string {
 	return "\n\n**File output rules**: whenever you need to write a file, write it to the working directory " + workDir + " (this is the default CWD — relative paths land here, and you may also use this absolute path) — do not write to /tmp or other absolute paths."
 }
 
+// isOrchestrationChatAgent reports whether a chat agent key is a pure
+// orchestrator that dispatches work through platform/task tools instead of
+// running shell, file, or HTTP tools itself.
+func isOrchestrationChatAgent(agentKey string) bool {
+	return agentKey == "auto"
+}
+
 // chatSystem renders the DB-managed prompt body for agentKey. Custom agents have
 // no per-key in-code default, so DefaultAssistantPrompt is the render fallback.
-// Every chat agent, built-in or custom, can read target-derived content through
-// WebFetch or Bash, so all of them get the code-owned untrusted-content tail
-// after the editable body.
+// Every chat agent, built-in or custom, can read target-derived content (via
+// WebFetch/Bash or task traces/findings), so all of them get the code-owned
+// untrusted-content tail after the editable body. Execution chat agents also get
+// the session working-directory notice and active noise profile guidance.
 func chatSystem(agentKey, dataDir, workDir string) string {
 	body := renderSystem(agentKey, DefaultAssistantPrompt, chatVars{DataDir: dataDir, Now: nowStr()})
 	body += untrustedContentTail(body)
+	if isOrchestrationChatAgent(agentKey) {
+		return body
+	}
 	return body + chatWorkDirSpec(workDir) + noiseProfileBlock()
+}
+
+// chatBaseTools returns the built-in base tool set for a chat agent before
+// AugmentTools runs. Orchestration agents (auto) get no SDK DefaultTools so they
+// dispatch via platform/task tools instead of executing commands themselves.
+func chatBaseTools(agentKey, workDir string) []actool.CoreTool {
+	if isOrchestrationChatAgent(agentKey) {
+		return nil
+	}
+	return defaultTools(workDir) // file tools confined to sessionWorkDir (filetools.go)
+}
+
+// assembleChatTools builds the final tool list for a chat agent run.
+func assembleChatTools(ctx context.Context, agentKey, workDir, proxyAddr, proxyCACert string) ([]actool.CoreTool, DeferredInfo, func()) {
+	base := chatBaseTools(agentKey, workDir)
+	tools, def, cleanup := AugmentTools(ctx, agentKey, base)
+	if !isOrchestrationChatAgent(agentKey) {
+		tools = withWebFetch(ctx, tools, proxyAddr, proxyCACert) // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
+	}
+	return tools, def, cleanup
 }
 
 // chatVars carries the runtime variables a custom agent's prompt may reference.
@@ -156,20 +189,24 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	makeRunDir(c.workDir, sessionWorkDir)
 	ctx = intercept.WithReviewWorkingDirectory(ctx, sessionWorkDir)
 
-	// Pure assistant: DefaultTools as the base; AugmentTools layers in the key's
-	// visible skills/MCP and lets the DB tools table filter/override. DefaultTools
-	// have no tools-table rows, so they always pass through.
-	base := defaultTools(c.workDir) // file tools confined to sessionWorkDir (filetools.go)
+	// Execution chat agents start with DefaultTools + WebFetch; orchestration
+	// agents (auto) receive only the orchestration/domain tools wired by
+	// AugmentTools / ToolResolve.
 	ctx = WithRunInfo(ctx, RunInfo{SessionID: sessionID})
-	tools, def, cleanup := AugmentTools(ctx, agentKey, base)
+	tools, def, cleanup := assembleChatTools(ctx, agentKey, c.workDir, c.proxyAddr, c.proxyCACert)
 	defer cleanup()
+
+	var bashEnv []string
+	if !isOrchestrationChatAgent(agentKey) {
+		bashEnv = proxyEnv(c.proxyAddr, c.proxyCACert) // Bash subcommands go through the proxy + trust the CA by default
+	}
 
 	system, boundary := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir), def)
 	opts := agentcore.Options{
 		Provider:        c.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           withWebFetch(ctx, tools, c.proxyAddr, c.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
+		Tools:           tools,
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
@@ -185,7 +222,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		DeepSeekSearchAPIKey:  ws.DeepSeekAPIKey,
 		DeepSeekSearchModel:   ws.DeepSeekModel,
 		WebSearchProxy:        ws.Proxy,
-		BashEnv:               proxyEnv(c.proxyAddr, c.proxyCACert), // Bash subcommands go through the proxy + trust the CA by default
+		BashEnv:               bashEnv,
 		WorkingDir:            sessionWorkDir,
 		MaxTurns:              maxTurns,
 		MaxDuration:           maxDuration,
