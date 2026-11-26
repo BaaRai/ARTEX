@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log"
+	"log/slog"
 
 	"github.com/Autumn-27/artex/db"
 )
@@ -15,7 +15,7 @@ func coverageOn(as *db.AssetStore, taskID int64) bool {
 	}
 	enabled, err := as.CoverageEnabled(taskID)
 	if err != nil {
-		log.Printf("[coverage] task %d: reading the coverage flag failed; leaving coverage on: %v", taskID, err)
+		slog.Warn("[coverage] reading the coverage flag failed; leaving coverage on", "task_id", taskID, "err", err)
 		return true
 	}
 	return enabled

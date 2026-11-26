@@ -39,6 +39,7 @@ import type {
   TrafficExchange,
   UsageStats,
 } from "@/lib/types";
+import { formatTokens } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { t } from "@/i18n";
 import { setVisibleInterval } from "@/lib/polling";
@@ -64,12 +65,6 @@ function fmtRel(ts?: string | number): string {
   const h = Math.floor(m / 60);
   if (h < 24) return t("{n}h ago", { n: h });
   return t("{n}d ago", { n: Math.floor(h / 24) });
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
-  return String(n);
 }
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
@@ -590,14 +585,14 @@ export default function DashboardPage() {
               <ZapIcon className="size-3" /> {t("Token usage")}
             </div>
             <div className="text-2xl font-semibold tabular-nums">
-              {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
+              {formatTokens(displayedTokens.input + displayedTokens.output) || "—"}
             </div>
           </CardHeader>
           <CardContent className="text-[10px] text-muted-foreground">
             {t("In {input} (incl. cache {cache}) · Out {output}", {
-              input: fmtTokens(displayedTokens.input),
-              cache: fmtTokens(displayedTokens.cacheRead),
-              output: fmtTokens(displayedTokens.output),
+              input: formatTokens(displayedTokens.input),
+              cache: formatTokens(displayedTokens.cacheRead),
+              output: formatTokens(displayedTokens.output),
             })}
           </CardContent>
         </Card>
@@ -704,7 +699,7 @@ export default function DashboardPage() {
             <div>
               <div className="text-[10px] text-muted-foreground">{t("Total (input+output)")}</div>
               <div className="mt-0.5 text-3xl font-bold tabular-nums tracking-tight">
-                {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
+                {formatTokens(displayedTokens.input + displayedTokens.output) || "—"}
               </div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">
                 {t("{count} tasks", { count: displayedTokens.taskCount })}
@@ -741,7 +736,7 @@ export default function DashboardPage() {
                     <div key={label}>
                       <div className="mb-1 flex items-center justify-between text-[10px]">
                         <span className="text-muted-foreground">{label}</span>
-                        <span className={cn("font-mono font-semibold tabular-nums", text)}>{fmtTokens(value)}</span>
+                        <span className={cn("font-mono font-semibold tabular-nums", text)}>{formatTokens(value)}</span>
                       </div>
                       <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                         <div
@@ -834,7 +829,7 @@ export default function DashboardPage() {
                     interval="preserveStartEnd"
                   />
                   <YAxis
-                    tickFormatter={(v) => fmtTokens(Number(v))}
+                    tickFormatter={(v) => formatTokens(Number(v))}
                     tickLine={false}
                     axisLine={false}
                     tick={{ fontSize: 10 }}
@@ -851,7 +846,7 @@ export default function DashboardPage() {
                               {(dailyTrendConfig as Record<string, { label: string }>)[String(name)]?.label ??
                                 String(name)}
                             </span>
-                            <span className="font-mono font-semibold tabular-nums">{fmtTokens(Number(value))}</span>
+                            <span className="font-mono font-semibold tabular-nums">{formatTokens(Number(value))}</span>
                           </div>
                         )}
                       />

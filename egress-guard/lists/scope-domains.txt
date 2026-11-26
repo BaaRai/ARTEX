@@ -1,0 +1,4 @@
+# Engagement scope: target domain suffixes (one per line). Every subdomain is allowed,
+# so newly discovered assets keep working. Edit per engagement, then:
+#   docker compose restart egress-guard
+# example.com

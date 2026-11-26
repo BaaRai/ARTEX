@@ -23,6 +23,8 @@ import type {
   BatchCategoryItem,
   BatchControlItem,
   ChatAttachment,
+  ChatBridge,
+  ChatBridgeIdentity,
   CommandRecord,
   Company,
   CompanyScopeMutation,
@@ -1061,6 +1063,18 @@ export const api = {
     ).then((r) => ({ ...r, deliveries: arr(r.deliveries) }));
   },
   notifyRetryDelivery: (id: number) => post<{ ok: boolean }>(`/notify/deliveries/${id}/retry`),
+
+  // ---- Inbound chat bridge ----
+  // One bridge per chat app kind. PUT semantics: omitted fields keep their stored value, and a masked
+  // config value sent back as-is keeps the stored secret.
+  chatBridges: () => get<ChatBridge[]>(`/chat-bridges`).then(arr),
+  chatBridgeSave: (
+    kind: string,
+    payload: { enabled?: boolean; config?: Record<string, unknown>; allowed_chats?: string[] },
+  ) => put<ChatBridge>(`/chat-bridges/${encodeURIComponent(kind)}`, payload),
+  // Asks the chat app which bot the stored token belongs to; sends no message.
+  chatBridgeTest: (kind: string) =>
+    post<{ ok: boolean; bot: ChatBridgeIdentity; latency_ms: number }>(`/chat-bridges/${encodeURIComponent(kind)}/test`),
   report: async (task?: string) => {
     if (MOCK) return mockReport(task);
     const token = getToken();
@@ -1145,6 +1159,7 @@ export const api = {
     session_header_key = "", // non-empty = the test request also carries this custom session header (value is a one-off session id)
     user_agent = "", // non-empty = the test overrides the User-Agent header with this value
     custom_headers = "",
+    max_tokens_field?: string, // ""=max_tokens | "max_completion_tokens"; omitted = the stored profile's choice
   ) =>
     // reply = the model's actual reply (truncated); the backend marks a profile that replies with nothing as failed
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string; reply?: string }>("/llm/test", {
@@ -1160,6 +1175,7 @@ export const api = {
       session_header_key,
       user_agent,
       custom_headers,
+      max_tokens_field,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
@@ -1173,6 +1189,11 @@ export const api = {
     rate_per_second?: number;
     rate_per_minute?: number;
     context_window_k?: number;
+    // Cost ledger, EUR per 1M tokens; 0 = unset. Sent on every save, which rewrites all four.
+    price_input_per_m?: number;
+    price_output_per_m?: number;
+    price_cache_read_per_m?: number;
+    price_cache_write_per_m?: number;
     thinking_type?: string; // ""(not sent)|"disabled"|"enabled"
     reasoning_effort?: string; // ""(not sent)|"low"|"medium"|"high"|"xhigh"|"max"
     priority?: number; // pool order position; higher is used first
