@@ -456,6 +456,8 @@ function ProfileSheet({
         sessionHeaderKey.trim(),
         userAgent.trim(),
         customHeaders,
+        // Test with the output-cap key the profile would actually send (OpenAI reasoning models reject max_tokens).
+        format === "openai" ? toStore(maxTokensField) : "",
       );
       // Show the reply too: only when the model demonstrably spoke is this the same as working inside a session.
       if (r.ok)

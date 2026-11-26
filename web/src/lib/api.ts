@@ -1159,6 +1159,7 @@ export const api = {
     session_header_key = "", // non-empty = the test request also carries this custom session header (value is a one-off session id)
     user_agent = "", // non-empty = the test overrides the User-Agent header with this value
     custom_headers = "",
+    max_tokens_field?: string, // ""=max_tokens | "max_completion_tokens"; omitted = the stored profile's choice
   ) =>
     // reply = the model's actual reply (truncated); the backend marks a profile that replies with nothing as failed
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string; reply?: string }>("/llm/test", {
@@ -1174,6 +1175,7 @@ export const api = {
       session_header_key,
       user_agent,
       custom_headers,
+      max_tokens_field,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
