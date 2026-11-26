@@ -209,20 +209,47 @@ func (s *logSinkT) subscribe() (<-chan LogLine, func()) {
 }
 
 // parseLog pulls a level + [tag] out of a standard-logger line; the timestamp is
-// the capture time (RFC3339).
+// the capture time (RFC3339). Lines written by the slog text handler carry the level
+// word right after the LstdFlags timestamp ("WARN [traffic] ..."): that word is the
+// level, and the tag after it is the tag. Lines without a level word keep the
+// keyword guess and the leading-tag rule.
 func parseLog(line string) LogLine {
 	msg := line
 	// strip the "2006/01/02 15:04:05" LstdFlags prefix if present
 	if len(msg) >= 20 && msg[4] == '/' && msg[7] == '/' && msg[10] == ' ' {
 		msg = strings.TrimSpace(msg[19:])
 	}
-	tag := ""
-	if strings.HasPrefix(msg, "[") {
-		if i := strings.IndexByte(msg, ']'); i > 1 {
-			tag = msg[1:i]
+	if word, rest, ok := strings.Cut(msg, " "); ok {
+		if level := slogLevel(word); level != "" {
+			tag, text := splitTag(rest)
+			return LogLine{TS: time.Now().Format(time.RFC3339), Level: level, Tag: tag, Text: text}
 		}
 	}
+	tag, _ := splitTag(msg)
 	return LogLine{TS: time.Now().Format(time.RFC3339), Level: levelOf(msg), Tag: tag, Text: msg}
+}
+
+// slogLevel maps the slog level word to the sink's level, "" when word is not one.
+func slogLevel(word string) string {
+	switch word {
+	case "DEBUG", "INFO":
+		return "info"
+	case "WARN":
+		return "warn"
+	case "ERROR":
+		return "error"
+	}
+	return ""
+}
+
+// splitTag returns the leading [tag] of msg and the text after it.
+func splitTag(msg string) (tag, text string) {
+	if strings.HasPrefix(msg, "[") {
+		if i := strings.IndexByte(msg, ']'); i > 1 {
+			return msg[1:i], strings.TrimSpace(msg[i+1:])
+		}
+	}
+	return "", msg
 }
 
 func levelOf(msg string) string {

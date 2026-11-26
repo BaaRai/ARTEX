@@ -112,6 +112,15 @@ The unit runs `/opt/artex/artex` directly without an extra supervisor script. It
 
 Because `docs/examples/artex.service` runs the server as the non-root `<artex-user>` (`User=artex`), the `-exec-uid`/`-exec-gid` privilege drop cannot be applied: `ResolveExecPrivilege` disables the drop when the server is not root (and errors if those flags are passed explicitly). The example unit deliberately omits `-exec-uid`/`-exec-gid`, so agents and spawned tools run under the `<artex-user>` service identity rather than a separate executor account. The root-owned run-directory layout and executor-group containment exist only when the server runs as root with explicit `-exec-uid`/`-exec-gid`; if you require unprivileged-executor containment, use the Docker deployment, which is the supported path for that isolation model.
 
+At every start the server runs an agent isolation self-test before it opens its stores. Under this unit the self-test reports that the privilege drop is off, and the server starts in **degraded** isolation mode; no flag is needed and the unit needs no change. A degraded start:
+
+- logs a banner that begins with `[isolation] !!!` and contains `AGENT ISOLATION IS DEGRADED` together with the self-test failure (see `journalctl -u artex.service`);
+- shows a red banner on every page of the web UI (from the `isolation` field of `GET /api/health`, returned to signed-in users only).
+
+In degraded mode agent shells, custom tools, MCP stdio servers and the file tools run as `<artex-user>`, which owns `config.json`, `keys/` and `data/`: they can read the JWT signing key, the secret key and the database password. Do not use this deployment on a server that holds real targets or credentials.
+
+A Linux server that runs as root with the privilege drop on (the Docker image) is held to the self-test instead: when isolation is broken there, the server refuses to start. `-dev-insecure-no-isolation` lets it start degraded anyway, for development only. The same rule leaves Windows, macOS and `dev.sh` (run as your own user) in degraded mode, with the same banners.
+
 ## Web setup
 
 On a new database, visit `http://127.0.0.1:8787/setup`, provide the one-time setup token from the private startup log or journal (`journalctl -u artex.service`), and choose a unique password of at least 12 characters. The username is `ARTEX`. Store the password in your password manager rather than in a plaintext file on disk.

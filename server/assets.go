@@ -70,6 +70,33 @@ func (s *Server) companyStore() *db.CompanyStore {
 	return s.m.pg.Companies()
 }
 
+// companyHosts lists the hosts a company owns, for the views that filter on a
+// host string instead of an asset id (traffic). Empty for "all companies" and
+// for a company that owns no host yet.
+func (s *Server) companyHosts(id int64) ([]string, error) {
+	if id <= 0 || s.m.pg == nil {
+		return nil, nil
+	}
+	rows, err := s.m.pg.Query(`
+		SELECT DISTINCT COALESCE(NULLIF(domain, ''), NULLIF(ip, ''))
+		FROM assets
+		WHERE company_id = $1
+		  AND COALESCE(NULLIF(domain, ''), NULLIF(ip, '')) IS NOT NULL`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var host string
+		if err := rows.Scan(&host); err != nil {
+			return nil, err
+		}
+		out = append(out, host)
+	}
+	return out, rows.Err()
+}
+
 // =====================================================================
 // GET /api/companies
 // =====================================================================
@@ -347,11 +374,14 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// task_id scopes the DSL search to a task's assets (the task detail
-		// "test assets" search); 0 means the global asset view.
+		// "test assets" search); 0 means the global asset view. company_id
+		// narrows it to one company (the sidebar switcher). Both are applied as
+		// SQL clauses next to the compiled DSL, never pasted into the DSL text.
 		taskID, _ := strconv.ParseInt(q.Get("task_id"), 10, 64)
-		total, err = as.CountDSL(dsl, typ, taskID)
+		companyID, _ := strconv.ParseInt(q.Get("company_id"), 10, 64)
+		total, err = as.CountDSLForCompany(dsl, typ, taskID, companyID)
 		if err == nil && offset < total {
-			assets, err = as.QueryDSL(dsl, typ, taskID, limit, offset)
+			assets, err = as.QueryDSLForCompany(dsl, typ, taskID, companyID, limit, offset)
 		}
 	} else {
 		companyID, _ := strconv.ParseInt(q.Get("company_id"), 10, 64)

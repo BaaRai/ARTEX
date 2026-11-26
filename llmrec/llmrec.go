@@ -211,7 +211,7 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 			}
 			// Lightweight metering row — always written.
 			r.recordUsage(ctx, taskID, expID, worker, usage, int(time.Since(start).Milliseconds()), status)
-			// Opt-in context size telemetry — independent of recordBodies.
+			// Context size telemetry (on by default) — independent of recordBodies.
 			if collectContext {
 				r.recordContext(taskID, worker, ctxMetrics, usage, status)
 			}

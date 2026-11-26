@@ -34,6 +34,8 @@ RECOVER
 update_docker(){
   command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
     || die "docker / docker compose not detected; install and deploy with ./install.sh first"
+  docker buildx version >/dev/null 2>&1 \
+    || die "docker buildx not detected; the image build needs it (see the Docker section of the README)"
   [ -f .env ] || die ".env not found; run ./install.sh first to complete the initial deployment"
 
   # Touch only artex: postgres is pinned to 16-alpine and does not need upgrading along

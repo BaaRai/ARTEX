@@ -50,6 +50,7 @@ import { setVisibleInterval } from "@/lib/polling";
 import { useStoredSortPreference } from "@/lib/sort-preference";
 import type { TrafficDetail, TrafficExchange, TrafficHARImportResult, TrafficHost, TrafficResp } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useActiveCompanyID } from "@/stores/company/company-store";
 import { intlLocale, t } from "@/i18n";
 
 import { ReplayPanel } from "./_components/replay-panel";
@@ -123,6 +124,8 @@ const STATUS_BUCKETS = ["2xx", "3xx", "4xx", "5xx"];
 
 export default function TrafficPage() {
   const [viewTab, setViewTab] = React.useState<"exchanges" | "hooks">("exchanges");
+  // The sidebar's company switcher narrows the list to that company's hosts.
+  const companyId = useActiveCompanyID();
   const [selectedFlows, setSelectedFlows] = React.useState<Set<string>>(() => new Set());
   const [linking, setLinking] = React.useState(false);
   const [page, setPage] = React.useState(0);
@@ -217,7 +220,7 @@ export default function TrafficPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: these values intentionally trigger a page reset.
   React.useEffect(() => {
     setPage(0);
-  }, [hostQ, queryQ, method, size, bodyQ, pathQ, statusFilter, rewrittenFilter, respMinQ, respMaxQ, sort]);
+  }, [hostQ, queryQ, method, size, bodyQ, pathQ, statusFilter, rewrittenFilter, respMinQ, respMaxQ, sort, companyId]);
 
   // Load the current page. Auto-refresh only on page 0 (newest) so paging back
   // through history isn't yanked out from under the user.
@@ -235,6 +238,7 @@ export default function TrafficPage() {
           respMax: respMaxQ,
           sort: sort.field,
           order: sort.direction,
+          company: companyId,
         })
         .then((r) => {
           if (alive) setTraffic(r);
@@ -274,6 +278,7 @@ export default function TrafficPage() {
     respMaxQ,
     sort,
     reloadTick,
+    companyId,
   ]);
 
   // Delete traffic for the current host filter (substring) or the checked

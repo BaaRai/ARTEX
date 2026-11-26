@@ -1,9 +1,11 @@
 package db
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // cleanupTreeFixtures deletes the assets and findings created by one test case.
@@ -240,5 +242,157 @@ func TestFindingAssetScopeFilter(t *testing.T) {
 	none := nodeByKey(tree, FindingUnassignedAsset)
 	if none == nil || none.Total != 2 {
 		t.Fatalf("unassigned bucket count: want 2, got %+v", none)
+	}
+}
+
+// TestFindingCompanyScopeFilter pins the company attribution rule. A finding
+// belongs to company C when one of its live assets has company_id = C. With no
+// live asset (empty asset_ids, or only deleted asset ids) it belongs to C only
+// when its task has a task_scope row of kind 'company' for C. Otherwise it
+// shows under "all companies" only. Unknown and non-numeric ids match nothing.
+func TestFindingCompanyScopeFilter(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	// Registered first so it runs last: every t.Cleanup below still has the connection.
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	newCompany := func(name string) int64 {
+		t.Helper()
+		key := fmt.Sprintf("%s %d", name, stamp)
+		var id int64
+		if err := d.QueryRow(`INSERT INTO companies(name, nkey) VALUES ($1, $1) RETURNING id`, key).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { d.Exec(`DELETE FROM companies WHERE id = $1`, id) }) //nolint:errcheck
+		return id
+	}
+	companyA := newCompany("scope test co a")
+	companyB := newCompany("scope test co b")
+	companyE := newCompany("scope test co empty")
+
+	newTask := func(name string, company int64) int64 {
+		t.Helper()
+		tk, err := d.CreateTask(name, "goal", nil, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { d.DeleteFindingsByTask(tk.ID); d.DeleteTask(tk.ID) }) //nolint:errcheck
+		if company > 0 {
+			if _, err := d.Exec(`INSERT INTO task_scope(task_id, kind, company_id, source) VALUES ($1, 'company', $2, 'manual')`, tk.ID, company); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return tk.ID
+	}
+	taskA := newTask("company scope a", companyA)
+	taskB := newTask("company scope b", companyB)
+	taskE := newTask("company scope empty", companyE)
+	taskNone := newTask("company scope none", 0)
+
+	rootA := fmt.Sprintf("company-scope-a-%d.example", stamp)
+	rootB := fmt.Sprintf("company-scope-b-%d.example", stamp)
+	rootGone := fmt.Sprintf("company-scope-gone-%d.example", stamp)
+	t.Cleanup(func() { cleanupTreeFixtures(d, 0, rootA, rootB, rootGone) })
+	assetA := seedTreeAsset(t, d, "root_domain", map[string]any{"domain": rootA, "root_domain": rootA, "company_id": companyA})
+	assetB := seedTreeAsset(t, d, "root_domain", map[string]any{"domain": rootB, "root_domain": rootB, "company_id": companyB})
+	// An asset of company A that is deleted: the finding left on it has no live asset.
+	gone := seedTreeAsset(t, d, "root_domain", map[string]any{"domain": rootGone, "root_domain": rootGone, "company_id": companyA})
+
+	add := func(task int64, name string, assets []int64) {
+		t.Helper()
+		if _, err := d.AddFinding(task, 0, name, name, "high", "s", "e", "w", assets); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(taskA, "a-on-asset", []int64{assetA})
+	add(taskB, "b-on-asset", []int64{assetB})
+	add(taskB, "b-unanchored", nil)
+	add(taskB, "b-deleted-asset", []int64{gone})
+	add(taskE, "e-unanchored", nil)
+	add(taskNone, "no-scope-unanchored", nil)
+	if _, err := d.Exec(`DELETE FROM assets WHERE id = $1`, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	idA, idB, idE := strconv.FormatInt(companyA, 10), strconv.FormatInt(companyB, 10), strconv.FormatInt(companyE, 10)
+	cases := []struct {
+		name string
+		f    FindingFilter
+		want []string
+	}{
+		{"own asset only", FindingFilter{Company: idA}, []string{"a-on-asset"}},
+		{"task-scoped unanchored and deleted asset", FindingFilter{Company: idB}, []string{"b-on-asset", "b-unanchored", "b-deleted-asset"}},
+		{"asset_scope c: matches Company", FindingFilter{AssetScope: companyKey(companyB)}, []string{"b-on-asset", "b-unanchored", "b-deleted-asset"}},
+		{"company without assets", FindingFilter{Company: idE}, []string{"e-unanchored"}},
+		{"nonexistent company", FindingFilter{Company: "999000444"}, nil},
+		{"nonexistent company node", FindingFilter{AssetScope: "c:999000444"}, nil},
+		{"non-numeric company", FindingFilter{Company: "abc"}, nil},
+		{"company node outside the company", FindingFilter{Company: idA, AssetScope: companyKey(companyB)}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			items, total, err := d.ListFindingsPage(tc.f, 1, 50)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]bool{}
+			for _, it := range items {
+				got[it.Name] = true
+			}
+			if total != len(tc.want) || len(items) != len(tc.want) {
+				t.Fatalf("%+v: want %v, got total=%d names=%v", tc.f, tc.want, total, got)
+			}
+			for _, name := range tc.want {
+				if !got[name] {
+					t.Fatalf("%+v: want %v, got %v", tc.f, tc.want, got)
+				}
+			}
+		})
+	}
+
+	// The unscoped finding only appears under "all companies".
+	if items, _, err := d.ListFindingsPage(FindingFilter{TaskID: strconv.FormatInt(taskNone, 10)}, 1, 50); err != nil || len(items) != 1 {
+		t.Fatalf("all companies: want the unscoped finding, got %d err=%v", len(items), err)
+	}
+
+	// The asset tree keeps the company: B's tree holds B's asset and the
+	// unlinked bucket (its 2 findings with no live asset), never company A.
+	tree, err := d.BuildFindingAssetTree(FindingFilter{Company: idB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.FindingTotal != 3 {
+		t.Fatalf("tree under B: want 3 findings, got %d", tree.FindingTotal)
+	}
+	keys := map[string]FindingAssetNode{}
+	for _, n := range tree.Nodes {
+		keys[n.Key] = n
+	}
+	if _, ok := keys[assetKey(assetA)]; ok {
+		t.Fatalf("tree under B holds company A's asset: %+v", tree.Nodes)
+	}
+	if _, ok := keys[companyKey(companyA)]; ok {
+		t.Fatalf("tree under B holds company A: %+v", tree.Nodes)
+	}
+	if _, ok := keys[assetKey(assetB)]; !ok {
+		t.Fatalf("tree under B misses its asset: %+v", tree.Nodes)
+	}
+	if n := keys[FindingUnassignedAsset]; n.Total != 2 {
+		t.Fatalf("tree under B: want 2 unlinked findings, got %+v", n)
+	}
+
+	// The stat cards count with the same rule as the list.
+	st, err := d.FindingStatsForCompany(idB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Total != 3 || st.High != 3 || len(st.Tasks) != 1 || st.Tasks[0].ID != taskB {
+		t.Fatalf("stats under B: want 3 high findings of task %d, got %+v", taskB, st)
+	}
+	if st, err := d.FindingStatsForCompany("999000444"); err != nil || st.Total != 0 {
+		t.Fatalf("stats under a nonexistent company: want 0, got %+v err=%v", st, err)
 	}
 }

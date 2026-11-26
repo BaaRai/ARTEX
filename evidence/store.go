@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -443,7 +443,7 @@ func (s *Store) RunGC(ctx context.Context) {
 			return
 		case now := <-timer.C:
 			if err := s.Collect(ctx, now); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("[evidence] cleanup failed: %v", err)
+				slog.Error("[evidence] evidence cleanup failed", "err", err)
 			}
 		}
 	}

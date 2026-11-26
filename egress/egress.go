@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -68,7 +68,7 @@ func ProfileByName(name string) (p Profile, ok bool) {
 		return Profile{Name: "off"}, false
 	}
 	if ua := strings.TrimSpace(os.Getenv("ARTEX_TARGET_USER_AGENT")); strings.ContainsFunc(ua, unicode.IsControl) {
-		log.Printf("[egress] ARTEX_TARGET_USER_AGENT contains a control character; ignored")
+		slog.Warn("[egress] ARTEX_TARGET_USER_AGENT contains a control character, ignored")
 	} else {
 		p.UserAgent = ua
 	}
@@ -81,7 +81,7 @@ func ProfileFromEnv() Profile {
 	name := strings.TrimSpace(os.Getenv("ARTEX_NOISE_PROFILE"))
 	p, ok := ProfileByName(name)
 	if !ok && name != "" {
-		log.Printf("[egress] ARTEX_NOISE_PROFILE=%q is not off, quiet, balanced or aggressive; using off", name)
+		slog.Warn("[egress] unknown noise profile, using off", "ARTEX_NOISE_PROFILE", name)
 	}
 	return p
 }
@@ -105,7 +105,7 @@ func Current() *Governor {
 	initCurrent.Do(func() {
 		g := New(ProfileFromEnv())
 		if current.CompareAndSwap(nil, g) {
-			log.Printf("[egress] noise profile: %s", g.p.Name)
+			slog.Info("[egress] noise profile active", "profile", g.p.Name)
 		}
 		startReporter()
 	})
@@ -120,7 +120,7 @@ func CurrentProfile() Profile { return Current().p }
 func SetProfile(p Profile) *Governor {
 	g := New(p)
 	current.Store(g)
-	log.Printf("[egress] noise profile: %s", g.p.Name)
+	slog.Info("[egress] noise profile active", "profile", g.p.Name)
 	startReporter()
 	return g
 }
@@ -135,7 +135,7 @@ func startReporter() {
 			defer t.Stop()
 			for range t.C {
 				for _, l := range Current().report() {
-					log.Print(l)
+					slog.Info(l)
 				}
 			}
 		}()
