@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS exchanges (
   resp_len     INTEGER,
   path         TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_ex_host ON exchanges(host);
+-- Replaces idx_ex_host(host): host lists skip the ts sort and Hosts() reads only the index.
+CREATE INDEX IF NOT EXISTS idx_ex_host_ts ON exchanges(host, ts);
+DROP INDEX IF EXISTS idx_ex_host;
 CREATE INDEX IF NOT EXISTS idx_ex_tmpl ON exchanges(host, url_template);
 CREATE INDEX IF NOT EXISTS idx_ex_ts   ON exchanges(ts);
 CREATE INDEX IF NOT EXISTS idx_ex_status ON exchanges(status);
