@@ -43,6 +43,9 @@ func (d *DB) RecentLogs(limit int) ([]*DBLog, error) {
 		}
 		out = append(out, l)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	// Reverse to oldest-first
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
@@ -69,6 +72,9 @@ func (d *DB) ListLogsBefore(beforeID int64, limit int) ([]*DBLog, error) {
 			return nil, err
 		}
 		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	// Reverse to oldest-first
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
