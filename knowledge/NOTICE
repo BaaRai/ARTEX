@@ -1,0 +1,27 @@
+Knowledge pack attribution
+
+The files under knowledge/data/ are generated from the sources below and are
+distributed under their own terms. They are not covered by the repository's
+AGPL-3.0 license.
+
+MITRE ATT&CK
+  Copyright © 2026 The MITRE Corporation. This work is reproduced and
+  distributed with the permission of The MITRE Corporation.
+  License: knowledge/licenses/ATTACK-LICENSE.txt
+  Source: https://github.com/mitre-attack/attack-stix-data
+
+OWASP Web Security Testing Guide
+  Copyright © OWASP Foundation. Licensed under CC-BY-SA-4.0.
+  Changes: descriptions are shortened for tool output; ids, names and
+  references are unchanged.
+  License: knowledge/licenses/WSTG-LICENSE.txt
+  Source: https://github.com/OWASP/wstg
+
+MITRE CWE
+  Copyright © 2006-2026 The MITRE Corporation. This work is reproduced and
+  distributed with the permission of The MITRE Corporation.
+  Terms: knowledge/licenses/CWE-TERMS.txt
+  Source: https://cwe.mitre.org/data/csv/1000.csv
+
+The canonical text and the full license terms are at the URL in each entry and
+in knowledge/licenses/.
