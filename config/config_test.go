@@ -110,6 +110,11 @@ func TestRedactMasksEveryDSNPasswordForm(t *testing.T) {
 		{"host=localhost user=u password=secret dbname=d", "secret"},
 		{"host=localhost password='p a ss' dbname=d", "p a ss"},
 		{"not a dsn password=stillsecret", "stillsecret"},
+		// A password with an unencoded # / ? or % makes url.Parse fail.
+		{"postgres://u:pa#ss@localhost:5432/d?sslmode=disable", "pa#ss"},
+		{"postgres://u:pa/ss@localhost/d", "pa/ss"},
+		{"postgresql://u:50%off@localhost/d", "50%off"},
+		{"postgres://u:a?b@localhost/d", "a?b"},
 	}
 	for _, c := range cases {
 		got := Redact(c.in)
