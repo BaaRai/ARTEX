@@ -45,6 +45,7 @@ import { BroadcastTab } from "./_tabs/broadcast-tab";
 import { CoverageGraphTab } from "./_tabs/coverage-graph-tab";
 import { CredentialsTab } from "./_tabs/credentials-tab";
 import { FindingsTab } from "./_tabs/findings-tab";
+import { AttackPathsTab } from "./_tabs/attack-paths-tab";
 import { BrainTab } from "./_tabs/brain-tab";
 import { GraphTab } from "./_tabs/graph-tab";
 import { InterceptTab } from "./_tabs/intercept-tab";
@@ -58,6 +59,7 @@ const TABS = [
   { value: "sessions", label: t("Sessions") },
   { value: "overview", label: t("Overview") },
   { value: "brain", label: t("Brain") },
+  { value: "attack-paths", label: t("Attack paths") },
   { value: "graph", label: t("Exploration graph") },
   { value: "broadcast", label: t("Broadcast") },
   { value: "findings", label: t("Findings") },
@@ -447,6 +449,9 @@ function TaskDetailInner() {
         </TabsContent>
         <TabsContent value="brain" className="mt-0">
           <BrainTab taskId={id} />
+        </TabsContent>
+        <TabsContent value="attack-paths" className="mt-0">
+          <AttackPathsTab taskId={id} />
         </TabsContent>
         <TabsContent value="graph" className="mt-0">
           <GraphTab taskId={id} />

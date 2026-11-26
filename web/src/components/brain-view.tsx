@@ -8,10 +8,21 @@
 // it and handles the camera, the data feed and the overlay.
 
 import * as React from "react";
+
 import { Crosshair, Maximize2, Minimize2, Navigation, Pause, Play, RotateCw } from "lucide-react";
 
 import { nodeSummary } from "@/components/exploration-graph";
-import { Button } from "@/components/ui/button";
+import {
+  Centered,
+  clamp,
+  glowSprite,
+  IconToggle,
+  type RGB,
+  readCssColors,
+  rgba,
+  rgbCss,
+  Stat,
+} from "@/components/glow-canvas";
 import { intlLocale, t } from "@/i18n";
 import { api, sseUrl } from "@/lib/api";
 import {
@@ -30,7 +41,6 @@ import { setVisibleInterval } from "@/lib/polling";
 import type { Activity, Edge, TaskNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type RGB = [number, number, number];
 type ColorKey = NeuronKind | SignalTone | "bg";
 
 const KIND_VAR: Record<ColorKey, string> = {
@@ -145,62 +155,12 @@ interface HoverInfo {
   label: string;
 }
 
-function clamp(v: number, lo: number, hi: number) {
-  return v < lo ? lo : v > hi ? hi : v;
-}
-
-function rgba([r, g, b]: RGB, a: number) {
-  return `rgba(${r},${g},${b},${a})`;
-}
-
 function readPalette(probe: HTMLElement): Record<ColorKey, RGB> {
-  const out = { ...FALLBACK };
-  const c = document.createElement("canvas");
-  c.width = 1;
-  c.height = 1;
-  const ctx = c.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return out;
-  const style = getComputedStyle(probe);
-  for (const key of Object.keys(KIND_VAR) as ColorKey[]) {
-    const css = style.getPropertyValue(KIND_VAR[key]).trim();
-    if (!css) continue;
-    ctx.clearRect(0, 0, 1, 1);
-    ctx.fillStyle = "#010203";
-    ctx.fillStyle = css;
-    if (ctx.fillStyle === "#010203") continue; // not a colour the canvas understands
-    ctx.fillRect(0, 0, 1, 1);
-    const d = ctx.getImageData(0, 0, 1, 1).data;
-    out[key] = [d[0], d[1], d[2]];
-  }
+  const out = readCssColors(probe, KIND_VAR, FALLBACK);
   // The brain sits in a deep field in either theme so the glow reads as light.
   const [r, g, b] = out.bg;
   out.bg = [Math.round(r * 0.55), Math.round(g * 0.55), Math.round(b * 0.62)];
   return out;
-}
-
-function glowSprite([r, g, b]: RGB, hot: boolean): HTMLCanvasElement {
-  const size = 64;
-  const c = document.createElement("canvas");
-  c.width = size;
-  c.height = size;
-  const ctx = c.getContext("2d");
-  if (!ctx) return c;
-  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  const mix = (v: number) => Math.round(v + (255 - v) * 0.7);
-  if (hot) {
-    grad.addColorStop(0, `rgba(${mix(r)},${mix(g)},${mix(b)},1)`);
-    grad.addColorStop(0.35, `rgba(${r},${g},${b},0.9)`);
-    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-  } else {
-    grad.addColorStop(0, `rgba(${mix(r)},${mix(g)},${mix(b)},0.9)`);
-    grad.addColorStop(0.1, `rgba(${r},${g},${b},0.75)`);
-    grad.addColorStop(0.32, `rgba(${r},${g},${b},0.22)`);
-    grad.addColorStop(0.6, `rgba(${r},${g},${b},0.06)`);
-    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-  }
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  return c;
 }
 
 function toActivityIn(a: Activity): ActivityIn {
@@ -519,7 +479,7 @@ class BrainRenderer {
       const p = this.proj.get(sh.n);
       if (!p || p.scale === 0) continue;
       const u = sh.age / sh.life;
-      const r = Math.pow(u, 0.55) * 46 * sh.size * p.scale + 2;
+      const r = u ** 0.55 * 46 * sh.size * p.scale + 2;
       ctx.strokeStyle = rgba(this.color(sh.tone), (1 - u) * 0.55);
       ctx.lineWidth = 1.5 + (1 - u) * 2.5;
       ctx.beginPath();
@@ -783,10 +743,6 @@ function infoFor(n: Neuron): SelectedInfo {
     lastSummary: n.lastSummary,
     parentLabel: n.parent ? shortLabel(n.parent) : "",
   };
-}
-
-function rgbCss(c: RGB) {
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
 export function BrainView({ taskId, className }: { taskId: string; className?: string }) {
@@ -1279,50 +1235,4 @@ function kindLabel(kind: string): string {
 function safeTime(fmt: Intl.DateTimeFormat, ts: string): string {
   const d = new Date(ts);
   return Number.isNaN(d.getTime()) ? "" : fmt.format(d);
-}
-
-function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
-  return (
-    <span>
-      <span className={cn("font-medium text-white/90", tone)}>{value.toLocaleString(intlLocale)}</span> {label}
-    </span>
-  );
-}
-
-function IconToggle({
-  label,
-  active,
-  onClick,
-  children,
-}: {
-  label: string;
-  active?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Button
-      type="button"
-      size="icon"
-      variant="ghost"
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "size-8 rounded-md border border-white/10 bg-black/35 text-white/70 backdrop-blur hover:bg-white/10 hover:text-white [&_svg]:size-4",
-        active && "border-white/25 bg-white/15 text-white",
-      )}
-    >
-      {children}
-    </Button>
-  );
-}
-
-function Centered({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-white/60">
-      {children}
-    </div>
-  );
 }
