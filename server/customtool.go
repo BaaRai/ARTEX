@@ -693,12 +693,31 @@ func identity(s string) string { return s }
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // renderTemplate replaces {name} placeholders with each param's rendered value.
+//
+// It scans the template once, left to right, and never rescans a substituted
+// value. Replacing param by param instead would let a value containing
+// "{other}" be expanded again by a later param, inside the quotes of the first
+// one: with a="{b}" and b="; id", shell-quoted {a} becomes '{b}', and then the
+// quoted value of b lands inside those quotes, closing them and running "id"
+// (and which param runs first depends on map order). A "{" that does not start a known placeholder is copied as is,
+// so "{{a}}" still renders as "{" + value + "}".
 func renderTemplate(tmpl string, params map[string]any, quote func(string) string) string {
-	out := tmpl
-	for k, v := range params {
-		out = strings.ReplaceAll(out, "{"+k+"}", quote(valToStr(v)))
+	var b strings.Builder
+	b.Grow(len(tmpl))
+	for i := 0; i < len(tmpl); {
+		if tmpl[i] == '{' {
+			if end := strings.IndexByte(tmpl[i+1:], '}'); end >= 0 {
+				if v, ok := params[tmpl[i+1:i+1+end]]; ok {
+					b.WriteString(quote(valToStr(v)))
+					i += end + 2
+					continue
+				}
+			}
+		}
+		b.WriteByte(tmpl[i])
+		i++
 	}
-	return out
+	return b.String()
 }
 
 // valToStr renders a param value: scalars as-is, arrays/objects as compact JSON.
