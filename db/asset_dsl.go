@@ -336,7 +336,14 @@ func (b *whereBuilder) buildLeaf(e Expr) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("task_id requires an integer value: %s", e.Value)
 		}
-		return b.next(n) + " = ANY(task_ids)", nil
+		switch e.Op {
+		case "=", "==":
+			return b.next(n) + " = ANY(task_ids)", nil
+		case "!=":
+			return "NOT (" + b.next(n) + " = ANY(task_ids))", nil
+		default:
+			return "", fmt.Errorf("field %s does not support operator %s", f, e.Op)
+		}
 	}
 
 	// company_id: exact integer
@@ -345,7 +352,15 @@ func (b *whereBuilder) buildLeaf(e Expr) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("company_id requires an integer value: %s", e.Value)
 		}
-		return "company_id = " + b.next(n), nil
+		switch e.Op {
+		case "=", "==":
+			return "company_id = " + b.next(n), nil
+		case "!=":
+			// An asset without a company is not in the excluded company.
+			return "company_id IS DISTINCT FROM " + b.next(n), nil
+		default:
+			return "", fmt.Errorf("field %s does not support operator %s", f, e.Op)
+		}
 	}
 
 	// numeric fields
@@ -360,6 +375,10 @@ func (b *whereBuilder) buildLeaf(e Expr) (string, error) {
 		}
 		if op != "=" && op != "!=" && op != ">" && op != ">=" && op != "<" && op != "<=" {
 			return "", fmt.Errorf("field %s does not support operator %s", f, e.Op)
+		}
+		if op == "!=" {
+			// An asset without the field does not have the excluded value.
+			op = "IS DISTINCT FROM"
 		}
 		return fmt.Sprintf("%s %s %s", col, op, b.next(n)), nil
 	}
@@ -387,7 +406,9 @@ func (b *whereBuilder) buildLeaf(e Expr) (string, error) {
 		case "==":
 			return col + " = " + b.next(e.Value), nil
 		case "!=":
-			return col + " NOT ILIKE " + b.next("%"+e.Value+"%"), nil
+			// NOT ILIKE on NULL is NULL, which would also drop the assets that
+			// have no value for the field; they do not match, so keep them.
+			return "(" + col + " IS NULL OR " + col + " NOT ILIKE " + b.next("%"+e.Value+"%") + ")", nil
 		default:
 			return "", fmt.Errorf("string field %s does not support operator %s", f, e.Op)
 		}

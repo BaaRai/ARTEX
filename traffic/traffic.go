@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS exchanges (
   resp_len     INTEGER,
   path         TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_ex_host ON exchanges(host);
+-- Replaces idx_ex_host(host): host lists skip the ts sort and Hosts() reads only the index.
+CREATE INDEX IF NOT EXISTS idx_ex_host_ts ON exchanges(host, ts);
+DROP INDEX IF EXISTS idx_ex_host;
 CREATE INDEX IF NOT EXISTS idx_ex_tmpl ON exchanges(host, url_template);
 CREATE INDEX IF NOT EXISTS idx_ex_ts   ON exchanges(ts);
 CREATE INDEX IF NOT EXISTS idx_ex_status ON exchanges(status);
@@ -245,6 +247,9 @@ type Traffic struct {
 	// build without FTS5: recording and metadata search still work, body search
 	// degrades to unsupported rather than erroring.
 	fts bool
+	// ftsq writes the full-text index off the request path (fts_queue.go). Nil
+	// when fts is off, and on a zero value, where recording indexes inline.
+	ftsq *ftsQueue
 	// reaping tracks background reclamation of legacy trees and index space, so
 	// shutdown and tests can wait for it instead of racing it.
 	reaping sync.WaitGroup
@@ -325,6 +330,10 @@ func Open(dir, addr string) (*Traffic, error) {
 	if err := t.initIndex(); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if t.fts {
+		t.ftsq = newFTSQueue(t)
+		t.ftsq.resume()
 	}
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
@@ -423,6 +432,9 @@ func (t *Traffic) initIndex() error {
 	if _, err := conn.ExecContext(ctx, ftsSchema); err != nil {
 		slog.Warn("[traffic] full-text index unavailable; body search will be disabled", "err", err)
 		return nil
+	}
+	if _, err := conn.ExecContext(ctx, ftsPendingSchema); err != nil {
+		return err
 	}
 	t.fts = true
 	return nil
@@ -582,6 +594,9 @@ func (t *Traffic) Close() error {
 	}
 	t.reaping.Wait()
 	t.sweeping.Wait()
+	if t.ftsq != nil {
+		t.ftsq.close()
+	}
 	return t.db.Close()
 }
 
@@ -707,10 +722,20 @@ const unavailableMarker = "[original request unavailable]\n"
 
 // recordViews writes one exchange from explicit views, with its rewrite trace,
 // in one transaction: the exchange row, its bodies, blob references, the trace
-// and the full-text index of the views only. A failure rolls everything back,
-// so there is never a rewritten exchange without its trace. Without trace
-// lines this is exactly what record always wrote.
+// and the full-text text of the views only, which waits in ex_fts_pending for
+// the background indexer (fts_queue.go). A failure rolls everything back, so
+// there is never a rewritten exchange without its trace.
 func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.TraceLine) {
+	if job := t.writeViews(rq, rs, lines); job != nil {
+		t.ftsq.add(*job)
+	}
+}
+
+func (t *Traffic) writeViews(rq requestView, rs responseView, lines []rewrite.TraceLine) *ftsJob {
+	// Decoding a compressed body is CPU work on up to maxIndexBody bytes each;
+	// it runs before the write lock so concurrent records do not wait on it.
+	reqIdx, reqDecoded := indexBody(rq.header, rq.body)
+	respIdx, respDecoded := indexBody(rs.header, rs.body)
 	// The write lock covers blob + index writes, so DeleteHost (and its blob GC)
 	// can run under the same lock without racing a concurrent record.
 	t.wmu.Lock()
@@ -733,6 +758,12 @@ func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.T
 	// work and must not sit inside the SQLite write lock.
 	reqB := t.spill(rq.body, rq.header.Get("Content-Type"))
 	respB := t.spill(rs.body, ct)
+	if reqDecoded {
+		reqB.index = reqIdx
+	}
+	if respDecoded {
+		respB.index = respIdx
+	}
 	trace := t.spillTrace(lines)
 
 	// A rewritten exchange is logged by host, step and rule ids only: its URL
@@ -749,7 +780,7 @@ func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.T
 	tx, err := t.db.Begin()
 	if err != nil {
 		fail("beginning transaction", err)
-		return
+		return nil
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
@@ -757,7 +788,7 @@ func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.T
 	// exchange it replaces must not stay attached to this one.
 	if _, err := tx.Exec(`DELETE FROM exchange_rewrites WHERE exchange_id=?`, id); err != nil {
 		fail("clearing rewrite trace", err)
-		return
+		return nil
 	}
 	// path stays empty for db-resident exchanges; a non-empty path marks a legacy
 	// row whose bodies still live in the old on-disk tree (see Get).
@@ -767,19 +798,19 @@ VALUES(?,?,?,?,?,?,?,?,?,?,'')`,
 		len(rq.body), len(rs.body))
 	if err != nil {
 		fail("writing index", err)
-		return
+		return nil
 	}
 	rowid, err := res.LastInsertId()
 	if err != nil {
 		fail("fetching rowid", err)
-		return
+		return nil
 	}
 
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO exchange_bodies(id,req_head,req_body,req_blob,resp_head,resp_body,resp_blob)
 VALUES(?,?,?,?,?,?,?)`,
 		id, reqHead, reqB.inline, nullIfEmpty(reqB.hash), respHead, respB.inline, nullIfEmpty(respB.hash)); err != nil {
 		fail("writing body", err)
-		return
+		return nil
 	}
 
 	for _, h := range []string{reqB.hash, respB.hash} {
@@ -788,7 +819,7 @@ VALUES(?,?,?,?,?,?,?)`,
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_refs(hash,exchange_id) VALUES(?,?)`, h, id); err != nil {
 			fail("registering blob reference", err)
-			return
+			return nil
 		}
 	}
 
@@ -796,23 +827,32 @@ VALUES(?,?,?,?,?,?,?)`,
 		var re *recordError
 		errors.As(err, &re)
 		fail(re.step, re.err)
-		return
+		return nil
 	}
 
+	var job *ftsJob
 	if t.fts {
 		// The index is fed from memory, so a body that spilled to _blobs is still
 		// fully searchable even though only its preview is stored inline. Only the
 		// recorded views are indexed, never a value a rule wrote.
 		idx := strings.Join([]string{url, reqHead, reqB.index, respHead, respB.index}, "\n")
-		if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowid, idx); err != nil {
+		if t.ftsq != nil {
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO ex_fts_pending(rowid,id,content) VALUES(?,?,?)`, rowid, id, idx); err != nil {
+				fail("queueing full-text index", err)
+				return nil
+			}
+			job = &ftsJob{rowid: rowid, id: id}
+		} else if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowid, idx); err != nil {
 			fail("writing full-text index", err)
-			return
+			return nil
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		fail("committing", err)
+		return nil
 	}
+	return job
 }
 
 // appliedRules reports whether a trace rewrote its exchange, with the ids of
@@ -1071,6 +1111,34 @@ func sanitize(s string) string {
 	return out
 }
 
+// storeDir reports whether name is one of the traffic store's own directories.
+// Host trees never use these names. DeleteAll skips every underscore-prefixed
+// entry for the same reason.
+func storeDir(name string) bool {
+	switch name {
+	case "_index", "_blobs", "_ca", "_delete_staging":
+		return true
+	default:
+		return false
+	}
+}
+
+// hostDir is the legacy on-disk tree for one recorded host. A sanitized name
+// that is the store itself, one of its own directories, or a path outside the
+// traffic root is not a host tree. Callers still delete the host's index rows.
+func hostDir(root, host string) (string, bool) {
+	name := sanitize(host)
+	if name == "." || name == ".." || storeDir(name) {
+		return "", false
+	}
+	dir := filepath.Join(root, name)
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return dir, true
+}
+
 var blobHashRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // blobPath locates a stored blob. Current writes use one bucket level; blobs
@@ -1234,13 +1302,30 @@ ORDER BY ts DESC LIMIT 8`, fromTS, toTS, arg)
 		}
 		for _, cand := range ids {
 			_, resp, gerr := t.Get(cand)
-			if gerr != nil || !strings.Contains(resp, line) {
+			if gerr != nil {
 				continue
 			}
-			return cand, true, nil
+			if strings.Contains(resp, line) || t.decodedResponseContains(cand, line) {
+				return cand, true, nil
+			}
 		}
 	}
 	return "", false, nil
+}
+
+// decodedResponseContains reports whether the decoded body of a compressed
+// response contains line. Get returns the body as recorded, which for a
+// Content-Encoding response is the compressed bytes.
+func (t *Traffic) decodedResponseContains(id, line string) bool {
+	_, _, respHead, respBody, err := t.loadFullExchange(id, "")
+	if err != nil {
+		return false
+	}
+	_, _, headers := parseStoredResponseHead(respHead)
+	h := http.Header{}
+	h.Set("Content-Encoding", findHeaderValue(headers, "Content-Encoding"))
+	dec, ok := decodeBody(h, respBody, maxIndexBody)
+	return ok && strings.Contains(string(dec), line)
 }
 
 // ftsFilter builds the SQL condition restricting rows to those whose indexed
@@ -1251,6 +1336,9 @@ func (t *Traffic) ftsFilter(term string) (cond string, arg any, ok bool) {
 	term = strings.TrimSpace(term)
 	if !t.fts || utf8.RuneCountInString(term) < minTrigram {
 		return "", nil, false
+	}
+	if t.ftsq != nil {
+		t.ftsq.wait()
 	}
 	return `rowid IN (SELECT rowid FROM ex_fts WHERE ex_fts MATCH ?)`, ftsQuote(term), true
 }
@@ -1719,7 +1807,9 @@ func (t *Traffic) hostTrees(where string, args ...any) ([]string, error) {
 		if err := rows.Scan(&h); err != nil {
 			return nil, err
 		}
-		dirs = append(dirs, filepath.Join(t.dir, sanitize(h)))
+		if dir, ok := hostDir(t.dir, h); ok {
+			dirs = append(dirs, dir)
+		}
 	}
 	return dirs, rows.Err()
 }
@@ -1952,7 +2042,9 @@ func (t *Traffic) stageDeleteHostsExact(hosts []string, archiveID, taskID int64)
 	// own an orphaned directory that this deletion should take with it.
 	legacy := make([]string, 0, len(unique))
 	for _, h := range unique {
-		legacy = append(legacy, filepath.Join(t.dir, sanitize(h)))
+		if dir, ok := hostDir(t.dir, h); ok {
+			legacy = append(legacy, dir)
+		}
 	}
 
 	tx, err := t.db.Begin()
@@ -2419,12 +2511,23 @@ func (t *Traffic) query(host, contains, bodyContains string, page, limit int) ([
 			// so constrain the original URL authority as a compatibility fallback.
 			// New and old captures therefore share the same search contract.
 			authority := net.JoinHostPort(hostName, port)
-			q += ` AND (url LIKE ? OR url LIKE ? OR url LIKE ?)`
-			args = append(args,
-				"%://"+authority+"/%",
-				"%://"+authority+"?%",
-				"%://"+authority,
-			)
+			prefixes := []string{"%://" + authority}
+			// Clients leave a default port out of the Host header, so a capture
+			// of https://host:443 is recorded as https://host, and a WebSocket
+			// over it as wss://host.
+			bare := strings.TrimSuffix(authority, ":"+port)
+			switch port {
+			case "80":
+				prefixes = append(prefixes, "http://"+bare, "ws://"+bare)
+			case "443":
+				prefixes = append(prefixes, "https://"+bare, "wss://"+bare)
+			}
+			var conds []string
+			for _, p := range prefixes {
+				conds = append(conds, `url LIKE ? OR url LIKE ? OR url LIKE ?`)
+				args = append(args, p+"/%", p+"?%", p)
+			}
+			q += ` AND (` + strings.Join(conds, ` OR `) + `)`
 		}
 	}
 	if contains != "" {
@@ -2510,7 +2613,7 @@ func (t *Traffic) Tools() []actool.CoreTool {
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"host":          map[string]any{"type": "string", "description": "Filter by host (required; e.g. '107.172.96.177', '107.172.96.177:8082', or 'http://107.172.96.177:8082/path')"},
+				"host":          map[string]any{"type": "string", "description": "Filter by host (required; e.g. '192.0.2.10', '192.0.2.10:8082', or 'http://192.0.2.10:8082/path')"},
 				"contains":      map[string]any{"type": "string", "description": "URL substring filter (optional, e.g. 'api' / 'login')"},
 				"body_contains": map[string]any{"type": "string", "description": "Full-text body search (optional, at least 3 characters); matches request/response headers and bodies, e.g. 'password' / 'root:x:0' / 'internal test'"},
 				"limit":         map[string]any{"type": "integer", "description": "Page size, default 3, max 10"},

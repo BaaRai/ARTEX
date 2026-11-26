@@ -775,6 +775,7 @@ gunzip -c backups/artex-db-<timestamp>.sql.gz | docker compose exec -T postgres 
 ```
 
 Stored secrets (LLM API keys, proxies and gateway custom headers, MCP env, task credentials, notification channel config,
+the chat bot token,
 Brave/Tavily search keys, web search and global proxies, the execution spec of custom tools, the
 capture-proxy rewrite rules) are
 encrypted in the database with the key in `keys/secret.key` (generated at first start, mode 0600,
@@ -963,6 +964,7 @@ Please report vulnerabilities privately through GitHub Security Advisories; see
 Operational security properties:
 
 - **Secrets at rest**: LLM keys/proxies/gateway headers, MCP environment, task credentials, notification config,
+  the chat bot token,
   search keys, proxies, custom-tool execution specs, capture-proxy rewrite rules and traffic
   evidence snapshots are encrypted
   with AES-256-GCM using `keys/secret.key` (or `ARTEX_SECRET_KEY`). ARTEX refuses to start when

@@ -16,7 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"regexp"
 	"strconv"
@@ -309,7 +309,7 @@ func (i *Interceptor) loadLocked() error {
 	if err != nil {
 		if !i.loadFailed {
 			i.loadFailed = true
-			log.Printf("[intercept] the rule store cannot be read; every tool call is denied until it can: %v", err)
+			slog.Error("[intercept] the rule store cannot be read; every tool call is denied until it can", "err", err)
 		}
 		return err
 	}

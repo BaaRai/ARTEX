@@ -9,19 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
+import { formatBytes } from "@/lib/format";
 import { createTrafficStreamPager, emptyTrafficStreamState } from "@/lib/traffic-stream";
 import type { TrafficStreamDirection, TrafficStreamMessage } from "@/lib/types";
 
 // Binary payloads loaded in full are shown as hex of their first 64 KiB.
 const HEX_PREVIEW_BYTES = 64 * 1024;
-
-function fmtBytes(n: number) {
-  if (n <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
-  const v = n / 1024 ** i;
-  return `${i === 0 ? v : v.toFixed(1)} ${units[i]}`;
-}
 
 function fmtDirection(direction: string) {
   if (direction === "c2s") return t("client -> server");
@@ -85,7 +78,7 @@ function StreamMessageRow({ message }: { message: TrafficStreamMessage }) {
         {message.event_id && <span className="font-mono">id: {message.event_id}</span>}
         {message.retry ? <span className="font-mono">retry: {message.retry}</span> : null}
         <span className="ml-auto text-muted-foreground tabular-nums">
-          {fmtBytes(message.size)} · {new Date(message.ts * 1000).toLocaleTimeString(intlLocale)}
+          {formatBytes(message.size)} · {new Date(message.ts * 1000).toLocaleTimeString(intlLocale)}
         </span>
       </div>
       <pre className={payloadClass}>{full?.text ?? message.payload}</pre>
