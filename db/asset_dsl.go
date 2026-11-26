@@ -336,7 +336,14 @@ func (b *whereBuilder) buildLeaf(e Expr) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("task_id requires an integer value: %s", e.Value)
 		}
-		return b.next(n) + " = ANY(task_ids)", nil
+		switch e.Op {
+		case "=", "==":
+			return b.next(n) + " = ANY(task_ids)", nil
+		case "!=":
+			return "NOT (" + b.next(n) + " = ANY(task_ids))", nil
+		default:
+			return "", fmt.Errorf("field %s does not support operator %s", f, e.Op)
+		}
 	}
 
 	// company_id: exact integer
@@ -345,7 +352,15 @@ func (b *whereBuilder) buildLeaf(e Expr) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("company_id requires an integer value: %s", e.Value)
 		}
-		return "company_id = " + b.next(n), nil
+		switch e.Op {
+		case "=", "==":
+			return "company_id = " + b.next(n), nil
+		case "!=":
+			// An asset without a company is not in the excluded company.
+			return "company_id IS DISTINCT FROM " + b.next(n), nil
+		default:
+			return "", fmt.Errorf("field %s does not support operator %s", f, e.Op)
+		}
 	}
 
 	// numeric fields

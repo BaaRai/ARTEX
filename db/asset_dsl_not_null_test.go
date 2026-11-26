@@ -51,3 +51,60 @@ func TestQueryDSLExclusionKeepsAssetsWithoutTheField(t *testing.T) {
 		}
 	}
 }
+
+// company_id!=N and task_id!=N exclude that company's or task's assets; they
+// used to compile to the equality and return exactly the excluded assets.
+func TestQueryDSLExclusionOnCompanyAndTask(t *testing.T) {
+	d, assets, _ := testSetup(t)
+	t.Cleanup(func() { d.Close() })
+
+	stamp := time.Now().UnixNano()
+	marker := fmt.Sprintf("exclid%d.invalid", stamp)
+	var companyID int64
+	if err := d.QueryRow(`INSERT INTO companies(name,nkey) VALUES ($1,$1) RETURNING id`, marker).Scan(&companyID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM companies WHERE id=$1`, companyID) })
+	taskID := stamp % 1_000_000_000
+
+	var owned, unowned int64
+	if err := d.QueryRow(`INSERT INTO assets(type,domain,root_domain,company_id,task_ids)
+		VALUES ('subdomain',$1,$2,$3,ARRAY[$4]::bigint[]) RETURNING id`, "a."+marker, marker, companyID, taskID).Scan(&owned); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`INSERT INTO assets(type,domain,root_domain)
+		VALUES ('subdomain',$1,$2) RETURNING id`, "b."+marker, marker).Scan(&unowned); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupExec(t, d, `DELETE FROM assets WHERE id=ANY($1::bigint[])`, []int64{owned, unowned})
+	})
+
+	for _, c := range []struct {
+		dsl  string
+		want int64
+	}{
+		{fmt.Sprintf("root_domain==%s AND company_id!=%d", marker, companyID), unowned},
+		{fmt.Sprintf("root_domain==%s AND task_id!=%d", marker, taskID), unowned},
+		{fmt.Sprintf("root_domain==%s AND company_id==%d", marker, companyID), owned},
+		{fmt.Sprintf("root_domain==%s AND task_id=%d", marker, taskID), owned},
+	} {
+		got, err := assets.QueryDSL(c.dsl, "subdomain", 0, 50, 0)
+		if err != nil {
+			t.Fatalf("%s: %v", c.dsl, err)
+		}
+		if len(got) != 1 || got[0].ID != c.want {
+			ids := []int64{}
+			for _, a := range got {
+				ids = append(ids, a.ID)
+			}
+			t.Errorf("%s: got ids %v, want [%d]", c.dsl, ids, c.want)
+		}
+	}
+
+	for _, dsl := range []string{"company_id>1", "task_id<1"} {
+		if err := ValidateDSL(dsl); err == nil {
+			t.Errorf("%s: accepted, want an unsupported-operator error", dsl)
+		}
+	}
+}
