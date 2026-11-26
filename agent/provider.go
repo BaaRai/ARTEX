@@ -14,7 +14,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -616,22 +616,23 @@ func logTestConnection(c Config, capt *llmrec.Capture) {
 	attempts := capt.Attempts()
 	if c.Format == FormatBedrockGateway {
 		if len(attempts) == 0 {
-			log.Print("[llm-test] bedrock-gateway — no HTTP request was sent")
+			slog.Warn("[llm-test] bedrock-gateway: no HTTP request was sent")
 			return
 		}
 		for i, a := range attempts {
-			log.Printf("[llm-test] bedrock-gateway — attempt %d/%d HTTP %d", i+1, len(attempts), a.Status)
+			slog.Info("[llm-test] bedrock-gateway attempt", "attempt", i+1, "attempts", len(attempts), "status", a.Status)
 		}
 		return
 	}
 	if len(attempts) == 0 {
-		log.Printf("[llm-test] %s / %s @ %s — no HTTP request was ever sent (config resolution or connection setup failed)",
-			c.Provider(), c.Model, c.BaseURL)
+		slog.Warn("[llm-test] no HTTP request was ever sent (config resolution or connection setup failed)",
+			"provider", c.Provider(), "model", c.Model, "base_url", c.BaseURL)
 		return
 	}
 	for i, a := range attempts {
-		log.Printf("[llm-test] %s / %s @ %s — attempt %d/%d HTTP %d\nresponse body: %s",
-			c.Provider(), c.Model, c.BaseURL, i+1, len(attempts), a.Status, clipBody(a.Body))
+		slog.Info("[llm-test] connection attempt",
+			"provider", c.Provider(), "model", c.Model, "base_url", c.BaseURL,
+			"attempt", i+1, "attempts", len(attempts), "status", a.Status, "response_body", clipBody(a.Body))
 	}
 }
 

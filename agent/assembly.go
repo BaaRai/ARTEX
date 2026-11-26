@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"runtime/debug"
 	"sync"
 
@@ -113,7 +113,7 @@ func (g *guardedTool) AcceptsRawInput() bool {
 func (g *guardedTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (res actool.Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[tools] %s panic: %v\n%s", g.Name(), r, debug.Stack())
+			slog.Error(fmt.Sprintf("[tools] %s panic: %v\n%s", g.Name(), r, debug.Stack()))
 			res, err = actool.Errorf(fmt.Sprintf("internal error in tool %s: %v (this call has failed; try different arguments or another tool)", g.Name(), r)), nil
 		}
 	}()

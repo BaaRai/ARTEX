@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -1586,7 +1586,7 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		// advice "register it again if it is distinct" is unactionable, because the
 		// retry hits the same check and is suppressed again.
 		if a.ForceRegister {
-			log.Printf("[triage] override: force_register set, registering %q without the duplicate check", a.Name)
+			slog.Info("[triage] override: force_register set, registering without duplicate check", "candidate", a.Name)
 		} else if ans, ok := t.triageDuplicate(ctx, input); ok && triageDuplicateHit(ans) {
 			res := map[string]any{
 				"duplicate_of_finding_id":      ans.DuplicateOf,
