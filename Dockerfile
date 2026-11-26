@@ -303,7 +303,7 @@ RUN set -eux; \
     curl -fsSL https://foundry.paradigm.xyz | bash; \
     /root/.foundry/bin/foundryup; \
     npm install --global "hardhat@${HARDHAT_VERSION}"; \
-    slither --version; myth --version; echidna --version; \
+    slither --version; myth -h; echidna --version; \
     /root/.foundry/bin/forge --version; hardhat --version
 ENV PATH="/root/.foundry/bin:/root/.local/bin:${PATH}"
 
