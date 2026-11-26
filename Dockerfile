@@ -26,7 +26,7 @@ RUN npm run build:static
 # GOTOOLCHAIN=local, so a floating 1.26 tag that lags go.mod fails the build;
 # bump this together with the go line in go.mod. The binary is CGO-free, so this
 # stage runs on the build platform and cross-compiles to $TARGETARCH without QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
