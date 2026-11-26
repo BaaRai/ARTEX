@@ -733,6 +733,8 @@ func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.T
 	// work and must not sit inside the SQLite write lock.
 	reqB := t.spill(rq.body, rq.header.Get("Content-Type"))
 	respB := t.spill(rs.body, ct)
+	reqB.index = indexBody(rq.header, rq.body, reqB.index)
+	respB.index = indexBody(rs.header, rs.body, respB.index)
 	trace := t.spillTrace(lines)
 
 	// A rewritten exchange is logged by host, step and rule ids only: its URL
@@ -1234,13 +1236,30 @@ ORDER BY ts DESC LIMIT 8`, fromTS, toTS, arg)
 		}
 		for _, cand := range ids {
 			_, resp, gerr := t.Get(cand)
-			if gerr != nil || !strings.Contains(resp, line) {
+			if gerr != nil {
 				continue
 			}
-			return cand, true, nil
+			if strings.Contains(resp, line) || t.decodedResponseContains(cand, line) {
+				return cand, true, nil
+			}
 		}
 	}
 	return "", false, nil
+}
+
+// decodedResponseContains reports whether the decoded body of a compressed
+// response contains line. Get returns the body as recorded, which for a
+// Content-Encoding response is the compressed bytes.
+func (t *Traffic) decodedResponseContains(id, line string) bool {
+	_, _, respHead, respBody, err := t.loadFullExchange(id, "")
+	if err != nil {
+		return false
+	}
+	_, _, headers := parseStoredResponseHead(respHead)
+	h := http.Header{}
+	h.Set("Content-Encoding", findHeaderValue(headers, "Content-Encoding"))
+	dec, ok := decodeBody(h, respBody, maxIndexBody)
+	return ok && strings.Contains(string(dec), line)
 }
 
 // ftsFilter builds the SQL condition restricting rows to those whose indexed
