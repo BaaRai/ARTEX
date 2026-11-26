@@ -27,7 +27,7 @@ func skillRowState(t *testing.T, d *DB, agentID int64, skill string) (exists, en
 // TestSkillVisibilityOffIsNotResurrectedBySeed pins the behaviour the seed policy
 // comment already claims: a toggle-off survives the next startup.
 //
-// The seeded map is api-recon -> {auto, pentest, worker}; the agents it names are
+// The seeded map is api-recon -> {pentest, worker}; the agents it names are
 // restored in cleanup so running this suite against a live dev database leaves no
 // changed tool surface behind.
 func TestSkillVisibilityOffIsNotResurrectedBySeed(t *testing.T) {

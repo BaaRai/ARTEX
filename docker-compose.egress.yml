@@ -1,0 +1,42 @@
+# Optional, Linux-only egress allowlist for the ARTEX network. See egress-guard/README.md.
+# Enable by adding this overlay to every compose command:
+#   docker compose -f docker-compose.yml -f docker-compose.egress.yml up -d
+# It needs NET_ADMIN and edits the host firewall (DOCKER-USER chain). Without
+# this overlay the main compose file is unchanged, so this is fully opt-in.
+services:
+  artex:
+    # Route DNS through egress-guard's dnsmasq (on the network gateway), which
+    # feeds the allowlist. depends_on merges with the base file's postgres entry.
+    dns:
+      - 172.31.250.1
+    depends_on:
+      egress-guard:
+        condition: service_started
+
+  egress-guard:
+    build:
+      context: ./egress-guard
+    image: artex-egress-guard:local
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      # monitor (default, log only) | enforce (block) | off (DNS only)
+      EGRESS_MODE: ${EGRESS_MODE:-monitor}
+      ARTEX_SUBNET: 172.31.250.0/24
+      ARTEX_GATEWAY: 172.31.250.1
+      UPSTREAM_DNS: ${EGRESS_UPSTREAM_DNS:-}
+    volumes:
+      - ./egress-guard/lists:/etc/egress-guard:ro
+      - ./egress-guard/logs:/var/log/egress
+    restart: unless-stopped
+
+# Give the ARTEX network a fixed subnet/gateway so dnsmasq and the firewall
+# rules have a known address to bind and match.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+          gateway: 172.31.250.1

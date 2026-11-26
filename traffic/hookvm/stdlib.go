@@ -27,6 +27,13 @@ func (e *vm) checkRepeat(elemLen, cnt int64) int {
 	return int(cnt)
 }
 
+// replacedLen is the length of s once its n matches of old become new, charged
+// before the replacement is built: a long new string repeated over many matches
+// can need far more than the budget.
+func replacedLen(sLen, n, oldLen, newLen int) int64 {
+	return int64(sLen) + int64(n)*(int64(newLen)-int64(oldLen))
+}
+
 func (e *vm) callPkg(pkg, fn string, args []any) any {
 	need := func(n int) {
 		if len(args) != n {
@@ -85,9 +92,9 @@ func (e *vm) callPkg(pkg, fn string, args []any) any {
 			return strings.ToUpper(s)
 		case "ReplaceAll":
 			need(3)
-			out := strings.ReplaceAll(e.str(args[0]), e.str(args[1]), e.str(args[2]))
-			e.alloc(int64(len(out)))
-			return out
+			s, old, repl := e.str(args[0]), e.str(args[1]), e.str(args[2])
+			e.alloc(replacedLen(len(s), strings.Count(s, old), len(old), len(repl)))
+			return strings.ReplaceAll(s, old, repl)
 		}
 	case "bytes":
 		switch fn {
@@ -121,9 +128,9 @@ func (e *vm) callPkg(pkg, fn string, args []any) any {
 			return bytes.ToUpper(b)
 		case "ReplaceAll":
 			need(3)
-			out := bytes.ReplaceAll(e.bytes(args[0]), e.bytes(args[1]), e.bytes(args[2]))
-			e.alloc(int64(len(out)))
-			return out
+			b, old, repl := e.bytes(args[0]), e.bytes(args[1]), e.bytes(args[2])
+			e.alloc(replacedLen(len(b), bytes.Count(b, old), len(old), len(repl)))
+			return bytes.ReplaceAll(b, old, repl)
 		}
 	case "encoding/json":
 		need(1)
@@ -219,9 +226,18 @@ func (e *vm) callPkg(pkg, fn string, args []any) any {
 			return re.FindString(s)
 		case "ReplaceAllString":
 			need(3)
-			out := re.ReplaceAllString(s, e.str(args[2]))
-			e.alloc(int64(len(out)))
-			return out
+			repl := e.str(args[2])
+			// Each match becomes at most the template with every $ reference
+			// expanded to the whole match, which bounds the result before it is built.
+			var n, matched int64
+			re.ReplaceAllStringFunc(s, func(m string) string {
+				n++
+				matched += int64(len(m))
+				return ""
+			})
+			refs := int64(strings.Count(repl, "$"))
+			e.alloc(int64(len(s)) - matched + n*int64(len(repl)) + refs*matched)
+			return re.ReplaceAllString(s, repl)
 		}
 	case "crypto/sha256":
 		need(1)

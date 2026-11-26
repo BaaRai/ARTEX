@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -324,6 +324,8 @@ func (t *ToolSet) ListWorkerTracesTool() actool.CoreTool   { return t.listWorker
 func (t *ToolSet) SearchWorkerTracesTool() actool.CoreTool { return t.searchAllWorkerTraces() }
 func (t *ToolSet) NodeDetailTool() actool.CoreTool         { return t.nodeDetail() }
 func (t *ToolSet) AddHintTool() actool.CoreTool            { return t.addHint() }
+func (t *ToolSet) SetGoalsTool() actool.CoreTool           { return t.setGoals() }
+func (t *ToolSet) SetConstraintsTool() actool.CoreTool     { return t.setConstraints() }
 
 // SetEnrich wires the async enrichment engine (DNS/HTTP auto-completion).
 func (t *ToolSet) SetEnrich(e EnrichTrigger) { t.enrich = e }
@@ -1162,6 +1164,49 @@ func (t *ToolSet) listFindings() actool.CoreTool {
 // context, so default to the newest page and let the agent page/filter for more.
 const factsPageSize = 20
 
+// toolPageMax is the largest page an agent list tool will return or allocate.
+// list_facts already stops at 100. The same ceiling keeps a model-supplied
+// limit from becoming a slice allocation or an unbounded query.
+const toolPageMax = 100
+
+// toolOffsetMax bounds a model-supplied SQL offset. The page size is already
+// capped; this stops a huge offset from turning one call into a long scan.
+const toolOffsetMax = 1_000_000
+
+// toolPageIndexMax bounds the page number used with a capped page size so the
+// offset multiplication cannot overflow.
+const toolPageIndexMax = 10_000
+
+func clampToolLimit(n, def int) int {
+	if n <= 0 {
+		return def
+	}
+	if n > toolPageMax {
+		return toolPageMax
+	}
+	return n
+}
+
+func clampToolOffset(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > toolOffsetMax {
+		return toolOffsetMax
+	}
+	return n
+}
+
+func clampToolPage(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	if n > toolPageIndexMax {
+		return toolPageIndexMax
+	}
+	return n
+}
+
 func (t *ToolSet) listFacts() actool.CoreTool {
 	return t.readExpTool("list_facts", "Page through the [exploration facts/conclusions] of this task and directly related tasks, newest first (compact: id+summary+state+origin+source; origin is the writer, source the declared source of the content; overlong summaries are truncated — full text via node_detail(id)). All parameters optional: limit (default 20, max 100), before (cursor; pass the previous page's next_before for an older page; omit/0 = the newest page), q (filter by summary keyword). Returns {facts, total, has_more, next_before}: total is the filtered count; when has_more=true, keep paging with next_before. Related-task entries carry source_task_id/inherited=true and are read-only. For findings see list_findings.",
 		obj(map[string]any{
@@ -1584,7 +1629,7 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		// advice "register it again if it is distinct" is unactionable, because the
 		// retry hits the same check and is suppressed again.
 		if a.ForceRegister {
-			log.Printf("[triage] override: force_register set, registering %q without the duplicate check", a.Name)
+			slog.Info("[triage] override: force_register set, registering without duplicate check", "candidate", a.Name)
 		} else if ans, ok := t.triageDuplicate(ctx, input); ok && triageDuplicateHit(ans) {
 			res := map[string]any{
 				"duplicate_of_finding_id":      ans.DuplicateOf,
@@ -2002,6 +2047,7 @@ func (t *ToolSet) setGoals() actool.CoreTool {
 			"★Batch preferred: put multiple goals in the goals array in a single submission; the returned ids match it in length and order (failed items get id=0, details in errors). For a single goal, omit goals and pass the top-level text.\n"+
 			"vulnclass is optional: the corresponding vulnerability class (e.g. SQLi/IDOR); leave empty for business-logic goals. Whether a goal is met is judged and marked met by the system; this tool only adds.",
 		obj(map[string]any{
+			"task_id":   str("optional: target task id (required when called from a task-less chat agent such as Auto)"),
 			"goals":     map[string]any{"type": "array", "description": "[Prefer this] array of goals to add, processed in order. Each element: text (required, an independently verifiable final goal) + vulnclass (optional). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
 			"text":      str("[single] one independently verifiable final goal"),
 			"vulnclass": str("[single] the corresponding vulnerability class (if clear), e.g. SQLi/IDOR; may be empty for business-logic goals"),
@@ -2103,6 +2149,7 @@ func (t *ToolSet) setConstraints() actool.CoreTool {
 			"★Batch preferred: put multiple constraints in the constraints array in a single submission; the returned ids match it in length and order (failed items get id=0, details in errors). For a single constraint, omit constraints and pass the top-level text/type.\n"+
 			"Register only constraints [explicitly stated] in the task goal/description — don't invent any; when unsure about the type, use deny (more conservative).",
 		obj(map[string]any{
+			"task_id":     str("optional: target task id (required when called from a task-less chat agent such as Auto)"),
 			"constraints": map[string]any{"type": "array", "description": "[Prefer this] array of constraints to add, processed in order. Each element: text (required, one constraint) + type (allow|deny). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
 			"text":        str("[single] the content of one operation constraint"),
 			"type":        str("[single] allow or deny; defaults to deny when omitted"),
@@ -2518,7 +2565,7 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 			"Only executed ones are listed (running/done/exhausted/blocked/stopped), not the not-yet-run open ones. Note: your task boundary is still the intent you claimed; looking at other works is only for reusing observations/avoiding duplicate work.",
 		obj(map[string]any{
 			"q":     str("filter by summary keyword (optional)"),
-			"limit": intp("return cap, default 50 (optional)"),
+			"limit": intp("return cap, default 50, max 100 (optional)"),
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
@@ -2526,10 +2573,7 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 				Limit int    `json:"limit"`
 			}
 			_ = json.Unmarshal(in, &a)
-			limit := a.Limit
-			if limit <= 0 {
-				limit = 50
-			}
+			limit := clampToolLimit(a.Limit, 50)
 			all, err := t.ts.ListByKindWithSources(db.KindIntent, 500)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
@@ -2567,7 +2611,7 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 // PlannerTools is the read + intent-generation + goal-judgement tool set.
 func (t *ToolSet) PlannerTools() []actool.CoreTool {
 	return []actool.CoreTool{
-		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(),
+		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(), t.knowledgeLookup(),
 		// cold-digest §6.1: restore folded cold nodes (digest body → members → detail).
 		t.expandDigest(),
 		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.listGoals(), t.addIntent(), t.proveGoal(), t.goalMet(),

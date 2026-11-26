@@ -20,7 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -71,7 +71,7 @@ func (c *Compactor) OnPlannerRound(ctx context.Context, ts *db.ExplorationStore)
 	}
 	round, uncompressed, activeDigests, err := c.maintain(ts)
 	if err != nil {
-		log.Printf("[compaction] maintain exp=%d: %v", ts.ID(), err)
+		slog.Warn("[compaction] maintain failed", "exp", ts.ID(), "err", err)
 		return
 	}
 	needMinor := uncompressed >= c.n
@@ -244,7 +244,7 @@ func (c *Compactor) major(ctx context.Context, ts *db.ExplorationStore) {
 		}
 	}
 	if err := ts.SupersedeDigests(stale); err != nil {
-		log.Printf("[compaction] supersede exp=%d: %v", ts.ID(), err)
+		slog.Warn("[compaction] supersede failed", "exp", ts.ID(), "err", err)
 	}
 	for _, b := range toCreate {
 		c.foldBlock(ctx, ts, g, b, nodeByID, cvers, c.generationFor(b, active))
@@ -258,7 +258,7 @@ func (c *Compactor) major(ctx context.Context, ts *db.ExplorationStore) {
 func (c *Compactor) foldBlock(ctx context.Context, ts *db.ExplorationStore, g *coldGraph, b block, nodeByID map[int64]*db.Node, cvers map[int64]int, generation int) {
 	body, err := c.compress(ctx, g, b, nodeByID)
 	if err != nil {
-		log.Printf("[compaction] compress exp=%d block=%v: %v", ts.ID(), b.Members, err)
+		slog.Warn("[compaction] compress failed", "exp", ts.ID(), "block", b.Members, "err", err)
 		return
 	}
 	// Re-read fresh state and drop any member that revived while we compressed.
@@ -279,7 +279,7 @@ func (c *Compactor) foldBlock(ctx context.Context, ts *db.ExplorationStore, g *c
 	final := block{Members: members, Anchors: b.Anchors}
 	payload := digestPayload(body, final, nodeByID, generation, blockSignature(final, cvers))
 	if _, err := ts.AddDigest(payload, members); err != nil {
-		log.Printf("[compaction] add digest exp=%d: %v", ts.ID(), err)
+		slog.Warn("[compaction] add digest failed", "exp", ts.ID(), "err", err)
 	}
 }
 
