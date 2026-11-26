@@ -478,16 +478,23 @@ func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 		}
 	}
 
+	// Credentials are never verified (the username only carries the pace marker),
+	// so username/password grants no more trust than no-auth: both are accepted
+	// from loopback clients only. A non-loopback client is refused whichever
+	// method it offers, so a non-loopback bind is not an open proxy.
+	if !isLoopbackRemote(conn.RemoteAddr()) {
+		_, _ = conn.Write([]byte{socks5Version, socks5AuthNoAccept})
+		return false, false
+	}
 	// Prefer username/password when offered so clients carrying the pace marker
 	// (egress.PaceUser) can pass it through without requiring real credentials.
-	// Accept no-auth for loopback clients.
 	if hasUserPass {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthUserPass}); err != nil {
 			return false, false
 		}
 		return readSOCKS5UserPass(conn)
 	}
-	if hasNone && isLoopbackRemote(conn.RemoteAddr()) {
+	if hasNone {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthNone}); err != nil {
 			return false, false
 		}
@@ -498,8 +505,9 @@ func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 }
 
 // readSOCKS5UserPass parses an RFC 1929 username/password subnegotiation.
-// Credentials are never required (any username/password succeeds); a username
-// equal to egress.PaceUser marks the connection as paced.
+// Credentials are never verified (any username/password succeeds, which is why
+// negotiateAuth only offers this method to loopback clients); a username equal
+// to egress.PaceUser marks the connection as paced.
 func readSOCKS5UserPass(conn net.Conn) (paced bool, ok bool) {
 	var head [2]byte
 	if _, err := io.ReadFull(conn, head[:]); err != nil {
