@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -363,7 +363,7 @@ func (r *Recorder) recordUsage(ctx context.Context, taskID string, expID int64, 
 		Status:        status,
 	})
 	if err != nil {
-		log.Printf("[llmusage] insert: %v", err)
+		slog.Error("[llmusage] insert failed", "err", err)
 	}
 }
 
@@ -424,7 +424,7 @@ func (r *Recorder) record(req llm.CompletionRequest, session, taskID, worker, re
 	}
 
 	if err := r.pg.InsertLLMRecord(rec); err != nil {
-		log.Printf("[llmrec] insert: %v", err)
+		slog.Error("[llmrec] insert failed", "err", err)
 	}
 }
 

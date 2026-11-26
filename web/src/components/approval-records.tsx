@@ -46,20 +46,10 @@ import type {
   InterceptReviewInput,
   InterceptRisk,
 } from "@/lib/types";
+import { formatShortDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { setVisibleInterval } from "@/lib/polling";
-import { intlLocale, t } from "@/i18n";
-
-function fmtTime(value?: string) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString(intlLocale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { t } from "@/i18n";
 
 function source(row: InterceptApprovalRow) {
   if (row.decision_source) return row.decision_source;
@@ -477,9 +467,9 @@ export function ApprovalDetail({
               <ApprovalOrigin row={current} detail />
             </dd>
             <dt className="text-muted-foreground">{t("Requested at")}</dt>
-            <dd>{fmtTime(row.created_at)}</dd>
+            <dd>{formatShortDateTime(row.created_at, { empty: "—" })}</dd>
             <dt className="text-muted-foreground">{t("Decided at")}</dt>
-            <dd>{fmtTime(current.decided_at)}</dd>
+            <dd>{formatShortDateTime(current.decided_at, { empty: "—" })}</dd>
             <dt className="text-muted-foreground">{t("Decided by")}</dt>
             <dd>
               <DecidedByBadge row={current} />
@@ -585,7 +575,7 @@ export function ApprovalDetail({
                         <h3 className="font-medium text-muted-foreground text-xs">{t("Visible conversation context")}</h3>
                         <p className="text-muted-foreground text-xs">
                           {t('Conversation record excerpt saved at {time}. What the model actually used follows "Model review input".', {
-                            time: fmtTime(audit.captured_at),
+                            time: formatShortDateTime(audit.captured_at, { empty: "—" }),
                           })}
                         </p>
                         {audit.context_truncated ? (
@@ -645,7 +635,11 @@ export function ApprovalDetail({
                   <div>{t("Model review input SHA-256: {value}", { value: audit.model_input_digest })}</div>
                 ) : null}
                 {audit.execution_ended_at ? (
-                  <div>{t("Result recorded at: {time}", { time: fmtTime(audit.execution_ended_at) })}</div>
+                  <div>
+                    {t("Result recorded at: {time}", {
+                      time: formatShortDateTime(audit.execution_ended_at, { empty: "—" }),
+                    })}
+                  </div>
                 ) : null}
               </dl>
             </div>
@@ -805,10 +799,10 @@ function ApprovalTable({
                   <DecidedByBadge row={row} />
                 </TableCell>
                 <TableCell className="hidden text-muted-foreground text-xs lg:table-cell">
-                  {fmtTime(row.created_at)}
+                  {formatShortDateTime(row.created_at, { empty: "—" })}
                 </TableCell>
                 <TableCell className="hidden text-muted-foreground text-xs xl:table-cell">
-                  {fmtTime(row.decided_at)}
+                  {formatShortDateTime(row.decided_at, { empty: "—" })}
                 </TableCell>
               </TableRow>
               {open ? (

@@ -41,23 +41,39 @@ const profiles: { value: NoiseProfileName; label: string; limits: string }[] = [
   },
 ];
 
+type NoiseReading =
+  | { state: "loading"; status: NoiseStatus | null }
+  | { state: "ready"; status: NoiseStatus }
+  | { state: "error"; status: NoiseStatus | null; message: string };
+
 // NoiseProfileCard sets the target noise profile and shows the per-host
 // counters of the current minute.
 export function NoiseProfileCard() {
-  const [status, setStatus] = React.useState<NoiseStatus | null>(null);
-  const [loading, setLoading] = React.useState(false);
+  const [reading, setReading] = React.useState<NoiseReading>({ state: "loading", status: null });
   const [saving, setSaving] = React.useState(false);
+  const latestRequest = React.useRef(0);
 
-  const refresh = React.useCallback(() => {
-    setLoading(true);
-    api
-      .noiseStatus()
-      .then(setStatus)
-      .catch((e) => toast.error(t("Failed to load the noise counters: {error}", { error: (e as Error).message })))
-      .finally(() => setLoading(false));
+  const refresh = React.useCallback(async () => {
+    const request = ++latestRequest.current;
+    setReading(({ status }) => ({ state: "loading", status }));
+    try {
+      const status = await api.noiseStatus();
+      if (!status || !profiles.some((profile) => profile.value === status.profile) || !Array.isArray(status.hosts)) {
+        throw new Error(t("Invalid noise status response."));
+      }
+      if (request === latestRequest.current) setReading({ state: "ready", status });
+    } catch (error) {
+      if (request === latestRequest.current) {
+        const message = error instanceof Error ? error.message : String(error);
+        setReading(({ status }) => ({ state: "error", status, message }));
+      }
+    }
   }, []);
   React.useEffect(() => {
-    refresh();
+    void refresh();
+    return () => {
+      latestRequest.current += 1;
+    };
   }, [refresh]);
 
   const save = (value: NoiseProfileName) => {
@@ -68,13 +84,15 @@ export function NoiseProfileCard() {
         toast.success(
           t("Noise profile set to {profile}", { profile: profiles.find((p) => p.value === value)?.label ?? value }),
         );
-        refresh();
+        return refresh();
       })
       .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
       .finally(() => setSaving(false));
   };
 
-  const current = profiles.find((p) => p.value === status?.profile) ?? profiles[0];
+  const { status } = reading;
+  const loading = reading.state === "loading";
+  const current = profiles.find((p) => p.value === status?.profile);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -95,11 +113,11 @@ export function NoiseProfileCard() {
           </Label>
           <Select
             value={status?.profile ?? ""}
-            disabled={!status || saving}
+            disabled={reading.state !== "ready" || saving}
             onValueChange={(v) => save(v as NoiseProfileName)}
           >
             <SelectTrigger id="noise-profile" className="w-48 shrink-0">
-              <SelectValue placeholder={t("Loading…")} />
+              <SelectValue placeholder={loading ? t("Loading…") : t("Noise status unavailable")} />
             </SelectTrigger>
             <SelectContent>
               {profiles.map((p) => (
@@ -110,10 +128,22 @@ export function NoiseProfileCard() {
             </SelectContent>
           </Select>
         </div>
-        <p className="text-muted-foreground text-xs">{current.limits}</p>
+        {reading.state === "error" && (
+          <p className="text-destructive text-xs" role="alert">
+            {t("Failed to load the noise counters: {error}", { error: reading.message })}
+          </p>
+        )}
+        {status && reading.state !== "ready" && (
+          <p className="text-muted-foreground text-xs" role="status">
+            {t("Showing the last successfully loaded noise profile and counters.")}
+          </p>
+        )}
+        {current && <p className="text-muted-foreground text-xs">{current.limits}</p>}
         <div className="flex items-center justify-between gap-4">
-          <span className="font-medium text-sm">{t("Hosts, current minute")}</span>
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+          <span className="font-medium text-sm">
+            {status && reading.state !== "ready" ? t("Last available host counters") : t("Hosts, current minute")}
+          </span>
+          <Button variant="outline" size="sm" onClick={refresh} disabled={loading || saving}>
             <RefreshCwIcon data-icon="inline-start" className={loading ? "animate-spin" : undefined} />
             {t("Refresh")}
           </Button>
@@ -145,11 +175,11 @@ export function NoiseProfileCard() {
               ))}
             </TableBody>
           </Table>
-        ) : (
+        ) : reading.state === "ready" ? (
           <p className="text-muted-foreground text-sm">
-            {status?.profile === "off" ? t("Off counts no request.") : t("No paced request yet.")}
+            {reading.status.profile === "off" ? t("Off counts no request.") : t("No paced request yet.")}
           </p>
-        )}
+        ) : null}
       </CardContent>
     </Card>
   );
