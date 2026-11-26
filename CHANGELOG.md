@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **Preinstalled Python packages for agent scripts**: `requests`, `beautifulsoup4`, `lxml`, `urllib3`, `pyyaml`, `jinja2`, `colorama` and `tqdm` are preinstalled in the runtime image with pinned versions so agent-generated scripts run without runtime pip downloads.
+
 - **LLM profile prices in the settings dialog** (follow-up to #70): the profile dialog has inputs for the four cost-ledger prices (EUR per 1M tokens), and the profile list returns them. Before this, prices could only be set through the API, and saving the profile from the UI reset them to zero because the dialog never sent them. A negative price is stored as unset, and an API save that leaves a price out keeps the stored value.
 - **Wildcard domains in asset scope**: a scope line such as `*.example.com`, the way bug bounty programs write a domain and its subdomains, is accepted in company and task asset scope and stored as the `example.com` domain rule, which already covers its subdomains. A URL form (`https://*.example.com/`) works too. The wildcard is accepted only on a registrable domain: `*.api.example.com`, `*.co.uk` and `*.<IP>` are still rejected, because no rule covers only a subdomain's subdomains (#519).
 - **Stream viewer direction filter** (follow-up to #380): the Traffic detail's Stream tab can show all messages, client-to-server messages or server-to-client messages. Pagination and refresh keep the selected direction, changing the filter resets the list, and opening another exchange resets the direction to all. Recording-limit warnings remain visible but are excluded from the displayed message counts.
