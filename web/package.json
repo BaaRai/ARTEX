@@ -19,7 +19,8 @@
     "test:upload": "node --test scripts/upload.test.mjs",
     "test:traffic-stream": "node --test scripts/traffic-stream.test.mjs",
     "test:i18n": "node scripts/check-i18n.mjs && node --test scripts/i18n.test.mjs",
-    "test:bash": "node --test src/lib/bash-exit-status.test.mjs"
+    "test:bash": "node --test src/lib/bash-exit-status.test.mjs",
+    "test:brain": "node --test scripts/brain-sim.test.mjs"
   },
   "lint-staged": {
     "*.{js,ts,jsx,tsx}": [
