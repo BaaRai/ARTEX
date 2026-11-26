@@ -233,11 +233,21 @@ func TestContextTelemetryFlagOffAndOnPostgres(t *testing.T) {
 	wantMetrics := MeasureContext(req)
 	wantUsage := llm.Usage{InputTokens: 1200, OutputTokens: 150, CacheReadTokens: 800, CacheWriteTokens: 100}
 
-	// 1. Flag OFF (default): zero rows in llm_context on both Stream and Complete,
-	// identical behavior regardless of recordBodies.
+	// 0. Default is ON: unset means enabled, only an explicit falsy value disables.
 	t.Setenv(ContextTelemetryEnv, "")
+	if !ContextTelemetryEnabled() {
+		t.Fatal("expected telemetry enabled by default when env unset")
+	}
+	t.Setenv(ContextTelemetryEnv, "off")
 	if ContextTelemetryEnabled() {
-		t.Fatal("expected telemetry disabled when env unset")
+		t.Fatal("expected telemetry disabled when ARTEX_CONTEXT_TELEMETRY=off")
+	}
+
+	// 1. Flag OFF explicitly: zero rows in llm_context on both Stream and Complete,
+	// identical behavior regardless of recordBodies.
+	t.Setenv(ContextTelemetryEnv, "0")
+	if ContextTelemetryEnabled() {
+		t.Fatal("expected telemetry disabled when ARTEX_CONTEXT_TELEMETRY=0")
 	}
 	recOff := Wrap(syntheticTelemetryProvider{usage: wantUsage}, pg, "claude-test", "prof-a", "", "", func() bool { return false })
 	ctxOff := transcript.WithSessionID(WithTaskID(context.Background(), taskOff), "exp1-worker-i1")

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -96,7 +96,7 @@ func TransparentTCPConfigFromEnv() (TransparentTCPConfig, bool) {
 		}
 		return TransparentTCPConfig{Addr: rawAddr}, true
 	default:
-		log.Printf("[traffic] %s=%q is not a boolean; leaving transparent TCP disabled", TransparentTCPEnabledEnv, rawEnabled)
+		slog.Warn("[traffic] transparent TCP env var is not a boolean, leaving disabled", "env", TransparentTCPEnabledEnv, "value", rawEnabled)
 		return TransparentTCPConfig{}, false
 	}
 }
@@ -302,7 +302,7 @@ func (s *transparentServer) serve() {
 			if errors.As(err, &ne) && ne.Timeout() {
 				continue
 			}
-			log.Printf("[traffic/transparent] accept error: %v", err)
+			slog.Error("[traffic/transparent] transparent proxy accept error", "err", err)
 			return
 		}
 		if !s.trackConn(conn) {
@@ -389,7 +389,7 @@ func (s *transparentServer) handleConn(client net.Conn) {
 			C2SData:   c2sCap.buf,
 			S2CData:   s2cCap.buf,
 		}, s.cfg.PreviewBytes); err != nil {
-			log.Printf("[traffic/transparent] failed to record raw TCP stream %s: %v", targetAddr, err)
+			slog.Error("[traffic/transparent] failed to record raw TCP stream", "target", targetAddr, "err", err)
 		}
 	}
 }

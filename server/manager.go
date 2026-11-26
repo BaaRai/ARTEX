@@ -82,6 +82,8 @@ type Task struct {
 	targetGate  atomic.Bool
 	interceptor *intercept.Interceptor // owner of the target gate, handed to the scope
 
+	assessmentIdentity config.AssessmentIdentity // assigned by the manager before publishing the task
+
 	// pendingTriggers accumulates the concrete changes (worker done / finding) that
 	// fired planning rounds since the last one consumed them. The debounce coalesces
 	// a burst into one round, so several may pile up before drainTriggers() clears them.
@@ -262,6 +264,8 @@ type Manager struct {
 	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
 
+	taskUserAgents config.TaskUserAgents // existing tasks verified at startup
+
 	// Capture-proxy rewrite rules: rewriteMu serializes reloads, rewriteSet is
 	// the snapshot last compiled, rewriteErrors outlives the reloads.
 	rewriteMu     sync.Mutex
@@ -330,6 +334,15 @@ const (
 	// Target noise profile (off|quiet|balanced|aggressive). When stored it wins over
 	// ARTEX_NOISE_PROFILE, which stays the fallback; applied at startup and on PUT.
 	settingNoiseProfile = "noise_profile"
+	// settingTriageProfile names an llm_profiles row that serves the decision-model
+	// (/v1/systemone) contract: the triage client for closed-list judgements such as
+	// the duplicate check in report_finding. Empty or 0 = triage off (main model
+	// decides, exactly as before). See server/triage.go.
+	settingTriageProfile = "triage_profile_id"
+	// settingTriageMinConfidence is the suppression threshold for a duplicate answer
+	// (0..1, empty = 0.5). Confidence on true duplicates moves with the question's
+	// width, so this is a knob rather than a constant.
+	settingTriageMinConfidence = "triage_min_confidence"
 	// defaultWebSearchBackend is used when web search is on but no backend was picked.
 	defaultWebSearchBackend = "ddgs"
 	// deepSeekWebSearchBackend borrows the active LLM profile instead of its own
@@ -397,6 +410,10 @@ func (m *Manager) Enrich() *enrich.Engine { return m.enrich }
 // NewManager connects to PostgreSQL and, if proxyAddr is non-empty, starts the
 // traffic-recording proxy. PostgreSQL is required (it is the single data source).
 func NewManager(dir, proxyAddr string) (*Manager, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
 	// Resolve the data dir to an ABSOLUTE path up front. Every data path derives
 	// from it — notably the MITM CA cert, whose path is injected into worker shells
 	// (SSL_CERT_FILE/CURL_CA_BUNDLE) and read by WebFetch. A relative path (the
@@ -418,6 +435,20 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Reject deferred activation: a configured ID that does not exist at startup
+	// must not start tagging requests if a task is assigned that ID later.
+	for taskID := range cfg.TaskUserAgents {
+		id, _ := strconv.ParseInt(taskID, 10, 64) // validated when the config was loaded
+		task, err := pg.GetTask(id)
+		if err != nil {
+			pg.Close()
+			return nil, fmt.Errorf("check task_user_agents task ID %s: %w", taskID, err)
+		}
+		if task == nil {
+			log.Printf("[config] task_user_agents task ID %s is unavailable, ignoring its entry", taskID)
+			delete(cfg.TaskUserAgents, taskID)
+		}
+	}
 	// Before anything reads a stored secret: load the key, encrypt legacy plaintext.
 	if err := pg.InitSecrets(config.KeyDir()); err != nil {
 		pg.Close()
@@ -434,7 +465,10 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err := pg.EnsureLLMUsageTable(); err != nil {
 		log.Printf("[llmusage] create table: %v", err)
 	}
-	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
+	m := &Manager{
+		dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg),
+		taskUserAgents: cfg.TaskUserAgents,
+	}
 	// Behind any proxy in the path (the recording proxy, the global egress proxy,
 	// or a custom tool's own proxy) the proxy chooses the address, so a target
 	// approval is name-only.
@@ -1007,12 +1041,21 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 	return t
 }
 
+func (m *Manager) taskFromPG(pt *pgdb.Task) *Task {
+	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
+	t.assessmentIdentity = m.taskUserAgents[t.ID]
+	return t
+}
+
 // targetScope is the approval scope of this task's tool calls for the target
 // gate. wait bounds how long a gated call may wait for a human decision.
 // Enabled reads the task's opt-in flag on every call, so a switch through the
 // API takes effect on the next tool call.
 func (t *Task) targetScope(wait time.Duration) intercept.TargetScope {
-	return intercept.TargetScope{TaskID: t.ID, Enabled: t.targetGate.Load, WaitBound: wait, Interceptor: t.interceptor}
+	return intercept.TargetScope{
+		TaskID: t.ID, Enabled: t.targetGate.Load, WaitBound: wait, Interceptor: t.interceptor,
+		AssessmentIdentity: t.assessmentIdentity,
+	}
 }
 
 // searchBackendEndpoints are the endpoints of the search backends. The
@@ -1292,7 +1335,7 @@ func (m *Manager) LoadExisting() []*Task {
 		if _, ok := m.tasks[id]; ok {
 			continue
 		}
-		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
+		t := m.taskFromPG(pt)
 		m.tasks[id] = t
 		loaded = append(loaded, t)
 	}

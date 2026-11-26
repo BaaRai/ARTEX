@@ -35,3 +35,20 @@ func TestFromEnvProviderIsCaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+func TestBedrockGatewayEnvDoesNotInheritPublicProviderKey(t *testing.T) {
+	t.Setenv("ARTEX_LLM_PROVIDER", "bedrock-gateway")
+	t.Setenv("ARTEX_LLM_BASE_URL", "https://gateway.example.com/bedrock")
+	t.Setenv("ARTEX_LLM_MODEL", "test.model")
+	t.Setenv("ANTHROPIC_API_KEY", "unrelated-anthropic-key")
+	t.Setenv("ARTEX_LLM_API_KEY", "")
+	if _, ok := FromEnv(); ok {
+		t.Fatal("gateway inherited an unrelated key")
+	}
+	t.Setenv("ARTEX_LLM_API_KEY", "synthetic-gateway-token")
+	t.Setenv("ARTEX_LLM_CUSTOM_HEADERS", "X-Example-Route: demo")
+	c, ok := FromEnv()
+	if !ok || c.Format != FormatBedrockGateway || c.APIKey != "synthetic-gateway-token" || c.CustomHeaders != "X-Example-Route: demo" {
+		t.Fatal("gateway environment was not resolved")
+	}
+}

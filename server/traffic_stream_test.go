@@ -41,7 +41,8 @@ VALUES('1-0001',1,'ws.example.com','GET','/ws','wss://ws.example.com/ws',101,'we
 			Payload  string `json:"payload"`
 			Encoding string `json:"encoding"`
 		} `json:"items"`
-		Total int `json:"total"`
+		Total        int  `json:"total"`
+		MessageTotal *int `json:"message_total"`
 	}
 	get := func(path string, wantStatus int) page {
 		t.Helper()
@@ -54,16 +55,19 @@ VALUES('1-0001',1,'ws.example.com','GET','/ws','wss://ws.example.com/ws',101,'we
 			if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
 				t.Fatalf("GET %s: %v in %s", path, err, w.Body)
 			}
+			if p.MessageTotal == nil {
+				t.Fatalf("GET %s: message_total missing in %s", path, w.Body)
+			}
 		}
 		return p
 	}
 
 	get("/api/traffic/stream", 400)
-	if p := get("/api/traffic/stream?exchange=nope", 200); p.Items == nil || len(p.Items) != 0 || p.Total != 0 {
+	if p := get("/api/traffic/stream?exchange=nope", 200); p.Items == nil || len(p.Items) != 0 || p.Total != 0 || *p.MessageTotal != 0 {
 		t.Fatalf("unknown exchange = %+v, want items [] and total 0", p)
 	}
 	p := get("/api/traffic/stream?exchange=1-0001", 200)
-	if p.Total != total || len(p.Items) != 50 || p.Items[0].Seq != 1 {
+	if p.Total != total || *p.MessageTotal != total || len(p.Items) != 50 || p.Items[0].Seq != 1 {
 		t.Fatalf("default page: total %d, %d items, first seq %d", p.Total, len(p.Items), p.Items[0].Seq)
 	}
 	if first, second := p.Items[0], p.Items[1]; first.Type != "text" || first.Payload != "hello" || second.Type != "binary" || second.Encoding != "base64" || second.Payload != "AAEC" {
@@ -112,7 +116,8 @@ VALUES('1-0002',1,'ws.example.com','GET','/ws','wss://ws.example.com/ws',101,'we
 			Seq       int64  `json:"seq"`
 			Direction string `json:"direction"`
 		} `json:"items"`
-		Total int `json:"total"`
+		Total        int  `json:"total"`
+		MessageTotal *int `json:"message_total"`
 	}
 	get := func(query string) page {
 		t.Helper()
@@ -124,6 +129,9 @@ VALUES('1-0002',1,'ws.example.com','GET','/ws','wss://ws.example.com/ws',101,'we
 		if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
 			t.Fatal(err)
 		}
+		if p.MessageTotal == nil {
+			t.Fatalf("GET %s: message_total missing in %s", query, w.Body)
+		}
 		return p
 	}
 	seqs := func(p page) []int64 {
@@ -134,19 +142,31 @@ VALUES('1-0002',1,'ws.example.com','GET','/ws','wss://ws.example.com/ws',101,'we
 		return out
 	}
 
-	if p := get(""); p.Total != 5 || len(p.Items) != 5 {
+	if p := get(""); p.Total != 5 || *p.MessageTotal != 4 || len(p.Items) != 5 {
 		t.Fatalf("unfiltered = %+v", p)
 	}
-	if p := get("&direction=c2s"); p.Total != 3 || fmt.Sprint(seqs(p)) != "[1 3 5]" {
+	if p := get("&direction=c2s"); p.Total != 3 || *p.MessageTotal != 2 || fmt.Sprint(seqs(p)) != "[1 3 5]" {
 		t.Fatalf("c2s = total %d seqs %v, want 3 and [1 3 5]", p.Total, seqs(p))
 	}
-	if p := get("&direction=S2C"); p.Total != 3 || fmt.Sprint(seqs(p)) != "[2 4 5]" {
+	if p := get("&direction=S2C"); p.Total != 3 || *p.MessageTotal != 2 || fmt.Sprint(seqs(p)) != "[2 4 5]" {
 		t.Fatalf("S2C = total %d seqs %v, want 3 and [2 4 5]", p.Total, seqs(p))
 	}
-	if p := get("&direction=s2c&offset=1&limit=1"); p.Total != 3 || fmt.Sprint(seqs(p)) != "[4]" {
+	if p := get("&direction=s2c&offset=1&limit=1"); p.Total != 3 || *p.MessageTotal != 2 || fmt.Sprint(seqs(p)) != "[4]" {
 		t.Fatalf("s2c offset=1 limit=1 = total %d seqs %v, want 3 and [4]", p.Total, seqs(p))
 	}
 	if w := request("GET", "/api/traffic/stream?exchange=1-0002&direction=meta", ""); w.Code != 400 {
 		t.Fatalf("direction=meta = %d %s, want 400", w.Code, w.Body)
+	}
+	if p := get("&direction=c2s&limit=1"); p.Total != 3 || *p.MessageTotal != 2 || fmt.Sprint(seqs(p)) != "[1]" {
+		t.Fatalf("first page without warning = %+v", p)
+	}
+	if p := get("&direction=c2s&offset=2&limit=1"); p.Total != 3 || *p.MessageTotal != 2 || fmt.Sprint(seqs(p)) != "[5]" {
+		t.Fatalf("warning page = %+v", p)
+	}
+	if _, err := db.Exec(`DELETE FROM stream_messages WHERE exchange_id='1-0002' AND direction='c2s'`); err != nil {
+		t.Fatal(err)
+	}
+	if p := get("&direction=c2s"); p.Total != 1 || *p.MessageTotal != 0 || fmt.Sprint(seqs(p)) != "[5]" {
+		t.Fatalf("warning-only direction = %+v", p)
 	}
 }

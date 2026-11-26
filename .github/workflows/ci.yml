@@ -116,6 +116,18 @@ jobs:
       # service, so parallel package runs delete each other's rows.
       - run: go test -p 1 ./...
 
+  govulncheck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # The official action uses the Go version declared by go.mod and reports
+      # only vulnerabilities reachable from this module's packages.
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
   shell:
     runs-on: ubuntu-latest
     steps:
@@ -147,6 +159,7 @@ jobs:
       - run: npm run test:polling
       - run: npm run test:replay
       - run: npm run test:upload
+      - run: npm run test:traffic-stream
       - run: npm run test:i18n
       - run: npm run test:bash
       - run: npm run build:static
@@ -159,3 +172,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 scripts/posture_check_test.py
+      - run: python3 -m unittest discover -s scripts/benchmark -p 'test_*.py' -v

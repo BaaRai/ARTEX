@@ -32,7 +32,9 @@ func connectMCP(ctx context.Context, m *db.MCPServer, priv ExecPrivilege) (mcpCl
 		if err != nil {
 			return nil, err
 		}
-		return mcp.NewStdioClient(ctx, m.Name, command, jsonStrMap(m.Env), args...)
+		// The drop shim rebuilds the environment from the allowlist; the configured
+		// variables of the server are named so it keeps them.
+		return mcp.NewStdioClient(ctx, m.Name, command, withExecKeep(priv, jsonStrMap(m.Env)), args...)
 	case "http":
 		if m.URL == "" {
 			return nil, fmt.Errorf("http transport is missing a URL")

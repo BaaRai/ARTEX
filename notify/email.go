@@ -2,12 +2,14 @@ package notify
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"mime"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"strconv"
 	"strings"
@@ -57,6 +59,14 @@ func (emailChannel) Validate(cfg map[string]any) error {
 	if len(cfgStrings(cfg, "to")) == 0 {
 		return errors.New("at least one recipient address is required")
 	}
+	for _, rcpt := range cfgStrings(cfg, "to") {
+		if hasLineBreak(rcpt) {
+			return errors.New("recipient address must not contain line breaks")
+		}
+	}
+	if _, err := senderAddress(cfgString(cfg, "from")); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -72,6 +82,10 @@ func (c emailChannel) Send(ctx context.Context, cfg map[string]any, m Message) (
 	password := cfgString(cfg, "password")
 	implicitTLS := cfgBool(cfg, "tls")
 
+	sender, err := senderAddress(from)
+	if err != nil {
+		return 0, Permanent(err)
+	}
 	msg, err := buildEmailMessage(from, to, m)
 	if err != nil {
 		return 0, Permanent(err)
@@ -106,8 +120,9 @@ func (c emailChannel) Send(ctx context.Context, cfg map[string]any, m Message) (
 			return 0, Permanent(fmt.Errorf("SMTP authentication failed: %w", err))
 		}
 	}
-	if err := client.Mail(from); err != nil {
-		return 0, smtpStageError(fmt.Sprintf("sender %s rejected", from), err)
+	// The envelope sender is the bare address; the display name stays in the header.
+	if err := client.Mail(sender.Address); err != nil {
+		return 0, smtpStageError(fmt.Sprintf("sender %s rejected", sender.Address), err)
 	}
 	for _, rcpt := range to {
 		if err := client.Rcpt(rcpt); err != nil {
@@ -217,9 +232,22 @@ func smtpReplyCode(text string) int {
 // over-long lines; second, base64 never produces a line starting with ".",
 // avoiding SMTP dot-stuffing entirely.
 func buildEmailMessage(from string, to []string, m Message) (string, error) {
+	// From and To go into header lines: a CR or LF would start a new header.
+	if hasLineBreak(from) {
+		return "", errors.New("sender address must not contain line breaks")
+	}
+	for _, rcpt := range to {
+		if hasLineBreak(rcpt) {
+			return "", errors.New("recipient address must not contain line breaks")
+		}
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", from)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
+	// RFC 5322 requires Date and recommends Message-ID. Not every submission
+	// server adds them, and spam filters penalize mail without them.
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Message-ID: <%s@%s>\r\n", rand.Text(), messageIDDomain(from))
 	// A non-ASCII subject must be RFC 2047 encoded, otherwise clients display it
 	// as mojibake.
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", htmlTitle(m)))
@@ -236,4 +264,36 @@ func buildEmailMessage(from string, to []string, m Message) (string, error) {
 	}
 	b.WriteString(encoded + "\r\n")
 	return b.String(), nil
+}
+
+// senderAddress parses the configured sender with net/mail, so a display name and
+// comments are accepted and the bare address is what gets used. A line break is
+// refused before parsing: the value lands in header lines.
+func senderAddress(from string) (*mail.Address, error) {
+	if hasLineBreak(from) {
+		return nil, errors.New("sender address must not contain line breaks")
+	}
+	addr, err := mail.ParseAddress(from)
+	if err != nil {
+		return nil, fmt.Errorf("invalid sender address: %w", err)
+	}
+	return addr, nil
+}
+
+// hasLineBreak reports whether s contains CR or LF.
+func hasLineBreak(s string) bool {
+	return strings.ContainsAny(s, "\r\n")
+}
+
+// messageIDDomain is the right-hand side of a Message-ID: the domain of the parsed
+// sender address, or "localhost" when there is none (or the sender does not parse).
+func messageIDDomain(from string) string {
+	addr, err := senderAddress(from)
+	if err != nil {
+		return "localhost"
+	}
+	if i := strings.LastIndex(addr.Address, "@"); i >= 0 && i+1 < len(addr.Address) {
+		return addr.Address[i+1:]
+	}
+	return "localhost"
 }

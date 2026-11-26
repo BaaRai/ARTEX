@@ -1087,6 +1087,11 @@ func valuesEqual(a, b any) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
+	if isFloat(a) || isFloat(b) {
+		af, aok := toFloat(a)
+		bf, bok := toFloat(b)
+		return aok && bok && af == bf
+	}
 	if an, ok := toInt(a); ok {
 		if bn, ok := toInt(b); ok {
 			return an == bn
@@ -1103,6 +1108,16 @@ func toInt(v any) (int64, bool) {
 		return int64(x), true
 	case float64:
 		return int64(x), true
+	}
+	return 0, false
+}
+
+func toFloat(v any) (float64, bool) {
+	if f, ok := v.(float64); ok {
+		return f, true
+	}
+	if n, ok := toInt(v); ok {
+		return float64(n), true
 	}
 	return 0, false
 }

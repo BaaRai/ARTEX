@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -157,7 +157,7 @@ func SOCKS5ConfigFromEnv() (SOCKS5Config, bool) {
 	case "1", "true", "on", "yes":
 		enableUDP = true
 	default:
-		log.Printf("[traffic] %s=%q is not a boolean; leaving SOCKS5 UDP disabled", SOCKS5UDPEnabledEnv, rawUDP)
+		slog.Warn("[traffic] non-boolean SOCKS5 UDP env value, leaving disabled", "env", SOCKS5UDPEnabledEnv, "value", rawUDP)
 	}
 
 	switch rawEnabled {
@@ -179,7 +179,7 @@ func SOCKS5ConfigFromEnv() (SOCKS5Config, bool) {
 		}
 		return SOCKS5Config{Addr: addr, EnableUDP: enableUDP}, true
 	default:
-		log.Printf("[traffic] %s=%q is not a boolean; leaving SOCKS5 disabled", SOCKS5EnabledEnv, rawEnabled)
+		slog.Warn("[traffic] non-boolean SOCKS5 env value, leaving disabled", "env", SOCKS5EnabledEnv, "value", rawEnabled)
 		return SOCKS5Config{}, false
 	}
 }
@@ -343,7 +343,7 @@ func (s *socks5Server) serve() {
 			if errors.As(err, &ne) && ne.Timeout() {
 				continue
 			}
-			log.Printf("[traffic/socks5] accept error: %v", err)
+			slog.Error("[traffic/socks5] socks5 accept error", "err", err)
 			return
 		}
 		if !s.trackConn(conn) {
@@ -447,7 +447,7 @@ func (s *socks5Server) handleConn(client net.Conn) {
 func (s *socks5Server) recordCapture(rec RawTCPCapture) {
 	if s.t != nil && s.t.db != nil {
 		if _, err := s.t.RecordRawTCPStream(rec, s.cfg.PreviewBytes); err != nil {
-			log.Printf("[traffic/socks5] failed to record raw tcp stream %s:%d: %v", rec.Host, rec.Port, err)
+			slog.Error("[traffic/socks5] failed to record raw tcp stream", "host", rec.Host, "port", rec.Port, "err", err)
 		}
 	}
 	if s.cfg.OnRecord != nil {

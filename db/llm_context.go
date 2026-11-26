@@ -5,8 +5,9 @@ import (
 	"strings"
 )
 
-// LLMContext is one opt-in context-size telemetry row written when
-// ARTEX_CONTEXT_TELEMETRY=1. It records only byte sizes, counts, token usage,
+// LLMContext is one context-size telemetry row, written on every model call while
+// telemetry is on (the default; ARTEX_CONTEXT_TELEMETRY=0|false|off|no turns it off).
+// It records only byte sizes, counts, token usage,
 // and call metadata — never any prompt, tool, or message content.
 type LLMContext struct {
 	TaskID                 string `json:"task_id"`

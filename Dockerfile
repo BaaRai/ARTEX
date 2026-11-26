@@ -13,7 +13,7 @@
 # ---------------------------------------------------------------- frontend ---
 # Pinned to the Node 22 line the CI/release workflows use. On the build platform
 # only; the frontend static export is architecture-independent.
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS web
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
@@ -26,7 +26,7 @@ RUN npm run build:static
 # GOTOOLCHAIN=local, so a floating 1.26 tag that lags go.mod fails the build;
 # bump this together with the go line in go.mod. The binary is CGO-free, so this
 # stage runs on the build platform and cross-compiles to $TARGETARCH without QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.26.11-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -67,7 +67,7 @@ RUN ARTEX_SKIP_FRONTEND=1 \
 #
 # sqlmap has no release binaries: it is a shallow clone of a pinned tag, checked
 # against the expected commit, which is the same idea.
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS tools
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS tools
 ARG TARGETARCH
 ARG NUCLEI_VERSION=v3.11.1
 ARG NUCLEI_SHA256_AMD64=ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6
@@ -133,13 +133,40 @@ RUN set -eux; \
     if [ "$commit" != "$SQLMAP_COMMIT" ]; then echo "sqlmap commit mismatch: want $SQLMAP_COMMIT got $commit" >&2; exit 1; fi; \
     rm -rf /opt/sqlmap/.git
 
+# -------------------------------------------------------- nuclei templates ---
+# nuclei ships no templates in the binary: on first run it clones
+# projectdiscovery/nuclei-templates into $HOME/nuclei-templates. Where the process
+# cannot reach github.com that install fails softly — it logs "nuclei-templates are
+# not installed, installing...", then "no templates found in path", and exits 0, so a
+# scan starts with an empty template set and looks like a broken tool. That is the
+# normal case behind an egress allowlist, and the case for every agent-run scan: the
+# executor's HOME is /app/data/exec-home, not the root-owned home the image is
+# built with. Bake the set at a fixed path instead, and point nuclei at it with
+# NUCLEI_TEMPLATES_DIR in the runtime stage, so the lookup does not depend on HOME or
+# on which user the process runs as. Tag and commit are both pinned and asserted: a
+# moved tag fails the build rather than silently changing the template set.
+ARG NUCLEI_TEMPLATES_VERSION=v10.5.1
+ARG NUCLEI_TEMPLATES_COMMIT=79fb682760ab3d5b0e22afbb44709353cbebf023
+RUN set -eux; \
+    git clone --quiet --depth 1 --branch "$NUCLEI_TEMPLATES_VERSION" \
+      https://github.com/projectdiscovery/nuclei-templates /opt/nuclei-templates; \
+    commit="$(git -C /opt/nuclei-templates rev-parse HEAD)"; \
+    if [ "$commit" != "$NUCLEI_TEMPLATES_COMMIT" ]; then echo "nuclei-templates commit mismatch: want $NUCLEI_TEMPLATES_COMMIT got $commit" >&2; exit 1; fi; \
+    rm -rf /opt/nuclei-templates/.git; \
+    count="$(find /opt/nuclei-templates -name '*.yaml' | wc -l)"; \
+    echo "baked nuclei templates: $count"; \
+    test "$count" -gt 10000
+
 # ---------------------------------------------------------------- runtime ---
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 ARG TARGETARCH
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
+      arp-scan arping fping iproute2 netdiscover net-tools nfs-common \
+      python3-impacket python3-paramiko python3-scapy rpcbind sqlite3 xxd \
+      hashcat hydra john ncrack openssh-client ssh-audit sshpass \
     && rm -rf /var/lib/apt/lists/*
 # Node 22 from the official nodejs.org tarball: bookworm's apt nodejs is 18,
 # Playwright requires >=20, and 20 is end-of-life. 22 matches the CI and release
@@ -163,13 +190,29 @@ RUN set -eux; \
     tar -xJf "/tmp/$asset" -C /usr/local --strip-components=1 --no-same-owner; \
     rm -f "/tmp/$asset"; \
     node --version; npm --version
-# Pinned, checksum-verified recon binaries and the sqlmap checkout from the tools stage.
+# Pinned, checksum-verified recon binaries and the sqlmap checkout from the tools stage,
+# plus the baked nuclei template set (see the tools stage for why it is baked).
 COPY --from=tools /out/ /usr/local/bin/
 COPY --from=tools /opt/sqlmap /opt/sqlmap
+COPY --from=tools /opt/nuclei-templates /opt/nuclei-templates
+# Read by nuclei in preference to $HOME/nuclei-templates, so root and the executor
+# resolve the same set. The directory stays root-owned and world-readable; scans
+# never need to write to it. The second variable keeps the set frozen: without it a
+# start with network access runs the routine template update against the public
+# repository, which rewrites the baked tree (and, on a slow link, adds tens of MB to
+# the writable layer for a result the bake already provides).
+ENV NUCLEI_TEMPLATES_DIR=/opt/nuclei-templates \
+    DISABLE_NUCLEI_TEMPLATES_PUBLIC_DOWNLOAD=true
+# -duc is what keeps this a check rather than an update: `nuclei -tl` runs the
+# automatic nuclei/templates update check first, so it could replace the pinned set
+# with the latest release inside the layer we are about to inspect.
 RUN set -eux; \
     ln -s /opt/sqlmap/sqlmap.py /usr/local/bin/sqlmap; \
     nuclei -version >/dev/null; httpx -version; subfinder -version; katana -version; \
-    ffuf -V >/dev/null; dalfox --version >/dev/null; sqlmap --version >/dev/null
+    ffuf -V >/dev/null; dalfox --version >/dev/null; sqlmap --version >/dev/null; \
+    templates="$(nuclei -tl -silent -duc | wc -l)"; \
+    echo "nuclei templates visible at build time: $templates"; \
+    test "$templates" -gt 10000
 
 # bbot recursive recon orchestrator (#117): blacklanternsecurity/bbot, AGPL-3.0
 # (same license as ARTEX; standalone CLI dependency, not linked code). Pinned
