@@ -3,7 +3,7 @@ package server
 import (
 	"database/sql"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 )
@@ -23,7 +23,7 @@ func (s *Server) taskOutcome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Printf("[tasks] outcome query failed for %d: %v", id, err)
+		slog.Error("[tasks] outcome query failed", "task_id", id, "err", err)
 		writeErr(w, 500, "outcome query failed")
 		return
 	}

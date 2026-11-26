@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +256,55 @@ func OnRequest(req *Request) error {
 		err = prog.RunRequest(context.Background(), &Request{}, RunOptions{MaxMemory: 1 << 20})
 		if !errors.Is(err, ErrMemoryLimit) {
 			t.Fatalf("err = %v, want ErrMemoryLimit", err)
+		}
+	})
+
+	t.Run("replace_all_result_stopped_by_memory_budget", func(t *testing.T) {
+		// 8 KiB of matches, each replaced by 8 KiB: a 64 MiB result.
+		srcs := map[string]string{
+			"strings": `package hook
+import "strings"
+func OnRequest(req *Request) error {
+	s := strings.Repeat("a", 8*1024)
+	_ = strings.ReplaceAll(s, "a", strings.Repeat("b", 8*1024))
+	return nil
+}`,
+			"bytes": `package hook
+import "bytes"
+func OnRequest(req *Request) error {
+	b := bytes.Repeat([]byte("a"), 8*1024)
+	_ = bytes.ReplaceAll(b, []byte("a"), bytes.Repeat([]byte("b"), 8*1024))
+	return nil
+}`,
+			"regexp": `package hook
+import (
+	"regexp"
+	"strings"
+)
+func OnRequest(req *Request) error {
+	s := strings.Repeat("a", 8*1024)
+	_ = regexp.ReplaceAllString("a", s, strings.Repeat("b", 8*1024))
+	return nil
+}`,
+		}
+		for name, src := range srcs {
+			t.Run(name, func(t *testing.T) {
+				prog, err := Compile("request", src)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var before, after runtime.MemStats
+				runtime.ReadMemStats(&before)
+				err = prog.RunRequest(context.Background(), &Request{}, RunOptions{MaxMemory: 1 << 20})
+				runtime.ReadMemStats(&after)
+				if !errors.Is(err, ErrMemoryLimit) {
+					t.Fatalf("err = %v, want ErrMemoryLimit", err)
+				}
+				// The limit must stop the run before the result is built, not after.
+				if got := after.TotalAlloc - before.TotalAlloc; got > 16<<20 {
+					t.Fatalf("the run allocated %d MiB under a 1 MiB budget", got>>20)
+				}
+			})
 		}
 	})
 

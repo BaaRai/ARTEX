@@ -51,13 +51,18 @@ func TestRenderNoiseProfileTable(t *testing.T) {
 }
 
 // The default must stay identical: with no profile the block is empty and none of
-// the four prompts that can launch Bash gains any text.
+// the prompts that can launch Bash gains any text. Pure orchestration prompts
+// (mainagent, auto) have no Bash/WebFetch and omit the scanner noise block.
 func TestPromptBuildersNoiseBlock(t *testing.T) {
 	builders := map[string]func() string{
-		"planner":   func() string { return plannerSystem("goal", "/data", "/work") },
-		"worker":    func() string { return workerSystem("", "", "/data", "/run") },
+		"planner": func() string { return plannerSystem("goal", "/data", "/work") },
+		"worker":  func() string { return workerSystem("", "", "/data", "/run") },
+		"pentest": func() string { return chatSystem("pentest", "/data", "/work") },
+		"chat":    func() string { return chatSystem("assistant", "/data", "/work") },
+	}
+	orchestrators := map[string]func() string{
 		"mainagent": func() string { return mainAgentSystem("goal", "/data", "/work") },
-		"chat":      func() string { return chatSystem("auto", "/data", "/work") },
+		"auto":      func() string { return chatSystem("auto", "/data", "/work") },
 	}
 	prev := egress.CurrentProfile()
 	t.Cleanup(func() { egress.SetProfile(prev) })
@@ -75,6 +80,11 @@ func TestPromptBuildersNoiseBlock(t *testing.T) {
 			got := build()
 			if !strings.Contains(got, noiseProfileHeader+profile) || strings.Contains(got, noiseProfileHeader+"aggressive") {
 				t.Errorf("%s after SetProfile(%s) is missing its block or shows the env profile", name, profile)
+			}
+		}
+		for name, build := range orchestrators {
+			if got := build(); strings.Contains(got, noiseProfileHeader) {
+				t.Errorf("orchestrator %s after SetProfile(%s) should not receive scanner noise block", name, profile)
 			}
 		}
 	}

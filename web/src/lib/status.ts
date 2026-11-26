@@ -128,3 +128,12 @@ export type StatusDomain = keyof typeof maps;
 export function statusMeta(domain: StatusDomain, key: string): StatusMeta {
   return maps[domain][key] ?? { label: t(key), tone: "neutral" };
 }
+
+// HTTP response status code → text colour (5xx red, 4xx amber, 3xx blue, 2xx green).
+export function httpStatusTone(code: number): string {
+  if (code >= 500) return "text-red-500";
+  if (code >= 400) return "text-amber-500";
+  if (code >= 300) return "text-blue-500";
+  if (code >= 200) return "text-emerald-500";
+  return "text-muted-foreground";
+}

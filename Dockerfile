@@ -168,6 +168,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-impacket python3-paramiko python3-scapy rpcbind sqlite3 xxd \
       hashcat hydra john ncrack openssh-client ssh-audit sshpass \
     && rm -rf /var/lib/apt/lists/*
+# Python packages needed by agent-generated scripts
+RUN pip install --no-cache-dir --break-system-packages \
+      requests==2.32.3 \
+      beautifulsoup4==4.12.3 \
+      lxml==5.3.0 \
+      urllib3==2.2.3 \
+      pyyaml==6.0.2 \
+      jinja2==3.1.4 \
+      colorama==0.4.6 \
+      tqdm==4.67.1
 # Node 22 from the official nodejs.org tarball: bookworm's apt nodejs is 18,
 # Playwright requires >=20, and 20 is end-of-life. 22 matches the CI and release
 # workflows. Verified against a digest pinned here rather than against the fetched

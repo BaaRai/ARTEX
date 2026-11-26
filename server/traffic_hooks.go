@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -145,7 +145,7 @@ func (m *Manager) reloadTamperHooks() {
 	}
 	rows, err := m.pg.ListTrafficTamperHooks()
 	if err != nil {
-		log.Printf("[traffic] tampering hooks not reloaded: %v", err)
+		slog.Warn("[traffic] tampering hooks not reloaded", "err", err)
 		return
 	}
 	defs := make([]traffic.HookDef, 0, len(rows))
@@ -165,7 +165,7 @@ func (m *Manager) reloadTamperHooks() {
 		loadErrs[id] = msg
 	}
 	for id, msg := range loadErrs {
-		log.Printf("[traffic] tampering hook %d not loaded: %s", id, msg)
+		slog.Warn("[traffic] tampering hook not loaded", "hook_id", id, "msg", msg)
 	}
 	m.hookLoadErrs = loadErrs
 	m.hookSet.Store(hs)

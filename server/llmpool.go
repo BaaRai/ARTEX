@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -43,7 +43,7 @@ func newLLMHealthRegistry(ctx context.Context, pg *db.DB) (*llmpool.Registry, *h
 				st.OpenUntil = *h.OpenUntil
 			}
 			reg.Restore(h.ProfileID, st)
-			log.Printf("[llmpool] restored circuit-breaker state: profile #%d cooling until %s", h.ProfileID, st.OpenUntil.Format(time.RFC3339))
+			slog.Info("[llmpool] restored circuit-breaker state", "profile_id", h.ProfileID, "cooling_until", st.OpenUntil.Format(time.RFC3339))
 		}
 	}
 	return reg, syncer
@@ -103,7 +103,7 @@ func (s *Server) FlushLLMHealth() {
 	select {
 	case <-s.llmHealthSync.done:
 	case <-time.After(5 * time.Second):
-		log.Printf("[llmpool] timed out flushing circuit-breaker state")
+		slog.Warn("[llmpool] timed out flushing circuit-breaker state")
 	}
 }
 
@@ -114,7 +114,7 @@ func (h *healthSync) enqueue(id int64, op healthOp) {
 	if h.stopped {
 		h.mu.Unlock()
 		if err := h.apply(id, op); err != nil {
-			log.Printf("[llmpool] write circuit-breaker profile #%d: %v", id, err)
+			slog.Error("[llmpool] write circuit-breaker profile failed", "profile_id", id, "err", err)
 		}
 		return
 	}
@@ -198,7 +198,7 @@ func (h *healthSync) apply(id int64, op healthOp) error {
 func (h *healthSync) write(batch map[int64]healthOp) (failed bool) {
 	for id, op := range batch {
 		if err := h.apply(id, op); err != nil {
-			log.Printf("[llmpool] write circuit-breaker profile #%d: %v", id, err)
+			slog.Error("[llmpool] write circuit-breaker profile failed", "profile_id", id, "err", err)
 			h.restore(id, op)
 			failed = true
 		}
@@ -214,7 +214,7 @@ func (h *healthSync) finish() {
 	h.mu.Unlock()
 	for id, op := range batch {
 		if err := h.apply(id, op); err != nil {
-			log.Printf("[llmpool] write circuit-breaker profile #%d: %v", id, err)
+			slog.Error("[llmpool] write circuit-breaker profile failed", "profile_id", id, "err", err)
 		}
 	}
 }
@@ -273,7 +273,7 @@ func (s *Server) poolChain(headID int64, headProv llm.Provider, headCfg agent.Co
 	}
 	profs, err := s.m.pg.PoolProfiles()
 	if err != nil {
-		log.Printf("[llmpool] failed to read the pool chain: %v", err)
+		slog.Error("[llmpool] failed to read pool chain", "err", err)
 		return nil
 	}
 	var head *db.LLMProfile
@@ -326,7 +326,7 @@ func (s *Server) poolForActive(activeID int64, prov llm.Provider, cfg agent.Conf
 	for _, m := range pool.Members() {
 		names = append(names, m.Name+"/"+m.Model)
 	}
-	log.Printf("[llmpool] LLM pooling enabled, chain (%d): %v", len(names), names)
+	slog.Info("[llmpool] LLM pooling enabled", "count", len(names), "chain", names)
 	return pool
 }
 
