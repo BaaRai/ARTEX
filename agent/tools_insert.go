@@ -533,7 +533,7 @@ func (t *ToolSet) listUntestedAssets() actool.CoreTool {
 		obj(map[string]any{
 			"type":      str("asset type filter (optional): root_domain/subdomain/service/app/endpoint/ip"),
 			"page":      intp("page number, starting at 1 (default 1)"),
-			"page_size": intp("entries per page (default 10)"),
+			"page_size": intp("entries per page (default 10, max 100)"),
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			if t.as == nil {
@@ -548,12 +548,8 @@ func (t *ToolSet) listUntestedAssets() actool.CoreTool {
 				PageSize int    `json:"page_size"`
 			}
 			_ = json.Unmarshal(in, &a)
-			if a.Page <= 0 {
-				a.Page = 1
-			}
-			if a.PageSize <= 0 {
-				a.PageSize = 10
-			}
+			a.Page = clampToolPage(a.Page)
+			a.PageSize = clampToolLimit(a.PageSize, 10)
 			offset := (a.Page - 1) * a.PageSize
 			assets, total, err := t.as.ListUntestedAssetsWithSources(t.taskID, strings.TrimSpace(a.Type), a.PageSize, offset)
 			if err != nil {
@@ -580,7 +576,7 @@ func (t *ToolSet) listAssets() actool.CoreTool {
 			"type":   str("asset type filter: root_domain|ip|subdomain|app|service|endpoint (a separate field, stackable with dsl; type alone is not enough for a query — dsl is still required)"),
 			"id":     intp("fetch directly by a single asset id (optional, mutually exclusive with dsl/type)"),
 			"ids":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "fetch directly by multiple asset ids (optional, mutually exclusive with dsl/type)"},
-			"limit":  intp("return cap, default 10 (optional)"),
+			"limit":  intp("return cap, default 10, max 100 (optional)"),
 			"offset": intp("pagination offset, default 0 (optional)"),
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
@@ -596,9 +592,8 @@ func (t *ToolSet) listAssets() actool.CoreTool {
 				Offset int     `json:"offset"`
 			}
 			_ = json.Unmarshal(in, &a)
-			if a.Limit <= 0 {
-				a.Limit = 10
-			}
+			a.Limit = clampToolLimit(a.Limit, 10)
+			a.Offset = clampToolOffset(a.Offset)
 
 			var assets []*db.Asset
 			var err error
