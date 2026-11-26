@@ -16,19 +16,19 @@ if [ -f "$LOG" ]; then
   while read -r name ip; do ip2name[$ip]="$name"; done < <(awk '/ reply / && / is [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {for(i=1;i<=NF;i++) if($i=="reply"){print $(i+1), $NF}}' "$LOG")
 fi
 
-echo "=== 1) Conexões sinalizadas pelo firewall (desde: $SINCE) ==="
+echo "=== 1) Connections flagged by the firewall (since: $SINCE) ==="
 if journalctl -k --since "$SINCE" -q --no-pager -g 'ARTEX-EGRESS-' >/dev/null 2>&1; then
   journalctl -k --since "$SINCE" -q --no-pager -g 'ARTEX-EGRESS-' \
     | grep -oE 'ARTEX-EGRESS-[a-z]+ .*DST=[0-9.]+.*PROTO=[A-Z]+( .*DPT=[0-9]+)?' \
     | sed -E 's/^ARTEX-EGRESS-([a-z]+) .*DST=([0-9.]+).*PROTO=([A-Z]+)( .*DPT=([0-9]+))?.*/\1 \2 \3 \5/' \
     | sort | uniq -c | sort -rn \
-    | while read -r cnt mode ip proto port; do printf '%6s  %-8s %-16s %-5s %-6s %s\n' "$cnt" "$mode" "$ip" "$proto" "${port:--}" "${ip2name[$ip]:-(sem DNS: IP direto)}"; done
+    | while read -r cnt mode ip proto port; do printf '%6s  %-8s %-16s %-5s %-6s %s\n' "$cnt" "$mode" "$ip" "$proto" "${port:--}" "${ip2name[$ip]:-(no DNS: direct IP)}"; done
 else
-  echo "(sem acesso ao log do kernel: rode com sudo ou adicione o usuário ao grupo adm)"
+  echo "(cannot read kernel log: run with sudo or add your user to the adm group)"
 fi
 
 echo
-echo "=== 2) Nomes resolvidos fora da allowlist (candidatos a liberar ou suspeitos) ==="
+echo "=== 2) Resolved names outside the allowlist (candidates to allow or investigate) ==="
 if [ -f "$LOG" ]; then
   mapfile -t sfx < <(suffixes)
   awk '/ query\[(A|AAAA)\] / {for(i=1;i<=NF;i++) if($i ~ /^query\[/){print tolower($(i+1))}}' "$LOG" | sort | uniq -c | sort -rn \
@@ -37,5 +37,5 @@ if [ -f "$LOG" ]; then
         [ $ok -eq 0 ] && printf '%6s  %s\n' "$cnt" "$name"
       done
 else
-  echo "(sem $LOG ainda)"
+  echo "(no $LOG yet)"
 fi

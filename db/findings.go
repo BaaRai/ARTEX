@@ -192,12 +192,25 @@ type FindingFilter struct {
 	// __none__); selecting a node means selecting its whole subtree.
 	// Empty = do not filter by asset.
 	AssetScope string
+	// Company narrows to one company (the sidebar switcher), independent of
+	// AssetScope so the asset tree keeps it. A finding belongs to company C when
+	// one of its live assets has company_id = C, or, when it has no live asset,
+	// when its task has a task_scope row of kind 'company' for C. A finding with
+	// no live asset and no such task scope shows only under "all companies".
+	// A company id that does not exist, or is not a number, matches nothing.
+	// Empty = do not filter by company. An AssetScope of c:<id> means the same.
+	Company string
 
 	// The three below are resolved from AssetScope by applyAssetScope; callers
 	// do not set them.
 	assetIDs  []int64 // all asset ids in the subtree
 	assetNone bool    // only findings with "unlinked assets"
 	assetMiss bool    // the selected node does not exist under the current filter → result is always empty
+
+	// The three below are resolved from Company by resolveCompany.
+	companyID       int64   // > 0 once resolved to an existing company
+	companyAssetIDs []int64 // the assets that company owns
+	companyMiss     bool    // unknown or non-numeric company → result is always empty
 }
 
 // FindingUnassignedTask is the task filter sentinel for findings whose task is
@@ -253,6 +266,30 @@ func (f FindingFilter) where() (string, []any) {
 		args = append(args, assetIDContainments(f.assetIDs))
 		conds = append(conds, fmt.Sprintf("f.asset_ids @> ANY($%d::jsonb[])", len(args)))
 	}
+	// Company filter, ANDed with the asset filter above.
+	switch {
+	case f.companyMiss:
+		conds = append(conds, "FALSE")
+	case f.companyID > 0:
+		anchored := "FALSE" // a company that owns no asset yet
+		if len(f.companyAssetIDs) > 0 {
+			args = append(args, assetIDContainments(f.companyAssetIDs))
+			anchored = fmt.Sprintf("f.asset_ids @> ANY($%d::jsonb[])", len(args))
+		}
+		// No live asset: attributed through the task's company scope only.
+		args = append(args, f.companyID)
+		conds = append(conds, fmt.Sprintf(`(%s
+			OR ((
+				jsonb_array_length(COALESCE(f.asset_ids, '[]'::jsonb)) = 0
+				OR NOT EXISTS (
+					SELECT 1 FROM jsonb_array_elements_text(f.asset_ids) e(v)
+					JOIN assets a ON a.id = e.v::bigint
+				)
+			) AND EXISTS (
+				SELECT 1 FROM task_scope ts
+				WHERE ts.task_id = f.task_id AND ts.kind = 'company' AND ts.company_id = $%d
+			)))`, anchored, len(args)))
+	}
 	if query := strings.TrimSpace(f.Query); query != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query)
 		args = append(args, "%"+escaped+"%")
@@ -296,11 +333,7 @@ func (d *DB) ListFindingsPage(f FindingFilter, page, pageSize int) ([]*DBFinding
 		return []*DBFinding{}, total, nil
 	}
 
-	order := "f.created_at DESC, f.id DESC"
-	if f.Sort == "severity" {
-		// critical > high > medium > low > others, then newest first.
-		order = `CASE f.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC, f.created_at DESC, f.id DESC`
-	}
+	order := f.orderBy()
 	pageArgs := append(append([]any{}, args...), pageSize, (page-1)*pageSize)
 	q := fmt.Sprintf(`
 		SELECT %s
@@ -315,6 +348,40 @@ func (d *DB) ListFindingsPage(f FindingFilter, page, pageSize int) ([]*DBFinding
 	defer rows.Close()
 	out, err := scanFindings(rows)
 	return out, total, err
+}
+
+// ListFindingsFiltered returns up to limit findings matching f, newest first,
+// without the total count. The dashboard aggregates from it and needs no count.
+func (d *DB) ListFindingsFiltered(f FindingFilter, limit int) ([]*DBFinding, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	f, err := d.applyAssetScope(f)
+	if err != nil {
+		return nil, err
+	}
+	where, args := f.where()
+	q := fmt.Sprintf(`
+		SELECT %s
+		FROM findings f
+		LEFT JOIN tasks t ON f.task_id = t.id%s
+		ORDER BY %s
+		LIMIT $%d`, findingSelectCols, where, f.orderBy(), len(args)+1)
+	rows, err := d.Query(q, append(args, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFindings(rows)
+}
+
+// orderBy is the list order: severity first when asked, newest first otherwise.
+func (f FindingFilter) orderBy() string {
+	if f.Sort == "severity" {
+		// critical > high > medium > low > others, then newest first.
+		return `CASE f.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC, f.created_at DESC, f.id DESC`
+	}
+	return "f.created_at DESC, f.id DESC"
 }
 
 // FindingGroup is one task-level bucket in the global findings view. TaskID is
@@ -592,21 +659,38 @@ type FindingTaskOption struct {
 // FindingStats returns whole-table counts (by severity, pending, and report
 // stage) and the sorted set of distinct vuln classes.
 func (d *DB) FindingStats() (*FindingStats, error) {
+	return d.FindingStatsForCompany("")
+}
+
+// FindingStatsForCompany is FindingStats narrowed by the Company rule of
+// FindingFilter, so the stat cards count the same findings as the list. Empty
+// company = whole table. A company view leaves out archived (cold) tasks: their
+// aggregates carry no asset or company attribution.
+func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
 	st := &FindingStats{VulnClasses: []string{}, Tasks: []FindingTaskOption{}}
-	err := d.QueryRow(`SELECT
-		COUNT(*),
-		COUNT(*) FILTER (WHERE status = 'pending'),
-		COUNT(*) FILTER (WHERE report_state = 'submitted'),
-		COUNT(*) FILTER (WHERE report_state = 'accepted'),
-		COUNT(*) FILTER (WHERE severity = 'critical'),
-		COUNT(*) FILTER (WHERE severity = 'high'),
-		COUNT(*) FILTER (WHERE severity = 'medium'),
-		COUNT(*) FILTER (WHERE severity = 'low')
-		FROM findings`).Scan(&st.Total, &st.Pending, &st.Submitted, &st.Accepted, &st.Critical, &st.High, &st.Medium, &st.Low)
+	f, err := d.resolveCompany(FindingFilter{Company: company})
 	if err != nil {
 		return nil, err
 	}
-	rows, err := d.Query(`SELECT DISTINCT vulnclass FROM findings WHERE vulnclass <> '' ORDER BY vulnclass`)
+	where, args := f.where()
+	and := " WHERE "
+	if where != "" {
+		and = where + " AND "
+	}
+	const from = ` FROM findings f LEFT JOIN tasks t ON f.task_id = t.id`
+	err = d.QueryRow(`SELECT
+		COUNT(*),
+		COUNT(*) FILTER (WHERE f.status = 'pending'),
+		COUNT(*) FILTER (WHERE f.report_state = 'submitted'),
+		COUNT(*) FILTER (WHERE f.report_state = 'accepted'),
+		COUNT(*) FILTER (WHERE f.severity = 'critical'),
+		COUNT(*) FILTER (WHERE f.severity = 'high'),
+		COUNT(*) FILTER (WHERE f.severity = 'medium'),
+		COUNT(*) FILTER (WHERE f.severity = 'low')`+from+where, args...).Scan(&st.Total, &st.Pending, &st.Submitted, &st.Accepted, &st.Critical, &st.High, &st.Medium, &st.Low)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := d.Query(`SELECT DISTINCT f.vulnclass`+from+and+`f.vulnclass <> '' ORDER BY f.vulnclass`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -625,12 +709,9 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 	// Task dropdown: tasks that have findings, with description (empty after the
 	// task is deleted; the frontend falls back to the id) and count, the most
 	// recently found first.
-	trows, err := d.Query(`SELECT f.task_id, COALESCE(t.name, ''), COALESCE(t.description, ''), COUNT(*)
-		FROM findings f
-		LEFT JOIN tasks t ON f.task_id = t.id
-		WHERE f.task_id IS NOT NULL
+	trows, err := d.Query(`SELECT f.task_id, COALESCE(t.name, ''), COALESCE(t.description, ''), COUNT(*)`+from+and+`f.task_id IS NOT NULL
 		GROUP BY f.task_id, t.name, t.description
-		ORDER BY MAX(f.created_at) DESC`)
+		ORDER BY MAX(f.created_at) DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -644,6 +725,9 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 	}
 	if err := trows.Err(); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(company) != "" {
+		return st, nil
 	}
 	archived, err := d.archivedTaskAggregates()
 	if err != nil {
@@ -750,7 +834,36 @@ func (d *DB) DeleteFindingsByTask(taskID int64) (int64, error) {
 // do not care about notifications (parameter validation, retest flows) can
 // drive the status on their own.
 func (d *DB) SetFindingStatus(id int64, status string) (int64, error) {
-	return d.setFindingCol(id, "status", "status", status)
+	ctx := context.Background()
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var nodeID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `UPDATE findings SET status=$1 WHERE id=$2 RETURNING node_id`, status, id).Scan(&nodeID)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if nodeID.Valid {
+		if _, err := tx.ExecContext(ctx, `UPDATE exploration_nodes
+			SET payload = jsonb_set(payload, '{status}', to_jsonb($1::text))
+			WHERE id = $2`, status, nodeID.Int64); err != nil {
+			return 0, err
+		}
+		if FindingStatusInvalidatesGoal(status) {
+			if err := reopenGoalsProvedByNodeTx(ctx, tx, nodeID.Int64); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
 // SetFindingReportState updates one finding's report stage and mirrors it onto

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -506,6 +507,194 @@ func (s *ExplorationStore) PopulateFindingTrafficIDs(nodes []*Node) error {
 		n.FindingID, n.FindingNodeID, n.TrafficCount = findingID, nodeID, count
 	}
 	return rows.Err()
+}
+
+// FindingProofCheck is the server-side verification result for prove_goal when
+// the evidence node is a finding (#124, P4.3).
+type FindingProofCheck struct {
+	Proven            bool
+	FindingID         int64
+	MatchedTrafficIDs []string
+	Reason            string
+}
+
+// VerifyFindingProofForNode recomputes from current finding_traffic_bindings
+// whether the finding for nodeID has at least one real bound traffic_ref whose
+// host matches the finding's linked assets. A finding without linked assets (or
+// whose assets carry no host) is never proven.
+// Each bound traffic_ref's source_traffic_id must also exist in the live
+// capture store according to exchangeExists. A nil exchangeExists or any
+// lookup error fails closed by returning an error.
+func (s *ExplorationStore) VerifyFindingProofForNode(
+	ctx context.Context,
+	nodeID int64,
+	exchangeExists func(ctx context.Context, trafficID string) (bool, error),
+) (*FindingProofCheck, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("exploration store is unavailable")
+	}
+	var (
+		findingID int64
+		assetRaw  []byte
+	)
+	err := s.db.QueryRowContext(ctx, `SELECT id, COALESCE(asset_ids,'[]'::jsonb) FROM findings WHERE node_id=$1`, nodeID).Scan(&findingID, &assetRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &FindingProofCheck{
+			Proven: false,
+			Reason: "no finding record or bound traffic evidence exists for this node",
+		}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var assetIDs []int64
+	_ = json.Unmarshal(assetRaw, &assetIDs)
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT COALESCE(s.source_traffic_id,''), COALESCE(s.url,'')
+FROM finding_traffic_bindings b
+JOIN traffic_evidence_snapshots s ON s.id = b.snapshot_id
+WHERE b.finding_id = $1
+ORDER BY b.position, b.id`, findingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type boundSnap struct {
+		trafficID string
+		rawURL    string
+	}
+	var snaps []boundSnap
+	for rows.Next() {
+		var bs boundSnap
+		if err := rows.Scan(&bs.trafficID, &bs.rawURL); err != nil {
+			return nil, err
+		}
+		snaps = append(snaps, bs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(snaps) == 0 {
+		return &FindingProofCheck{
+			Proven:    false,
+			FindingID: findingID,
+			Reason:    "finding has no bound traffic_ref",
+		}, nil
+	}
+	// Without a linked asset there is no target to match the bound traffic
+	// against, so any traffic would prove the finding. Fail closed: the finding
+	// stays recorded and visible but cannot close a goal.
+	if len(assetIDs) == 0 {
+		return &FindingProofCheck{
+			Proven:    false,
+			FindingID: findingID,
+			Reason:    "finding has no linked asset (asset_ids is empty), so its bound traffic cannot be matched to a target",
+		}, nil
+	}
+
+	var assetHosts []string
+	var assetRootDomains []string
+	if len(assetIDs) > 0 {
+		assets, err := s.db.Assets().GetByIDs(assetIDs)
+		if err != nil {
+			return nil, fmt.Errorf("load finding assets: %w", err)
+		}
+		for _, a := range assets {
+			addHost := func(h string) {
+				h = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(h), "."))
+				if h != "" {
+					assetHosts = append(assetHosts, h)
+				}
+			}
+			if a.Type == "root_domain" && strings.TrimSpace(a.Domain) != "" {
+				assetRootDomains = append(assetRootDomains, strings.ToLower(strings.TrimSuffix(strings.TrimSpace(a.Domain), ".")))
+			}
+			addHost(a.Domain)
+			addHost(a.IP)
+			for _, bd := range a.BoundDomains {
+				addHost(bd)
+			}
+			if a.URL != "" {
+				if u, err := url.Parse(a.URL); err == nil {
+					addHost(u.Hostname())
+				}
+			}
+		}
+	}
+	if len(assetHosts) == 0 && len(assetRootDomains) == 0 {
+		return &FindingProofCheck{
+			Proven:    false,
+			FindingID: findingID,
+			Reason:    "finding's linked assets have no host to match its bound traffic against",
+		}, nil
+	}
+
+	hostMatchesFinding := func(snapHost string) bool {
+		for _, h := range assetHosts {
+			if snapHost == h {
+				return true
+			}
+		}
+		for _, rd := range assetRootDomains {
+			if snapHost == rd || strings.HasSuffix(snapHost, "."+rd) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var matched []string
+	missingInCapture := false
+	hostMismatch := false
+	for _, sn := range snaps {
+		tid := strings.TrimSpace(sn.trafficID)
+		if tid == "" {
+			missingInCapture = true
+			continue
+		}
+		// Without a capture checker the ref cannot be verified: fail closed.
+		if exchangeExists == nil {
+			return nil, errors.New("traffic capture verification is unavailable")
+		}
+		ok, err := exchangeExists(ctx, tid)
+		if err != nil {
+			return nil, fmt.Errorf("traffic capture lookup failed for %q: %w", tid, err)
+		}
+		if !ok {
+			missingInCapture = true
+			continue
+		}
+		u, err := url.Parse(strings.TrimSpace(sn.rawURL))
+		if err != nil {
+			hostMismatch = true
+			continue
+		}
+		snapHost := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(u.Hostname()), "."))
+		if snapHost == "" || !hostMatchesFinding(snapHost) {
+			hostMismatch = true
+			continue
+		}
+		matched = append(matched, tid)
+	}
+	if len(matched) > 0 {
+		return &FindingProofCheck{
+			Proven:            true,
+			FindingID:         findingID,
+			MatchedTrafficIDs: matched,
+		}, nil
+	}
+	reason := "finding has no verified bound traffic_ref"
+	if hostMismatch && !missingInCapture {
+		reason = "bound traffic host does not match any asset of the finding"
+	} else if missingInCapture {
+		reason = "bound traffic_ref does not exist in this task's capture"
+	}
+	return &FindingProofCheck{
+		Proven:    false,
+		FindingID: findingID,
+		Reason:    reason,
+	}, nil
 }
 
 func (d *DB) SetFindingReportVersionByNodeID(ctx context.Context, nodeID int64, report string, version *int64) (n int64, err error) {

@@ -168,8 +168,9 @@ func TestIntentAssetsIncludesDirectSourceProvenance(t *testing.T) {
 		cleanupErr(t, "source task", d.DeleteTask(source.ID))
 	})
 
+	intentHost := fmt.Sprintf("intent-%d.example.test", time.Now().UnixNano())
 	assetID, err := d.Assets().UpsertHTTPService(UpsertHTTPServiceReq{
-		URL: fmt.Sprintf("https://intent-%d.example.test", time.Now().UnixNano()), TaskID: source.ID,
+		URL: "https://" + intentHost, TaskID: source.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -177,6 +178,9 @@ func TestIntentAssetsIncludesDirectSourceProvenance(t *testing.T) {
 	t.Cleanup(func() {
 		_, err := d.Assets().DeleteByIDs([]int64{assetID})
 		cleanupErr(t, "asset", err)
+		// UpsertHTTPService also creates the parent subdomain and root_domain rows.
+		_, err = d.Exec(`DELETE FROM assets WHERE domain IN ($1, 'example.test')`, intentHost)
+		cleanupErr(t, "parent assets", err)
 	})
 	intentID, err := d.Exploration(source.ExplorationID).AddIntent(map[string]any{"summary": "source worker"}, 5, []int64{assetID}, "planner")
 	if err != nil {

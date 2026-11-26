@@ -97,10 +97,15 @@ type scopeProbe struct {
 type scopeProbeProvider struct {
 	seen chan scopeProbe
 	turn atomic.Int64
+	tool string
 }
 
 func newScopeProbeProvider() *scopeProbeProvider {
-	return &scopeProbeProvider{seen: make(chan scopeProbe, 16)}
+	return newScopeProbeProviderFor("LS")
+}
+
+func newScopeProbeProviderFor(tool string) *scopeProbeProvider {
+	return &scopeProbeProvider{seen: make(chan scopeProbe, 16), tool: tool}
 }
 
 func (p *scopeProbeProvider) Stream(ctx context.Context, _ llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
@@ -111,8 +116,12 @@ func (p *scopeProbeProvider) Stream(ctx context.Context, _ llm.CompletionRequest
 	}
 	events := []llm.StreamEvent{{Type: llm.SETextDelta, Text: "done"}, {Type: llm.SEMessageDelta, StopReason: "end_turn"}}
 	if p.turn.Add(1) == 1 {
+		tool := p.tool
+		if tool == "" {
+			tool = "LS"
+		}
 		events = []llm.StreamEvent{
-			{Type: llm.SEToolUseStart, ToolID: "call-1", ToolName: "LS"},
+			{Type: llm.SEToolUseStart, ToolID: "call-1", ToolName: tool},
 			{Type: llm.SEToolInputJSON, Text: `{}`},
 			{Type: llm.SEMessageDelta, StopReason: "tool_use"},
 		}
@@ -174,6 +183,7 @@ func (f *targetScopeFixture) newTask(t *testing.T) *Task {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _, _ = f.m.DeleteTask(created.ID, DeleteTaskOptions{}) })
 	task, ok := f.m.Task(created.ID)
 	if !ok {
 		t.Fatal("task not found after creation")
@@ -235,7 +245,7 @@ func (f *targetScopeFixture) finalPlannerRound(t *testing.T, task *Task) scopePr
 
 func (f *targetScopeFixture) mainAgentTurn(t *testing.T, task *Task) scopeProbe {
 	t.Helper()
-	probe := newScopeProbeProvider()
+	probe := newScopeProbeProviderFor("graph_overview")
 	f.s.cfgMu.Lock()
 	f.s.llmOn, f.s.llmProv = true, probe
 	f.s.cfgMu.Unlock()
@@ -310,11 +320,12 @@ func TestEveryAgentKindCarriesTargetScope(t *testing.T) {
 		run        func(*testing.T, *Task) scopeProbe
 		wait       time.Duration
 		targetOnly bool // the session runs on Task.TargetGuard, not Task.Guard
+		wantTool   string
 	}{
-		{"planner round", f.plannerLoopRound, intercept.DefaultTargetWaitBound, true},
-		{"final planner round", f.finalPlannerRound, 0, true},
-		{"main-agent turn", f.mainAgentTurn, intercept.DefaultTargetWaitBound, true},
-		{"worker intent", f.workerIntent, intercept.DefaultTargetWaitBound, false},
+		{"planner round", f.plannerLoopRound, intercept.DefaultTargetWaitBound, true, "LS"},
+		{"final planner round", f.finalPlannerRound, 0, true, "LS"},
+		{"main-agent turn", f.mainAgentTurn, intercept.DefaultTargetWaitBound, true, "graph_overview"},
+		{"worker intent", f.workerIntent, intercept.DefaultTargetWaitBound, false, "LS"},
 	}
 	for _, site := range taskSites {
 		t.Run(site.name, func(t *testing.T) {
@@ -323,11 +334,11 @@ func TestEveryAgentKindCarriesTargetScope(t *testing.T) {
 			task.TargetGuard = recorder
 			got := site.run(t, task)
 			onTarget, onMain := auditedTools(recorder), auditedTools(task.Guard)
-			if site.targetOnly && (len(onTarget) != 1 || onTarget[0] != "LS" || len(onMain) != 0) {
-				t.Fatalf("tool calls seen by TargetGuard=%v Guard=%v, want one LS on TargetGuard only", onTarget, onMain)
+			if site.targetOnly && (len(onTarget) != 1 || onTarget[0] != site.wantTool || len(onMain) != 0) {
+				t.Fatalf("tool calls seen by TargetGuard=%v Guard=%v, want one %s on TargetGuard only", onTarget, onMain, site.wantTool)
 			}
-			if !site.targetOnly && (len(onMain) != 1 || onMain[0] != "LS" || len(onTarget) != 0) {
-				t.Fatalf("tool calls seen by TargetGuard=%v Guard=%v, want one LS on Guard only", onTarget, onMain)
+			if !site.targetOnly && (len(onMain) != 1 || onMain[0] != site.wantTool || len(onTarget) != 0) {
+				t.Fatalf("tool calls seen by TargetGuard=%v Guard=%v, want one %s on Guard only", onTarget, onMain, site.wantTool)
 			}
 			if !got.ok || got.scope.TaskID != task.ID || got.scope.ConversationID != 0 {
 				t.Fatalf("scope = %+v (present=%v), want task %s", got.scope, got.ok, task.ID)

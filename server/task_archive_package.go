@@ -193,6 +193,16 @@ func (s *taskArchiveFileStage) rollback() error {
 	if s == nil || s.done {
 		return nil
 	}
+	err := s.rollbackFiles()
+	if err == nil {
+		err = os.RemoveAll(s.root)
+	}
+	s.done = true
+	return err
+}
+
+// Keep the journal until the caller has also cleaned temporary packages.
+func (s *taskArchiveFileStage) rollbackFiles() error {
 	var errs []error
 	for i := len(s.journal.Moves) - 1; i >= 0; i-- {
 		move := s.journal.Moves[i]
@@ -218,12 +228,6 @@ func (s *taskArchiveFileStage) rollback() error {
 			errs = append(errs, err)
 		}
 	}
-	if len(errs) == 0 {
-		if err := os.RemoveAll(s.root); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	s.done = true
 	return errors.Join(errs...)
 }
 
@@ -464,18 +468,33 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 			errs = append(errs, getErr)
 			continue
 		}
-		if archive != nil && archive.State == pgdb.ArchiveReady {
+		if archive != nil && archive.ArchivePath != "" && archive.SHA256 != "" {
 			if err := os.RemoveAll(root); err != nil {
 				errs = append(errs, err)
 			}
 			continue
 		}
 		stage := &taskArchiveFileStage{root: root, payload: filepath.Join(root, "payload"), journal: journal}
-		if err := stage.rollback(); err != nil {
+		if err := stage.rollbackFiles(); err != nil {
 			errs = append(errs, err)
+			continue
 		}
-		if archive != nil && archive.ArchivePath != "" {
-			_ = os.Remove(archive.ArchivePath)
+		// The process can exit after compression but before an upload journal or
+		// database location exists. Remove that temporary package only after the
+		// source-file rollback succeeds, for both local and remote backends.
+		packagePath := taskArchivePath(dataDir, journal.ArchiveID, journal.TaskID)
+		if err := validateArchivePath(dataDir, packagePath); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		// A crash inside compression leaves .partial, before any upload journal.
+		// Retain this staging journal on cleanup failure so startup can retry.
+		if err := errors.Join(removeLocalArchivePackage(packagePath), removeLocalArchivePackage(packagePath+".partial")); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err := os.RemoveAll(root); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
@@ -618,6 +637,12 @@ func writeTaskArchivePackage(path, payloadDir string, snapshot *pgdb.TaskArchive
 			// unpacker errors out on other types), so symlinks cannot be restored. Skip rather
 			// than fail the whole package: the link target is not read (lstat, never leaves the tree) and no symlink entry is written; when a link points inside the tree, the target file itself is still walked and archived separately.
 			log.Printf("[task-archive] skipping symlink (unsupported by the archive, other files unaffected): %s", current)
+			return nil
+		}
+		if !entry.IsDir() && !info.Mode().IsRegular() {
+			// A named pipe, socket or device left by a command: opening a pipe blocks until
+			// a writer appears, tar refuses a socket, and the unpacker refuses the rest.
+			log.Printf("[task-archive] skipping a file that is not regular (unsupported by the archive): %s", current)
 			return nil
 		}
 		header, err := tar.FileInfoHeader(info, "")

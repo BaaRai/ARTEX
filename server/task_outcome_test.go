@@ -22,7 +22,10 @@ func TestTaskOutcomeCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	taskID, _ := strconv.ParseInt(task.ID, 10, 64)
-	defer func() { _ = m.pg.DeleteTask(taskID) }()
+	defer func() {
+		_, _ = m.pg.DeleteFindingsByTask(taskID)
+		_ = m.pg.DeleteTask(taskID)
+	}()
 	// skill_usage has no foreign keys, so DeleteTask leaves these rows behind,
 	// and their misses would outrank TestSkillGapsReport's fixture in later runs.
 	defer func() { _, _ = m.pg.Exec(`DELETE FROM skill_usage WHERE task_id=$1`, taskID) }()

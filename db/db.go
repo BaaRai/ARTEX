@@ -102,8 +102,9 @@ func coordinateWithSchemaMigration(tx *sql.Tx) error {
 }
 
 // DSN resolves the PostgreSQL connection string and reports where it came from.
-// Precedence: env ARTEX_PG_DSN > config file (config.json). There is no
-// built-in default — it errors if neither source is configured.
+// Precedence: env ARTEX_PG_DSN > ARTEX_PG_HOST/USER/PASSWORD/DBNAME > config
+// file (config.json). There is no built-in default — it errors if no source
+// is configured.
 func DSN() (dsn, source string, err error) {
 	return config.PostgresDSN()
 }
@@ -311,11 +312,12 @@ ON CONFLICT (agent_id, var_name) DO UPDATE
 	if _, err := d.Exec(`DELETE FROM agent_prompt_vars WHERE var_name IN ('EngagementTitle', 'CoverageGaps', 'Now')`); err != nil {
 		return fmt.Errorf("cleanup renamed vars: %w", err)
 	}
-	// Default-on interactive_shell for the runtime agents (planner/worker/mainagent/auto)
+	// Default-on interactive_shell for the execution agents (planner/worker)
 	// ONCE — respects a later user toggle-off (guarded by a settings flag). goals(one-shot
-	// decomposer) stays off. Runs after the column exists (schema applied before seed).
+	// decomposer) and pure orchestrators (mainagent/auto) stay off. Runs after the column
+	// exists (schema applied before seed).
 	if v, _, _ := d.GetSetting("interactive_shell_default_v1"); v != "true" {
-		if _, err := d.Exec(`UPDATE agents SET interactive_shell=true WHERE key IN ('planner','worker','mainagent','auto')`); err != nil {
+		if _, err := d.Exec(`UPDATE agents SET interactive_shell=true WHERE key IN ('planner','worker')`); err != nil {
 			return fmt.Errorf("seed interactive_shell defaults: %w", err)
 		}
 		_ = d.SetSetting("interactive_shell_default_v1", "true")
@@ -405,7 +407,7 @@ ON CONFLICT DO NOTHING`, r.kind, r.pattern, r.note); err != nil {
 // declares `mcps: ScopeSentry`, which only takes effect once it's made visible and
 // that MCP is enabled/configured.
 var builtinSkillVisibility = map[string][]string{
-	"api-recon": {"auto", "pentest", "worker"},
+	"api-recon": {"pentest", "worker"},
 }
 
 // seedBuiltinSkillVisibility binds the shipped built-in skills to their default

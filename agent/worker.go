@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -62,16 +62,20 @@ type WebSearchOpts struct {
 
 type Worker struct {
 	findingRecorder FindingRecorder
-	prov            llm.Provider
-	model           string
-	workDir         string
-	proxyAddr       string
-	proxyCACert     string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
-	webSearch       WebSearchOpts     // web_search tool backend selection (off by default)
-	tx              *transcript.Store // raw LLM conversation persistence (nil = off)
-	window          int               // context window in tokens (for compaction)
-	windowFn        func() int        // optional dynamic task-chain minimum
-	maxTurns        int               // max agent turns per run (0 = unlimited)
+	// triage is the advisory decision-model client for closed-list judgements,
+	// handed to the per-run ToolSet (see agent/triage.go). nil = off.
+	triage      TriageClient
+	prov        llm.Provider
+	model       string
+	workDir     string
+	proxyAddr   string
+	proxyCACert string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
+	factTraffic FactTrafficLookup // proxy captures for fact provenance (nil = activity-only)
+	webSearch   WebSearchOpts     // web_search tool backend selection (off by default)
+	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
+	window      int               // context window in tokens (for compaction)
+	windowFn    func() int        // optional dynamic task-chain minimum
+	maxTurns    int               // max agent turns per run (0 = unlimited)
 	// runTimeout is the wall-clock budget for the main exploration of one intent
 	// (0 = unlimited). When it fires, the run is cut and a settlement round is
 	// forced so already-identified facts get written back instead of being lost.
@@ -206,6 +210,10 @@ func (w *Worker) compactionWindow() int {
 // that MITM proxy. Empty addr disables the hint.
 func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = addr, caCert }
 
+// SetFactTraffic wires the proxy capture store used to classify recorded facts
+// (#124 row 1). nil keeps the activity-only classification.
+func (w *Worker) SetFactTraffic(l FactTrafficLookup) { w.factTraffic = l }
+
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 
@@ -335,7 +343,7 @@ func makeRunDir(base, leaf string) {
 		return
 	}
 	if err := runDirMaker(base, leaf); err != nil {
-		log.Printf("[agent] run directory %s: %v", leaf, err)
+		slog.Warn("[agent] run directory creation failed", "dir", leaf, "err", err)
 	}
 }
 
@@ -387,12 +395,57 @@ func IsRunDirName(name string) bool {
 	return true
 }
 
-func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
+// CachePrefixEnv is the opt-in environment flag enabling the worker system
+// prompt cache-prefix split (P3.5 phase C). Off by default: when unset/false,
+// worker system segments and DynamicBoundary are byte-identical to the legacy
+// layout. Planner, mainagent, chat, and goals are unaffected.
+const CachePrefixEnv = "ARTEX_CACHE_PREFIX"
+
+func cachePrefixEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(CachePrefixEnv))) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	return false
+}
+
+// workerSystemParts splits workerSystem at the first per-intent volatile
+// segment (workerArtifactSpec(runDir)) without reordering any text:
+//   - staticPart  = body + untrustedContentTail + workerTrafficBlock
+//   - dynamicHead = workerArtifactSpec(runDir) + noiseProfileBlock
+//
+// Custom DB prompts that reference {{.Now}} remain volatile inside staticPart.
+func workerSystemParts(proxyAddr, caCert, dataDir, runDir string) (staticPart, dynamicHead string) {
 	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr, DataDir: dataDir, Now: nowStr()})
 	// caCert is present only when the recording MITM is on, which is exactly when
 	// the traffic_* tools are registered — so it gates the traffic-tool note.
 	// Optional finding guidance is added for every role after tool resolution.
-	return body + untrustedContentTail(body) + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir) + noiseProfileBlock()
+	staticPart = body + untrustedContentTail(body) + workerTrafficBlock(caCert != "")
+	dynamicHead = workerArtifactSpec(runDir) + noiseProfileBlock()
+	return staticPart, dynamicHead
+}
+
+func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
+	staticPart, dynamicHead := workerSystemParts(proxyAddr, caCert, dataDir, runDir)
+	return staticPart + dynamicHead
+}
+
+// assembleWorkerSystem builds the worker's SystemPrompt segments and
+// DynamicBoundary. When split is false (default), it delegates directly to
+// deferredSystem(staticPart+dynamicTail, def). When split is true
+// (ARTEX_CACHE_PREFIX=1), it emits two segments [staticPart, dynamic] with
+// DynamicBoundary=1 so sibling workers in the same task share the cached static
+// prefix, absorbing the leading "\n\n" separator from workerArtifactSpec so
+// strings.Join(system, "\n\n") is byte-identical to the unsplit prompt.
+func assembleWorkerSystem(staticPart, dynamicTail string, def DeferredInfo, split bool) (system []string, boundary int) {
+	if !split {
+		return deferredSystem(staticPart+dynamicTail, def)
+	}
+	dyn := strings.TrimPrefix(dynamicTail+def.FindingGuidance+def.SkillIndex, "\n\n")
+	if block := actool.RenderDeferredToolsBlock(def.GlobalNames); block != "" {
+		dyn += "\n\n" + block
+	}
+	return []string{staticPart, dyn}, 1
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:
@@ -482,6 +535,8 @@ func (w *Worker) ExecuteWithMessage(ctx context.Context, name string, taskID int
 func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string), requestID, message string) (harness.TerminalReason, WriteCounts, error) {
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
+	tsx.SetTriageClient(w.triage)
+	tsx.SetFactTraffic(w.factTraffic)
 	tsx.SetTaskID(taskID)
 	coverageEnabled := coverageOn(as, taskID)
 	tsx.SetCoverageEnabled(coverageEnabled)
@@ -523,19 +578,26 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// The run-wide intent is not the current tool action. Do not forward it or
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
-	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), newDataEnvelope())
-	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir) + frameLessonsBlock(w.lessonsBlock)
+	workerEnv := newDataEnvelope()
+	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), workerEnv)
+	staticPart, dynamicTail := workerSystemParts(w.proxyAddr, w.proxyCACert, w.workDir, runDir)
+	dynamicTail += frameLessonsBlock(w.lessonsBlock)
 	if w.wantConstraints() {
-		sysBody += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
+		dynamicTail += constraintBlock(ts) // inject the operation constraints (if any) into the system prompt; the worker strictly obeys them during execution
 	}
-	// intent block → intent-anchored assets block → launch instruction, appended to
-	// the system tail in that order (same append pattern as constraintBlock).
-	sysBody += renderIntentTask(intent)
+	// intent block → launch instruction in the system tail; intent-anchored assets
+	// carry target-influenced fields (PageTitle, Description, etc.) and go into
+	// the launch user message inside workerEnv's data envelope (#124).
+	dynamicTail += renderIntentTask(intent)
 	if as != nil {
 		if ids := intentAssetIDs(intent); len(ids) > 0 {
 			if assets, err := as.GetByIDs(ids); err == nil && len(assets) > 0 {
-				if b, err := json.Marshal(assets); err == nil {
-					sysBody += "\n\nThe target assets corresponding to this intent's asset_ids:\n" + string(b)
+				if block := renderWorkerIntentAssets(assets, workerEnv); block != "" {
+					if strings.TrimSpace(overview) == "" {
+						overview = workerEnv.intro() + block
+					} else {
+						overview += block
+					}
 				}
 				// The assets this intent explicitly targets → automatically join the task's
 				// test scope (same conservative granularity as insertAssets). upsertTaskScope's
@@ -551,8 +613,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 			}
 		}
 	}
-	sysBody += "\n\nStart executing the intent above: do only it, produce only facts, assets, findings, stop when done."
-	system, boundary := deferredSystem(sysBody, def)
+	dynamicTail += "\n\nStart executing the intent above: do only it, produce only facts, assets, findings, stop when done."
+	system, boundary := assembleWorkerSystem(staticPart, dynamicTail, def, cachePrefixEnabled())
 	// The task-level deadline (injected via ctx) clamps this run's wall-clock budget +
 	// decides the wrap-up prompt (see taskclock.go).
 	tc := taskClockFrom(ctx)

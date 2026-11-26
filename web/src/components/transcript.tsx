@@ -23,6 +23,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ApprovalDetail } from "@/components/approval-records";
+import { reportsBashExit127 } from "@/lib/bash-exit-status";
+import { formatBytes } from "@/lib/format";
 import type { Activity, InterceptPending } from "@/lib/types";
 
 // ---- per-agent lane color (planner + work#1/#2/#3 …) ---------------------------
@@ -368,7 +370,7 @@ function ToolBlock({
 }) {
   const [open, setOpen] = React.useState(focused);
   const targetRef = React.useRef<HTMLElement>(null);
-  const [detail, setDetail] = React.useState<string | null>(null);
+  const [detail, setDetail] = React.useState<{ text: string; bashExit127: boolean } | null>(null);
   // what we last loaded, keyed by the underlying step seqs. When the tool result
   // arrives after we expanded mid-run (command only), this key changes and the
   // effect below re-fetches — so the output shows up instead of being cached out.
@@ -406,11 +408,17 @@ function ToolBlock({
       ),
     ).then((parts) => {
       if (!live) return;
-      setDetail(
-        segs
+      const resultText = result ? parts[parts.length - 1] : undefined;
+      setDetail({
+        text: segs
           .map((x, i) => `[${x.label}]\n${x.command ? toolInputText(toolName, parts[i]) : parts[i]}`)
           .join("\n\n"),
-      );
+        bashExit127:
+          toolName === "Bash" &&
+          result?.is_error === true &&
+          resultText !== undefined &&
+          reportsBashExit127(resultText),
+      });
       loadedKey.current = detailKey;
     });
     return () => {
@@ -475,9 +483,14 @@ function ToolBlock({
         {cmd && <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{cmd}</span>}
         <span className={"ml-auto shrink-0 font-medium " + statusTone}>{statusText}</span>
       </button>
+      {open && detail?.bashExit127 && (
+        <p className="ml-7 mb-1 text-muted-foreground" role="status">
+          {t("Bash reported exit code 127. Check whether the command or its interpreter is available in this runtime.")}
+        </p>
+      )}
       {open && (
         <pre className="ml-7 mb-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-          {detail ?? t("Loading…")}
+          {detail?.text ?? t("Loading…")}
         </pre>
       )}
     </section>
@@ -553,18 +566,6 @@ function MessageBlock({
   );
 }
 
-// UserRow renders a right-aligned chat bubble: either a human turn (the message you
-// sent the main agent) or, in a worker session, the LLM-generated intent that leads
-// it (intent=true) — same bubble, but a target icon instead of the human avatar.
-// summary is a truncated first line, so the full message is pulled from the detail
-// and shown in full (bubble is whitespace-pre-wrap, so long/multi-line text wraps).
-// fmtBytes renders a human file size for attachment chips.
-function fmtBytes(n: number): string {
-  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
-  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`;
-  return `${n} B`;
-}
-
 type MsgAttachment = { name: string; path: string; size: number };
 
 // parseUserBody splits a user turn's body into text + attachments. The backend stores
@@ -586,6 +587,11 @@ function parseUserBody(body: string): { text: string; attachments: MsgAttachment
   return { text: body, attachments: [] };
 }
 
+// UserRow renders a right-aligned chat bubble: either a human turn (the message you
+// sent the main agent) or, in a worker session, the LLM-generated intent that leads
+// it (intent=true) — same bubble, but a target icon instead of the human avatar.
+// summary is a truncated first line, so the full message is pulled from the detail
+// and shown in full (bubble is whitespace-pre-wrap, so long/multi-line text wraps).
 function UserRow({ step, intent, getDetail }: { step: Activity; intent?: boolean; getDetail: (seq: number) => Promise<string> }) {
   const Icon = intent ? CrosshairIcon : UserIcon;
   const [ref, inView] = useInView();
@@ -629,7 +635,7 @@ function UserRow({ step, intent, getDetail }: { step: Activity; intent?: boolean
               >
                 <PaperclipIcon className="size-3 shrink-0 text-primary" />
                 <span className="max-w-[180px] truncate font-medium">{a.name}</span>
-                <span className="shrink-0 text-muted-foreground">{fmtBytes(a.size)}</span>
+                <span className="shrink-0 text-muted-foreground">{formatBytes(a.size)}</span>
               </div>
             ))}
           </div>

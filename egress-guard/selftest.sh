@@ -51,3 +51,4 @@ unset IPSET_TIMEOUT
 $IPT -F DOCKER-USER 2>/dev/null; $IPT -X ARTEX-EGRESS 2>/dev/null
 echo "=== guard log test1 ==="; cat /tmp/g.log; echo "=== guard log test2 ==="; cat /tmp/g2.log
 echo "######## RESULT: pass=$pass fail=$fail ########"
+[ "$fail" -eq 0 ]

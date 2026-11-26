@@ -282,7 +282,15 @@ func (d *DB) FinishFindingRetest(id int64, status, reason string) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if finalStatus == "completed" {
+		if err := syncLessonsForFindingTx(context.Background(), tx, findingID); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *DB) RecoverFindingRetests() error {

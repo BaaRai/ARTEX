@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/url"
 	"strconv"
@@ -129,7 +129,7 @@ func insertAssetsRuleLoadFailure(err error) (actool.Result, bool) {
 	if err == nil {
 		return actool.Result{}, false
 	}
-	log.Printf("[insert_assets] intercept rules unavailable: %v", err)
+	slog.Warn("[insert_assets] intercept rules unavailable", "err", err)
 	return actool.Errorf("asset intercept rules are unavailable; insertion refused"), true
 }
 
@@ -508,7 +508,10 @@ func (t *ToolSet) addTaskScope() actool.CoreTool {
 					errs[strconv.Itoa(i)] = err.Error()
 					continue
 				}
-				added = append(added, map[string]any{"kind": ts.Kind, "domain": ts.Domain, "net": ts.Net, "value": ts.Value, "company_id": ts.CompanyID})
+				added = append(added, map[string]any{
+					"kind": ts.Kind, "domain": ts.Domain, "net": ts.Net, "value": ts.Value,
+					"company_id": ts.CompanyID, "source": ts.Source, "reason": ts.Reason, "expanded": ts.Expanded,
+				})
 			}
 			out := map[string]any{"added": added}
 			if len(errs) > 0 {

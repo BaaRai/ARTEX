@@ -40,26 +40,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { formatBytes, formatShortDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { WorkspaceEntry, WorkspaceFile } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
-
-function fmtSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
-}
-function fmtTime(ms: number): string {
-  return new Date(ms).toLocaleString(intlLocale, {
-    year: "2-digit",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { t } from "@/i18n";
 
 type EditState = {
   file: WorkspaceFile;
@@ -251,9 +236,11 @@ export default function WorkspacePage() {
                     </button>
                   </TableCell>
                   <TableCell className="text-muted-foreground text-right font-mono text-xs">
-                    {e.dir ? "—" : fmtSize(e.size)}
+                    {e.dir ? "—" : formatBytes(e.size)}
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">{fmtTime(e.mtime)}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {formatShortDateTime(e.mtime, { year: true, seconds: false })}
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
                       {!e.dir && (
@@ -303,7 +290,7 @@ export default function WorkspacePage() {
                     {edit.file.path}
                   </span>
                 </SheetTitle>
-                <span className="text-muted-foreground text-xs">{fmtSize(edit.file.size)}</span>
+                <span className="text-muted-foreground text-xs">{formatBytes(edit.file.size)}</span>
               </SheetHeader>
 
               {edit.file.binary || edit.file.too_large ? (

@@ -6,7 +6,6 @@
 
 **Autonomous penetration testing that keeps its receipts.**
 
-(upstream: [Autumn-27/ARTEX](https://github.com/Autumn-27), AGPL-3.0)
 
 Self-hosted multi-agent offensive security. A planner explores, workers run real tools,
 and every finding stays bound to the assets and HTTP traffic that prove it.
@@ -15,8 +14,11 @@ and every finding stays bound to the assets and HTTP traffic that prove it.
 [![License](https://img.shields.io/github/license/BaaRai/ARTEX?color=6b34db)](LICENSE)
 [![CI](https://github.com/BaaRai/ARTEX/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BaaRai/ARTEX/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/github/go-mod/go-version/BaaRai/ARTEX?color=6b34db)](go.mod)
+[![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/VKyvMTcgXh)
 
 [Quick start](#quick-start) · [Screenshots](#screenshots) · [How it works](#how-it-works) · [Install](#installation) · [Configuration](#configuration) · [Security](SECURITY.md)
+
+[![Join us on Discord](https://img.shields.io/badge/JOIN%20US%20ON-DISCORD-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/VKyvMTcgXh)
 
 </div>
 
@@ -57,8 +59,10 @@ printed at startup:
 docker compose logs artex | grep "Setup token"
 ```
 
-> There is no prebuilt Docker image to pull: the image is always built from your checkout.
-> For all installation paths (script, binaries, source, release archives), see [Installation](#installation).
+> Multi-arch release images (`linux/amd64`, `linux/arm64`) are published to GitHub Container
+> Registry at `ghcr.io/baarai/artex` from the next tagged release; v0.7.0 predates the publish
+> step. For pulling the prebuilt image and all other installation paths (script, binaries,
+> source, release archives), see [Installation](#installation).
 
 ---
 
@@ -331,7 +335,9 @@ The UI listens on `127.0.0.1` by default. To reach it from another machine (or f
 ARTEX runs inside WSL), set `ARTEX_BIND_ADDR=0.0.0.0` in `.env` (the setup token still protects the
 first-run claim), or keep loopback and use a reverse proxy or SSH tunnel.
 
-### Option 2: Docker Compose (manual)
+### Option 2: Docker (Compose checkout build or prebuilt GHCR image)
+
+Build from a checkout with Docker Compose:
 
 ```bash
 git clone https://github.com/BaaRai/ARTEX.git
@@ -341,8 +347,84 @@ docker compose up -d --build
 # → http://localhost:8787
 ```
 
+The checkout build needs the Docker **buildx** plugin (BuildKit). Docker Desktop and
+get.docker.com include it; distro packages and Homebrew's docker CLI (Colima) may not. If
+`docker buildx version` fails, install `docker-buildx-plugin` or `docker-buildx`, or on macOS
+`brew install docker-buildx`. Without it the build stops at the first stage with
+`failed to parse platform`.
+
+The release workflow publishes a multi-arch image (`linux/amd64`, `linux/arm64`) to GitHub
+Container Registry on each `v*` tag, with tags `:latest`, `:v<version>`, and `:<version>`.
+v0.7.0 predates that step, so there is no `artex` package yet: until the next tagged release,
+use the checkout build above, and `docker-compose.ghcr.yml` and the `docker pull` below will
+fail with `denied`. GHCR packages start private; after the first publish the package visibility
+must be set to Public, and the release workflow verifies that the image pulls anonymously and
+fails the job otherwise.
+
+Once the image is published, the standalone container requires an existing PostgreSQL database
+reachable from the container.
+Set the `ARTEX_PG_*` variables below. The example uses Docker Desktop's
+`host.docker.internal` to reach PostgreSQL on the host. On native Linux Docker Engine, add
+`--add-host=host.docker.internal:host-gateway` to `docker run` for a host database, or use
+the reachable hostname of your database server.
+
+```bash
+docker pull ghcr.io/baarai/artex:latest
+
+mkdir -p data keys
+docker run -d --name artex \
+  --security-opt no-new-privileges:true \
+  -p 127.0.0.1:8787:8787 \
+  -p 127.0.0.1:8788:8788 \
+  -e ARTEX_PG_HOST=host.docker.internal \
+  -e ARTEX_PG_PORT=5432 \
+  -e ARTEX_PG_USER=artex \
+  -e ARTEX_PG_PASSWORD='yourpass' \
+  -e ARTEX_PG_DBNAME=artex \
+  -e ARTEX_PG_SSLMODE=disable \
+  -e ARTEX_JWT_KEY_DIR=/app/keys \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/keys:/app/keys" \
+  ghcr.io/baarai/artex:latest
+# → http://localhost:8787  (docker logs artex | grep "Setup token")
+```
+
+In `docker-compose.yml` and `docker-compose.ghcr.yml`, `POSTGRES_PASSWORD` is passed to ARTEX as
+its own variable. The server percent-encodes it into the connection URL, so a password may contain
+`/`, `?`, `%`, `@`, `:` or spaces. In `.env`, quote a value that contains `#`, and write `$$` for a
+literal `$`. The `ARTEX_PG_*` variables take the password raw; quote it in a shell.
+
 The image includes a scanner toolchain (`nmap`, `nuclei`, `httpx`, `katana`, `ffuf`, `dalfox`,
-`sqlmap`, `ripgrep`, `curl`, `npm`, …); `./skills` and `./data` are persisted via bind mounts.
+`sqlmap`, `ripgrep`, `curl`, `npm`, …) and built-in `/app/skills`. The GHCR Compose file below
+persists `./keys` and `./data`; it does not mount a host `skills/` directory, so the image's
+built-in skills are used.
+
+#### Compose stack from the prebuilt image
+
+`docker-compose.ghcr.yml` runs the same ARTEX + PostgreSQL stack from the released image, with no
+checkout build. The image is not published yet: v0.7.0 predates the GHCR publish step, so use the
+checkout build above until the next tagged release. Once the first image is published, download
+the file and `.env.example` once:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/BaaRai/ARTEX/main/docker-compose.ghcr.yml
+curl -fsSLO https://raw.githubusercontent.com/BaaRai/ARTEX/main/.env.example
+cp .env.example .env            # set POSTGRES_PASSWORD, optionally an LLM key
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+# → http://localhost:8787  (docker compose -f docker-compose.ghcr.yml logs artex | grep "Setup token")
+```
+
+Update the stack without a git checkout:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Pin a version with `ARTEX_IMAGE_TAG=v0.7.1` in `.env` (or `0.7.1`); unset uses `latest`. To use
+custom skills, copy them into a host directory and add `- ./skills:/app/skills` to the `artex`
+volumes, which overrides the built-in `/app/skills`.
 
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
@@ -405,7 +487,7 @@ runtime supports it.
 
 ## Configuration
 
-**Database** (`config.json`, or the `ARTEX_PG_DSN` environment variable):
+**Database** (`config.json`, `ARTEX_PG_DSN`, or `ARTEX_PG_*` environment variables — see [External PostgreSQL](#external-postgresql)):
 
 ```json
 {
@@ -420,7 +502,7 @@ runtime supports it.
 **LLM**: `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`), or configure it in the UI's
 "LLM Configuration" page, which can also add a local Ollama server as a keyless provider (format
 "Ollama", default base URL `http://127.0.0.1:11434/v1`). Optional:
-`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama`), `ARTEX_LLM_MODEL`,
+`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama | bedrock-gateway`), `ARTEX_LLM_MODEL`,
 `ARTEX_LLM_BASE_URL`, `ARTEX_LLM_PROXY`.
 
 **Base URL gotcha**: for the Anthropic format, enter the host **without** `/v1` (for example
@@ -435,6 +517,30 @@ root, paste the key, then click the **↻** button next to *Model* to load the p
 catalog (`GET /v1/models`) and pick a model; models the provider adds later appear on the
 next refresh. For example, [NotHoly](https://notholy.com) (offensive-security models) uses
 base URL `https://api.notholy.com/v1` with an API key from its console.
+
+**Bedrock gateway**: select **Bedrock gateway** in System → LLM for a gateway that
+exposes the Bedrock `InvokeModel` and `InvokeModelWithResponseStream` paths and accepts
+bearer-token authentication. Enter the gateway's base URL (for example,
+`https://gateway.example.com/bedrock`), the full Bedrock model ID, and the token
+in **Bearer token**. If required, enter static headers as one `Name: Value` per line
+in **Custom gateway headers**. ARTEX adds `/model/{model}/invoke` (or
+`/invoke-with-response-stream`), sends `anthropic_version: bedrock-2023-05-31`,
+and decodes Bedrock's binary event stream. Enter the model ID manually; this
+gateway format does not have a model-list operation. The token and custom header
+values are encrypted in the database and are write-only in the UI. Editing the
+gateway URL requires re-entering the token, so saved credentials cannot be sent
+to a different host by changing the URL. This format is for bearer-authenticated
+gateways; direct AWS Bedrock with SigV4 credentials is not supported.
+
+For environment-based setup, set `ARTEX_LLM_PROVIDER=bedrock-gateway`,
+`ARTEX_LLM_BASE_URL`, `ARTEX_LLM_MODEL`, and `ARTEX_LLM_API_KEY`. Optional
+`ARTEX_LLM_CUSTOM_HEADERS` uses the same newline-separated `Name: Value` format.
+
+**Task archive storage**: local disk by default. Set `ARTEX_ARCHIVE_STORAGE=s3` to
+store cold task packages in an S3-compatible bucket and release their local
+package space after verification. Existing local archives remain usable. See
+[Task archive storage](docs/task-archive-storage.md) for configuration, permissions,
+integrity checks, temporary disk requirements and recovery.
 
 **Concurrency**: work agents per task, in "System Settings" (default 3).
 
@@ -460,6 +566,10 @@ every case.
 The **Target noise** card in System settings sets the profile at runtime (no restart) and shows the
 per-host counters; once saved, that setting takes precedence over `ARTEX_NOISE_PROFILE`.
 
+**Scanner User-Agent (opt-in per task)** adds a stable ARTEX User-Agent to supported
+target requests so defenders can correlate them with an approved assessment. See the
+[configuration and WAF triage guide](docs/scanner-user-agent.md).
+
 **Low-and-slow agent guidance (off by default)**: when a noise profile is set, the planner, worker,
 main agent and chat agents receive a code-owned prompt block with the profile's per-host limits and
 exact rate/delay flags for the installed scanners. It tells them to test one host at a time, back
@@ -484,6 +594,70 @@ from the defaults until a worker finishes in this process.
 **Common flags**: `./start.sh -addr :8787 -proxy :8788` (`-addr` frontend/API, `-proxy` traffic
 recording proxy).
 
+### External PostgreSQL
+
+ARTEX already supports an external PostgreSQL 16+ instance — the `postgres` service in
+`docker-compose.yml` is only the bundled default. Because the database is startup configuration and
+the system's single source of truth, there is no runtime database switcher in the UI: change the
+environment variables and restart the server to point at another instance.
+
+Configure the connection with either a full connection string or individual parts:
+
+- **`ARTEX_PG_DSN`**: full PostgreSQL connection URL (for example
+  `postgres://artex:pass@db.example.internal:5432/artex?sslmode=require`). When set, it takes
+  precedence over the `ARTEX_PG_*` variables and you are responsible for percent-encoding any
+  URL-special characters in the username or password.
+- **`ARTEX_PG_*` parts** (recommended when passwords contain `/`, `?`, `%`, `@`, `:`, or spaces —
+  ARTEX percent-encodes the user and password and removes `ARTEX_PG_PASSWORD` from the environment
+  at startup):
+  - `ARTEX_PG_HOST` — PostgreSQL host
+  - `ARTEX_PG_PORT` — PostgreSQL port (default `5432`)
+  - `ARTEX_PG_USER` — database user
+  - `ARTEX_PG_PASSWORD` — database password (raw, not URL-encoded)
+  - `ARTEX_PG_DBNAME` — database name
+  - `ARTEX_PG_SSLMODE` — TLS mode (`disable`, `require`, `verify-ca`, `verify-full`)
+
+#### Compose without the bundled `postgres` service
+
+To run ARTEX against an external PostgreSQL server with Docker Compose, remove the `postgres`
+service, the `depends_on` block, and the `pgdata` volume from `docker-compose.yml`, and point
+`artex` at your database:
+
+```yaml
+services:
+  artex:
+    image: ghcr.io/baarai/artex:latest
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      # Option A: individual parts (recommended; percent-encodes special characters)
+      ARTEX_PG_HOST: ${ARTEX_PG_HOST:?Set ARTEX_PG_HOST in .env}
+      ARTEX_PG_PORT: ${ARTEX_PG_PORT:-5432}
+      ARTEX_PG_USER: ${ARTEX_PG_USER:-artex}
+      ARTEX_PG_PASSWORD: ${ARTEX_PG_PASSWORD:?Set ARTEX_PG_PASSWORD in .env}
+      ARTEX_PG_DBNAME: ${ARTEX_PG_DBNAME:-artex}
+      ARTEX_PG_SSLMODE: ${ARTEX_PG_SSLMODE:-require}
+      # Option B: full DSN (overrides ARTEX_PG_* when set)
+      # ARTEX_PG_DSN: ${ARTEX_PG_DSN}
+      ARTEX_JWT_KEY_DIR: /app/keys
+    ports:
+      - "${ARTEX_BIND_ADDR:-127.0.0.1}:8787:8787"
+      - "127.0.0.1:8788:8788"
+    volumes:
+      - ./data:/app/data
+      - ./keys:/app/keys
+    restart: unless-stopped
+```
+
+#### Local disk usage (`data/`)
+
+Moving PostgreSQL to an external host does **not** move the runtime `data/` directory off local
+disk. `data/` still stores spilled HTTP/TCP traffic blobs (`data/traffic/_blobs`), LLM
+transcripts, task working files, and local task archives, so heavy workloads can still fill the
+host disk if `data/` is on a small volume. Mount `data/` on a suitably sized volume, and consider
+setting `ARTEX_ARCHIVE_STORAGE=s3` (see [Task archive storage](docs/task-archive-storage.md)) to
+offload cold task archives to object storage.
+
 ### Reverse proxy deployment (HTTPS / exposing only 443)
 
 The frontend, API and SSE stream share port 8787 (the binary listens on `127.0.0.1:8787` by
@@ -491,7 +665,19 @@ default; the Docker container publishes on `127.0.0.1`), and the activity stream
 default, so **no `NEXT_PUBLIC_SSE_BASE` is needed**: expose 443 and keep 8787 internal.
 
 SSE keeps a long-lived connection with continuous pushes, so the proxy **must disable buffering**;
-otherwise the browser connects but never receives events. Nginx example:
+otherwise the browser connects but never receives events.
+
+Redirect plain HTTP first, so a bookmarked `http://` URL never reaches the app unencrypted:
+
+```nginx
+server {
+    listen 80;
+    server_name your.domain.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+Then the TLS server:
 
 ```nginx
 server {
@@ -537,6 +723,13 @@ For a peer in that list, ARTEX reads `X-Forwarded-For` from the right and takes 
 that is not a trusted proxy; from any other peer the header is ignored. Trust only proxies you run:
 a trusted peer can claim any client address.
 
+**Security headers**: every response carries `X-Content-Type-Options: nosniff`, a same-origin
+referrer policy and a `frame-ancestors 'self'` CSP; console documents additionally get a
+`Permissions-Policy` and COOP/CORP. `Strict-Transport-Security` is sent only when the request is
+known to be HTTPS: directly over TLS, or via `X-Forwarded-Proto: https` from a trusted proxy. The
+same list above enables it, so with nginx in front, the 443 server answers with HSTS after you set
+`ARTEX_TRUSTED_PROXIES`.
+
 > Only when SSE needs a different origin from the page (e.g. a dedicated subdomain) should you set
 > `NEXT_PUBLIC_SSE_BASE` **at build time** (it is baked into the static bundle during `next build`;
 > setting it at container runtime has no effect).
@@ -544,6 +737,25 @@ a trusted peer can claim any client address.
 ---
 
 ## Operations
+
+### Troubleshooting an empty tool call
+
+In the task's session transcript, expand the affected tool call and compare **Command** and
+**Output**. The `UNTRUSTED_OUTPUT` markers identify the boundary around tool output. They are
+expected and should stay enabled while troubleshooting.
+
+- **Command shows `{}`.** The recorded tool input is an empty JSON object. For a tool that
+  requires a command, this means its command argument was missing. Check which model and version
+  produced the call.
+- **Command shows `(empty)` or `(failed to load)`.** The transcript has no input detail to display
+  or could not fetch it. If the session record contains a command, include that discrepancy in a
+  report.
+- **Output shows `[]`.** This is the recorded result body. Check the row's success or failure
+  indicator and its input separately before drawing conclusions about what ran.
+
+For a recurring problem, share the ARTEX version or commit, the model and version, and a sanitized
+excerpt of the affected input and result. Remove credentials, target data, and other sensitive
+content before sharing.
 
 ### Backups
 
@@ -562,7 +774,8 @@ gunzip -c backups/artex-db-<timestamp>.sql.gz | docker compose exec -T postgres 
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
 
-Stored secrets (LLM API keys and proxies, MCP env, task credentials, notification channel config,
+Stored secrets (LLM API keys, proxies and gateway custom headers, MCP env, task credentials, notification channel config,
+the chat bot token,
 Brave/Tavily search keys, web search and global proxies, the execution spec of custom tools, the
 capture-proxy rewrite rules) are
 encrypted in the database with the key in `keys/secret.key` (generated at first start, mode 0600,
@@ -618,7 +831,7 @@ The script optionally `git pull`s, then offers **① Docker update** (`docker co
 `docker compose up -d artex`) or **② local build update** (rebuild the frontend static assets, then
 recompile `./artex`; restart the process for it to take effect).
 
-#### Option 2: Docker Compose (manual)
+#### Option 2: Docker (Compose or GHCR image)
 
 ```bash
 cd ARTEX
@@ -626,6 +839,15 @@ git pull
 docker compose build artex
 docker compose up -d artex
 docker image prune -f            # optional
+```
+
+If running the prebuilt `ghcr.io/baarai/artex` container directly, pull the new tag (`docker pull
+ghcr.io/baarai/artex:latest` or a pinned `:v<version>`) and recreate the container with the same
+`/app/data` and `/app/keys` mounts. If you run the prebuilt Compose stack, the update is:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 #### Option 3: prebuilt binaries
@@ -659,7 +881,8 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 - Backend: `go run ./cmd/artex` (without `-tags embedui`, the frontend is not embedded)
 - Frontend: `cd web && npm run dev` (`/api` is reverse-proxied to the backend, with hot reload)
 - Tests: `go test ./...`
-- Reproduce all CI checks locally: `./scripts/verify.sh` (add `--full` for `-race` and the static web build)
+- Reproduce the fast CI checks locally: `./scripts/verify.sh` (add `--full` for `-race` and the static web build; add `--security` for `govulncheck`)
+- Security scan: install `govulncheck` and run `./scripts/verify.sh --security` (CI runs this on every push and pull request)
 - Mock preview (no backend): `cd web && NEXT_PUBLIC_MOCK=1 npm run dev`
 
 ---
@@ -740,7 +963,8 @@ Please report vulnerabilities privately through GitHub Security Advisories; see
 
 Operational security properties:
 
-- **Secrets at rest**: LLM keys/proxies, MCP environment, task credentials, notification config,
+- **Secrets at rest**: LLM keys/proxies/gateway headers, MCP environment, task credentials, notification config,
+  the chat bot token,
   search keys, proxies, custom-tool execution specs, capture-proxy rewrite rules and traffic
   evidence snapshots are encrypted
   with AES-256-GCM using `keys/secret.key` (or `ARTEX_SECRET_KEY`). ARTEX refuses to start when
@@ -755,9 +979,9 @@ Operational security properties:
 
 ---
 
-## About this fork
+## About this project
 
-This repository is the English translation and continuation of ARTEX, originally by [Autumn-27](https://github.com/Autumn-27). The upstream repository is no longer public, so the link points to the author profile. Changes in this fork are tracked in [CHANGELOG.md](CHANGELOG.md), under the same AGPL-3.0 license.
+This repository is the actively maintained community continuation of ARTEX, originally by [Autumn-27](https://github.com/Autumn-27). It diverges from the original with its own features and fixes, tracked in [CHANGELOG.md](CHANGELOG.md), under the same AGPL-3.0 license. The original repository is no longer public, so the link points to the author profile.
 
 ---
 

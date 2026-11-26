@@ -100,7 +100,7 @@ func TestEvidenceRewriteFlagMigrationAndRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), "0008_") {
+		if e.IsDir() || e.Name() >= "0008_" {
 			continue
 		}
 		data, err := fs.ReadFile(migrationsFS(), e.Name())

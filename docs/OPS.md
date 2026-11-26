@@ -32,7 +32,7 @@ boundary and trusted proxies. No password or token value is ever logged there.
 | Setting | Resolution order | Code |
 | --- | --- | --- |
 | Config file | `ARTEX_CONFIG` → `./config.json` → `config.json` next to the binary | `config.Path` |
-| PostgreSQL DSN | `ARTEX_PG_DSN` → `database.dsn` → assembled `host/port/user/password/dbname` | `config.PostgresDSN` |
+| PostgreSQL DSN | `ARTEX_PG_DSN` → `ARTEX_PG_HOST` / `ARTEX_PG_PORT` / `ARTEX_PG_USER` / `ARTEX_PG_PASSWORD` / `ARTEX_PG_DBNAME` / `ARTEX_PG_SSLMODE` → `database.dsn` → assembled `host/port/user/password/dbname` | `config.PostgresDSN` |
 | Skill directory | `ARTEX_SKILL_DIR` → `skill_dir` → `<binary dir>/skills` | `config.SkillDir` |
 | JWT / secret key directory | `ARTEX_JWT_KEY_DIR` → `<binary dir>` (never the browsable data dir) | `config.KeyDir` |
 | Secret encryption key | `ARTEX_SECRET_KEY` → `<key dir>/secret.key` → newly generated key file | `db.InitSecrets` |

@@ -1,5 +1,5 @@
 // Package config loads runtime configuration from a JSON file, with environment
-// variables taking precedence. Currently it carries the PostgreSQL connection.
+// variables taking precedence where supported.
 package config
 
 import (
@@ -29,8 +29,9 @@ type Database struct {
 
 // Config is the on-disk config file shape.
 type Config struct {
-	Database Database `json:"database"`
-	SkillDir string   `json:"skill_dir"`
+	Database       Database       `json:"database"`
+	SkillDir       string         `json:"skill_dir"`
+	TaskUserAgents TaskUserAgents `json:"task_user_agents,omitempty"`
 }
 
 // BaseDir is the directory that anchors all runtime artifacts (config.json and
@@ -116,19 +117,25 @@ func Path() string {
 // callers fall back to defaults). A file that exists but cannot be read or parsed
 // is an error: ignoring it would run with defaults the operator did not choose.
 func Load() (Config, error) {
-	var c Config
 	path := Path()
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return c, nil
+		return Config{}, nil
 	}
 	if err != nil {
-		return c, fmt.Errorf("read config file %s: %w", path, err)
+		return Config{}, fmt.Errorf("read config file %s: %w", path, err)
 	}
-	if err := json.Unmarshal(b, &c); err != nil {
+	var disk struct {
+		Config
+		LegacyTaskUserAgents json.RawMessage `json:"assessment_identification"`
+	}
+	if err := json.Unmarshal(b, &disk); err != nil {
 		return Config{}, fmt.Errorf("parse config file %s: %w", path, err)
 	}
-	return c, nil
+	if disk.LegacyTaskUserAgents != nil {
+		return Config{}, fmt.Errorf("parse config file %s: assessment_identification was replaced by task_user_agents. Move each task entry to task_user_agents with its origins list", path)
+	}
+	return disk.Config, nil
 }
 
 // SkillDir returns the skill root directory with precedence:
@@ -157,7 +164,15 @@ func SkillDir() (string, error) {
 
 // PostgresDSN resolves the connection string with precedence:
 //
-//	env ARTEX_PG_DSN  >  config file (database.dsn, or assembled from fields)
+//	env ARTEX_PG_DSN
+//	  >  env ARTEX_PG_HOST / ARTEX_PG_PORT / ARTEX_PG_USER / ARTEX_PG_PASSWORD /
+//	     ARTEX_PG_DBNAME / ARTEX_PG_SSLMODE
+//	  >  config file (database.dsn, or assembled from fields)
+//
+// The component variables are how Docker Compose passes a password that contains
+// URL-special characters: the password stays a raw environment value, and
+// buildDSN percent-encodes it. An explicit ARTEX_PG_DSN is returned unchanged,
+// so a value that was already assembled by something else is not rewritten.
 //
 // There is NO built-in fallback: when neither source supplies a database config,
 // it returns an error naming the config path it inspected, so startup fails loudly
@@ -166,6 +181,9 @@ func SkillDir() (string, error) {
 func PostgresDSN() (dsn, source string, err error) {
 	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
 		return v, "environment variable ARTEX_PG_DSN", nil
+	}
+	if d, ok, err := postgresDSNFromEnv(); ok || err != nil {
+		return d, "environment variables ARTEX_PG_HOST/USER/PASSWORD/DBNAME", err
 	}
 	c, err := Load()
 	if err != nil {
@@ -178,7 +196,33 @@ func PostgresDSN() (dsn, source string, err error) {
 	if db.Host != "" || db.DBName != "" || db.User != "" {
 		return db.buildDSN(), "config file " + Path() + " (database fields)", nil
 	}
-	return "", "", fmt.Errorf("no database config found: the environment variable ARTEX_PG_DSN is not set, and config file %s provides no database (dsn or host/user/dbname). Create the config file or set the environment variable and retry", Path())
+	return "", "", fmt.Errorf("no database config found: ARTEX_PG_DSN is not set, ARTEX_PG_HOST/USER/PASSWORD/DBNAME are not set, and config file %s provides no database (dsn or host/user/dbname). Create the config file or set the environment variable and retry", Path())
+}
+
+// postgresDSNFromEnv assembles a URL from the component environment variables.
+// ok is false when none of them is set. The password is not trimmed: a space is
+// a legal character and is the case docker-compose used to break.
+func postgresDSNFromEnv() (dsn string, ok bool, err error) {
+	host := strings.TrimSpace(os.Getenv("ARTEX_PG_HOST"))
+	user := strings.TrimSpace(os.Getenv("ARTEX_PG_USER"))
+	password := os.Getenv("ARTEX_PG_PASSWORD")
+	dbname := strings.TrimSpace(os.Getenv("ARTEX_PG_DBNAME"))
+	portStr := strings.TrimSpace(os.Getenv("ARTEX_PG_PORT"))
+	ssl := strings.TrimSpace(os.Getenv("ARTEX_PG_SSLMODE"))
+	if host == "" && user == "" && password == "" && dbname == "" && portStr == "" && ssl == "" {
+		return "", false, nil
+	}
+	port := 0
+	if portStr != "" {
+		n, convErr := strconv.Atoi(portStr)
+		if convErr != nil || n <= 0 || n > 65535 {
+			return "", true, fmt.Errorf("ARTEX_PG_PORT %q is not a TCP port", portStr)
+		}
+		port = n
+	}
+	return Database{
+		Host: host, Port: port, User: user, Password: password, DBName: dbname, SSLMode: ssl,
+	}.buildDSN(), true, nil
 }
 
 func (d Database) buildDSN() string {
@@ -216,8 +260,8 @@ var libpqPassword = regexp.MustCompile(`(?i)\b(password)\s*=\s*(?:'[^']*'|"[^"]*
 
 // Redact is a log-safe view of a PostgreSQL DSN. It masks URL userinfo
 // passwords, `?password=` query values, and libpq `password=` keywords.
-// Unrecognised input still runs the keyword mask so a parse failure cannot
-// print the secret.
+// Unrecognised input still runs the userinfo and keyword masks so a parse
+// failure cannot print the secret.
 func Redact(dsn string) string {
 	if dsn == "" {
 		return dsn
@@ -234,6 +278,15 @@ func Redact(dsn string) string {
 			u.RawQuery = q.Encode()
 		}
 		return u.String()
+	}
+	// A URL whose password has an unencoded # / ? or % does not parse; its
+	// password still runs from the first : after the scheme to the last @.
+	if i := strings.Index(dsn, "://"); i >= 0 {
+		if at := strings.LastIndex(dsn, "@"); at > i {
+			if c := strings.Index(dsn[i+3:at], ":"); c >= 0 {
+				dsn = dsn[:i+3+c+1] + "****" + dsn[at:]
+			}
+		}
 	}
 	return libpqPassword.ReplaceAllString(dsn, `${1}=****`)
 }

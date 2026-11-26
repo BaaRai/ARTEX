@@ -534,7 +534,7 @@ func TestSetFindingStatusWithNotifyOnlyEmitsOnRealChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.DeleteTask(tk.ID)
+	t.Cleanup(func() { _ = d.DeleteTask(tk.ID) })
 	es := d.Exploration(tk.ExplorationID)
 	f, err := es.RecordFinding(ctx, RecordFindingInput{
 		TaskID: tk.ID, Worker: "test", VulnClass: "SQL injection", Name: "status change case",
@@ -543,7 +543,10 @@ func TestSetFindingStatusWithNotifyOnlyEmitsOnRealChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { d.Exec(`DELETE FROM notification_events WHERE finding_id=$1`, f.FindingID) })
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM notification_events WHERE finding_id=$1`, f.FindingID)
+		_, _ = d.DeleteFinding(f.FindingID)
+	})
 
 	// Writing the finding already registered one finding_created event; count it as the baseline.
 	var base int
@@ -617,7 +620,7 @@ func TestSetFindingStatusesWithNotify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.DeleteTask(tk.ID)
+	t.Cleanup(func() { _ = d.DeleteTask(tk.ID) })
 	es := d.Exploration(tk.ExplorationID)
 	record := func(name string) int64 {
 		fi, err := es.RecordFinding(ctx, RecordFindingInput{
@@ -627,7 +630,10 @@ func TestSetFindingStatusesWithNotify(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { d.Exec(`DELETE FROM notification_events WHERE finding_id=$1`, fi.FindingID) })
+		t.Cleanup(func() {
+			_, _ = d.Exec(`DELETE FROM notification_events WHERE finding_id=$1`, fi.FindingID)
+			_, _ = d.DeleteFinding(fi.FindingID)
+		})
 		return fi.FindingID
 	}
 	first, second := record("bulk one"), record("bulk two")
@@ -891,7 +897,7 @@ func TestFinishFindingRetestEmitsStatusChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.DeleteTask(tk.ID)
+	t.Cleanup(func() { _ = d.DeleteTask(tk.ID) })
 	es := d.Exploration(tk.ExplorationID)
 	f, err := es.RecordFinding(ctx, RecordFindingInput{
 		TaskID: tk.ID, Worker: "test", VulnClass: "SQL injection", Name: "retest target",
@@ -900,7 +906,10 @@ func TestFinishFindingRetestEmitsStatusChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { d.Exec(`DELETE FROM notification_events WHERE finding_id=$1`, f.FindingID) })
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM notification_events WHERE finding_id=$1`, f.FindingID)
+		_, _ = d.DeleteFinding(f.FindingID)
+	})
 
 	// Create a retest record and drive it straight to completion.
 	rt, _, _, err := d.CreateFindingRetest(ctx, f.FindingID, "review")
@@ -910,6 +919,8 @@ func TestFinishFindingRetestEmitsStatusChange(t *testing.T) {
 	if rt.ConversationID == nil {
 		t.Fatal("a retest should be associated with a session")
 	}
+	retestConvID := *rt.ConversationID
+	t.Cleanup(func() { _ = d.DeleteConversation(retestConvID) })
 	// A retest must enter running before a verdict can land (consistent with the real flow).
 	if ok, err := d.StartFindingRetest(ctx, rt.ID); err != nil || !ok {
 		t.Fatalf("failed to start retest: ok=%v err=%v", ok, err)

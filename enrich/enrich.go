@@ -11,7 +11,7 @@ import (
 	"crypto/tls"
 	"html"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -75,7 +75,7 @@ func New(as *db.AssetStore, proxy func() string, workers int) *Engine {
 		Timeout:       4 * time.Second,
 	})
 	if err != nil {
-		log.Printf("[enrich] dnsx init failed, DNS resolution disabled: %v", err)
+		slog.Warn("[enrich] dnsx init failed, DNS resolution disabled", "err", err)
 		resolv = nil
 	}
 	e := &Engine{
@@ -146,7 +146,7 @@ func (e *Engine) enqueue(j job) {
 	select {
 	case e.jobs <- j:
 	default: // queue full → drop (best-effort enrichment)
-		log.Printf("[enrich] queue full, dropping job kind=%d id=%d", j.kind, j.id)
+		slog.Warn("[enrich] enrich queue full, dropping job", "kind", j.kind, "id", j.id)
 	}
 }
 
@@ -248,6 +248,7 @@ func (e *Engine) doHTTP(ctx context.Context, id int64, rawURL string) {
 	if err != nil {
 		return
 	}
+	intercept.ApplyAssessmentUserAgent(req)
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return
@@ -279,20 +280,6 @@ func hostOf(rawURL string) string {
 		return ""
 	}
 	return u.Hostname()
-}
-
-func isBlank(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return true
-	case string:
-		return x == ""
-	case float64:
-		return x == 0
-	case int:
-		return x == 0
-	}
-	return false
 }
 
 func uniq(in []string) []string {

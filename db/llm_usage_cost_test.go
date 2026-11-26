@@ -44,7 +44,7 @@ func TestCostSeparatesFreshReadAndWriteBuckets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { d.Close() })
 	priced, unpriced := costProfiles(t, d)
 	// Every case adds 100k output tokens: 0.1 × 4.00 = 0.40.
 	for _, tc := range []struct {
@@ -82,7 +82,7 @@ func TestUsageByProfileCostAggregatesRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { d.Close() })
 	priced, unpriced := costProfiles(t, d)
 	t.Cleanup(func() { d.Exec(`DELETE FROM llm_usage WHERE profile_name IN ($1,$2)`, priced, unpriced) })
 	rows := []LLMUsage{

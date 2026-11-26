@@ -442,6 +442,51 @@ func TestQueryHostPortAndURLForms(t *testing.T) {
 	}
 }
 
+// TestQueryHostDefaultPort covers captures of default-port targets: clients
+// leave :80 and :443 out of the Host header, so the recorded URL carries no
+// port, and a search naming that port must still find them.
+func TestQueryHostDefaultPort(t *testing.T) {
+	tr, _ := openTraffic(t)
+	tls := newFlow("x", "GET", "/", nil, []byte("tls"))
+	tls.Request.URL, _ = url.Parse("https://shop.example.com/login")
+	tr.record(tls)
+	tr.record(newFlow("shop.example.com", "GET", "/plain", nil, []byte("plain")))
+	tr.record(newFlow("shop.example.com:8443", "GET", "/alt", nil, []byte("alt")))
+	v6 := newFlow("x", "GET", "/", nil, []byte("v6"))
+	v6.Request.URL, _ = url.Parse("https://[2001:db8::1]/admin")
+	tr.record(v6)
+	ws := newFlow("x", "GET", "/", nil, nil)
+	ws.Request.URL, _ = url.Parse("https://chat.example.com/socket")
+	if _, err := tr.recordStreamStart(flowRequestView(ws.Request), responseView{}, "websocket", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		host string
+		want string
+	}{
+		{host: "shop.example.com:443", want: "https://shop.example.com/login"},
+		{host: "https://shop.example.com:443/login", want: "https://shop.example.com/login"},
+		{host: "shop.example.com:80", want: "http://shop.example.com/plain"},
+		{host: "http://shop.example.com:80/", want: "http://shop.example.com/plain"},
+		{host: "shop.example.com:8443", want: "http://shop.example.com:8443/alt"},
+		{host: "[2001:db8::1]:443", want: "https://[2001:db8::1]/admin"},
+		{host: "chat.example.com:443", want: "wss://chat.example.com/socket"},
+	} {
+		rows, err := tr.query(tc.host, "", "", 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || rows[0].URL != tc.want {
+			var got []string
+			for _, r := range rows {
+				got = append(got, r.URL)
+			}
+			t.Errorf("query(%q) = %v, want [%s]", tc.host, got, tc.want)
+		}
+	}
+}
+
 func TestNormalizeSearchHost(t *testing.T) {
 	for _, tc := range []struct {
 		raw, host, port string
@@ -614,5 +659,30 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, ts, host, "GET", "/p/"+id, "https://"+host+"
 	}
 	if !found["rw-a-200"] || found["orig-a-200"] || found["skip-a-404"] {
 		t.Fatalf("Search rewritten flags = %v", found)
+	}
+}
+
+// TestPageHostsAllowlist pins the company-scope filter: an exact host allowlist
+// keeps only those hosts (the substring Host filter stays independent), and
+// MatchNone forces an empty result for a company that owns no host.
+func TestPageHostsAllowlist(t *testing.T) {
+	tr, _ := openTraffic(t)
+	tr.record(newFlow("api.example.com", "GET", "/a", nil, []byte("a")))
+	tr.record(newFlow("api.other.example", "GET", "/b", nil, []byte("b")))
+	tr.record(newFlow("shop.example.com", "GET", "/c", nil, []byte("c")))
+
+	rows, total, err := tr.Page(PageQuery{Hosts: []string{"api.example.com", "shop.example.com"}, RespMin: -1, RespMax: -1}, 0, 100)
+	if err != nil || total != 2 || len(rows) != 2 {
+		t.Fatalf("allowlist should keep 2 rows, got total=%d rows=%d err=%v", total, len(rows), err)
+	}
+	// Exact match: api.other.example is not api.example.com.
+	if rows, _, err := tr.Page(PageQuery{Hosts: []string{"api.example.com"}, RespMin: -1, RespMax: -1}, 0, 100); err != nil || len(rows) != 1 {
+		t.Fatalf("exact allowlist should keep 1 row, got %d err=%v", len(rows), err)
+	}
+	if _, total, err := tr.Page(PageQuery{MatchNone: true, RespMin: -1, RespMax: -1}, 0, 100); err != nil || total != 0 {
+		t.Fatalf("MatchNone should match nothing, got total=%d err=%v", total, err)
+	}
+	if _, total, err := tr.Page(PageQuery{RespMin: -1, RespMax: -1}, 0, 100); err != nil || total != 3 {
+		t.Fatalf("no filter should return all 3, got %d err=%v", total, err)
 	}
 }

@@ -370,7 +370,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS llm_profiles (
     id               BIGSERIAL PRIMARY KEY,
     name             TEXT NOT NULL UNIQUE,
-    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses','ollama')),
+    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses','ollama','bedrock-gateway')),
     base_url         TEXT,
     proxy            TEXT,
     model            TEXT NOT NULL,
@@ -405,6 +405,7 @@ CREATE TABLE IF NOT EXISTS llm_profiles (
     session_header_key TEXT NOT NULL DEFAULT '',
     -- Custom User-Agent: when non-empty, every outbound LLM request overrides the User-Agent header with this value. ''=do not override (keep the default UA).
     user_agent       TEXT NOT NULL DEFAULT '',
+    custom_headers   TEXT NOT NULL DEFAULT '',
     -- Retry overrides: attempts 0=use global default / -1=disable / >0=use this value; interval 0=use default exponential backoff / >0=fixed milliseconds.
     -- The three groups correspond to connect retry, empty-response retry, and same-provider safe-window retry; see the ALTER comment below.
     retry_connect_attempts    INTEGER NOT NULL DEFAULT 0,
@@ -427,10 +428,10 @@ ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS pool_exclude BOOLEAN NOT NULL 
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS streaming    BOOLEAN NOT NULL DEFAULT true;
 -- Relax the format constraint to allow openai-responses (OpenAI Responses API) and
 -- ollama (local Ollama server, keyless OpenAI-compatible endpoint); backfills old databases.
--- Runs at every startup, idempotent: drop the old CHECK first, then create the new four-value CHECK.
+-- Runs at every startup, idempotent: drop the old CHECK first, then create the current format CHECK.
 ALTER TABLE llm_profiles DROP CONSTRAINT IF EXISTS llm_profiles_format_check;
 ALTER TABLE llm_profiles ADD  CONSTRAINT llm_profiles_format_check
-    CHECK (format IN ('openai','anthropic','openai-responses','ollama'));
+    CHECK (format IN ('openai','anthropic','openai-responses','ollama','bedrock-gateway'));
 
 -- Output cap and its field name; backfills old databases. Defaults 0 / '' = send no cap and keep the max_tokens field name;
 -- old configs behave exactly as before.
@@ -447,6 +448,7 @@ ALTER TABLE llm_profiles ADD  CONSTRAINT llm_profiles_max_tokens_check
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS session_header_key TEXT NOT NULL DEFAULT '';
 -- Custom User-Agent; backfills old databases. Default '' = do not override (keep the default UA); old configs behave unchanged.
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT '';
+ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS custom_headers TEXT NOT NULL DEFAULT '';
 
 -- Per-profile retry overrides (see the LLM retry design doc). Each of the three groups is a pair of
 -- "attempts + fixed interval" with unified semantics: attempts 0=use the global default, -1=disable this layer's
@@ -771,8 +773,10 @@ CREATE TABLE IF NOT EXISTS task_scope (
     value       TEXT,          -- icp / keyword
     source      TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto','agent','manual')),
     reason      TEXT,
+    expanded    BOOLEAN NOT NULL DEFAULT FALSE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE task_scope ADD COLUMN IF NOT EXISTS expanded BOOLEAN NOT NULL DEFAULT FALSE;
 -- Old database upgrade: expand task scope to match the company scope's single-textbox recognition capability.
 ALTER TABLE task_scope ADD COLUMN IF NOT EXISTS value TEXT;
 ALTER TABLE task_scope DROP CONSTRAINT IF EXISTS task_scope_kind_check;
@@ -1558,15 +1562,21 @@ CREATE TABLE IF NOT EXISTS rsi_lessons (
 CREATE INDEX IF NOT EXISTS idx_rsi_lessons_scope ON rsi_lessons(company_id, category_id, status);
 CREATE INDEX IF NOT EXISTS idx_rsi_lessons_kind  ON rsi_lessons(kind, updated_at DESC);
 
--- One row per (lesson, source). The primary key makes extraction idempotent:
--- a second run for the same task adds nothing and cannot inflate support.
+-- Live evidence is unique per (lesson, source) via uq_rsi_lesson_evidence_live,
+-- making repeated extraction idempotent without inflating support. Withdrawn
+-- rows keep withdrawn_at set for history; re-confirming inserts a new live row.
 CREATE TABLE IF NOT EXISTS rsi_lesson_evidence (
-    lesson_id   BIGINT NOT NULL REFERENCES rsi_lessons(id) ON DELETE CASCADE,
-    source_kind TEXT NOT NULL,
-    source_id   BIGINT NOT NULL,
-    detail      TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (lesson_id, source_kind, source_id)
+    id           BIGSERIAL PRIMARY KEY,
+    lesson_id    BIGINT NOT NULL REFERENCES rsi_lessons(id) ON DELETE CASCADE,
+    source_kind  TEXT NOT NULL,
+    source_id    BIGINT NOT NULL,
+    detail       TEXT NOT NULL DEFAULT '',
+    withdrawn_at TIMESTAMPTZ
 );
+ALTER TABLE rsi_lesson_evidence ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_rsi_lesson_evidence_live
+    ON rsi_lesson_evidence(lesson_id, source_kind, source_id)
+    WHERE withdrawn_at IS NULL;
 
 -- What was shown to which task, and in which mode (shadow = logged but not
 -- injected; inject = appended to the planner/worker system prompt).

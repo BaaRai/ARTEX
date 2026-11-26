@@ -31,13 +31,10 @@ var scanReaders = map[string]func(io.Reader, *scanIngest) error{
 	"ffuf-json": readFfufJSON,
 }
 
-// openScanOutput opens path, resolved under the run's working directory root.
-// A path with a ".." element, or one that resolves outside root (a symlink
-// included), is refused, as is anything but a regular file under the size cap.
-func openScanOutput(root, path string) (*os.File, error) {
-	if strings.TrimSpace(root) == "" {
-		return nil, errors.New("no working directory for this run: the output file cannot be located")
-	}
+// openScanOutputFromWorkRoot opens rel under w with the same confinement as
+// openBbotOutput: refuses any symlink component (even internal), non-regular
+// files, hard-linked files (checkOpened after open), and files over scanMaxFileBytes.
+func openScanOutputFromWorkRoot(w *workRoot, path string) (*os.File, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("path is required")
 	}
@@ -46,23 +43,40 @@ func openScanOutput(root, path string) (*os.File, error) {
 			return nil, errors.New("path must not contain ..")
 		}
 	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
-	}
-	realRoot, err := filepath.EvalSymlinks(root)
+	rel, err := w.rel(path)
 	if err != nil {
-		return nil, fmt.Errorf("working directory: %w", err)
+		return nil, fmt.Errorf("%s is %w %s", path, err, w.dir)
 	}
-	real, err := filepath.EvalSymlinks(path)
+	if rel == "." {
+		return nil, errNotRegular
+	}
+	// Refuse any symlink along the path (including internal symlinks).
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	cur := ""
+	for i, part := range parts {
+		if i == 0 {
+			cur = part
+		} else {
+			cur = filepath.Join(cur, part)
+		}
+		fi, err := w.Lstat(cur)
+		if err != nil {
+			return nil, err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return nil, errors.New("symlinks are not allowed")
+		}
+		if i == len(parts)-1 && !fi.Mode().IsRegular() {
+			return nil, errNotRegular
+		}
+	}
+	f, err := w.Open(rel)
 	if err != nil {
-		return nil, errors.New("path not found under the working directory")
+		return nil, err
 	}
-	if rel, err := filepath.Rel(realRoot, real); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil, errors.New("path resolves outside the working directory " + root)
-	}
-	f, err := os.Open(real)
-	if err != nil {
-		return nil, errors.New("path cannot be opened")
+	if err := checkOpened(f); err != nil {
+		f.Close()
+		return nil, err
 	}
 	st, err := f.Stat()
 	switch {
@@ -76,6 +90,50 @@ func openScanOutput(root, path string) (*os.File, error) {
 		return nil, err
 	}
 	return f, nil
+}
+
+// openScanOutput opens path confined inside root using os.Root, refusing every
+// symlink (external or internal), "..", non-regular files, hard-linked files,
+// and files exceeding scanMaxFileBytes (aligned with openBbotOutput).
+func openScanOutput(root, path string) (*os.File, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, errors.New("no working directory for this run: the output file cannot be located")
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("working directory: %w", err)
+	}
+	realRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return nil, fmt.Errorf("working directory: %w", err)
+	}
+	r, err := os.OpenRoot(realRoot)
+	if err != nil {
+		return nil, fmt.Errorf("working directory: %w", err)
+	}
+	defer r.Close()
+	return openScanOutputFromWorkRoot(&workRoot{Root: r, dir: absRoot}, path)
+}
+
+func openScanOutputInBase(base, dir, path string) (f *os.File, err error) {
+	if strings.TrimSpace(base) == "" {
+		return openScanOutput(dir, path)
+	}
+	// The open runs as the executor when the privilege drop is active
+	// (filetools_identity.go); the descriptor is then read by the server.
+	idErr := RunAsFileToolIdentity(func() {
+		w, oerr := openWorkRoot(base, dir)
+		if oerr != nil {
+			err = oerr
+			return
+		}
+		defer w.Close()
+		f, err = openScanOutputFromWorkRoot(w, path)
+	})
+	if idErr != nil {
+		return nil, idErr
+	}
+	return f, err
 }
 
 // ingestScanOutput parses a scanner output file written by the agent's own
@@ -125,7 +183,7 @@ func (t *ToolSet) runScanIngest(ctx context.Context, in json.RawMessage, tc *act
 	if tc != nil {
 		root = tc.WorkingDir
 	}
-	f, err := openScanOutput(root, a.Path)
+	f, err := openScanOutputInBase(t.workBase, root, a.Path)
 	if err != nil {
 		return actool.Errorf(err.Error()), nil
 	}
@@ -174,10 +232,13 @@ func (t *ToolSet) runScanIngest(ctx context.Context, in json.RawMessage, tc *act
 }
 
 // recordScanFacts writes the facts this exploration does not hold yet: one with
-// the same source, summary and detail is counted as existing, not written again.
+// the same summary and detail is counted as existing, not written again. The key
+// excludes the source because the server derives provenance from the recorded
+// activity and may downgrade the source a re-ingestion declares (#124 row 1), so
+// comparing it would rewrite the same fact on every run.
 func (t *ToolSet) recordScanFacts(facts []factItem) (written, existing int, errs []string, err error) {
 	seen := map[string]bool{}
-	key := func(source, summary, detail string) string { return source + "\x00" + summary + "\x00" + detail }
+	key := func(summary, detail string) string { return summary + "\x00" + detail }
 	for before, more := int64(0), true; more; {
 		var nodes []*db.Node
 		if nodes, more, err = t.ts.ListByKindPage(db.KindFact, before, 500); err != nil {
@@ -190,13 +251,13 @@ func (t *ToolSet) recordScanFacts(facts []factItem) (written, existing int, errs
 				Source  string `json:"source"`
 			}
 			if json.Unmarshal(n.Payload, &p) == nil {
-				seen[key(p.Source, p.Summary, p.Detail)] = true
+				seen[key(p.Summary, p.Detail)] = true
 			}
 			before = n.ID
 		}
 	}
 	for _, f := range facts {
-		k := key(f.Source, f.Summary, f.Detail)
+		k := key(f.Summary, f.Detail)
 		if seen[k] {
 			existing++
 			continue

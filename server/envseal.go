@@ -13,8 +13,9 @@ import (
 
 // Sealing the server environment. ScrubSecretEnv removes the secrets from the Go
 // environment, but the kernel keeps the environment block the process was executed
-// with: /proc/<pid>/environ still shows ARTEX_PG_DSN, ARTEX_SECRET_KEY and the API
-// keys to any process that can read it. SealProcessEnv re-executes the server once,
+// with: /proc/<pid>/environ still shows ARTEX_PG_DSN, ARTEX_PG_PASSWORD,
+// ARTEX_SECRET_KEY and the API keys to any process that can read it.
+// SealProcessEnv re-executes the server once,
 // with those variables left out of the block; the values travel to the new image
 // through an inherited pipe and are put back into the Go environment there, so the
 // readers that run next see the same configuration.

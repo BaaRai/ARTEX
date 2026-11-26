@@ -70,7 +70,10 @@ export default function SetupPage() {
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="ARTEX" width={160} height={160} className="relative brightness-0 invert" />
+          <picture className="contents">
+            <source srcSet="/logo.webp" type="image/webp" />
+            <img src="/logo.png" alt="ARTEX" width={160} height={160} className="relative brightness-0 invert" />
+          </picture>
         </div>
       </div>
 
@@ -139,6 +142,9 @@ export default function SetupPage() {
               >
                 {loading ? t("Saving...") : t("Set password and sign in")}
               </Button>
+              <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                {t("Traffic capture is off by default. Enable it in System settings after setup if you need provable HTTP findings — captured traffic is required for findings to prove goals.")}
+              </p>
             </form>
           )}
         </div>

@@ -61,8 +61,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { parseCompanyScopeText } from "@/lib/company-scope";
 import { httpHref } from "@/lib/http-href";
+import { httpStatusTone } from "@/lib/status";
 import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useActiveCompanyID } from "@/stores/company/company-store";
 import { t } from "@/i18n";
 
 const METHOD_COLOR: Record<string, string> = {
@@ -89,14 +91,6 @@ function MethodBadge({ method }: { method: string }) {
   );
 }
 
-function statusTone(code: number) {
-  if (code >= 500) return "text-red-500";
-  if (code >= 400) return "text-amber-500";
-  if (code >= 300) return "text-blue-500";
-  if (code >= 200) return "text-emerald-500";
-  return "text-muted-foreground";
-}
-
 const PAGE_SIZES = [25, 50, 100, 200];
 
 const TABS: { key: string; label: string; icon: LucideIcon }[] = [
@@ -110,6 +104,8 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
 ];
 
 export default function AssetsPage() {
+  // The sidebar's company switcher narrows the data tabs to that company.
+  const companyId = useActiveCompanyID();
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
   const [companies, setCompanies] = React.useState<Company[]>([]);
@@ -242,7 +238,7 @@ export default function AssetsPage() {
   }, [tab]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these controls intentionally reset server pagination.
-  React.useEffect(() => setPage(0), [tab, size, query]);
+  React.useEffect(() => setPage(0), [tab, size, query, companyId]);
 
   const dslMode = query.trim() !== "";
 
@@ -256,7 +252,9 @@ export default function AssetsPage() {
     const offset = page * size;
     const run = async () => {
       try {
-        const r = dsl ? await api.searchAssets(dsl, tab, size, offset) : await api.assets(tab, size, offset);
+        const r = dsl
+          ? await api.searchAssets(dsl, tab, size, offset, companyId)
+          : await api.assets(tab, size, offset, companyId);
         if (assetsRequestRef.current !== request) return;
         setRows(r.assets);
         setRowsTab(tab);
@@ -280,7 +278,7 @@ export default function AssetsPage() {
       clearTimeout(tid);
       if (assetsRequestRef.current === request) assetsRequestRef.current++;
     };
-  }, [tab, page, size, query, refreshKey]);
+  }, [tab, page, size, query, refreshKey, companyId]);
 
   React.useEffect(() => {
     if (tab === "company") return;
@@ -641,7 +639,9 @@ export default function AssetsPage() {
                   <TableCell className="font-mono text-xs tabular-nums">{a.port || "—"}</TableCell>
                   <TableCell>
                     {a.status_code != null ? (
-                      <span className={cn("font-mono text-xs font-semibold tabular-nums", statusTone(a.status_code))}>
+                      <span
+                        className={cn("font-mono text-xs font-semibold tabular-nums", httpStatusTone(a.status_code))}
+                      >
                         {a.status_code}
                       </span>
                     ) : (
@@ -776,7 +776,9 @@ export default function AssetsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("Delete company · {name}", { name: companyDeleteTarget?.name ?? "" })}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("Delete company · {name}", { name: companyDeleteTarget?.name ?? "" })}
+            </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
                 <p>

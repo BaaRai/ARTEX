@@ -51,15 +51,31 @@ func TestSealedEnvironmentHandoff(t *testing.T) {
 	}
 	want := map[string]string{
 		"ARTEX_PG_DSN":      "postgres://artex:p@ss@db.internal/artex?sslmode=disable\nsecond line\twith tab",
+		"ARTEX_PG_PASSWORD": "p/ss w@rd?#%",
 		"ARTEX_SECRET_KEY":  "",
 		"ANTHROPIC_API_KEY": "sk-ant-test",
 		"OPENAI_API_KEY":    "=leading-equals",
+		// The Bedrock gateway reads a bearer token and supports multiline headers.
+		"ARTEX_LLM_API_KEY":        "synthetic-gateway-token",
+		"ARTEX_LLM_CUSTOM_HEADERS": "X-Example-Secret: synthetic-header-value\nX-Example-Route: demo",
 		// Proxy and endpoint URLs can carry credentials in their userinfo.
 		"ARTEX_LLM_PROXY":                    "http://proxyuser:proxypass@proxy.internal:3128",
 		"ARTEX_LLM_BASE_URL":                 "https://apiuser:apipass@llm.internal/v1",
 		"ARTEX_ARCHIVE_S3_ACCESS_KEY_ID":     "AKIATESTONLY",
 		"ARTEX_ARCHIVE_S3_SECRET_ACCESS_KEY": "s3-secret-test",
 		"ARTEX_ARCHIVE_S3_SESSION_TOKEN":     "",
+		// Ambient AWS credentials the archive store reads when it has no override.
+		"AWS_ACCESS_KEY_ID":                      "AKIAAMBIENTTEST",
+		"AWS_ACCESS_KEY":                         "AKIAALTERNATETEST",
+		"AWS_SECRET_ACCESS_KEY":                  "ambient-secret-test",
+		"AWS_SECRET_KEY":                         "alternate-secret-test",
+		"AWS_SESSION_TOKEN":                      "",
+		"AWS_CONTAINER_CREDENTIALS_FULL_URI":     "http://127.0.0.1:8080/credentials?id=1",
+		"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "/v2/credentials/test",
+		"AWS_CONTAINER_AUTHORIZATION_TOKEN":      "container-token-test",
+		"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": "/var/run/secrets/token-file",
+		"AWS_WEB_IDENTITY_TOKEN_FILE":            "/var/run/secrets/token",
+		"AWS_ROLE_ARN":                           "arn:aws:iam::123456789012:role/test",
 	}
 	env := os.Environ()
 	for k, v := range want {

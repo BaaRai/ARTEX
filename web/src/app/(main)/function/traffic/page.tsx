@@ -46,42 +46,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { formatBytes, formatShortDateTime } from "@/lib/format";
 import { setVisibleInterval } from "@/lib/polling";
 import { useStoredSortPreference } from "@/lib/sort-preference";
+import { httpStatusTone } from "@/lib/status";
 import type { TrafficDetail, TrafficExchange, TrafficHARImportResult, TrafficHost, TrafficResp } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { intlLocale, t } from "@/i18n";
+import { useActiveCompanyID } from "@/stores/company/company-store";
+import { t } from "@/i18n";
 
 import { ReplayPanel } from "./_components/replay-panel";
 import { StreamMessagesPanel } from "./_components/stream-messages";
+import { TamperHooksPanel } from "./_components/tamper-hooks-panel";
 
-function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString(intlLocale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function fmtBytes(n: number) {
-  if (n <= 0) return "0 B";
-  // GB matters for the reclaimed-space figure a full purge reports; a capture-heavy
-  // instance can hand back several.
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
-  const v = n / 1024 ** i;
-  return `${i === 0 ? v : v.toFixed(1)} ${units[i]}`;
-}
-
-function statusTone(status: number) {
-  if (status >= 500) return "text-red-500";
-  if (status >= 400) return "text-amber-500";
-  if (status >= 300) return "text-blue-500";
-  if (status >= 200) return "text-emerald-500";
-  return "text-muted-foreground";
-}
 
 function MethodBadge({ method }: { method: string }) {
   return <Badge className="shrink-0 font-mono">{method}</Badge>;
@@ -121,6 +98,9 @@ const SORT_STORAGE_KEY = "traffic-sort";
 const STATUS_BUCKETS = ["2xx", "3xx", "4xx", "5xx"];
 
 export default function TrafficPage() {
+  const [viewTab, setViewTab] = React.useState<"exchanges" | "hooks">("exchanges");
+  // The sidebar's company switcher narrows the list to that company's hosts.
+  const companyId = useActiveCompanyID();
   const [selectedFlows, setSelectedFlows] = React.useState<Set<string>>(() => new Set());
   const [linking, setLinking] = React.useState(false);
   const [page, setPage] = React.useState(0);
@@ -215,7 +195,7 @@ export default function TrafficPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: these values intentionally trigger a page reset.
   React.useEffect(() => {
     setPage(0);
-  }, [hostQ, queryQ, method, size, bodyQ, pathQ, statusFilter, rewrittenFilter, respMinQ, respMaxQ, sort]);
+  }, [hostQ, queryQ, method, size, bodyQ, pathQ, statusFilter, rewrittenFilter, respMinQ, respMaxQ, sort, companyId]);
 
   // Load the current page. Auto-refresh only on page 0 (newest) so paging back
   // through history isn't yanked out from under the user.
@@ -233,6 +213,7 @@ export default function TrafficPage() {
           respMax: respMaxQ,
           sort: sort.field,
           order: sort.direction,
+          company: companyId,
         })
         .then((r) => {
           if (alive) setTraffic(r);
@@ -272,6 +253,7 @@ export default function TrafficPage() {
     respMaxQ,
     sort,
     reloadTick,
+    companyId,
   ]);
 
   // Delete traffic for the current host filter (substring) or the checked
@@ -325,7 +307,7 @@ export default function TrafficPage() {
             reclaimed > 0
               ? t("Purged {count} traffic records, freeing {size} of storage", {
                   count: r.deleted,
-                  size: fmtBytes(reclaimed),
+                  size: formatBytes(reclaimed),
                 })
               : t("Purged {count} traffic records", { count: r.deleted }),
           );
@@ -506,6 +488,22 @@ export default function TrafficPage() {
           </Button>
         </div>
       </div>
+
+      <Tabs
+        value={viewTab}
+        onValueChange={(v) => setViewTab(v as "exchanges" | "hooks")}
+        className="flex min-h-0 flex-1 flex-col gap-4"
+      >
+        <TabsList className="w-fit">
+          <TabsTrigger value="exchanges">{t("Exchanges")}</TabsTrigger>
+          <TabsTrigger value="hooks">{t("Hooks")}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="hooks" className="mt-0 flex min-h-0 flex-1 flex-col gap-4">
+          <TamperHooksPanel recentExchanges={exchanges} />
+        </TabsContent>
+
+        <TabsContent value="exchanges" className="mt-0 flex min-h-0 flex-1 flex-col gap-4">
 
       {harError ? (
         <Alert variant="destructive" className="flex items-center justify-between gap-2 py-2">
@@ -891,7 +889,9 @@ export default function TrafficPage() {
                         }
                       />
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground tabular-nums">{fmtTime(e.ts)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground tabular-nums">
+                      {formatShortDateTime(e.ts)}
+                    </TableCell>
                     <TableCell className="font-mono text-xs">{e.host}</TableCell>
                     <TableCell>
                       <MethodBadge method={e.method} />
@@ -910,12 +910,14 @@ export default function TrafficPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className={cn("font-mono text-xs font-semibold tabular-nums", statusTone(e.status))}>
+                      <span
+                        className={cn("font-mono text-xs font-semibold tabular-nums", httpStatusTone(e.status))}
+                      >
                         {e.status}
                       </span>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{e.content_type}</TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">{fmtBytes(e.resp_len)}</TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{formatBytes(e.resp_len)}</TableCell>
                   </TableRow>
                 ))}
                 {exchanges.length === 0 && (
@@ -945,7 +947,10 @@ export default function TrafficPage() {
               <SheetHeader className="border-b px-5 py-4">
                 <div className="flex items-center gap-2 pr-8">
                   <MethodBadge method={selected.method} />
-                  <Badge variant="secondary" className={cn("font-mono tabular-nums", statusTone(selected.status))}>
+                  <Badge
+                    variant="secondary"
+                    className={cn("font-mono tabular-nums", httpStatusTone(selected.status))}
+                  >
                     {selected.status}
                   </Badge>
                   {selected.rewritten ? (
@@ -956,7 +961,9 @@ export default function TrafficPage() {
                       {t("Rewritten")}
                     </Badge>
                   ) : null}
-                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">{fmtTime(selected.ts)}</span>
+                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                    {formatShortDateTime(selected.ts)}
+                  </span>
                 </div>
                 <SheetTitle className="break-all font-mono">{selected.host}</SheetTitle>
                 <SheetDescription className="break-all font-mono">{selected.url}</SheetDescription>
@@ -1098,6 +1105,8 @@ export default function TrafficPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

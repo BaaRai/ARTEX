@@ -1211,6 +1211,60 @@ WHERE e.exploration_id=$1 AND e.rel=$2 AND n.kind='finding'`, s.expID, RelYields
 	return out, rows.Err()
 }
 
+// FactOnlyIntent is one intent that yielded facts and no finding — the measurable
+// form of «proved but not registered».
+type FactOnlyIntent struct {
+	IntentID int64
+	Summary  string
+	Facts    int
+}
+
+// FactOnlyIntents returns the intents of this exploration that yielded at least one
+// fact node and zero finding nodes, newest first, capped at limit.
+//
+// Why it exists: on the run record, three runs out of twelve had EVERY
+// fact-producing intent register nothing (3/3, 3/3, 2/2 — llm/agent logs of the
+// 2026-11-22 stand). Facts were proven, findings never reached the registry, and
+// nothing in the graph connected the two, so the planner could not notice.
+// The counter is deliberately about the intent, not the fact: a fact carries no
+// "this is a defect" flag, while an intent that produced facts has finished work
+// whose result the planner can judge.
+//
+// limit<=0 falls back to 10: a planner round acts on a handful, and the whole
+// point is a nudge, not an inventory.
+func (s *ExplorationStore) FactOnlyIntents(limit int) ([]FactOnlyIntent, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Query(`SELECT i.id, COALESCE(i.payload->>'summary',''), count(*)
+FROM exploration_edges e
+JOIN exploration_nodes i ON i.id=e.src_id AND i.exploration_id=e.exploration_id
+JOIN exploration_nodes d ON d.id=e.dst_id AND d.exploration_id=e.exploration_id
+WHERE e.exploration_id=$1 AND e.rel=$2 AND d.kind=$3
+  AND i.state IN ('done','blocked','exhausted','stopped')
+  AND NOT EXISTS (
+    SELECT 1 FROM exploration_edges e2
+    JOIN exploration_nodes f ON f.id=e2.dst_id AND f.exploration_id=e2.exploration_id
+    WHERE e2.exploration_id=e.exploration_id AND e2.src_id=e.src_id
+      AND e2.rel=$2 AND f.kind='finding')
+GROUP BY i.id, 2
+ORDER BY i.id DESC
+LIMIT $4`, s.expID, RelYields, KindFact, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FactOnlyIntent
+	for rows.Next() {
+		var r FactOnlyIntent
+		if err := rows.Scan(&r.IntentID, &r.Summary, &r.Facts); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // FindingIntentsTerminal is the inherited-history variant: it returns finding
 // lineage only when the producing intent has reached an immutable terminal
 // state. This keeps a source task's live worker topology private.
@@ -1766,6 +1820,34 @@ FROM activity WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT $3`, s.expID, 
 		out = append(out, a)
 	}
 	return out, cursor, rows.Err()
+}
+
+// ActivityContainingEvidence returns the newest activity recorded for nodeID
+// whose summary or full detail contains one of the given evidence lines (#124
+// row 1). ok is false when no recorded activity carries any of them. The match
+// is literal and case-sensitive: evidence has to quote the recorded output, not
+// paraphrase it. Callers pass only substantive lines, so a command name alone
+// cannot tie a claim to an activity. The activity's timestamp bounds the search
+// for a proxy capture of the same bytes.
+func (s *ExplorationStore) ActivityContainingEvidence(nodeID int64, lines []string) (id int64, createdAt time.Time, ok bool, err error) {
+	if nodeID <= 0 || len(lines) == 0 {
+		return 0, time.Time{}, false, nil
+	}
+	// One query across all lines: the newest matching activity wins, not the
+	// newest match for whichever line came first.
+	err = s.db.QueryRow(`SELECT id, created_at FROM activity a
+WHERE exploration_id=$1 AND node_id=$2
+  AND EXISTS (SELECT 1 FROM unnest($3::text[]) AS line
+              WHERE strpos(COALESCE(a.detail,''), line) > 0
+                 OR strpos(COALESCE(a.summary,''), line) > 0)
+ORDER BY id DESC LIMIT 1`, s.expID, nodeID, lines).Scan(&id, &createdAt)
+	if err == sql.ErrNoRows {
+		return 0, time.Time{}, false, nil
+	}
+	if err != nil {
+		return 0, time.Time{}, false, err
+	}
+	return id, createdAt, true, nil
 }
 
 // ActivityListForTerminalIntent is the inherited, incremental-read boundary.

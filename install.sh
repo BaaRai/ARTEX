@@ -29,8 +29,10 @@ ensure_docker(){
   case "$(uname -s)" in
     Linux)
       if [ "$(ask 'Install Docker automatically? (y/n)' y)" = y ]; then
-        curl -fsSL https://get.docker.com | sh
+        install_docker_linux
         sudo usermod -aG docker "$USER" || true
+        docker compose version >/dev/null 2>&1 || sudo docker compose version >/dev/null 2>&1 \
+          || die "docker installed but 'docker compose' is unavailable; install the compose v2 plugin and retry"
         ok "Docker installed (re-login required for the group change to take effect)"
       else
         die "please install docker yourself and retry"
@@ -40,9 +42,73 @@ ensure_docker(){
   esac
 }
 
+# install_docker_linux uses get.docker.com only on the distros it supports. That
+# script keys its repo URL off /etc/os-release ID + codename, so on derivatives
+# such as Kali it writes a repo for a nonexistent release (debian kali-rolling)
+# and leaves apt broken. Other apt-based distros get the distro's own packages.
+install_docker_linux(){
+  local id="" id_like=""
+  if [ -r /etc/os-release ]; then
+    id="$(. /etc/os-release && echo "${ID:-}")"
+    id_like="$(. /etc/os-release && echo "${ID_LIKE:-}")"
+  fi
+  case "$id" in
+    ubuntu|debian|raspbian|centos|fedora|rhel|sles)
+      curl -fsSL https://get.docker.com | sh
+      return ;;
+  esac
+  command -v apt-get >/dev/null 2>&1 \
+    || die "automatic Docker install is not supported on '${id:-unknown}'; please install docker + the compose plugin yourself and retry"
+  info "'${id:-unknown}' (like: ${id_like:-n/a}) is not supported by get.docker.com; installing from the distro's apt repos"
+  # Drop a broken repo left by an earlier get.docker.com run (it fails every apt update).
+  # Match the URI and the distro id anywhere in the file: in a one-line .list entry
+  # they share a line, but in a deb822 .sources file the URIs and Suites fields are
+  # on separate lines. -w keeps "kali" matching inside "kali-rolling".
+  local f
+  for f in /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources; do
+    if [ -n "$id" ] && [ -f "$f" ] \
+      && grep -qF "download.docker.com/linux/debian" "$f" 2>/dev/null \
+      && grep -qwF "$id" "$f" 2>/dev/null; then
+      warn "removing broken Docker repo $f"
+      sudo rm -f "$f"
+    fi
+  done
+  sudo apt-get update
+  sudo apt-get install -y docker.io
+  # The compose v2 package name varies across Debian derivatives; take the first that exists.
+  local p
+  for p in docker-compose-plugin docker-compose-v2 docker-compose; do
+    if apt-cache madison "$p" 2>/dev/null | grep -q .; then
+      sudo apt-get install -y "$p" && break
+    fi
+  done
+  # docker.io only suggests buildx on some releases, and the image build needs it.
+  for p in docker-buildx-plugin docker-buildx; do
+    if apt-cache madison "$p" 2>/dev/null | grep -q .; then
+      sudo apt-get install -y "$p" && break
+    fi
+  done
+  # Kali (and some others) don't start services on package install.
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl enable --now docker || true
+  fi
+}
+
+# The Dockerfile uses --platform=$BUILDPLATFORM, which needs BuildKit. Without the
+# buildx plugin Compose only warns, falls back to the legacy builder and fails on
+# the first FROM with 'failed to parse platform'.
+ensure_buildx(){
+  docker buildx version >/dev/null 2>&1 && return
+  case "$(uname -s)" in
+    Darwin) die "docker buildx not detected; the image build needs it. Docker Desktop includes it; with Homebrew's docker CLI (e.g. Colima) run 'brew install docker-buildx' and register the plugin as its caveats describe" ;;
+    *)      die "docker buildx not detected; the image build needs it. Install docker-buildx-plugin (Docker's repo) or docker-buildx (distro repo) and retry" ;;
+  esac
+}
+
 # ── 1) All-Docker ───────────────────────────────
 install_docker(){
   ensure_docker
+  ensure_buildx
   if [ ! -f .env ]; then
     cp .env.example .env 2>/dev/null || true
     local pw key
@@ -106,8 +172,8 @@ JSON
   # embedding the frontend requires node to produce the static assets
   if command -v npm >/dev/null 2>&1; then
     info "building frontend static assets..."
-    ( cd web && npm ci && npm run build:static )
-    rm -rf server/webui/dist && cp -r web/out server/webui/dist
+    ( cd web && npm ci --ignore-scripts && npm run build:static )
+    rm -rf server/webui/dist && mkdir -p server/webui && cp -r web/out server/webui/dist
     info "compiling embedded single binary..."
     CGO_ENABLED=0 go build -tags embedui -trimpath -o artex ./cmd/artex
   else

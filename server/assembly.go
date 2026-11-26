@@ -36,47 +36,48 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 		}
 		var extra []actool.CoreTool
 
-		// --- skills: load visible skills into reg (used for the Skill meta-tool
-		// and to know which MCP servers are skill-gated). ---
+		// --- skills & MCP: Auto is a pure orchestration agent and never receives
+		// the Skill meta-tool or MCP execution tools (it dispatches via spawn_task
+		// and manages skills/MCP through platform tools instead). ---
 		var reg *skill.Registry
-		if names, _ := pg.AgentSkillNames(a.ID); len(names) > 0 {
-			nameSet := make(map[string]bool, len(names))
-			for _, n := range names {
-				nameSet[n] = true
-			}
-			if allReg, err := loadSkillsConfined(skillDir); err == nil && allReg != nil {
-				reg = skill.NewRegistry()
-				for _, s := range allReg.List() {
-					// match by directory name (Base of Dir), not by skill display Name
-					if s.Dir != "" && nameSet[filepath.Base(s.Dir)] {
-						reg.Add(s)
-					}
-				}
-				if len(reg.List()) == 0 {
-					reg = nil
-				}
-			}
-		}
-		// A server named by any visible skill's `mcps:` is skill-gated: its tools
-		// are deferred + locked (not in the global block) until that skill loads.
-		gated := map[string]bool{}
-		if reg != nil {
-			for _, s := range reg.List() {
-				for _, srv := range s.MCPs {
-					gated[srv] = true
-				}
-			}
-		}
-
-		// --- mcp: connect enabled servers that are directly visible to this agent
-		// OR skill-gated (named in a visible skill's mcps field). Directly-visible
-		// and NOT gated → global (unlocked from session start). Skill-gated →
-		// deferred until that skill is invoked (regardless of direct visibility).
 		var closers []io.Closer
 		serverTools := map[string][]string{} // server name → its tool names
 		var allNames, globalNames []string
 		globalSet := map[string]bool{}
-		{
+		if agentKey != "auto" {
+			if names, _ := pg.AgentSkillNames(a.ID); len(names) > 0 {
+				nameSet := make(map[string]bool, len(names))
+				for _, n := range names {
+					nameSet[n] = true
+				}
+				if allReg, err := loadSkillsConfined(skillDir); err == nil && allReg != nil {
+					reg = skill.NewRegistry()
+					for _, s := range allReg.List() {
+						// match by directory name (Base of Dir), not by skill display Name
+						if s.Dir != "" && nameSet[filepath.Base(s.Dir)] {
+							reg.Add(s)
+						}
+					}
+					if len(reg.List()) == 0 {
+						reg = nil
+					}
+				}
+			}
+			// A server named by any visible skill's `mcps:` is skill-gated: its tools
+			// are deferred + locked (not in the global block) until that skill loads.
+			gated := map[string]bool{}
+			if reg != nil {
+				for _, s := range reg.List() {
+					for _, srv := range s.MCPs {
+						gated[srv] = true
+					}
+				}
+			}
+
+			// --- mcp: connect enabled servers that are directly visible to this agent
+			// OR skill-gated (named in a visible skill's mcps field). Directly-visible
+			// and NOT gated → global (unlocked from session start). Skill-gated →
+			// deferred until that skill is invoked (regardless of direct visibility).
 			mcpIDs, _ := pg.AgentVisible(a.ID, "mcp")
 			want := idSet(mcpIDs)
 			all, _ := pg.ListMCP()
@@ -181,11 +182,18 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 				_ = c.Close()
 			}
 		}
+		var skillNames []string
+		if reg != nil {
+			for _, s := range reg.List() {
+				skillNames = append(skillNames, s.Name)
+			}
+		}
 		def := agent.DeferredInfo{
 			Deferred:    allNames,
 			GlobalNames: globalNames,
 			Unlock:      unlock,
 			UnlockSkill: unlockSkill,
+			SkillIndex:  agent.SkillIndexBlock(skillNames),
 		}
 		return extra, def, cleanup
 	})
@@ -223,6 +231,7 @@ func seedPrompts(pg *db.DB) {
 // and default params get injected. MCP/skill/host tools have no row and pass through.
 func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 	agent.SetFindingTrafficBindingEnabled(func() bool { return pg.GetBool(settingAgentTrafficBinding, false) })
+	agent.SetTrafficCaptureEnabled(func() bool { return pg.GetBool(settingTrafficCapture, false) })
 	// Seed the built-in domain tools (first-insert only; DO NOTHING preserves edits).
 	// No startup prune: rows we didn't seed are left alone so future user-defined
 	// custom tools (system=false, added via the UI) survive restarts.
@@ -318,10 +327,10 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 			}
 		}
 		// interactive shell: gated purely by the agent's interactive_shell flag (like
-		// web_search), NOT by tools-table binding. When on, inject the 5 shell_* tools
-		// and COUPLE the Bash description addendum so it points at shell_open — and never
-		// dangles when off. See docs/interactive-shell-design.md §14.2.
-		if !actool.InteractiveShellDisabled() {
+		// web_search), NOT by tools-table binding. Orchestration-only agents (auto,
+		// mainagent) have no shell execution tools and never receive shell_* even if
+		// an older DB had interactive_shell=true. See docs/interactive-shell-design.md §14.2.
+		if agentKey != "auto" && agentKey != "mainagent" && !actool.InteractiveShellDisabled() {
 			if a, err := pg.GetAgentByKey(agentKey); err == nil && a != nil && a.InteractiveShell {
 				out = append(out, actool.ShellSessionTools()...)
 				for i, t := range out {

@@ -125,8 +125,11 @@ func telegramHTML(m Message) (string, int) {
 		if m.HomeURL != "" {
 			footer = fmt.Sprintf("\n\n<a href=\"%s\">View all on the platform</a>", telegramEscapeAttr(m.HomeURL))
 		}
+		// Each line is measured as it is written below: escaped, with its
+		// newline. Measuring the raw line let an escaped digest outgrow the
+		// budget, and TruncateHTML then cut items that were counted as sent.
 		kept := packItemCount(m.Items, telegramTextLimit, telegramReservedRunes, footer, runeSize, func(it Item, idx int) string {
-			return telegramBatchLine(it, idx+1, lim)
+			return "\n" + telegramEscape(telegramBatchLine(it, idx+1, lim))
 		})
 		items := m.Items[:kept]
 		b.Reset()

@@ -56,35 +56,12 @@ import { useSideQuestions } from "@/hooks/use-side-questions";
 import { mergeActivities } from "@/lib/activity-merge";
 import { api } from "@/lib/api";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
-import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
+import { formatBytes, formatTokens } from "@/lib/format";
+import { getLocalStorageValue, removeLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { isBtwCommand } from "@/lib/side-questions";
 import type { Activity, Agent, ChatAttachment, Conversation, LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { intlLocale, t } from "@/i18n";
-
-// fmtBytes renders a human file size for attachment chips (mirrors transcript.tsx).
-function fmtBytes(n: number): string {
-  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
-  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`;
-  return `${n} B`;
-}
-
-// fmtTokens renders a compact token count (1234 → 1.2k, 2_000_000 → 2M).
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
-  return String(n);
-}
-
-// fmtDuration renders an elapsed milliseconds span compactly (90s → 1m30s).
-function fmtDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h${String(m % 60).padStart(2, "0")}m`;
-}
 
 // HISTORY_PAGE is how many steps one history page loads: the latest page on open,
 // then one more page each time the user scrolls to the top. Kept modest so a long
@@ -96,6 +73,10 @@ const CONVERSATION_LIST_PAGE = 100;
 // rail looks the same after a reload; unknown keys are harmless (a deleted agent
 // simply never renders a group again).
 const COLLAPSED_AGENTS_KEY = "artex.chat.collapsed-agents";
+// The conversation that was open when the user last left the chat page. The
+// sidebar links to a bare /chat, so without this, coming back from another page
+// always lands on the empty draft view. A ?c= in the URL takes precedence.
+const LAST_CONVERSATION_KEY = "artex.chat.last-conversation";
 
 function conversationIsPinned(conversation: Conversation): boolean {
   return conversation.pinned ?? Boolean(conversation.pinned_at);
@@ -198,7 +179,7 @@ function Composer({
             >
               <PaperclipIcon className="size-3 shrink-0 text-primary" />
               <span className="max-w-[160px] truncate">{a.name}</span>
-              <span className="text-muted-foreground">{fmtBytes(a.size)}</span>
+              <span className="text-muted-foreground">{formatBytes(a.size)}</span>
               {onRemoveAttachment && (
                 <button
                   type="button"
@@ -794,9 +775,9 @@ function ChatView({
           {tokenTotal.any && (
             <span title={t("input / cache(read) / output tokens")} className="min-w-0 truncate tabular-nums">
               {t("input {input} · cache {cache} · output {output}", {
-                input: fmtTokens(tokenTotal.i),
-                cache: fmtTokens(tokenTotal.cr),
-                output: fmtTokens(tokenTotal.o),
+                input: formatTokens(tokenTotal.i),
+                cache: formatTokens(tokenTotal.cr),
+                output: formatTokens(tokenTotal.o),
               })}
             </span>
           )}
@@ -1171,13 +1152,14 @@ export default function ChatPage() {
     });
   }, []);
 
-  // Restore the open conversation from the URL (?c=<id>) on mount, so a refresh
-  // returns to the same thread instead of the empty draft view. Runs after
+  // Restore the open conversation on mount, so a refresh or a return from another
+  // page lands on the same thread instead of the empty draft view: the URL
+  // (?c=<id>) first, else the last conversation opened here. Runs after
   // hydration (not a lazy useState init) to avoid a server/client mismatch.
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setSourceRequested(params.has("approval"));
-    const c = params.get("c");
+    const c = params.get("c") ?? getLocalStorageValue(LAST_CONVERSATION_KEY);
     const id = c ? Number(c) : NaN;
     if (Number.isFinite(id)) setSelectedId(id);
   }, []);
@@ -1185,10 +1167,19 @@ export default function ChatPage() {
   // selectedId with no matching conversation (e.g. a stale ?c=, or a just-created
   // one before reloadConvs lands) simply renders the draft view — harmless — so we
   // deliberately do NOT auto-clear it here (that raced new-conversation creation).
+  // The same value goes to localStorage for the restore above. On mount this
+  // effect runs once with the initial null before the restored id lands; the
+  // restore has already read the stored value by then and writes it back on the
+  // next render.
   React.useEffect(() => {
     const url = new URL(window.location.href);
-    if (selectedId != null) url.searchParams.set("c", String(selectedId));
-    else url.searchParams.delete("c");
+    if (selectedId != null) {
+      url.searchParams.set("c", String(selectedId));
+      setLocalStorageValue(LAST_CONVERSATION_KEY, String(selectedId));
+    } else {
+      url.searchParams.delete("c");
+      removeLocalStorageValue(LAST_CONVERSATION_KEY);
+    }
     window.history.replaceState(null, "", url);
   }, [selectedId]);
 

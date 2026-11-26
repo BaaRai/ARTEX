@@ -74,7 +74,7 @@ func newExecRootFixture(t *testing.T) *execRootFixture {
 		t.Fatal(err)
 	}
 	// PrepareExecPrivilege sets them process-wide.
-	t.Cleanup(func() { agent.SetRunDirMaker(nil); agent.SetSpillDirMaker(nil, nil) })
+	t.Cleanup(func() { agent.SetRunDirMaker(nil); agent.SetSpillDirMaker(nil, nil); agent.SetFileToolIdentity(nil) })
 	if err := PrepareExecPrivilege(&priv, dataDir, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -735,6 +735,127 @@ func TestNormaTaskDirPlantedByExecutorAsRoot(t *testing.T) {
 	}
 	if after := treeDigest(t, dir); after != before {
 		t.Fatalf("the directory or what it holds changed: digest %s, was %s", after, before)
+	}
+}
+
+// envNames returns the variable names of an `env` listing.
+func envNames(out string) map[string]string {
+	m := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok && k != "" && !strings.ContainsAny(k, " \t") {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+// checkExecutorEnv asserts what crosses to an executor process: no variable
+// outside the allowlist (the canary and a secret name set in the server), the
+// executor's HOME, and the extra names wanted.
+func checkExecutorEnv(t *testing.T, path, out, home string, want ...string) {
+	t.Helper()
+	got := envNames(out)
+	for k := range got {
+		if !executorEnvAllowed(k) && !strings.HasPrefix(k, "TOOL_") && k != "PWD" && k != "SHLVL" && k != "_" && k != "OLDPWD" && !slicesContains(want, k) {
+			t.Errorf("%s: %s crossed to the executor", path, k)
+		}
+	}
+	for _, k := range []string{"ARTEX_ISOLATION_CANARY", "OPENAI_API_KEY", envExecKeep} {
+		if _, ok := got[k]; ok {
+			t.Errorf("%s: %s reached the executor", path, k)
+		}
+	}
+	if got["HOME"] != home {
+		t.Errorf("%s: HOME=%q, want %q", path, got["HOME"], home)
+	}
+	for _, k := range append([]string{"PATH"}, want...) {
+		if _, ok := got[k]; !ok {
+			t.Errorf("%s: %s missing from the executor environment:\n%s", path, k, out)
+		}
+	}
+}
+
+func slicesContains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// Each executor path starts its process with the allowlisted environment: a
+// variable of the server outside the allowlist does not cross, whatever its name;
+// what the caller passes on purpose (Bash env, custom-tool parameters, the
+// configured env of an MCP server) does. A nested shell keeps what the agent set.
+func TestExecutorEnvAllowlistAsRoot(t *testing.T) {
+	f := newExecRootFixture(t)
+	t.Setenv("ARTEX_ISOLATION_CANARY", "canary-value")
+	t.Setenv("OPENAI_API_KEY", "sk-canary")
+	if err := InstallBashShim(f.priv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(filepath.SplitList(os.Getenv("PATH"))[0]) })
+
+	// Bash (Norma: exec.Command("bash") with the server env and the agent's BashEnv).
+	in, _ := json.Marshal(map[string]string{"command": "env; echo NESTED=$(AGENT_SET=1 bash -c 'echo $AGENT_SET')"})
+	res, err := actool.NewBash().Call(context.Background(), in, &actool.ToolContext{WorkingDir: f.work, Env: []string{"HTTP_PROXY=http://127.0.0.1:9"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := res.Flatten()
+	checkExecutorEnv(t, "bash shim", out, f.home, "HTTP_PROXY", "PAGER", "NESTED")
+	if !strings.Contains(out, "NESTED=1") {
+		t.Errorf("a nested shell lost the variable the agent set:\n%s", out)
+	}
+
+	// Custom tool.
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatalf("python3 is needed for the custom-tool path: %v", err)
+	}
+	out, err = execPython(context.Background(), py, "probe", `import os
+for k, v in os.environ.items():
+    print(k + "=" + v)`, map[string]any{"x": "1"}, f.work, []string{"HTTP_PROXY=http://127.0.0.1:9"}, 30*time.Second, f.priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkExecutorEnv(t, "custom tool", out, f.home, "HTTP_PROXY", "TOOL_X")
+
+	// MCP stdio: mcp.NewStdioClient sets the server env plus the configured one.
+	command, args, err := execDropCommand(f.priv, "env", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command(command, args...)
+	c.Dir = f.work
+	c.Env = os.Environ()
+	for k, v := range withExecKeep(f.priv, map[string]string{"MCP_TOKEN": "configured"}) {
+		c.Env = append(c.Env, k+"="+v)
+	}
+	b, err := c.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, b)
+	}
+	checkExecutorEnv(t, "mcp stdio", string(b), f.home, "MCP_TOKEN")
+	if envNames(string(b))["MCP_TOKEN"] != "configured" {
+		t.Errorf("mcp stdio: the configured MCP_TOKEN did not cross:\n%s", b)
+	}
+}
+
+// PrepareExecPrivilege gives the agent's file tools the executor identity: through
+// it, a root-only file is refused by the kernel.
+func TestPrepareExecPrivilegeSetsFileToolIdentityAsRoot(t *testing.T) {
+	f := newExecRootFixture(t)
+	var readErr error
+	if err := agent.RunAsFileToolIdentity(func() { _, readErr = os.ReadFile(f.secret) }); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(readErr, fs.ErrPermission) {
+		t.Fatalf("read of a root-only file with the file tool identity: %v, want permission denied", readErr)
+	}
+	if _, err := os.ReadFile(f.secret); err != nil {
+		t.Fatalf("the server itself must still read the file: %v", err)
 	}
 }
 

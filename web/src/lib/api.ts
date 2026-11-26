@@ -23,6 +23,8 @@ import type {
   BatchCategoryItem,
   BatchControlItem,
   ChatAttachment,
+  ChatBridge,
+  ChatBridgeIdentity,
   CommandRecord,
   Company,
   CompanyScopeMutation,
@@ -83,6 +85,12 @@ import type {
   SSProject,
   SSTask,
   Stats,
+  TamperDryRunRequest,
+  TamperDryRunResult,
+  TamperHook,
+  TamperHookInput,
+  TamperHooksListResp,
+  TamperHookVersion,
   Task,
   TaskArchive,
   TaskArchivePage,
@@ -108,6 +116,7 @@ import type {
   TrafficReplayRequest,
   TrafficReplayResult,
   TrafficResp,
+  TrafficStreamDirection,
   TrafficStreamPage,
   UsageStats,
   WorkspaceFile,
@@ -252,6 +261,7 @@ function findingFilterParams(q: Omit<FindingQuery, "page" | "pageSize">): URLSea
   if (q.query?.trim()) p.set("q", q.query.trim());
   if (q.sort) p.set("sort", q.sort);
   if (q.assetScope) p.set("asset_scope", q.assetScope);
+  if (q.company) p.set("company", q.company);
   return p;
 }
 
@@ -265,7 +275,15 @@ function interceptPageQuery(page: number, size: number, filter: InterceptApprova
 
 export const api = {
   // Backend application version (injected via ldflags at release, default "dev").
-  health: () => get<{ ok: boolean; service: string; version: string; latest_version?: string }>("/health"),
+  // isolation: result of the startup agent isolation self-test; "degraded" shows a banner on every page.
+  health: () =>
+    get<{
+      ok: boolean;
+      service: string;
+      version: string;
+      latest_version?: string;
+      isolation?: { mode: "isolated" | "degraded"; reason?: string };
+    }>("/health"),
 
   // ---- auth ----
   authStatus: () => get<{ initialized: boolean }>("/auth/status"),
@@ -276,8 +294,11 @@ export const api = {
     post<{ ok: boolean }>("/auth/change-password", { old_password: oldPassword, new_password: newPassword }),
 
   // ---- tasks ----
-  tasks: () =>
-    get<{ tasks: Task[]; active: string }>("/tasks").then((r) => ({ tasks: arr(r.tasks), active: r.active ?? "" })),
+  tasks: (companyId: number | null = null) =>
+    get<{ tasks: Task[]; active: string }>(`/tasks${companyId ? `?company=${companyId}` : ""}`).then((r) => ({
+      tasks: arr(r.tasks),
+      active: r.active ?? "",
+    })),
   task: (id: string) => get<Task>(`/tasks/${encodeURIComponent(id)}`),
   createTask: (input: {
     name?: string;
@@ -520,13 +541,13 @@ export const api = {
 
   // ---- assets ----
   // Server-side paginated: pass limit/offset, get back the page + full match total.
-  assets: (type = "", limit = 50, offset = 0) =>
-    get<{ count: number; total: number; assets: Asset[] }>(`/assets?type=${type}&limit=${limit}&offset=${offset}`).then(
-      (r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 }),
-    ),
-  searchAssets: (dsl: string, type = "", limit = 50, offset = 0) =>
+  assets: (type = "", limit = 50, offset = 0, companyId: number | null = null) =>
     get<{ count: number; total: number; assets: Asset[] }>(
-      `/assets?dsl=${encodeURIComponent(dsl)}${type ? `&type=${encodeURIComponent(type)}` : ""}&limit=${limit}&offset=${offset}`,
+      `/assets?type=${type}&limit=${limit}&offset=${offset}${companyId ? `&company_id=${companyId}` : ""}`,
+    ).then((r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 })),
+  searchAssets: (dsl: string, type = "", limit = 50, offset = 0, companyId: number | null = null) =>
+    get<{ count: number; total: number; assets: Asset[] }>(
+      `/assets?dsl=${encodeURIComponent(dsl)}${type ? `&type=${encodeURIComponent(type)}` : ""}&limit=${limit}&offset=${offset}${companyId ? `&company_id=${companyId}` : ""}`,
     ).then((r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 })),
   assetCounts: (taskId = "") =>
     get<Record<string, number>>(`/assets/counts${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ""}`),
@@ -583,7 +604,13 @@ export const api = {
 
   // ---- exploration (per task) ----
   frontier: (task?: string) => get<TaskNode[]>(`/exploration/frontier${tq(task)}`).then(arr),
-  findings: (task?: string) => get<Finding[]>(`/exploration/findings${tq(task)}`).then(arr),
+  findings: (task?: string, company?: string) => {
+    const p = new URLSearchParams();
+    if (task) p.set("task", task);
+    if (company) p.set("company", company);
+    const qs = p.toString();
+    return get<Finding[]>(`/exploration/findings${qs ? `?${qs}` : ""}`).then(arr);
+  },
   findingsPage: (q: FindingQuery) => {
     const p = findingFilterParams(q);
     p.set("page", String(q.page));
@@ -600,7 +627,8 @@ export const api = {
   // findings and their ancestors, nodes carrying subtree aggregate counts. Not paginated — the tree is a navigation structure, fetched in one go.
   findingAssetTree: (q: Omit<FindingQuery, "page" | "pageSize">) =>
     get<FindingAssetTree>(`/exploration/findings/asset-tree?${findingFilterParams(q).toString()}`),
-  findingStats: () => get<FindingStats>("/exploration/findings/stats"),
+  findingStats: (company?: string) =>
+    get<FindingStats>(`/exploration/findings/stats${company ? `?company=${encodeURIComponent(company)}` : ""}`),
   // exportFindings triggers the findings page export and downloads the file. scope=selected
   // sends ids (a finding_id list); scope=filtered sends the current filters (the FindingQuery filter fields); scope=all ignores filters.
   exportFindings: async (opts: {
@@ -847,6 +875,7 @@ export const api = {
       respMax?: string;
       sort?: string;
       order?: string;
+      company?: number | null;
     } = {},
   ) =>
     get<TrafficResp>(
@@ -861,12 +890,15 @@ export const api = {
         (opts.respMin ? `&resp_min=${encodeURIComponent(opts.respMin)}` : "") +
         (opts.respMax ? `&resp_max=${encodeURIComponent(opts.respMax)}` : "") +
         (opts.sort ? `&sort=${encodeURIComponent(opts.sort)}` : "") +
-        (opts.order ? `&order=${encodeURIComponent(opts.order)}` : ""),
+        (opts.order ? `&order=${encodeURIComponent(opts.order)}` : "") +
+        (opts.company ? `&company=${opts.company}` : ""),
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
   // One page of a WebSocket/SSE exchange's messages, in order.
-  trafficStream: (id: string, offset = 0, limit = 50) =>
-    get<TrafficStreamPage>(`/traffic/stream?exchange=${encodeURIComponent(id)}&offset=${offset}&limit=${limit}`),
+  trafficStream: (id: string, offset = 0, limit = 50, direction: TrafficStreamDirection = "") =>
+    get<TrafficStreamPage>(
+      `/traffic/stream?exchange=${encodeURIComponent(id)}&offset=${offset}&limit=${limit}${direction ? `&direction=${direction}` : ""}`,
+    ),
   // Raw bytes of one stored blob (a full message payload or an oversized body).
   // The JSON-only `get` cannot carry binary, hence the direct fetch.
   trafficBlob: async (hash: string) => {
@@ -966,6 +998,16 @@ export const api = {
   // index handed back to the filesystem. Evidence bound to findings is kept.
   trafficDeleteAll: () => del<{ deleted: number; reclaimed: number }>(`/traffic/all`),
 
+  // ---- capture-proxy constrained Go tampering hooks (P4.2, admin-only) ----
+  trafficHooks: () => get<TamperHooksListResp>(`/traffic/hooks`),
+  createTrafficHook: (body: TamperHookInput) => post<TamperHook>(`/traffic/hooks`, { ...body, enabled: false }),
+  updateTrafficHook: (id: number, body: TamperHookInput) => put<TamperHook>(`/traffic/hooks/${id}`, body),
+  deleteTrafficHook: (id: number) => del<{ deleted: boolean }>(`/traffic/hooks/${id}`),
+  toggleTrafficHook: (id: number, enabled: boolean) => post<TamperHook>(`/traffic/hooks/${id}/toggle`, { enabled }),
+  trafficHookVersions: (id: number) => get<{ versions: TamperHookVersion[] }>(`/traffic/hooks/${id}/versions`),
+  rollbackTrafficHook: (id: number, version: number) => post<TamperHook>(`/traffic/hooks/${id}/rollback`, { version }),
+  dryRunTrafficHook: (body: TamperDryRunRequest) => post<TamperDryRunResult>(`/traffic/hooks/dry-run`, body),
+
   // ---- app settings (runtime toggles) ----
   settings: () => get<Settings>(`/settings`),
   setSettings: (patch: Partial<Settings>) => put<Settings>(`/settings`, patch),
@@ -1021,6 +1063,18 @@ export const api = {
     ).then((r) => ({ ...r, deliveries: arr(r.deliveries) }));
   },
   notifyRetryDelivery: (id: number) => post<{ ok: boolean }>(`/notify/deliveries/${id}/retry`),
+
+  // ---- Inbound chat bridge ----
+  // One bridge per chat app kind. PUT semantics: omitted fields keep their stored value, and a masked
+  // config value sent back as-is keeps the stored secret.
+  chatBridges: () => get<ChatBridge[]>(`/chat-bridges`).then(arr),
+  chatBridgeSave: (
+    kind: string,
+    payload: { enabled?: boolean; config?: Record<string, unknown>; allowed_chats?: string[] },
+  ) => put<ChatBridge>(`/chat-bridges/${encodeURIComponent(kind)}`, payload),
+  // Asks the chat app which bot the stored token belongs to; sends no message.
+  chatBridgeTest: (kind: string) =>
+    post<{ ok: boolean; bot: ChatBridgeIdentity; latency_ms: number }>(`/chat-bridges/${encodeURIComponent(kind)}/test`),
   report: async (task?: string) => {
     if (MOCK) return mockReport(task);
     const token = getToken();
@@ -1104,6 +1158,7 @@ export const api = {
     streaming = true, // test with the profile's real streaming mode so "streaming works, non-streaming does not" never leaks into conversations
     session_header_key = "", // non-empty = the test request also carries this custom session header (value is a one-off session id)
     user_agent = "", // non-empty = the test overrides the User-Agent header with this value
+    custom_headers = "",
   ) =>
     // reply = the model's actual reply (truncated); the backend marks a profile that replies with nothing as failed
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string; reply?: string }>("/llm/test", {
@@ -1118,6 +1173,7 @@ export const api = {
       streaming,
       session_header_key,
       user_agent,
+      custom_headers,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
@@ -1131,6 +1187,11 @@ export const api = {
     rate_per_second?: number;
     rate_per_minute?: number;
     context_window_k?: number;
+    // Cost ledger, EUR per 1M tokens; 0 = unset. Sent on every save, which rewrites all four.
+    price_input_per_m?: number;
+    price_output_per_m?: number;
+    price_cache_read_per_m?: number;
+    price_cache_write_per_m?: number;
     thinking_type?: string; // ""(not sent)|"disabled"|"enabled"
     reasoning_effort?: string; // ""(not sent)|"low"|"medium"|"high"|"xhigh"|"max"
     priority?: number; // pool order position; higher is used first
@@ -1140,6 +1201,8 @@ export const api = {
     max_tokens_field?: string; // ""=max_tokens (default) | "max_completion_tokens" (openai format only)
     session_header_key?: string; // non-empty = send this HTTP header on every request, value = the current session id; "" = not sent
     user_agent?: string; // non-empty = override the User-Agent header on every request; "" = keep the default UA
+    custom_headers?: string; // static Bedrock gateway headers; values are write-only
+    clear_custom_headers?: boolean;
     retry?: LLMRetryOverride; // this profile's retry override; all zeros = follow the global retry policy
   }) => post<{ id: number }>("/llm/profiles", p),
   deleteLLMProfile: (id: string) => del<{ deleted: number }>(`/llm/profiles/${id}`),

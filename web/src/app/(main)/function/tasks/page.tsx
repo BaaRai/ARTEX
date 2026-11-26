@@ -120,6 +120,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { intlLocale, t } from "@/i18n";
+import { formatBytes, formatTokens } from "@/lib/format";
 import { setVisibleInterval } from "@/lib/polling";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
@@ -139,13 +140,7 @@ import type {
   TaskStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-// fmtBytes renders a human file size for the upload manifest.
-function fmtBytes(n: number): string {
-  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
-  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`;
-  return `${n} B`;
-}
+import { useActiveCompanyID } from "@/stores/company/company-store";
 
 // UPLOAD_MARKER labels the auto-appended block of uploaded-file paths inside the task
 // description, so re-uploads append under the same block instead of adding a new header.
@@ -155,7 +150,7 @@ const UPLOAD_MARKER = "[Uploaded Files (Absolute Paths)]";
 // Read/Bash-friendly manifest — the worker opens them by path. Keeps one marked block:
 // first upload adds the header, later uploads append bullets under it.
 function appendUploads(desc: string, atts: ChatAttachment[]): string {
-  const bullets = atts.map((a) => `- ${a.abs ?? a.path} (${fmtBytes(a.size)})`).join("\n");
+  const bullets = atts.map((a) => `- ${a.abs ?? a.path} (${formatBytes(a.size)})`).join("\n");
   if (desc.includes(UPLOAD_MARKER)) {
     return `${desc.replace(/\s*$/, "")}\n${bullets}\n`;
   }
@@ -167,13 +162,6 @@ function appendUploads(desc: string, atts: ChatAttachment[]): string {
 // worker), so the list has to be pulled; 10s is plenty for status / progress / token changes.
 const POLL_MS = 10_000;
 const MAX_SOURCE_TASKS = 8;
-
-// fmtTokens renders a compact token count (1234 → 1.2k, 2_000_000 → 2M).
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k";
-  return String(n);
-}
 
 // fmtDuration renders a run duration in seconds as a compact human string.
 function fmtDuration(sec: number): string {
@@ -307,6 +295,8 @@ function compareTasks(left: Task, right: Task, field: TaskSortField, direction: 
 }
 
 export default function TasksPage() {
+  // The sidebar's company switcher: the server returns only the tasks scoped to it.
+  const companyId = useActiveCompanyID();
   const [activeTab, setActiveTab] = React.useState("current");
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [categories, setCategories] = React.useState<TaskCategory[]>([]);
@@ -459,7 +449,7 @@ export default function TasksPage() {
 
   const load = React.useCallback(() => {
     api
-      .tasks()
+      .tasks(companyId)
       .then((r) => {
         const next = r.tasks.map((t) => (t.id === r.active ? { ...t, active: true } : t));
         const sig = JSON.stringify(next);
@@ -470,7 +460,7 @@ export default function TasksPage() {
       .catch(() => {
         // Polling is best-effort; the next interval retries automatically.
       });
-  }, []);
+  }, [companyId]);
 
   const loadCategories = React.useCallback(() => {
     api
@@ -1330,12 +1320,11 @@ const TaskRow = React.memo(function TaskRow({
       >
         {task.tokens ? (
           <span className="text-muted-foreground">
-            {t("In")} <span className="text-foreground">{fmtTokens(task.tokens.input_tokens)}</span>
+            {t("In")} <span className="text-foreground">{formatTokens(task.tokens.input_tokens)}</span>
             {" · "}
-            {t("Cache")} <span className="text-foreground">{fmtTokens(task.tokens.cache_read_tokens)}</span>
+            {t("Cache")} <span className="text-foreground">{formatTokens(task.tokens.cache_read_tokens)}</span>
             {" · "}
-            {t("Out")}{" "}
-            <span className="text-foreground">{fmtTokens(task.tokens.output_tokens)}</span>
+            {t("Out")} <span className="text-foreground">{formatTokens(task.tokens.output_tokens)}</span>
           </span>
         ) : (
           "—"
@@ -1555,7 +1544,7 @@ function ArchiveConfirmDialog({
           <AlertDialogTitle>{count === 1 ? t("Archive task") : t("Archive {count} tasks", { count })}</AlertDialogTitle>
           <AlertDialogDescription className="[overflow-wrap:anywhere]">
             {t(
-              "Archiving stops task scheduling and compresses the graph, LLM history, files, and exclusive assets and traffic into local cold storage. Once archived, a task can be restored from \"Archived\".",
+              "Archiving stops task scheduling and compresses the graph, LLM history, files, and exclusive assets and traffic into the configured archive storage. Once archived, a task can be restored from \"Archived\". Restoring requires free space on this server.",
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -1638,18 +1627,13 @@ function ArchiveStateBadge({ state }: { state: TaskArchiveState }) {
   return <Badge variant={variant}>{archiveStateLabel(state)}</Badge>;
 }
 
-function formatArchiveBytes(bytes: number): string {
-  if (bytes <= 0) return "—";
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${bytes} B`;
-}
-
 function archiveCompressionLabel(archive: TaskArchive): string {
   if (archive.original_size <= 0 || archive.compressed_size <= 0) return "—";
   const saved = Math.max(0, 100 - (archive.compressed_size / archive.original_size) * 100);
-  return t("{size} · saves {percent}%", { size: formatArchiveBytes(archive.compressed_size), percent: saved.toFixed(0) });
+  return t("{size} · saves {percent}%", {
+    size: formatBytes(archive.compressed_size, { empty: "—" }),
+    percent: saved.toFixed(0),
+  });
 }
 
 function archiveDataTotal(archive: TaskArchive): number {
@@ -1685,7 +1669,7 @@ function ArchiveDeleteDialog({
           <AlertDialogDescription className="[overflow-wrap:anywhere]">
             {t(
               "About {size} of archive packages and {rows} related data snapshots will be permanently deleted. This action cannot be undone.",
-              { size: formatArchiveBytes(bytes), rows: rows.toLocaleString(intlLocale) },
+              { size: formatBytes(bytes, { empty: "—" }), rows: rows.toLocaleString(intlLocale) },
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -1996,9 +1980,16 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                     </TableCell>
                     <TableCell
                       className="whitespace-nowrap text-xs"
-                      title={t("Before compression: {size}", { size: formatArchiveBytes(archive.original_size) })}
+                      title={t("Before compression: {size}", {
+                        size: formatBytes(archive.original_size, { empty: "—" }),
+                      })}
                     >
                       {archiveCompressionLabel(archive)}
+                      {(archive.storage === "s3" || archive.storage === "local") && (
+                        <div className="text-muted-foreground">
+                          {archive.storage === "s3" ? t("Object storage") : t("Local storage")}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs tabular-nums">{archiveDataTotal(archive).toLocaleString(intlLocale)}</TableCell>
                     <TableCell>
@@ -2017,7 +2008,11 @@ function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                           </p>
                         ))}
                         <span className="text-muted-foreground text-xs">
-                          {t(archive.phase)} · {archive.progress}%
+                          {archive.phase === "upload_and_verify"
+                            ? t("Uploading and verifying")
+                            : archive.phase === "download_and_verify"
+                              ? t("Downloading and verifying")
+                              : t(archive.phase)} · {archive.progress}%
                         </span>
                       </div>
                     </TableCell>
@@ -3264,6 +3259,7 @@ function CreateTaskSheet({
       setSeedFirstIntent(false);
       setCoverageEnabled(true);
       setInterceptRules([]);
+      setCredentials([]);
       setUploadCount(0);
       draftIdRef.current = "";
       setOpen(false);
@@ -3448,6 +3444,8 @@ function CreateTaskSheet({
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, username: e.target.value } : x)))}
                     />
                     <Input
+                      type="password"
+                      autoComplete="new-password"
                       placeholder={t("password (empty = agent generates)")}
                       value={c.password}
                       onChange={(e) => setCredentials((prev) => prev.map((x, j) => (j === i ? { ...x, password: e.target.value } : x)))}

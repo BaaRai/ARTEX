@@ -34,6 +34,7 @@ command -v ip6tables-nft >/dev/null 2>&1 && IP6T=ip6tables-nft
 [ -n "${IP6TABLES_BIN:-}" ] && IP6T="$IP6TABLES_BIN"
 
 BOOT_CMT="artex-egress-bootstrap-deny"
+V6_CMT="artex-egress-v6-deny"
 
 log() { echo "[egress-guard] $*"; }
 
@@ -96,6 +97,12 @@ cleanup_rules() {
   done
   $IPT -t nat -F ARTEX-DNS 2>/dev/null || true
   $IPT -t nat -X ARTEX-DNS 2>/dev/null || true
+  # persistent IPv6 deny rule installed in apply_rules
+  if [ -n "$SUBNET6" ] && command -v "$IP6T" >/dev/null 2>&1; then
+    while $IP6T -C DOCKER-USER -s "$SUBNET6" -m comment --comment "$V6_CMT" -j DROP 2>/dev/null; do
+      $IP6T -D DOCKER-USER -s "$SUBNET6" -m comment --comment "$V6_CMT" -j DROP
+    done
+  fi
 }
 
 apply_rules() {
@@ -143,6 +150,11 @@ apply_rules() {
     log "gateway filter on: only DNS to $GW allowed from the subnet"
   fi
 
+  if [ "$MODE" = enforce ] && [ -n "$SUBNET6" ] && command -v "$IP6T" >/dev/null 2>&1; then
+    $IP6T -I DOCKER-USER 1 -s "$SUBNET6" -m comment --comment "$V6_CMT" -j DROP
+    log "IPv6 egress deny installed (subnet6=$SUBNET6)"
+  fi
+
   log "firewall rules applied (mode=$MODE, subnet=$SUBNET)"
 }
 
@@ -179,9 +191,9 @@ cleanup_rules
 ensure_docker_user
 bootstrap_deny
 apply_rules
-remove_bootstrap_deny
 write_dnsmasq_conf
 dnsmasq --test -C "$CONF"
+remove_bootstrap_deny
 trap - ERR   # setup done; a later dnsmasq exit is handled below, not as a fatal setup error.
 dnsmasq -k -C "$CONF" &
 DNSMASQ_PID=$!
