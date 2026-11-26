@@ -59,6 +59,8 @@ type Server struct {
 	execPriv  ExecPrivilege   // identity agent processes run under; zero keeps the server's own
 	isolation IsolationStatus // result of the startup isolation self-test (isolation.go); zero when not run
 
+	chatBridges *chatBridgeRunner // inbound chat bridges (issue #5); nil without PostgreSQL
+
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
 	// pwdVersion is auth.password_version, a counter. Zero means no password
@@ -290,6 +292,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		// Vulnerability IM push delivery engine. Sits beside the Scheduler but independent: push latency demands (3s)
 		// differ from the triggers' business cadence, and neither's failures drag the other down — a stuck push must not affect agent triggers.
 		go newNotifier(s).Run(s.ctx)
+		// Inbound chat bridges: an operator drives ARTEX from a chat app. Off until a bridge is enabled,
+		// and only allowlisted chats are served; long polling only, so no inbound port is opened.
+		s.chatBridges = newChatBridgeRunner(m.pg)
+		go s.chatBridges.Run(s.ctx)
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
 	}
 	// precedence: persisted DB config > env.
@@ -937,6 +943,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/notify/channels/{id}/test", s.notifyTestChannel)
 	mux.HandleFunc("GET /api/notify/deliveries", s.notifyListDeliveries)
 	mux.HandleFunc("POST /api/notify/deliveries/{id}/retry", s.notifyRetryDelivery)
+	// Inbound chat bridges, one per transport kind (telegram).
+	mux.HandleFunc("GET /api/chat-bridges", s.chatBridgeList)
+	mux.HandleFunc("PUT /api/chat-bridges/{kind}", s.chatBridgeSave)
+	mux.HandleFunc("POST /api/chat-bridges/{kind}/test", s.chatBridgeTest)
 	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
 	mux.HandleFunc("GET /api/report", s.getReport)
 	mux.HandleFunc("GET /api/chat/mentions", s.searchChatMentions)
