@@ -1162,6 +1162,49 @@ func (t *ToolSet) listFindings() actool.CoreTool {
 // context, so default to the newest page and let the agent page/filter for more.
 const factsPageSize = 20
 
+// toolPageMax is the largest page an agent list tool will return or allocate.
+// list_facts already stops at 100. The same ceiling keeps a model-supplied
+// limit from becoming a slice allocation or an unbounded query.
+const toolPageMax = 100
+
+// toolOffsetMax bounds a model-supplied SQL offset. The page size is already
+// capped; this stops a huge offset from turning one call into a long scan.
+const toolOffsetMax = 1_000_000
+
+// toolPageIndexMax bounds the page number used with a capped page size so the
+// offset multiplication cannot overflow.
+const toolPageIndexMax = 10_000
+
+func clampToolLimit(n, def int) int {
+	if n <= 0 {
+		return def
+	}
+	if n > toolPageMax {
+		return toolPageMax
+	}
+	return n
+}
+
+func clampToolOffset(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > toolOffsetMax {
+		return toolOffsetMax
+	}
+	return n
+}
+
+func clampToolPage(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	if n > toolPageIndexMax {
+		return toolPageIndexMax
+	}
+	return n
+}
+
 func (t *ToolSet) listFacts() actool.CoreTool {
 	return t.readExpTool("list_facts", "Page through the [exploration facts/conclusions] of this task and directly related tasks, newest first (compact: id+summary+state+origin+source; origin is the writer, source the declared source of the content; overlong summaries are truncated — full text via node_detail(id)). All parameters optional: limit (default 20, max 100), before (cursor; pass the previous page's next_before for an older page; omit/0 = the newest page), q (filter by summary keyword). Returns {facts, total, has_more, next_before}: total is the filtered count; when has_more=true, keep paging with next_before. Related-task entries carry source_task_id/inherited=true and are read-only. For findings see list_findings.",
 		obj(map[string]any{
@@ -2518,7 +2561,7 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 			"Only executed ones are listed (running/done/exhausted/blocked/stopped), not the not-yet-run open ones. Note: your task boundary is still the intent you claimed; looking at other works is only for reusing observations/avoiding duplicate work.",
 		obj(map[string]any{
 			"q":     str("filter by summary keyword (optional)"),
-			"limit": intp("return cap, default 50 (optional)"),
+			"limit": intp("return cap, default 50, max 100 (optional)"),
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
@@ -2526,10 +2569,7 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 				Limit int    `json:"limit"`
 			}
 			_ = json.Unmarshal(in, &a)
-			limit := a.Limit
-			if limit <= 0 {
-				limit = 50
-			}
+			limit := clampToolLimit(a.Limit, 50)
 			all, err := t.ts.ListByKindWithSources(db.KindIntent, 500)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
