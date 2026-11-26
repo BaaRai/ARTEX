@@ -292,14 +292,14 @@ func unitStream(t *testing.T, host string) (*Traffic, *sink, *mproxy.Flow) {
 	}
 	t.Cleanup(func() { _ = tr.Close() })
 	u, _ := url.Parse("https://" + host + "/ws")
-	f := &mproxy.Flow{Request: &mproxy.Request{Method: "GET", URL: u, Proto: "HTTP/1.1", Header: http.Header{}}, WebScoket: &mproxy.WebSocketData{}}
+	f := &mproxy.Flow{Request: &mproxy.Request{Method: "GET", URL: u, Proto: "HTTP/1.1", Header: http.Header{}}, WebSocket: &mproxy.WebSocketData{}}
 	s := tr.proxy.Addons[0].(*sink)
 	s.WebSocketStart(f)
 	return tr, s, f
 }
 
 func addWS(f *mproxy.Flow, fromClient bool, mt int, content []byte) {
-	f.WebScoket.Messages = append(f.WebScoket.Messages, &mproxy.WebSocketMessage{Type: mt, Content: content, FromClient: fromClient, Timestamp: time.Now()})
+	f.WebSocket.Messages = append(f.WebSocket.Messages, &mproxy.WebSocketMessage{Type: mt, Content: content, FromClient: fromClient, Timestamp: time.Now()})
 }
 
 func onlyExchange(t *testing.T, tr *Traffic) string {

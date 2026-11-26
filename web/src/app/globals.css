@@ -54,78 +54,82 @@
 }
 
 /* Default theme styles (used when no data-theme-preset is set or when 'default' is selected).
-These serve as the fallback; there is no separate default.css file. */
+These serve as the fallback; there is no separate default.css file.
+
+The default is the ARTEX theme: violet from the logo as the one brand colour, cool-tinted
+neutrals, a page background one step below the cards so panels read as surfaces, and a
+categorical chart palette. Text pairs meet WCAG AA (4.5:1) in both modes. */
 :root {
   --radius: 0.625rem;
+  --background: oklch(0.982 0.004 286);
+  --foreground: oklch(0.2 0.02 285);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.2 0.02 285);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.2 0.02 285);
+  --primary: oklch(0.5 0.21 290);
+  --primary-foreground: oklch(0.99 0.005 290);
+  --secondary: oklch(0.955 0.012 290);
+  --secondary-foreground: oklch(0.33 0.09 290);
+  --muted: oklch(0.962 0.006 286);
+  --muted-foreground: oklch(0.5 0.022 285);
+  --accent: oklch(0.948 0.022 290);
+  --accent-foreground: oklch(0.38 0.15 290);
+  --destructive: oklch(0.56 0.22 25);
+  --border: oklch(0.915 0.008 286);
+  --input: oklch(0.9 0.01 286);
+  --ring: oklch(0.6 0.18 290);
+  --chart-1: oklch(0.56 0.2 290);
+  --chart-2: oklch(0.65 0.14 200);
+  --chart-3: oklch(0.72 0.16 65);
+  --chart-4: oklch(0.6 0.19 15);
+  --chart-5: oklch(0.62 0.15 150);
+  --sidebar: oklch(0.99 0.003 286);
+  --sidebar-foreground: oklch(0.27 0.02 285);
+  --sidebar-primary: oklch(0.5 0.21 290);
+  --sidebar-primary-foreground: oklch(0.99 0.005 290);
+  --sidebar-accent: oklch(0.945 0.024 290);
+  --sidebar-accent-foreground: oklch(0.36 0.15 290);
+  --sidebar-border: oklch(0.92 0.008 286);
+  --sidebar-ring: oklch(0.6 0.18 290);
 
   /* fonts */
   --font-sans: var(--font-geist);
   --font-mono: var(--font-geist-mono);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.16 0.014 285);
+  --foreground: oklch(0.96 0.006 286);
+  --card: oklch(0.205 0.017 285);
+  --card-foreground: oklch(0.96 0.006 286);
+  --popover: oklch(0.22 0.018 285);
+  --popover-foreground: oklch(0.96 0.006 286);
+  --primary: oklch(0.72 0.15 290);
+  --primary-foreground: oklch(0.18 0.03 290);
+  --secondary: oklch(0.27 0.025 288);
+  --secondary-foreground: oklch(0.93 0.01 286);
+  --muted: oklch(0.255 0.018 285);
+  --muted-foreground: oklch(0.72 0.02 285);
+  --accent: oklch(0.3 0.05 290);
+  --accent-foreground: oklch(0.92 0.04 290);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.62 0.15 290);
+  --chart-1: oklch(0.72 0.15 290);
+  --chart-2: oklch(0.75 0.12 200);
+  --chart-3: oklch(0.8 0.14 70);
+  --chart-4: oklch(0.7 0.17 15);
+  --chart-5: oklch(0.74 0.14 150);
+  --sidebar: oklch(0.185 0.016 285);
+  --sidebar-foreground: oklch(0.9 0.008 286);
+  --sidebar-primary: oklch(0.72 0.15 290);
+  --sidebar-primary-foreground: oklch(0.18 0.03 290);
+  --sidebar-accent: oklch(0.28 0.04 290);
+  --sidebar-accent-foreground: oklch(0.95 0.02 290);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.62 0.15 290);
 }
 
 @layer base {
@@ -139,6 +143,27 @@ These serve as the fallback; there is no separate default.css file. */
   }
   html {
     @apply font-sans;
+  }
+
+  /* Smoother text and a brand-tinted selection. */
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background-color: color-mix(in oklch, var(--primary) 22%, transparent);
+  }
+
+  /* Figures in tables line up column by column (IDs, counts, times, progress). */
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Thin scrollbars that follow the theme instead of the OS default grey bar. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
   }
 }
 

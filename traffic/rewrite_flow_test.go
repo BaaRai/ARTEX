@@ -1041,7 +1041,7 @@ func TestRewriteIDCollisionClearsTrace(t *testing.T) {
 		},
 		"recordStreamStart": func(tr *Traffic) {
 			u, _ := url.Parse("https://c.example/ws")
-			f := &mproxy.Flow{Request: &mproxy.Request{Method: "GET", URL: u, Proto: "HTTP/1.1", Header: http.Header{}}, WebScoket: &mproxy.WebSocketData{}}
+			f := &mproxy.Flow{Request: &mproxy.Request{Method: "GET", URL: u, Proto: "HTTP/1.1", Header: http.Header{}}, WebSocket: &mproxy.WebSocketData{}}
 			tr.proxy.Addons[0].(*sink).WebSocketStart(f)
 		},
 	}

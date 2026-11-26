@@ -47,9 +47,9 @@ import { useActiveCompany } from "@/stores/company/company-store";
 // ── chart constants ───────────────────────────────────────────────────────────
 
 const dailyTrendConfig = {
-  input: { label: t("Input"), color: "hsl(217 91% 60%)" },
-  output: { label: t("Output"), color: "hsl(263 70% 60%)" },
-  cacheRead: { label: t("Cache read"), color: "hsl(160 60% 45%)" },
+  input: { label: t("Input"), color: "var(--chart-2)" },
+  output: { label: t("Output"), color: "var(--chart-1)" },
+  cacheRead: { label: t("Cache read"), color: "var(--chart-5)" },
 } satisfies ChartConfig;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -632,7 +632,7 @@ export default function DashboardPage() {
                         )
                   }
                   className={cn(
-                    "rounded px-2 py-0.5 text-[9px] font-medium transition-colors",
+                    "rounded px-2 py-0.5 text-xs font-medium transition-colors",
                     tokenVersion === v
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground",
@@ -642,7 +642,7 @@ export default function DashboardPage() {
                 </button>
               ))}
             </div>
-            <span className="text-[10px] font-normal text-muted-foreground">
+            <span className="text-[11px] font-normal text-muted-foreground">
               {tokenVersion === "new" ? "llm_usage" : "activity"}
             </span>
           </div>
@@ -652,10 +652,10 @@ export default function DashboardPage() {
               type="button"
               onClick={() => setTokenTab("all")}
               className={cn(
-                "rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors",
+                "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                 tokenTab === "all"
-                  ? "bg-foreground text-background"
-                  : "bg-muted/30 text-muted-foreground hover:text-foreground",
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "bg-muted/60 text-muted-foreground hover:bg-accent hover:text-accent-foreground",
               )}
             >
               {t("All")}
@@ -670,10 +670,10 @@ export default function DashboardPage() {
                   key={p.id}
                   onClick={() => setTokenTab(resolvedKey)}
                   className={cn(
-                    "flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors",
+                    "flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                     tokenTab === resolvedKey
-                      ? "bg-foreground text-background"
-                      : "bg-muted/30 text-muted-foreground hover:text-foreground",
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "bg-muted/60 text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                     !hasData && "opacity-40",
                   )}
                 >
@@ -681,10 +681,10 @@ export default function DashboardPage() {
                   {p.is_default && (
                     <span
                       className={cn(
-                        "rounded px-1 py-0 text-[8px]",
+                        "rounded px-1 py-0 text-[10px]",
                         tokenTab === resolvedKey
-                          ? "bg-background/20 text-background"
-                          : "bg-emerald-500/20 text-emerald-400",
+                          ? "bg-primary-foreground/20 text-primary-foreground"
+                          : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
                       )}
                     >
                       {t("Default")}
@@ -702,11 +702,11 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-4">
             {/* Total */}
             <div>
-              <div className="text-[10px] text-muted-foreground">{t("Total (input+output)")}</div>
+              <div className="text-xs text-muted-foreground">{t("Total (input+output)")}</div>
               <div className="mt-0.5 text-3xl font-bold tabular-nums tracking-tight">
                 {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
               </div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">
+              <div className="mt-0.5 text-xs text-muted-foreground">
                 {t("{count} tasks", { count: displayedTokens.taskCount })}
               </div>
             </div>
@@ -721,25 +721,25 @@ export default function DashboardPage() {
                     label: t("Input (uncached)"),
                     value: displayedTokens.input - displayedTokens.cacheRead,
                     barColor: dailyTrendConfig.input.color!,
-                    text: "text-blue-400",
+                    text: "text-foreground",
                   },
                   {
                     label: t("Cache hits"),
                     value: displayedTokens.cacheRead,
                     barColor: dailyTrendConfig.cacheRead.color!,
-                    text: "text-emerald-400",
+                    text: "text-foreground",
                   },
                   {
                     label: t("Output"),
                     value: displayedTokens.output,
                     barColor: dailyTrendConfig.output.color!,
-                    text: "text-violet-400",
+                    text: "text-foreground",
                   },
                 ].map(({ label, value, barColor, text }) => {
                   const pct = total > 0 ? (value / total) * 100 : 0;
                   return (
                     <div key={label}>
-                      <div className="mb-1 flex items-center justify-between text-[10px]">
+                      <div className="mb-1 flex items-center justify-between text-xs">
                         <span className="text-muted-foreground">{label}</span>
                         <span className={cn("font-mono font-semibold tabular-nums", text)}>{fmtTokens(value)}</span>
                       </div>
@@ -761,10 +761,10 @@ export default function DashboardPage() {
               const denominator = displayedTokens.input;
               const hitPct = denominator > 0 ? Math.round((displayedTokens.cacheRead / denominator) * 100) : 0;
               return (
-                <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-[10px]">
+                <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2 text-xs">
                   <span className="text-muted-foreground">{t("Cache hit rate")}</span>
                   <span
-                    className={cn("font-semibold tabular-nums", hitPct > 50 ? "text-emerald-400" : "text-amber-400")}
+                    className={cn("font-semibold tabular-nums", hitPct > 50 ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400")}
                   >
                     {hitPct}%
                   </span>
@@ -776,7 +776,7 @@ export default function DashboardPage() {
           {/* Right: daily bar chart */}
           <div className="flex min-h-0 flex-col">
             <div className="mb-2 flex items-center justify-between">
-              <div className="flex gap-3 text-[9px] text-muted-foreground">
+              <div className="flex gap-3 text-xs text-muted-foreground">
                 {(["input", "output", "cacheRead"] as const).map((k) => (
                   <span key={k} className="flex items-center gap-1">
                     <span
@@ -802,7 +802,7 @@ export default function DashboardPage() {
                     key={days}
                     onClick={() => setTokenDays(days)}
                     className={cn(
-                      "rounded px-2.5 py-0.5 text-[9px] font-medium transition-colors",
+                      "rounded px-2.5 py-0.5 text-xs font-medium transition-colors",
                       tokenDays === days
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground",
@@ -829,7 +829,7 @@ export default function DashboardPage() {
                     dataKey="date"
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fontSize: 10 }}
+                    tick={{ fontSize: 11 }}
                     tickMargin={6}
                     interval="preserveStartEnd"
                   />
@@ -837,7 +837,7 @@ export default function DashboardPage() {
                     tickFormatter={(v) => fmtTokens(Number(v))}
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fontSize: 10 }}
+                    tick={{ fontSize: 11 }}
                     width={44}
                   />
                   <ChartTooltip
@@ -999,7 +999,7 @@ export default function DashboardPage() {
               {["Task", "Status", "Engine", "Goal progress", "In flight", "Last activity"].map((h) => (
                 <th
                   key={h}
-                  className="px-4 py-2 text-left text-[9px] font-semibold uppercase tracking-widest text-muted-foreground first:pl-4"
+                  className="bg-muted/40 px-4 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-muted-foreground first:pl-4"
                 >
                   {t(h)}
                 </th>
@@ -1017,21 +1017,21 @@ export default function DashboardPage() {
               sortedTasks.map((t) => {
                 const goalsPct = t.goals_total ? Math.round(((t.goals_met ?? 0) / t.goals_total) * 100) : null;
                 return (
-                  <tr key={t.id} className="border-b last:border-0 transition-colors hover:bg-muted/30">
+                  <tr key={t.id} className="border-b last:border-0 transition-colors hover:bg-accent/40">
                     <td className="max-w-xs px-4 py-3">
                       <Link href={`/function/tasks/detail?id=${t.id}`} className="group flex flex-col">
                         <span className="truncate font-medium group-hover:underline">{t.description}</span>
-                        <span className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{t.id}</span>
+                        <span className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{t.id}</span>
                       </Link>
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge domain="task" value={t.status} dot className="px-1.5 py-0 text-[10px]" />
+                      <StatusBadge domain="task" value={t.status} dot className="px-1.5 py-0 text-[11px]" />
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge
                         domain="engine"
                         value={t.engine_mode ?? "idle"}
-                        className="px-1.5 py-0 text-[10px]"
+                        className="px-1.5 py-0 text-[11px]"
                       />
                     </td>
                     <td className="px-4 py-3">
