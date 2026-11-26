@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,7 +306,7 @@ func (d *DB) InitSecrets(keyDir string) error {
 		if err != nil {
 			return err
 		}
-		log.Printf("[secrets] at-rest encryption ready; backfill encrypted %d plaintext value(s)", n)
+		slog.Info("[secrets] at-rest encryption ready", "backfilled_plaintext_values", n)
 		activeSecretBox.Store(box)
 		sub := deriveSubKey(key, trafficTraceDomain)
 		trafficTraceKey.Store(&sub)
@@ -362,7 +362,7 @@ func loadSecretKey(ctx context.Context, conn *sql.Conn, keyDir string) ([]byte, 
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("write secret key: %w", err)
 	}
-	log.Printf("[secrets] new secret key written to %s", path)
+	slog.Info("[secrets] new secret key written", "path", path)
 	return key, nil
 }
 
