@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/Autumn-27/artex/db"
@@ -96,20 +97,37 @@ func TestProfilePricesThroughAPI(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &saved)
 	t.Cleanup(func() { _, _ = m.pg.Exec("DELETE FROM llm_profiles WHERE id=$1", saved.ID) })
 
-	rec = httptest.NewRecorder()
-	s.pgListProfiles(rec, httptest.NewRequest(http.MethodGet, "/api/llm/profiles", nil))
-	var list struct{ Profiles []LLMProfileDTO }
-	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range list.Profiles {
-		if p.Name != "price-api-test" {
-			continue
+	listed := func() LLMProfileDTO {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.pgListProfiles(rec, httptest.NewRequest(http.MethodGet, "/api/llm/profiles", nil))
+		var list struct{ Profiles []LLMProfileDTO }
+		if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+			t.Fatal(err)
 		}
+		for _, p := range list.Profiles {
+			if p.ID == strconv.FormatInt(saved.ID, 10) {
+				return p
+			}
+		}
+		t.Fatal("saved profile missing from the list")
+		return LLMProfileDTO{}
+	}
+	check := func(when string) {
+		t.Helper()
+		p := listed()
 		if p.PriceInputPerM != 2.5 || p.PriceOutputPerM != 10 || p.PriceCacheReadPerM != 0 || p.PriceCacheWritePerM != 0 {
-			t.Fatalf("listed prices = %v %v %v %v; want 2.5 10 0 0", p.PriceInputPerM, p.PriceOutputPerM, p.PriceCacheReadPerM, p.PriceCacheWritePerM)
+			t.Fatalf("%s: listed prices = %v %v %v %v; want 2.5 10 0 0", when, p.PriceInputPerM, p.PriceOutputPerM, p.PriceCacheReadPerM, p.PriceCacheWritePerM)
 		}
-		return
 	}
-	t.Fatal("saved profile missing from the list")
+	check("after create")
+
+	// An API save that leaves the prices out keeps them.
+	body, _ = json.Marshal(map[string]any{"id": saved.ID, "name": "price-api-test", "format": "openai", "model": "m2"})
+	rec = httptest.NewRecorder()
+	s.pgSaveProfile(rec, httptest.NewRequest(http.MethodPost, "/api/llm/profiles", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: HTTP %d %s", rec.Code, rec.Body.String())
+	}
+	check("after an update without prices")
 }
