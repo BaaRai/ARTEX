@@ -2,7 +2,7 @@ package llmrec
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -169,6 +169,6 @@ func (r *Recorder) recordContext(taskID, worker string, m ContextMetrics, usage 
 		Status:                 status,
 	})
 	if err != nil {
-		log.Printf("[llmcontext] insert: %v", err)
+		slog.Error("[llmcontext] insert failed", "err", err)
 	}
 }

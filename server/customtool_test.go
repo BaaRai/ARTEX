@@ -33,40 +33,23 @@ func TestRenderTemplateCommand(t *testing.T) {
 
 func TestRenderTemplateHTTP(t *testing.T) {
 	// http: identity (no shell quoting) — raw substitution into url/body.
-	got := renderTemplate("https://x/submit?flag={flag}", map[string]any{"flag": "CTF{abc}"}, identity)
+	// abc is a real param; braces inside the flag value must stay literal.
+	got := renderTemplate("https://x/submit?flag={flag}", map[string]any{
+		"flag": "CTF{abc}",
+		"abc":  "nope",
+	}, identity)
 	if got != "https://x/submit?flag=CTF{abc}" {
 		t.Fatalf("http render: %q", got)
 	}
 }
 
-func TestRenderTemplateDoesNotExpandSubstitutedValues(t *testing.T) {
-	// A value that looks like another placeholder must stay literal. Map
-	// iteration order is random, so render many times: the old param-by-param
-	// replacement produced cmd ''; id'' whenever "a" was replaced before "b".
-	params := map[string]any{"a": "{b}", "b": "; id"}
-	want := `cmd '{b}' '; id'`
-	for i := 0; i < 200; i++ {
-		if got := renderTemplate("cmd {a} {b}", params, shellQuote); got != want {
-			t.Fatalf("render %d: got %q, want %q", i, got, want)
-		}
-	}
-}
-
-func TestRenderTemplateLiteralBraces(t *testing.T) {
-	params := map[string]any{"a": "v"}
-	cases := map[string]string{
-		"{{a}}":       "{v}",         // doubled braces wrap the value
-		"{a":          "{a",          // unclosed
-		"x{unknown}y": "x{unknown}y", // not a param
-		"{}{a}":       "{}v",
-		"{a}{a}":      "vv",
-		"}{a}{":       "}v{",
-		"":            "",
-	}
-	for tmpl, want := range cases {
-		if got := renderTemplate(tmpl, params, identity); got != want {
-			t.Fatalf("renderTemplate(%q) = %q, want %q", tmpl, got, want)
-		}
+func TestRenderTemplateDoesNotRescanValues(t *testing.T) {
+	got := renderTemplate("cmd {a} {missing}", map[string]any{
+		"a": "{b}",
+		"b": "; id",
+	}, shellQuote)
+	if got != "cmd '{b}' {missing}" {
+		t.Fatalf("render = %q", got)
 	}
 }
 

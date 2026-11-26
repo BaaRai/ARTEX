@@ -88,11 +88,10 @@ func (m *MainAgent) SetWebSearch(o WebSearchOpts) { m.webSearch = o }
 func (m *MainAgent) SetSteerWork(fn func(intentID int64, msg string) error) { m.steerWork = fn }
 
 // mainAgentDefaultTmpl is the built-in EDITABLE body (section [A]) of the main agent
-// prompt, seeded into agent_prompts. Goal is a {{.Goal}} template var; the
-// intermediate-artifact output rules tail is code-owned (artifactSpec), appended after rendering.
-const mainAgentDefaultTmpl = `You are the "main agent" of an authorized penetration-testing system, the interface to the human operator. You do not explore in person, nor do you autonomously generate intents in a loop (that is the planner's job). Your duties:
+// prompt, seeded into agent_prompts. Goal is a {{.Goal}} template var.
+const mainAgentDefaultTmpl = `You are the "main agent" of an authorized penetration-testing system, the interface to the human operator. You are an orchestrator only: you have no shell, file, or direct HTTP tools, you never probe or exploit targets in person, and you do not autonomously generate intents in a loop (that is the planner's job). Your duties:
 
-1. Observe: use graph_overview / list_findings / list_facts / list_assets / get_worker_output to answer the human's questions about current progress.
+1. Observe: use graph_overview / list_findings / list_facts / list_assets / get_worker_output / get_worker_trace / search_all_worker_traces / node_detail to answer the human's questions about current progress.
 2. Steer (land the human's intent into the system):
    - The human wants to "change direction / emphasize a vulnerability class / focus an area" → write a hint with add_hint (the planner will read it next round).
    - The human wants to "test a specific target right now" → inject one high-priority intent directly with add_intent (priority 8-10). The system automatically pulls a completed task back to running so a worker claims and executes this intent, returning to completed when done.
@@ -106,9 +105,9 @@ Current task goal: {{.Goal}}
 
 Do not fabricate findings; answer only from real data returned by tools.`
 
-func mainAgentSystem(goal, dataDir, workDir string) string {
+func mainAgentSystem(goal, dataDir, _ string) string {
 	body := renderSystem("mainagent", mainAgentDefaultTmpl, MainVars{Goal: goal, DataDir: dataDir, Now: nowStr()})
-	return body + untrustedContentTail(body) + artifactSpec(workDir) + noiseProfileBlock()
+	return body + untrustedContentTail(body)
 }
 
 // Chat handles one human message and returns the assistant reply. emit, if
@@ -130,9 +129,9 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	tsx.SetNotifyGoal(notifyGoal) // set_goals adds a goal → record a "human added a goal: …" trigger for the planner
 	tsx.SetNotifyHint(notifyHint) // add_hint adds hints → record a "human added N strategic hints: …" trigger for the planner (origin "human")
 	tsx.steerWork = m.steerWork   // enable steer_work tool (nil = unavailable)
-	// domain tools + basic default toolset (Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash)
-	// when the asset coverage feature is off, drop add_task_scope/list_untested_assets (not in the prompt).
-	base := append(tsx.DropCoverageTools(tsx.MainAgentTools()), defaultTools(m.workDir)...)
+	// Orchestration domain tools only (no SDK DefaultTools, no WebFetch).
+	// When the asset coverage feature is off, drop add_task_scope/list_untested_assets (not in the prompt).
+	base := tsx.DropCoverageTools(tsx.MainAgentTools())
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts)})
 	tools, def, cleanup := AugmentTools(ctx, "mainagent", base)
 	defer cleanup()
@@ -144,7 +143,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		Provider:        m.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           withWebFetch(ctx, tools, m.proxyAddr, m.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
+		Tools:           tools,
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
@@ -160,8 +159,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		DeepSeekSearchAPIKey:  m.webSearch.DeepSeekAPIKey,
 		DeepSeekSearchModel:   m.webSearch.DeepSeekModel,
 		WebSearchProxy:        m.webSearch.Proxy,
-		BashEnv:               proxyEnv(m.proxyAddr, m.proxyCACert), // Bash subcommands go through the proxy + trust the CA by default
-		WorkingDir:            mainDir,                              // the main run directory <workDir>/tasks/<taskID>/main
+		WorkingDir:            mainDir, // the main run directory <workDir>/tasks/<taskID>/main
 		ToolOutputDir:         TaskToolOutputDir(m.workDir, taskID, mainDir),
 		MaxTurns:              m.maxTurns,                             // 0 = unlimited (configurable in agent management)
 		Compaction:            compactionConfig(m.compactionWindow()), // long chats stay within the window

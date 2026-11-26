@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"regexp"
@@ -323,12 +323,16 @@ func (p *Planner) SetTriageClient(c TriageClient) { p.triage = c }
 // bounded: newest findings first (a duplicate of a fresh finding is the common case).
 func (t *ToolSet) triageDuplicate(ctx context.Context, in db.RecordFindingInput) (DuplicateAnswer, bool) {
 	if t.triage == nil || t.ts == nil {
-		log.Printf("[triage] skip: client=%v store=%v", t.triage != nil, t.ts != nil)
+		slog.Info("[triage] skip", "client", t.triage != nil, "store", t.ts != nil)
 		return DuplicateAnswer{}, false
 	}
 	nodes, err := t.ts.ListByKindWithSources(db.KindFinding, 500)
-	if err != nil || len(nodes) == 0 {
-		log.Printf("[triage] skip: nodes=%d err=%v", len(nodes), err)
+	if err != nil {
+		slog.Warn("[triage] skip: failed to list findings", "nodes", len(nodes), "err", err)
+		return DuplicateAnswer{}, false
+	}
+	if len(nodes) == 0 {
+		slog.Info("[triage] skip: no existing findings", "nodes", 0)
 		return DuplicateAnswer{}, false
 	}
 	// Findings from independently created tasks on the same assets are NOT in the
@@ -351,26 +355,26 @@ func (t *ToolSet) triageDuplicate(ctx context.Context, in db.RecordFindingInput)
 	// candidate list is built from nodes whose FindingID is still 0 and every
 	// entry is dropped (observed live: "nodes=6, no usable existing findings").
 	if err := t.ts.PopulateFindingTrafficIDs(nodes); err != nil {
-		log.Printf("[triage] populate finding ids failed: %v", err)
+		slog.Warn("[triage] populate finding ids failed", "err", err)
 	}
 	existing := triageCandidates(nodes, in)
 	if len(existing) == 0 {
-		log.Printf("[triage] skip: no usable existing findings (nodes=%d)", len(nodes))
+		slog.Info("[triage] skip: no usable existing findings", "nodes", len(nodes))
 		return DuplicateAnswer{}, false
 	}
-	log.Printf("[triage] asking: existing=%d candidate=%q", len(existing), in.Name)
+	slog.Info("[triage] asking", "existing", len(existing), "candidate", in.Name)
 	ans, err := t.triage.Duplicate(ctx, TriageCandidate{
 		Name: in.Name, VulnClass: in.VulnClass, Severity: in.Severity, Summary: in.Summary,
 	}, existing)
 	if err != nil {
-		log.Printf("[triage] client error (fail open): %v", err)
+		slog.Warn("[triage] client error (fail open)", "err", err)
 		return DuplicateAnswer{}, false
 	}
 	// Carry the node id of the matched finding alongside its findings-table id:
 	// the agent extends a finding through update_finding_report, which takes the
 	// node id, so an answer that names only the table id sends it to the wrong call.
 	ans = withNodeID(ans, existing)
-	log.Printf("[triage] answer: dup=%d node=%d conf=%.2f", ans.DuplicateOf, ans.DuplicateOfNode, ans.Confidence)
+	slog.Info("[triage] answer", "dup", ans.DuplicateOf, "node", ans.DuplicateOfNode, "conf", fmt.Sprintf("%.2f", ans.Confidence))
 	return ans, true
 }
 

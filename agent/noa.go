@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log"
+	"log/slog"
 	"path/filepath"
 
 	"github.com/Autumn-27/norma/agentcore"
@@ -11,7 +11,7 @@ import (
 // noaWarn returns a diagnostics sink tagging non-fatal noa messages with the
 // session, routed through the package logger (agents have no per-instance one).
 func noaWarn(session string) func(string) {
-	return func(msg string) { log.Printf("[noa] %s: %s", session, msg) }
+	return func(msg string) { slog.Warn("[noa] diagnostics", "session", session, "msg", msg) }
 }
 
 // noa is the "model-driven context compression" mechanism introduced in norma v0.4.0,

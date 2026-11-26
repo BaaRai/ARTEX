@@ -692,30 +692,33 @@ func identity(s string) string { return s }
 // shellQuote single-quotes a value for safe shell interpolation.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// renderTemplate replaces {name} placeholders with each param's rendered value.
-//
-// It scans the template once, left to right, and never rescans a substituted
-// value. Replacing param by param instead would let a value containing
-// "{other}" be expanded again by a later param, inside the quotes of the first
-// one: with a="{b}" and b="; id", shell-quoted {a} becomes '{b}', and then the
-// quoted value of b lands inside those quotes, closing them and running "id"
-// (and which param runs first depends on map order). A "{" that does not start a known placeholder is copied as is,
-// so "{{a}}" still renders as "{" + value + "}".
+// renderTemplate replaces each {name} in the original template. The inserted
+// text is not scanned again, so a value that contains {other} stays literal.
 func renderTemplate(tmpl string, params map[string]any, quote func(string) string) string {
 	var b strings.Builder
 	b.Grow(len(tmpl))
 	for i := 0; i < len(tmpl); {
-		if tmpl[i] == '{' {
-			if end := strings.IndexByte(tmpl[i+1:], '}'); end >= 0 {
-				if v, ok := params[tmpl[i+1:i+1+end]]; ok {
-					b.WriteString(quote(valToStr(v)))
-					i += end + 2
-					continue
-				}
-			}
+		start := strings.IndexByte(tmpl[i:], '{')
+		if start < 0 {
+			b.WriteString(tmpl[i:])
+			break
 		}
-		b.WriteByte(tmpl[i])
-		i++
+		start += i
+		b.WriteString(tmpl[i:start])
+		end := strings.IndexByte(tmpl[start+1:], '}')
+		if end < 0 {
+			b.WriteString(tmpl[start:])
+			break
+		}
+		end += start + 1
+		name := tmpl[start+1 : end]
+		if v, ok := params[name]; ok {
+			b.WriteString(quote(valToStr(v)))
+			i = end + 1
+			continue
+		}
+		b.WriteByte('{')
+		i = start + 1
 	}
 	return b.String()
 }
