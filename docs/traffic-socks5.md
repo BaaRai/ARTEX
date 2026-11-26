@@ -12,7 +12,7 @@ ARTEX ships an opt-in **RFC 1928 SOCKS5 `CONNECT`** inbound listener in `traffic
 - **Flag off**: no SOCKS5 listener is started and the HTTP MITM recording proxy is byte-identical.
 - **Requires traffic recorder**: the server only starts the SOCKS5 listener when the traffic recorder is enabled (inside the traffic proxy block in `server/manager.go`). If traffic capture is disabled, setting `ARTEX_SOCKS5_ENABLED` / `ARTEX_SOCKS5_ADDR` does not open a listener.
 - **Agents unchanged**: workers and tools keep `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` pointing to the existing HTTP proxy; ARTEX does not silently switch agents to SOCKS5.
-- **Non-loopback bind warning**: RFC 1929 username/password (`0x02`) accepts **any** username and password without verifying credentials (so the pace marker `artex-pace` can ride in the username). Binding `ARTEX_SOCKS5_ADDR` to a non-loopback address therefore exposes an **unauthenticated proxy** to anyone who can reach that port. The target gate and egress governor still apply to every connection, but keep the listener on loopback (`127.0.0.1`) or restrict access at the host firewall.
+- **Loopback clients only**: RFC 1929 username/password (`0x02`) does not verify credentials (the username only carries the pace marker `artex-pace`), so it is offered on the same terms as no-auth (`0x00`): to loopback clients only. A client connecting from any other address is refused with `0xFF` (*no acceptable methods*) whichever method it offers, so binding `ARTEX_SOCKS5_ADDR` to a non-loopback address does not expose an open proxy; it simply accepts no remote clients. The target gate and egress governor still apply to every accepted connection.
 
 ## Protocol Scope (P4.1a)
 

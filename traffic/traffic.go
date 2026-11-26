@@ -1111,6 +1111,34 @@ func sanitize(s string) string {
 	return out
 }
 
+// storeDir reports whether name is one of the traffic store's own directories.
+// Host trees never use these names. DeleteAll skips every underscore-prefixed
+// entry for the same reason.
+func storeDir(name string) bool {
+	switch name {
+	case "_index", "_blobs", "_ca", "_delete_staging":
+		return true
+	default:
+		return false
+	}
+}
+
+// hostDir is the legacy on-disk tree for one recorded host. A sanitized name
+// that is the store itself, one of its own directories, or a path outside the
+// traffic root is not a host tree. Callers still delete the host's index rows.
+func hostDir(root, host string) (string, bool) {
+	name := sanitize(host)
+	if name == "." || name == ".." || storeDir(name) {
+		return "", false
+	}
+	dir := filepath.Join(root, name)
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return dir, true
+}
+
 var blobHashRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // blobPath locates a stored blob. Current writes use one bucket level; blobs
@@ -1779,7 +1807,9 @@ func (t *Traffic) hostTrees(where string, args ...any) ([]string, error) {
 		if err := rows.Scan(&h); err != nil {
 			return nil, err
 		}
-		dirs = append(dirs, filepath.Join(t.dir, sanitize(h)))
+		if dir, ok := hostDir(t.dir, h); ok {
+			dirs = append(dirs, dir)
+		}
 	}
 	return dirs, rows.Err()
 }
@@ -2012,7 +2042,9 @@ func (t *Traffic) stageDeleteHostsExact(hosts []string, archiveID, taskID int64)
 	// own an orphaned directory that this deletion should take with it.
 	legacy := make([]string, 0, len(unique))
 	for _, h := range unique {
-		legacy = append(legacy, filepath.Join(t.dir, sanitize(h)))
+		if dir, ok := hostDir(t.dir, h); ok {
+			legacy = append(legacy, dir)
+		}
 	}
 
 	tx, err := t.db.Begin()
@@ -2581,7 +2613,7 @@ func (t *Traffic) Tools() []actool.CoreTool {
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"host":          map[string]any{"type": "string", "description": "Filter by host (required; e.g. '107.172.96.177', '107.172.96.177:8082', or 'http://107.172.96.177:8082/path')"},
+				"host":          map[string]any{"type": "string", "description": "Filter by host (required; e.g. '192.0.2.10', '192.0.2.10:8082', or 'http://192.0.2.10:8082/path')"},
 				"contains":      map[string]any{"type": "string", "description": "URL substring filter (optional, e.g. 'api' / 'login')"},
 				"body_contains": map[string]any{"type": "string", "description": "Full-text body search (optional, at least 3 characters); matches request/response headers and bodies, e.g. 'password' / 'root:x:0' / 'internal test'"},
 				"limit":         map[string]any{"type": "integer", "description": "Page size, default 3, max 10"},
