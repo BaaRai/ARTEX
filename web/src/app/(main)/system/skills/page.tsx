@@ -41,20 +41,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatShortDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import { intlLocale, t } from "@/i18n";
+import { t } from "@/i18n";
 import type { Agent, SkillItem, MCPServer, SkillCall, MissingSkill } from "@/lib/types";
-
-function fmtTime(ts?: string) {
-  if (!ts) return t("Never called");
-  return new Date(ts).toLocaleString(intlLocale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 // ── Tree node ──────────────────────────────────────────────────────────────
 interface TreeNode {
@@ -264,7 +255,9 @@ function SkillsOverview({
                   className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-muted"
                 >
                   <span className="min-w-0 flex-1 truncate font-mono text-xs" title={s.name}>{s.name}</span>
-                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{fmtTime(s.last_used)}</span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                    {formatShortDateTime(s.last_used, { seconds: false, empty: t("Never called") })}
+                  </span>
                 </button>
               ))}
             </div>
@@ -738,7 +731,9 @@ export default function SkillsPage() {
                   <div key={m.skill} className="flex items-center gap-2 text-sm">
                     <code className="min-w-0 flex-1 truncate font-mono text-xs" title={m.skill}>{m.skill}</code>
                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{t("{count} calls", { count: m.calls })}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{fmtTime(m.last_used)}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {formatShortDateTime(m.last_used, { seconds: false, empty: t("Never called") })}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -804,7 +799,10 @@ export default function SkillsPage() {
                       {s.calls > 0 && (
                         <span
                           className="shrink-0 rounded bg-muted px-1 text-[10px] tabular-nums text-muted-foreground"
-                          title={t("Called {count} times · last {time}", { count: s.calls, time: fmtTime(s.last_used) })}
+                          title={t("Called {count} times · last {time}", {
+                            count: s.calls,
+                            time: formatShortDateTime(s.last_used, { seconds: false, empty: t("Never called") }),
+                          })}
                         >
                           {s.calls}
                         </span>
@@ -893,8 +891,14 @@ export default function SkillsPage() {
                       <p className="text-xs text-muted-foreground">{t("Tasks covered")}</p>
                     </div>
                     <div className="rounded-md border p-2">
-                      <p className="truncate text-sm font-medium" title={fmtTime(selectedSkill.last_used)}>
-                        {fmtTime(selectedSkill.last_used)}
+                      <p
+                        className="truncate text-sm font-medium"
+                        title={formatShortDateTime(selectedSkill.last_used, {
+                          seconds: false,
+                          empty: t("Never called"),
+                        })}
+                      >
+                        {formatShortDateTime(selectedSkill.last_used, { seconds: false, empty: t("Never called") })}
                       </p>
                       <p className="text-xs text-muted-foreground">{t("Last called")}</p>
                     </div>
@@ -917,7 +921,9 @@ export default function SkillsPage() {
                       <div className="max-h-56 overflow-y-auto">
                         {usageCalls.map((c, i) => (
                           <div key={`${c.ts}-${i}`} className="flex items-center gap-2 border-b px-2 py-1 text-xs last:border-b-0">
-                            <span className="tabular-nums text-muted-foreground">{fmtTime(c.ts)}</span>
+                            <span className="tabular-nums text-muted-foreground">
+                              {formatShortDateTime(c.ts, { seconds: false, empty: t("Never called") })}
+                            </span>
                             <Badge variant="outline" className="font-normal">{c.agent_key || "—"}</Badge>
                             <span className="ml-auto text-muted-foreground">
                               {c.task_id > 0 ? t("Task #{id}", { id: c.task_id }) : c.session_id ? t("Chat session") : "—"}

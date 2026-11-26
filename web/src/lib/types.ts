@@ -1872,3 +1872,32 @@ export interface TamperDryRunResult extends TamperDryRunIO {
   changed: boolean;
   lines: TamperTraceLine[] | null;
 }
+
+// ---- Inbound chat bridge (drive ARTEX from a chat app) ----
+export interface ChatBridgeIdentity {
+  id: string;
+  username: string;
+  name: string;
+}
+
+export interface ChatBridgeStatus {
+  // off: disabled or not configured; connecting: checking the token; online: polling; error: see last_error.
+  state: "off" | "connecting" | "online" | "error";
+  bot?: ChatBridgeIdentity;
+  last_error?: string;
+  last_error_at?: string;
+  last_poll_at?: string;
+  last_update_at?: string;
+}
+
+export interface ChatBridge {
+  kind: string;
+  configured: boolean;
+  enabled: boolean;
+  // Masked: credential fields come back as "__masked__…"; sending them back unchanged keeps the stored value.
+  config: Record<string, unknown>;
+  allowed_chats: string[];
+  secret_keys: string[];
+  status: ChatBridgeStatus;
+  updated_at?: string;
+}

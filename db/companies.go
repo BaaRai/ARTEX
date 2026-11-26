@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 	"unicode/utf8"
@@ -583,7 +583,7 @@ const malformedIPAssetsSampled = 5
 // per-request response (company deletion, scopesentry sync, agent asset writes).
 func logAttributionWarning(warning string) {
 	if warning != "" {
-		log.Printf("[assets] %s", warning)
+		slog.Warn("[assets] " + warning)
 	}
 }
 

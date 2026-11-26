@@ -26,7 +26,6 @@ func (s *Server) triageClient() agent.TriageClient {
 	if id <= 0 {
 		return nil
 	}
-	slog.Info("[triage] initialized triage client", "profile_id", id)
 	p, err := s.m.pg.ProfileByID(id)
 	if err != nil || p == nil {
 		return nil
@@ -38,6 +37,7 @@ func (s *Server) triageClient() agent.TriageClient {
 	if client == nil {
 		return nil
 	}
+	slog.Info("[triage] initialized triage client", "profile_id", id)
 	return &agent.SystemOneClient{BaseURL: p.BaseURL, APIKey: p.APIKey, Model: p.Model, HTTP: client}
 }
 

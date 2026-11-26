@@ -1,0 +1,45 @@
+# Domain suffixes always allowed for the ARTEX container (a suffix covers all subdomains).
+# Resolved IPs are added to the allowlist automatically. Reload: docker compose restart egress-guard
+
+# --- LLM providers (keep only the one you use) ---
+api.deepseek.com
+api.anthropic.com
+api.openai.com
+
+# --- Passive recon sources seen in past runs ---
+crt.sh
+rapiddns.io
+api.certspotter.com
+api.hackertarget.com
+api.threatminer.org
+web.archive.org
+archive.org
+otx.alienvault.com
+urlscan.io
+services.nvd.nist.gov
+api.osv.dev
+
+# --- Public code / advisories (downloads are still gated by the [hardening] approval rules) ---
+github.com
+api.github.com
+raw.githubusercontent.com
+objects.githubusercontent.com
+release-assets.githubusercontent.com
+codeload.github.com
+gist.githubusercontent.com
+
+# --- Package registries (installs are gated by the approval rules) ---
+pypi.org
+files.pythonhosted.org
+registry.npmjs.org
+proxy.golang.org
+deb.debian.org
+
+# --- Nuclei / Interactsh out-of-band testing (OAST). Remove if you do not use OAST checks:
+#     these servers accept arbitrary data, so they are also a possible exfiltration channel.
+oast.pro
+oast.live
+oast.site
+oast.online
+oast.fun
+oast.me
