@@ -1242,7 +1242,8 @@ func (s *Server) fsSkillUsage(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	calls, err := pg.RecentSkillCalls(name, limit)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		log.Printf("[skills] recent calls for %s: %v", name, err)
+		writeErr(w, 500, "failed to load skill usage")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"calls": calls})
@@ -1258,7 +1259,8 @@ func (s *Server) fsMissingSkills(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	missing, err := pg.MissingSkillStats(limit)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		log.Printf("[skills] missing skills: %v", err)
+		writeErr(w, 500, "failed to load missing skills")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"missing": missing})
@@ -2044,7 +2046,8 @@ func (s *Server) pgSkillVisibility(w http.ResponseWriter, r *http.Request) {
 	}
 	agents, err := pg.SkillAgents(r.PathValue("name"))
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		log.Printf("[skills] visibility for %s: %v", r.PathValue("name"), err)
+		writeErr(w, 500, "failed to load skill visibility")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"agents": idStrings(agents)})
@@ -2065,7 +2068,8 @@ func (s *Server) pgToggleSkillVisibility(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := pg.ToggleSkillVisibility(body.AgentID, body.SkillName, body.Visible); err != nil {
-		writeErr(w, 500, err.Error())
+		log.Printf("[skills] toggle visibility for %s: %v", body.SkillName, err)
+		writeErr(w, 500, "failed to update skill visibility")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
