@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -222,7 +222,7 @@ func (s *Server) abortTaskDelete(taskID string) {
 			state := task.lifecycleSnapshot()
 			keepPaused = state.Paused || state.Queued
 			if getErr != nil {
-				log.Printf("[task-delete] task %s failed to read persisted state, restoring the barrier from in-memory state: %v", taskID, getErr)
+				slog.Warn("[task-delete] failed to read persisted state, restoring barrier from in-memory state", "task_id", taskID, "err", getErr)
 			}
 		} else if getErr == nil {
 			// The request targeted a task that does not exist. Do not retain a
@@ -376,7 +376,7 @@ func (s *Server) pgCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	// starter prompt so the editor shows something editable from the start.
 	if err := pg.SeedPromptIfEmpty(a.ID, agent.DefaultAssistantPrompt); err != nil {
-		log.Printf("[agents] failed to seed starter prompt for %s: %v", a.Key, err)
+		slog.Error("[agents] failed to seed starter prompt", "agent", a.Key, "err", err)
 	}
 	writeJSON(w, 200, agentDTO(a))
 }
@@ -424,10 +424,10 @@ func (s *Server) pgDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := pg.RemoveAgentFromToolBindings(a.Key); err != nil {
-		log.Printf("[agents] failed to clean up tool bindings for %s: %v", a.Key, err)
+		slog.Error("[agents] failed to clean up tool bindings", "agent", a.Key, "err", err)
 	}
 	if err := pg.DeleteTriggersForAgent(a.Key); err != nil {
-		log.Printf("[agents] failed to clean up triggers for %s: %v", a.Key, err)
+		slog.Error("[agents] failed to clean up triggers", "agent", a.Key, "err", err)
 	}
 	writeJSON(w, 200, map[string]any{"deleted": a.Key})
 }
@@ -865,7 +865,7 @@ func (s *Server) pgListTools(w http.ResponseWriter, r *http.Request) {
 	// catalog query, so agent assembly never pays for this aggregate.
 	counts, countErr := pg.ToolUsageCounts()
 	if countErr != nil {
-		log.Printf("[tools] failed to read call stats: %v", countErr)
+		slog.Warn("[tools] failed to read call stats", "err", countErr)
 	} else {
 		for _, tool := range ts {
 			tool.Calls = counts[tool.Key]
@@ -1086,7 +1086,7 @@ func (s *Server) pgSaveMCP(w http.ResponseWriter, r *http.Request) {
 		m.ID = id
 		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 		if derr := s.discoverAndCacheMCP(ctx, &m); derr != nil {
-			log.Printf("[mcp] tool discovery after adding %s failed: %v", m.Name, derr)
+			slog.Error("[mcp] tool discovery failed after adding mcp", "mcp", m.Name, "err", derr)
 		}
 		cancel()
 	}
@@ -1197,7 +1197,7 @@ func (s *Server) fsListSkills(w http.ResponseWriter, r *http.Request) {
 	if s.m.pg != nil {
 		stats, err := s.m.pg.SkillStats()
 		if err != nil {
-			log.Printf("[skills] failed to read call stats: %v", err)
+			slog.Warn("[skills] failed to read call stats", "err", err)
 		}
 		for _, st := range stats {
 			statBySkill[st.Skill] = st
@@ -1242,7 +1242,7 @@ func (s *Server) fsSkillUsage(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	calls, err := pg.RecentSkillCalls(name, limit)
 	if err != nil {
-		log.Printf("[skills] recent calls for %s: %v", name, err)
+		slog.Error("[skills] failed to read recent calls", "skill", name, "err", err)
 		writeErr(w, 500, "failed to load skill usage")
 		return
 	}
@@ -1259,7 +1259,7 @@ func (s *Server) fsMissingSkills(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	missing, err := pg.MissingSkillStats(limit)
 	if err != nil {
-		log.Printf("[skills] missing skills: %v", err)
+		slog.Error("[skills] failed to read missing stats", "err", err)
 		writeErr(w, 500, "failed to load missing skills")
 		return
 	}
@@ -1454,7 +1454,7 @@ func warnBrokenSkills(dir string) {
 		if s.Dir == "" || s.Name == filepath.Base(s.Dir) {
 			continue
 		}
-		log.Printf("[skill] %s: frontmatter did not parse (loaded under the directory name; description and mcps are empty) - fix the YAML in %s", s.Name, filepath.Join(s.Dir, "SKILL.md"))
+		slog.Warn("[skill] frontmatter did not parse (loaded under directory name; fix YAML in SKILL.md)", "skill", s.Name, "path", filepath.Join(s.Dir, "SKILL.md"))
 	}
 }
 
@@ -2046,7 +2046,7 @@ func (s *Server) pgSkillVisibility(w http.ResponseWriter, r *http.Request) {
 	}
 	agents, err := pg.SkillAgents(r.PathValue("name"))
 	if err != nil {
-		log.Printf("[skills] visibility for %s: %v", r.PathValue("name"), err)
+		slog.Error("[skills] failed to read visibility", "skill", r.PathValue("name"), "err", err)
 		writeErr(w, 500, "failed to load skill visibility")
 		return
 	}
@@ -2068,7 +2068,7 @@ func (s *Server) pgToggleSkillVisibility(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := pg.ToggleSkillVisibility(body.AgentID, body.SkillName, body.Visible); err != nil {
-		log.Printf("[skills] toggle visibility for %s: %v", body.SkillName, err)
+		slog.Error("[skills] failed to toggle visibility", "skill", body.SkillName, "err", err)
 		writeErr(w, 500, "failed to update skill visibility")
 		return
 	}
@@ -2349,7 +2349,7 @@ func (s *Server) restoreTasksAfterProfileDelete(pg *db.DB) {
 				// paused task remains paused and terminal tasks remain immutable.
 				if !isTerminalStatus(task.lifecycleSnapshot().Status) && s.taskRuntimeAvailable(task, "planner", "worker") {
 					if _, reopenErr := task.Store.ReopenIntentsByBlockedReason(db.IntentBlockedLLMQuota); reopenErr != nil {
-						log.Printf("[llm-profile] task %s reopen quota-blocked intents after profile delete: %v", task.ID, reopenErr)
+						slog.Warn("[llm-profile] reopen quota-blocked intents failed after profile delete", "task_id", task.ID, "err", reopenErr)
 					}
 				}
 				task.Notify()

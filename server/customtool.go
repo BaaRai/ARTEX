@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -242,7 +242,7 @@ func (s *Server) seedPythonInterpreter() {
 	}
 	if p := detectPython(); p != "" {
 		_ = s.m.pg.SetSetting(settingPythonInterp, p)
-		log.Printf("[custom-tool] auto-detected python interpreter: %s", p)
+		slog.Info("[custom-tool] auto-detected python interpreter", "path", p)
 	}
 }
 
