@@ -49,8 +49,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { intlLocale, t } from "@/i18n";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
+import { formatShortDateTime } from "@/lib/format";
 import {
   buildMatchers,
   DEFAULT_REQUEST_HOOK_SOURCE,
@@ -70,17 +71,6 @@ import type {
   TamperHookVersion,
   TrafficExchange,
 } from "@/lib/types";
-
-function fmtDateTime(ts: string) {
-  if (!ts) return "";
-  return new Date(ts).toLocaleString(intlLocale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 interface EditorState {
   mode: "create" | "edit";
@@ -518,7 +508,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                           </Badge>
                         </TooltipTrigger>
                         <TooltipContent className="text-xs">
-                          {t("Last seen at {time}", { time: fmtDateTime(hook.last_error.at) })}
+                          {t("Last seen at {time}", { time: formatShortDateTime(hook.last_error.at) })}
                         </TooltipContent>
                       </Tooltip>
                     ) : (
@@ -903,7 +893,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                           {t("prio {n}", { n: v.priority })} · {v.source_sha256.slice(0, 12)}
                         </span>
                       </div>
-                      <span className="text-xs text-muted-foreground">{fmtDateTime(v.created_at)}</span>
+                      <span className="text-xs text-muted-foreground">{formatShortDateTime(v.created_at)}</span>
                     </div>
                     {v.note && <p className="text-xs text-muted-foreground">{v.note}</p>}
                     <div className="flex items-center justify-between gap-2 pt-1">

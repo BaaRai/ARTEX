@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"os"
 	"sort"
@@ -183,15 +183,15 @@ func applyToolRAG(ctx context.Context, agentKey string, tools []actool.CoreTool,
 	query, _ := ctx.Value(toolQueryKey{}).(string)
 	out, projected, err := projectTools(query, tools, toolRAGKeep(deferred), k, score)
 	if err != nil {
-		log.Printf("[tool-rag] %s: scoring failed, using full catalog (%d tools): %v", agentKey, len(tools), err)
+		slog.Warn("[tool-rag] scoring failed, using full catalog", "agent", agentKey, "tools", len(tools), "err", err)
 	} else if !projected {
-		log.Printf("[tool-rag] %s: full catalog (%d tools; empty query or under %d)", agentKey, len(tools), toolRAGMinCatalog)
+		slog.Info("[tool-rag] using full catalog (empty query or under threshold)", "agent", agentKey, "tools", len(tools), "min_catalog", toolRAGMinCatalog)
 	} else {
 		names := make([]string, len(out))
 		for i, t := range out {
 			names[i] = t.Name()
 		}
-		log.Printf("[tool-rag] %s: selected %d/%d tools: %s", agentKey, len(out), len(tools), strings.Join(names, ", "))
+		slog.Info("[tool-rag] selected tools", "agent", agentKey, "selected", len(out), "total", len(tools), "names", strings.Join(names, ", "))
 	}
 	return out
 }
