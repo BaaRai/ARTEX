@@ -102,6 +102,35 @@ func TestTelegramPackingUsesRuneBudget(t *testing.T) {
 	}
 }
 
+// TestTelegramPackingCountsEscapedText covers digest lines that carry HTML
+// metacharacters (an XSS title, a query string with &). They grow when escaped,
+// so packing must measure the escaped text: every item reported as kept has to
+// appear whole in the message, and the footer must survive.
+func TestTelegramPackingCountsEscapedText(t *testing.T) {
+	m := batchMsg(200)
+	m.WindowMinutes = 60
+	m.HomeURL = "https://artex.example.com/"
+	for i := range m.Items {
+		m.Items[i].Name = "Reflected XSS <script> in q param of /search, vuln" + itoa(i+1) + " end"
+		m.Items[i].Assets = []string{"https://shop.example.com/search?q=1&lang=en"}
+	}
+	text, kept := telegramHTML(m)
+	if n := utf8.RuneCountInString(text); n > telegramTextLimit {
+		t.Fatalf("body of %d characters exceeds the limit of %d", n, telegramTextLimit)
+	}
+	if kept <= 0 || kept >= len(m.Items) {
+		t.Fatalf("only a part should fit, got %d", kept)
+	}
+	for i := 0; i < kept; i++ {
+		if !strings.Contains(text, "vuln"+itoa(i+1)+" end") {
+			t.Fatalf("item %d of %d reported as kept is not whole in the message:\n...%s", i+1, kept, text[max(0, len(text)-300):])
+		}
+	}
+	if !strings.Contains(text, "View all on the platform</a>") {
+		t.Fatalf("the footer was cut off:\n...%s", text[max(0, len(text)-300):])
+	}
+}
+
 func TestFeishuPackingReportsKept(t *testing.T) {
 	m := batchMsg(2000)
 	_, kept := feishuCard(m)

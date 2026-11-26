@@ -139,12 +139,16 @@ func TestPlannerToolCallReachesHooks(t *testing.T) {
 func TestMainAgentToolCallReachesHooks(t *testing.T) {
 	f := newHookReachFixture(t)
 	hooks := &recordingHooks{}
-	main := NewMainAgent(toolCallThenStop("Bash", f.bash), "test-model", f.workDir, nil, 0, 3)
-	if _, err := main.Chat(f.ctx, f.expID, 0, nil, f.ts, "probe goal", "status?", hooks, nil, nil, nil, nil, nil); err != nil {
+	main := NewMainAgent(toolCallThenStop("add_hint", `{"text":"focus on auth"}`), "test-model", f.workDir, nil, 0, 3)
+	if _, err := main.Chat(f.ctx, f.expID, 0, nil, f.ts, "probe goal", "focus on auth", hooks, nil, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	hooks.assertOneScopedCall(t, "Bash", f.taskID)
-	f.assertToolDidNotRun(t)
+	hooks.assertOneScopedCall(t, "add_hint", f.taskID)
+	if hints, err := f.ts.ListByKind("hint", 10); err != nil {
+		t.Fatal(err)
+	} else if len(hints) != 0 {
+		t.Fatalf("blocked add_hint still wrote %d hint node(s)", len(hints))
+	}
 }
 
 func TestWorkerToolCallReachesHooks(t *testing.T) {

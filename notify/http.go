@@ -299,3 +299,32 @@ func redactURLsInText(s string) string {
 	}
 	return b.String()
 }
+
+// The helpers below let the inbound chat bridge (package chatbridge) talk to the
+// same chat platforms with the same protections as delivery: the dial guard,
+// the redirect policy and the credential-safe error text. They are wrappers,
+// not copies, so a fix to the guard reaches both directions at once.
+
+// NewGuardedClient returns a client with the delivery dial guard and redirect
+// policy and its own timeout. Long polling needs a timeout longer than the
+// 15 seconds a delivery gets.
+func NewGuardedClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     notifyTransport,
+		CheckRedirect: httpClient.CheckRedirect,
+	}
+}
+
+// RedactTransportError returns the text of a transport error with any URL
+// reduced to scheme and host, so a credential carried in the URL never
+// reaches a log line or an API response.
+func RedactTransportError(err error) string { return redactTransportError(err) }
+
+// ValidateEndpointURL checks a configured platform address the way the
+// channels do: http(s) only, a host, and no loopback or link-local literal.
+func ValidateEndpointURL(raw string) error { return validateHTTPURL(raw) }
+
+// AllowLocalTargets reports whether ARTEX_NOTIFY_ALLOW_LOCAL is set, the
+// explicit opt-in for local and test endpoints.
+func AllowLocalTargets() bool { return allowLocalTargets() }

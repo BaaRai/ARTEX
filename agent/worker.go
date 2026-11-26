@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -343,7 +343,7 @@ func makeRunDir(base, leaf string) {
 		return
 	}
 	if err := runDirMaker(base, leaf); err != nil {
-		log.Printf("[agent] run directory %s: %v", leaf, err)
+		slog.Warn("[agent] run directory creation failed", "dir", leaf, "err", err)
 	}
 }
 

@@ -41,6 +41,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api } from "@/lib/api";
+import { formatShortDateTime } from "@/lib/format";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { statusMeta } from "@/lib/status";
 import type {
@@ -65,7 +66,6 @@ import {
   type FindingReport,
   FindingsTable,
   findingRowKey,
-  fmtTime,
   isSameFinding,
   REPORT_STATE_META,
   SEVERITIES,
@@ -1350,7 +1350,7 @@ export default function FindingsPage() {
                           );
                         })}
                         <span className="text-xs tabular-nums text-muted-foreground">
-                          {fmtTime(group.last_found_at)}
+                          {formatShortDateTime(group.last_found_at, { seconds: false })}
                         </span>
                         {group.task_id !== null && (
                           <Button size="icon-sm" variant="ghost" asChild>
