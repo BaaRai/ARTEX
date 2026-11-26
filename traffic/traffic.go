@@ -331,6 +331,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	}
 	if t.fts {
 		t.ftsq = newFTSQueue(t)
+		t.ftsq.resume()
 	}
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
@@ -429,6 +430,9 @@ func (t *Traffic) initIndex() error {
 	if _, err := conn.ExecContext(ctx, ftsSchema); err != nil {
 		slog.Warn("[traffic] full-text index unavailable; body search will be disabled", "err", err)
 		return nil
+	}
+	if _, err := conn.ExecContext(ctx, ftsPendingSchema); err != nil {
+		return err
 	}
 	t.fts = true
 	return nil
@@ -716,12 +720,10 @@ const unavailableMarker = "[original request unavailable]\n"
 
 // recordViews writes one exchange from explicit views, with its rewrite trace,
 // in one transaction: the exchange row, its bodies, blob references, the trace
-// and the full-text index of the views only. A failure rolls everything back,
-// so there is never a rewritten exchange without its trace. Without trace
-// lines this is exactly what record always wrote.
+// and the full-text text of the views only, which waits in ex_fts_pending for
+// the background indexer (fts_queue.go). A failure rolls everything back, so
+// there is never a rewritten exchange without its trace.
 func (t *Traffic) recordViews(rq requestView, rs responseView, lines []rewrite.TraceLine) {
-	// The index job is queued after writeViews releases wmu: the indexer needs
-	// wmu, and a full queue makes add wait for it.
 	if job := t.writeViews(rq, rs, lines); job != nil {
 		t.ftsq.add(*job)
 	}
@@ -823,7 +825,11 @@ VALUES(?,?,?,?,?,?,?)`,
 		// recorded views are indexed, never a value a rule wrote.
 		idx := strings.Join([]string{url, reqHead, reqB.index, respHead, respB.index}, "\n")
 		if t.ftsq != nil {
-			job = &ftsJob{rowid: rowid, id: id, text: idx}
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO ex_fts_pending(rowid,id,content) VALUES(?,?,?)`, rowid, id, idx); err != nil {
+				fail("queueing full-text index", err)
+				return nil
+			}
+			job = &ftsJob{rowid: rowid, id: id}
 		} else if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowid, idx); err != nil {
 			fail("writing full-text index", err)
 			return nil

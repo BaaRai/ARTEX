@@ -33,10 +33,43 @@ func TestQueuedIndexSkipsDeletedExchange(t *testing.T) {
 	if tr.ftsq == nil {
 		t.Skip("no full-text index in this build")
 	}
-	tr.ftsq.index(ftsJob{rowid: 4242, id: "gone", text: "orphan-marker-xyz"})
-	var n int
-	if err := tr.db.QueryRow(`SELECT count(*) FROM ex_fts WHERE ex_fts MATCH '"orphan-marker-xyz"'`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("orphan index rows = %d, %v; want 0", n, err)
+	if _, err := tr.db.Exec(`INSERT INTO ex_fts_pending(rowid,id,content) VALUES(4242,'gone','orphan-marker-xyz')`); err != nil {
+		t.Fatal(err)
+	}
+	tr.ftsq.index(ftsJob{rowid: 4242, id: "gone"})
+	var indexed, pending int
+	if err := tr.db.QueryRow(`SELECT count(*) FROM ex_fts WHERE ex_fts MATCH '"orphan-marker-xyz"'`).Scan(&indexed); err != nil || indexed != 0 {
+		t.Fatalf("orphan index rows = %d, %v; want 0", indexed, err)
+	}
+	if err := tr.db.QueryRow(`SELECT count(*) FROM ex_fts_pending`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("pending rows = %d, %v; want 0", pending, err)
+	}
+}
+
+// An exchange recorded but not yet indexed when the process stops is indexed
+// on the next Open instead of staying invisible to body search.
+func TestPendingIndexSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	tr, err := Open(dir, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.ftsq == nil {
+		tr.Close()
+		t.Skip("no full-text index in this build")
+	}
+	tr.ftsq.close() // the worker is gone, as after a kill
+	tr.record(newFlow("app.example", "GET", "/config.js", nil, []byte("var key = 'restart-marker-77';")))
+	tr.Close()
+
+	tr, err = Open(dir, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	got, err := tr.query("", "", "restart-marker-77", 0, 10)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("body search after restart = %d results, %v; want 1", len(got), err)
 	}
 }
 
