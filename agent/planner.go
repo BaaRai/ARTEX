@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -516,7 +518,53 @@ func plannerSystem(goal, dataDir, workDir string) string {
 // for time/heartbeat wakes). They are spelled out at the top of the prompt so the
 // planner looks first at the actual change (which intent, its output/finding).
 // hooks (the task's target-only Guard) sees every tool call; may be nil.
+// ErrPlannerEmptyContext reports that Planner.Plan was called without usable
+// planning context (missing exploration store, or both task goal and goal nodes
+// are empty).
+var ErrPlannerEmptyContext = errors.New("planner refused to plan on empty context")
+
+func hasNonEmptyGoalNodes(ts *db.ExplorationStore) bool {
+	if ts == nil {
+		return false
+	}
+	nodes, err := ts.ListByKind(db.KindGoal, 100)
+	if err != nil {
+		return false
+	}
+	for _, n := range nodes {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(n.Payload, &payload) == nil && strings.TrimSpace(payload.Text) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, goal string, triggers []TriggerEvent, hooks harness.HookRunner, emit func(db.Activity)) (met bool, reason string, err error) {
+	if ts == nil {
+		msg := fmt.Sprintf("task %d: refusing to plan on empty context (exploration store is nil)", taskID)
+		log.Printf("[planner] %s", msg)
+		if emit != nil {
+			emit(db.Activity{Worker: "planner", Kind: "result", IsError: true, Summary: msg, Detail: msg})
+		}
+		return false, "", fmt.Errorf("%w: exploration store is nil", ErrPlannerEmptyContext)
+	}
+	rootDesc, rootGoal, _ := ts.Root()
+	effectiveGoal := strings.TrimSpace(goal)
+	if effectiveGoal == "" {
+		effectiveGoal = strings.TrimSpace(rootGoal)
+	}
+	if effectiveGoal == "" && !hasNonEmptyGoalNodes(ts) {
+		msg := fmt.Sprintf("task %d: refusing to plan on empty context (empty task goal and no goals; description=%q)", taskID, strings.TrimSpace(rootDesc))
+		log.Printf("[planner] %s", msg)
+		if emit != nil {
+			emit(db.Activity{Worker: "planner", Kind: "result", IsError: true, Summary: msg, Detail: msg})
+		}
+		return false, "", fmt.Errorf("%w: empty task goal and no goals", ErrPlannerEmptyContext)
+	}
+	goal = effectiveGoal
 	// cold-digest §2.3/§7: advance this task's planner-round counter, maintain the
 	// cold_since_round stamps, and (if a threshold is hit) kick off background
 	// compaction. Synchronous part is cheap (a few queries); the LLM compaction
