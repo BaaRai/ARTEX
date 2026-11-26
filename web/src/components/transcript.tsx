@@ -587,6 +587,11 @@ function parseUserBody(body: string): { text: string; attachments: MsgAttachment
   return { text: body, attachments: [] };
 }
 
+// UserRow renders a right-aligned chat bubble: either a human turn (the message you
+// sent the main agent) or, in a worker session, the LLM-generated intent that leads
+// it (intent=true) — same bubble, but a target icon instead of the human avatar.
+// summary is a truncated first line, so the full message is pulled from the detail
+// and shown in full (bubble is whitespace-pre-wrap, so long/multi-line text wraps).
 function UserRow({ step, intent, getDetail }: { step: Activity; intent?: boolean; getDetail: (seq: number) => Promise<string> }) {
   const Icon = intent ? CrosshairIcon : UserIcon;
   const [ref, inView] = useInView();

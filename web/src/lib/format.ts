@@ -17,10 +17,12 @@ export function formatBytes(bytes: number | null | undefined, { empty = "0 B" }:
   return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${BYTE_UNITS[unit]}`;
 }
 
-/** Compact token count: 950, 1.2k, 25k, 1.5M, 12M (one decimal only below 10k / 10M). */
+/** Compact token count: 950, 1.2k, 25k, 123.5k, 12.5M (one decimal, a trailing ".0" dropped). */
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  const oneDecimal = (v: number) => v.toFixed(1).replace(/\.0$/, "");
+  // From 999,950 the "k" value would round up to "1000k", so switch to "M" there.
+  if (n >= 999_950) return `${oneDecimal(n / 1_000_000)}M`;
+  if (n >= 1000) return `${oneDecimal(n / 1000)}k`;
   return String(n);
 }
 
