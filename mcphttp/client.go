@@ -264,13 +264,33 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 	return c, nil
 }
 
+// readLimitedLine reads one line, delimiter included, and refuses a line
+// longer than max. ReadString would buffer the whole line, and a legacy SSE
+// peer can withhold the newline.
+func readLimitedLine(r *bufio.Reader, max int) (string, error) {
+	if max < 0 {
+		max = 0
+	}
+	var b strings.Builder
+	for {
+		frag, err := r.ReadSlice('\n')
+		if len(frag) > max || b.Len() > max-len(frag) {
+			return "", fmt.Errorf("mcp sse line exceeds %d bytes", max)
+		}
+		b.Write(frag)
+		if err == nil || !errors.Is(err, bufio.ErrBufferFull) || len(frag) == 0 {
+			return b.String(), err
+		}
+	}
+}
+
 // readSSEEndpoint reads the message endpoint announced by the SSE stream. The
 // endpoint must stay on the origin of the configured SSE URL: the POSTs that
 // follow carry the operator's headers, and a remote server must not be able to
 // retarget them.
 func readSSEEndpoint(r *bufio.Reader, base *url.URL) (string, error) {
 	for {
-		line, err := r.ReadString('\n')
+		line, err := readLimitedLine(r, mcpMaxRPCBytes)
 		if err != nil {
 			return "", fmt.Errorf("mcp sse endpoint: %w", err)
 		}
@@ -303,7 +323,7 @@ func readSSEEndpoint(r *bufio.Reader, base *url.URL) (string, error) {
 func (c *Client) readLegacySSE(r *bufio.Reader) {
 	defer close(c.streamDone)
 	for {
-		line, err := r.ReadString('\n')
+		line, err := readLimitedLine(r, mcpMaxRPCBytes)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				select {

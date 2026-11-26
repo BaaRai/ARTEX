@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -105,6 +107,45 @@ func TestLegacySSEClientDiscoverAndCall(t *testing.T) {
 	got, err := c.Call(ctx, "echo", map[string]any{"value": "x"})
 	if err != nil || got != "ok" {
 		t.Fatalf("Call() = %q, %v", got, err)
+	}
+}
+
+func TestReadLimitedLine(t *testing.T) {
+	short := bufio.NewReaderSize(strings.NewReader("hello\nnext\n"), 4)
+	got, err := readLimitedLine(short, 16)
+	if err != nil || got != "hello\n" {
+		t.Fatalf("short = %q, %v", got, err)
+	}
+	got, err = readLimitedLine(short, 16)
+	if err != nil || got != "next\n" {
+		t.Fatalf("second = %q, %v", got, err)
+	}
+
+	exact := strings.Repeat("a", 7) + "\n"
+	got, err = readLimitedLine(bufio.NewReaderSize(strings.NewReader(exact), 3), 8)
+	if err != nil || got != exact {
+		t.Fatalf("exact = %q, %v", got, err)
+	}
+
+	over := strings.Repeat("b", 8) + "\n"
+	if _, err = readLimitedLine(bufio.NewReaderSize(strings.NewReader(over), 3), 8); err == nil || !strings.Contains(err.Error(), "exceeds 8 bytes") {
+		t.Fatalf("over: %v", err)
+	}
+
+	got, err = readLimitedLine(bufio.NewReader(strings.NewReader("tail")), 16)
+	if got != "tail" || !errors.Is(err, io.EOF) {
+		t.Fatalf("eof = %q, %v", got, err)
+	}
+}
+
+func TestReadSSEEndpointRejectsLongLine(t *testing.T) {
+	base, err := url.Parse("https://mcp.example.com/sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := "data: " + strings.Repeat("a", mcpMaxRPCBytes) + "\n"
+	if _, err = readSSEEndpoint(bufio.NewReader(strings.NewReader(line)), base); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("long line: %v", err)
 	}
 }
 
