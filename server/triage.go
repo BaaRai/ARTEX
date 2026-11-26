@@ -23,10 +23,10 @@ import (
 // no base_url/model returns nil, and report_finding behaves exactly as before.
 func (s *Server) triageClient() agent.TriageClient {
 	id := s.triageProfileID()
-	slog.Info("[triage] initialized triage client", "profile_id", id)
 	if id <= 0 {
 		return nil
 	}
+	slog.Info("[triage] initialized triage client", "profile_id", id)
 	p, err := s.m.pg.ProfileByID(id)
 	if err != nil || p == nil {
 		return nil

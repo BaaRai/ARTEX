@@ -157,7 +157,7 @@ func (s *Server) deleteRemoteTaskArchive(job *pgdb.TaskArchive) error {
 	}
 	if err := s.recoverRemoteArchiveJournal(journal); err != nil {
 		// The task is gone; the durable outbox retries the remaining object cleanup.
-		slog.Info("[task-archive] archive deleted, remote cleanup pending", "archive_id", job.ID, "err", err)
+		slog.Warn("[task-archive] archive deleted, remote cleanup pending", "archive_id", job.ID, "err", err)
 	}
 	return nil
 }

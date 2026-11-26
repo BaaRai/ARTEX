@@ -1437,7 +1437,7 @@ func warnBrokenSkills(dir string) {
 		if s.Dir == "" || s.Name == filepath.Base(s.Dir) {
 			continue
 		}
-		slog.Warn("[skill] frontmatter did not parse", "skill", s.Name, "path", filepath.Join(s.Dir, "SKILL.md"))
+		slog.Warn("[skill] frontmatter did not parse (loaded under directory name; fix YAML in SKILL.md)", "skill", s.Name, "path", filepath.Join(s.Dir, "SKILL.md"))
 	}
 }
 
