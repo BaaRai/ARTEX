@@ -28,6 +28,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
+import { formatTokens } from "@/lib/format";
 import { taskAssetTypeLabel } from "@/lib/task-assets";
 import type {
   AssetInterceptKind,
@@ -44,13 +45,6 @@ import type {
 } from "@/lib/types";
 import { setVisibleInterval } from "@/lib/polling";
 import { intlLocale, t } from "@/i18n";
-
-// Compact token count formatting (12345 → 12.3k, 2000000 → 2M).
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k";
-  return String(n);
-}
 
 // Cache hit rate = cache read / input (InputTokens already includes the cache_read subset, so the ratio is 0–100%).
 function cacheHitRate(cacheRead: number, input: number): string {
@@ -787,15 +781,15 @@ export function OverviewTab({ taskId }: { taskId: string }) {
               <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
                 <span className="tabular-nums">
                   <span className="text-muted-foreground">{t("Input")} </span>
-                  <span className="font-semibold">{fmtTokens(tokenTotals.input)}</span>
+                  <span className="font-semibold">{formatTokens(tokenTotals.input)}</span>
                 </span>
                 <span className="tabular-nums">
                   <span className="text-muted-foreground">{t("Output")} </span>
-                  <span className="font-semibold">{fmtTokens(tokenTotals.output)}</span>
+                  <span className="font-semibold">{formatTokens(tokenTotals.output)}</span>
                 </span>
                 <span className="tabular-nums">
                   <span className="text-muted-foreground">{t("Cache read")} </span>
-                  <span className="font-semibold">{fmtTokens(tokenTotals.cacheRead)}</span>
+                  <span className="font-semibold">{formatTokens(tokenTotals.cacheRead)}</span>
                 </span>
                 <span className="tabular-nums">
                   <span className="text-muted-foreground">{t("Cache hit rate")} </span>
@@ -824,9 +818,9 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                           {m.model}
                         </td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{m.calls}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.input_tokens)}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.output_tokens)}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.cache_read_tokens)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{formatTokens(m.input_tokens)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{formatTokens(m.output_tokens)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{formatTokens(m.cache_read_tokens)}</td>
                         <td className="py-1.5 text-right tabular-nums text-emerald-500">
                           {cacheHitRate(m.cache_read_tokens, m.input_tokens)}
                         </td>

@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { Loader2Icon, PlusIcon, SendIcon, XIcon } from "lucide-react";
 
-import { HttpCodeBlock, statusTone } from "@/components/http-code-block";
+import { HttpCodeBlock } from "@/components/http-code-block";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -15,6 +15,7 @@ import { ApiError, api } from "@/lib/api";
 import { parseRawRequest, splitReplayHeaders } from "@/lib/replay";
 import type { TrafficExchange, TrafficReplayHeader, TrafficReplayResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { httpStatusTone } from "@/lib/status";
 import { t } from "@/i18n";
 
 type HeaderRow = TrafficReplayHeader & { key: number };
@@ -260,7 +261,7 @@ export function ReplayPanel({
       {result && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="secondary" className={cn("font-mono tabular-nums", statusTone(result.status))}>
+            <Badge variant="secondary" className={cn("font-mono tabular-nums", httpStatusTone(result.status))}>
               {result.status}
             </Badge>
             <span className="text-muted-foreground tabular-nums">{result.duration_ms} ms</span>

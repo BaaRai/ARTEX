@@ -6,16 +6,9 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { httpStatusTone } from "@/lib/status";
 import { cn, copyText } from "@/lib/utils";
 import { t } from "@/i18n";
-
-export function statusTone(status: number) {
-  if (status >= 500) return "text-red-500";
-  if (status >= 400) return "text-amber-500";
-  if (status >= 300) return "text-blue-500";
-  if (status >= 200) return "text-emerald-500";
-  return "text-muted-foreground";
-}
 
 function StartLine({ line }: { line: string }) {
   const response = /^(HTTP\/\S+)(\s+)(\d{3})(.*)$/.exec(line);
@@ -24,7 +17,7 @@ function StartLine({ line }: { line: string }) {
       <>
         <span className="text-muted-foreground">{response[1]}</span>
         {response[2]}
-        <span className={statusTone(Number(response[3]))}>{response[3]}</span>
+        <span className={httpStatusTone(Number(response[3]))}>{response[3]}</span>
         {response[4]}
       </>
     );
