@@ -42,6 +42,14 @@ var noTargetTools = toolSet(
 	"ask_operator",
 	// recorded traffic
 	"traffic_search", "traffic_get", "traffic_blob", "traffic_messages",
+	// Ghidra sidecar: the input names a file in the run directory or a job id,
+	// never a connection; the sidecar URL comes from ARTEX_GHIDRA_URL
+	"ghidra_status", "ghidra_analyze", "ghidra_job", "ghidra_functions",
+	"ghidra_decompile", "ghidra_strings", "ghidra_attack_surface",
+	// OpenTRAP sidecar: the input names a history id or scope rules,
+	// never a connection; the sidecar URL comes from ARTEX_OPENTRAP_URL
+	"opentrap_status", "opentrap_history", "opentrap_history_item",
+	"opentrap_scope_get", "opentrap_scope_put", "opentrap_replay",
 )
 
 func toolSet(names ...string) map[string]bool {

@@ -1,0 +1,44 @@
+# Optional OpenTRAP sidecar for intercepting proxy and web security testing (skills/opentrap, opentrap_* tools).
+# Enable by adding this overlay to every compose command:
+#   docker compose -f docker-compose.yml -f docker-compose.opentrap.yml up -d
+# Without this overlay the main compose file is unchanged and the opentrap_* tools
+# report that the service is not configured.
+services:
+  artex:
+    environment:
+      # Empty in .env falls back to the bundled sidecar. Point it at an external
+      # sidecar to keep this one unused (the container still starts, harmlessly).
+      ARTEX_OPENTRAP_URL: ${ARTEX_OPENTRAP_URL:-http://opentrap:8081}
+      ARTEX_OPENTRAP_API_KEY: ${ARTEX_OPENTRAP_API_KEY:-}
+    depends_on:
+      opentrap:
+        condition: service_healthy
+
+  opentrap:
+    # Build from the opentrap repository. The image is not published on Docker Hub;
+    # build it locally or use a private registry. The build expects the AppImage
+    # at /app/opentrap/opentrap-x86_64.appimage inside the build context.
+    build:
+      context: ./opentrap-sidecar
+      dockerfile: Dockerfile
+    image: artex-opentrap-sidecar:local
+    # No host port. The service has no authentication of its own, so it is
+    # reachable only from the compose network; publishing it would expose an
+    # unauthenticated proxy/replay endpoint to every process on the host.
+    volumes:
+      - opentrap-data:/app/data
+    environment:
+      # Sidecar listens on 0.0.0.0:8081 inside the container.
+      PORT: "8081"
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8081/v1/status >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  opentrap-data:
