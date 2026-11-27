@@ -143,3 +143,17 @@ func TestIndexBodySkipsBinaryContentType(t *testing.T) {
 		t.Fatalf("indexBody on an image/png body = (%q, %v), want (\"\", false)", text, ok)
 	}
 }
+
+// A gzip body with a bad checksum still yields the text that decoded.
+func TestDecodeBodyKeepsTextOnBadGzipChecksum(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	io.WriteString(gz, compressedPage)
+	gz.Close()
+	b := buf.Bytes()
+	b[len(b)-8] ^= 0xff
+	out, ok := decodeBody(http.Header{"Content-Encoding": {"gzip"}}, b, maxIndexBody)
+	if !ok || string(out) != compressedPage {
+		t.Fatalf("decodeBody on a bad gzip checksum = (%q, %v), want the decoded text", out, ok)
+	}
+}

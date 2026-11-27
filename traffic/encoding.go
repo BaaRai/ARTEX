@@ -5,7 +5,6 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -17,8 +16,8 @@ import (
 // returns at most limit decoded bytes. The proxy records bodies as they crossed
 // the wire, so a compressed body has to be decoded before its text can be
 // indexed or matched. ok is false when the body is not encoded, the encoding is
-// unsupported or stacked, or the data does not decode. A truncated stream
-// yields what decoded before the cut. The output is bounded because the body
+// unsupported or stacked, or nothing decodes. A truncated or corrupt stream
+// yields what decoded before the error. The output is bounded because the body
 // comes from the target.
 func decodeBody(header http.Header, body []byte, limit int) (out []byte, ok bool) {
 	enc := strings.ToLower(strings.TrimSpace(header.Get("Content-Encoding")))
@@ -46,7 +45,7 @@ func decodeBody(header http.Header, body []byte, limit int) (out []byte, ok bool
 		return nil, false
 	}
 	out, err := io.ReadAll(io.LimitReader(zr, int64(limit)))
-	if err != nil && (!errors.Is(err, io.ErrUnexpectedEOF) || len(out) == 0) {
+	if err != nil && len(out) == 0 {
 		return nil, false
 	}
 	return out, true
