@@ -873,7 +873,11 @@ func (s *Server) emitTaskLLMTransition(t *Task, transition db.TaskLLMTransition,
 	}
 	mode := "automatic"
 	kind := "llm_switch"
-	summary := fmt.Sprintf("%s quota exhausted", llmAuditProfileLabel(previous))
+	reasonLabel := "failed consecutive calls"
+	if isQuotaExhaustedError(cause) {
+		reasonLabel = "quota exhausted"
+	}
+	summary := fmt.Sprintf("%s %s", llmAuditProfileLabel(previous), reasonLabel)
 	if transition.NextProfileID != nil {
 		summary += fmt.Sprintf(", subsequent calls switched to %s", llmAuditProfileLabel(next))
 	} else {

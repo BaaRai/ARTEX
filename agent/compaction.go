@@ -537,16 +537,32 @@ func buildCompressionInput(g *coldGraph, b block, nodeByID map[int64]*db.Node) s
 	return sb.String()
 }
 
+// isThinkingBetweenToolsError reports an Anthropic 400 telling the caller that
+// the model rejects thinking.type="disabled" and requires "between_tools" instead
+// (e.g. Claude Sonnet 5.5, #550).
+func isThinkingBetweenToolsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "between_tools") && strings.Contains(msg, "thinking")
+}
+
 // compress runs the §4 body LLM call on one block. Uses the same model the agent
-// runs on; thinking disabled (a pure summarization step).
+// runs on without forcing thinking.type="disabled" (models such as Claude Sonnet
+// 5.5 reject {"type":"disabled"} with HTTP 400; inheriting the profile's working
+// thinking setting avoids sending an unsupported parameter, #550).
 func (c *Compactor) compress(ctx context.Context, g *coldGraph, b block, nodeByID map[int64]*db.Node) (string, error) {
 	req := llm.CompletionRequest{
 		System:    []string{compressionSystem},
 		Messages:  []llm.Message{llm.UserText(buildCompressionInput(g, b, nodeByID))},
 		MaxTokens: 1500,
-		Thinking:  "disabled",
 	}
 	msg, _, _, err := c.prov.Complete(ctx, req)
+	if err != nil && isThinkingBetweenToolsError(err) {
+		req.Thinking = "between_tools"
+		msg, _, _, err = c.prov.Complete(ctx, req)
+	}
 	if err != nil {
 		return "", err
 	}
