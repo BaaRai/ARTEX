@@ -1738,6 +1738,10 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]any{"ok": false, "error": msg})
 			return
 		}
+	} else if cfg.Format == agent.FormatClaudeCode && cfg.APIKey == "" && stored != nil && stored.Format == string(agent.FormatClaudeCode) {
+		// The token is optional for Claude Code, but a saved one must be used
+		// by the test exactly as a real run would use it.
+		cfg.APIKey = strings.TrimSpace(stored.APIKey)
 	}
 	// Retry params do [not] go into the connection test: the test has a 30s hard timeout, and stacking the configured retry counts/long intervals on top
 	// would only turn a perfectly usable endpoint into a "timeout failure". The test asks "does this endpoint work at all"; retry pacing

@@ -502,7 +502,7 @@ runtime supports it.
 **LLM**: `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`), or configure it in the UI's
 "LLM Configuration" page, which can also add a local Ollama server as a keyless provider (format
 "Ollama", default base URL `http://127.0.0.1:11434/v1`). Optional:
-`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama | bedrock-gateway`), `ARTEX_LLM_MODEL`,
+`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama | bedrock-gateway | claude-code`), `ARTEX_LLM_MODEL`,
 `ARTEX_LLM_BASE_URL`, `ARTEX_LLM_PROXY`.
 
 **Base URL gotcha**: for the Anthropic format, enter the host **without** `/v1` (for example
@@ -535,6 +535,32 @@ gateways; direct AWS Bedrock with SigV4 credentials is not supported.
 For environment-based setup, set `ARTEX_LLM_PROVIDER=bedrock-gateway`,
 `ARTEX_LLM_BASE_URL`, `ARTEX_LLM_MODEL`, and `ARTEX_LLM_API_KEY`. Optional
 `ARTEX_LLM_CUSTOM_HEADERS` uses the same newline-separated `Name: Value` format.
+
+**Claude Code CLI**: select **Claude Code CLI** in System → LLM to drive the agents with
+the `claude` binary instead of an HTTP endpoint, using a Claude subscription. ARTEX keeps its
+own agent loop: each model turn runs one `claude -p` process with every built-in Claude Code
+tool, MCP server, settings file and slash command disabled, so the CLI only generates text.
+ARTEX's tool definitions go into the system prompt with a JSON reply protocol, and the reply's
+tool calls come back to ARTEX as ordinary `tool_use` blocks, so tools still run under ARTEX's
+executor, permissions and transcripts. The process gets a minimal environment, never the
+server's secrets.
+
+- **Model**: an alias (`opus`, `sonnet`, `haiku`; the ↻ button lists them) or a full model ID.
+  The default is `sonnet`. Base URL does not apply.
+- **Login**: run `claude setup-token` on any machine and paste the token into the profile's
+  **Token** field (stored encrypted), or set `CLAUDE_CODE_OAUTH_TOKEN` in `.env`. Without a token,
+  the CLI uses its own login: in Docker, `docker compose exec artex sh -c
+  'CLAUDE_CONFIG_DIR=/app/keys/claude-code claude'` and `/login` once; the config dir lives in
+  the root-only keys volume. An `sk-ant-api…` key is passed as `ANTHROPIC_API_KEY` instead.
+- **Limits**: `ARTEX_CLAUDE_CODE_MAX_PROCS` (default 4) caps concurrent CLI processes,
+  `ARTEX_CLAUDE_CODE_TIMEOUT` (default `10m`) caps one turn, and `ARTEX_CLAUDE_CODE_BIN` points at
+  a binary that is not `claude` on `PATH`. Each turn resends the whole conversation, there is no
+  token-by-token streaming, and images in tool results are replaced by a placeholder. Usage
+  counts against the subscription's limits; a usage-limit reply is reported as HTTP 429, and a
+  missing login as 401.
+
+For environment-based setup, set `ARTEX_LLM_PROVIDER=claude-code`, optionally
+`ARTEX_LLM_MODEL` and `CLAUDE_CODE_OAUTH_TOKEN`.
 
 **Task archive storage**: local disk by default. Set `ARTEX_ARCHIVE_STORAGE=s3` to
 store cold task packages in an S3-compatible bucket and release their local

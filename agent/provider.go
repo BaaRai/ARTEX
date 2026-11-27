@@ -175,8 +175,9 @@ func normalizeOllamaBaseURL(raw string) string {
 }
 
 // NeedsAPIKey reports whether this provider format requires an API key to be
-// usable. Ollama (local server) is keyless; every cloud format needs one.
-func (c Config) NeedsAPIKey() bool { return c.Format != FormatOllama }
+// usable. Ollama (local server) and Claude Code (the CLI's own login) are
+// keyless; every cloud format needs one.
+func (c Config) NeedsAPIKey() bool { return !IsKeylessFormat(string(c.Format)) }
 
 // CompactionWindow returns the model context window in TOKENS for compaction
 // thresholds, resolved from the user-configured size (ContextWindowK). 0/unset →
@@ -223,11 +224,12 @@ func compactionConfig(windowTokens int) *compaction.Config {
 
 // FromEnv resolves the LLM provider config:
 //
-//	ARTEX_LLM_PROVIDER = anthropic|openai|openai-responses|ollama (default: inferred from keys)
+//	ARTEX_LLM_PROVIDER = anthropic|openai|openai-responses|ollama|bedrock-gateway|claude-code (default: inferred from keys)
 //	ARTEX_LLM_MODEL    = model id        (default: per provider)
 //	ARTEX_LLM_BASE_URL = endpoint        (optional; ollama defaults to localhost:11434/v1)
 //	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
 //	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials (unused for ollama)
+//	CLAUDE_CODE_OAUTH_TOKEN                    = optional token for claude-code (`claude setup-token`)
 func FromEnv() (Config, bool) {
 	// Case- and space-insensitive: "Ollama" used to miss every case below and
 	// fall through to anthropic, sending ANTHROPIC_API_KEY to the Ollama base URL.
@@ -284,6 +286,15 @@ func FromEnv() (Config, bool) {
 		if c.BaseURL == "" || c.Model == "" {
 			return Config{}, false
 		}
+	case "claude-code":
+		c.Format = FormatClaudeCode
+		// The CLI needs no endpoint. ANTHROPIC_API_KEY is deliberately not
+		// inherited: it would bill the API instead of the subscription login.
+		c.BaseURL = ""
+		c.APIKey = strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"))
+		if c.Model == "" {
+			c.Model = DefaultClaudeCodeModel
+		}
 	default:
 		c.Format = llm.FormatAnthropic
 		c.APIKey = anthKey
@@ -339,6 +350,12 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		c.Format = FormatBedrockGateway
 		// No public-provider defaults: an absent URL, model or token fails closed.
 		c.BaseURL = strings.TrimRight(strings.TrimSuffix(strings.TrimSuffix(c.BaseURL, "/invoke-with-response-stream"), "/invoke"), "/")
+	case "claude-code":
+		c.Format = FormatClaudeCode
+		c.BaseURL = "" // the CLI has no endpoint; a typed value is ignored
+		if c.Model == "" {
+			c.Model = DefaultClaudeCodeModel
+		}
 	default:
 		c.Format = llm.FormatAnthropic
 		// provider appends "/v1/messages".
@@ -361,7 +378,7 @@ func isFalsy(s string) bool {
 }
 
 // Provider returns the short provider name
-// ("anthropic"/"openai"/"openai-responses"/"ollama").
+// ("anthropic"/"openai"/"openai-responses"/"ollama"/"bedrock-gateway"/"claude-code").
 func (c Config) Provider() string {
 	switch c.Format {
 	case llm.FormatOpenAI:
@@ -372,6 +389,8 @@ func (c Config) Provider() string {
 		return "ollama"
 	case FormatBedrockGateway:
 		return "bedrock-gateway"
+	case FormatClaudeCode:
+		return "claude-code"
 	}
 	return "anthropic"
 }
@@ -411,6 +430,20 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		qt.base = &bedrockGatewayTransport{base: qt.base, baseURL: baseURL, token: apiKey, model: c.Model, headers: headers}
 		client.Transport = qt
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	if wireFormat == FormatClaudeCode {
+		// Norma speaks Anthropic Messages to a placeholder URL; the transport
+		// answers by running the Claude Code CLI and never dials out itself.
+		ct, err := newClaudeCodeTransport(c)
+		if err != nil {
+			return nil, err
+		}
+		wireFormat = llm.FormatAnthropic
+		baseURL = claudeCodeBaseURL
+		apiKey = "claude-code" // placeholder x-api-key; the token travels in the CLI's env
+		qt := client.Transport.(quotaAwareTransport)
+		qt.base = ct
+		client.Transport = qt
 	}
 	lc := llm.Config{
 		Format:     wireFormat,

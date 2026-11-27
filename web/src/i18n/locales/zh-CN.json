@@ -2752,5 +2752,10 @@
   "Only for a self-hosted Bot API server or a relay. Changing it requires entering the token again.": "仅用于自托管的 Bot API 服务器或中转。修改后需要重新填写 Token。",
   "The bot uses long polling, so ARTEX opens no inbound port. Messages it sends contain summaries and links, never evidence bodies or credentials.": "机器人使用长轮询，因此 ARTEX 不会开放任何入站端口。它发送的消息只包含摘要和链接，绝不包含证据正文或凭据。",
   "The bot is off. Enter a token and switch it on.": "机器人已关闭。请填写 Token 并将其开启。",
-  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "尚未允许任何聊天：机器人会拒绝所有聊天，并在回复中告知其聊天 ID。在此添加你的聊天 ID 即可开始使用。"
+  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "尚未允许任何聊天：机器人会拒绝所有聊天，并在回复中告知其聊天 ID。在此添加你的聊天 ID 即可开始使用。",
+  "Only selectable for the openai format. The Claude Code CLI sets its own output cap.": "仅 openai 格式可选。Claude Code CLI 自行决定输出上限。",
+  "Token (optional for Claude Code)": "Token（Claude Code 可选）",
+  "optional — claude setup-token output; empty uses the CLI's own login": "可选 — claude setup-token 的输出；留空则使用 CLI 自身的登录",
+  "Claude Code CLI (subscription, no key needed)": "Claude Code CLI（订阅，无需 Key）",
+  "Runs the local claude CLI with every built-in tool disabled; ARTEX's own tools are passed in the prompt. Use an alias (opus, sonnet, haiku) or a full model ID.": "运行本地 claude CLI，并禁用其全部内置工具；ARTEX 自身的工具通过提示词传入。可填写别名（opus、sonnet、haiku）或完整模型 ID。"
 }

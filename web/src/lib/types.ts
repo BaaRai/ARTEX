@@ -1160,7 +1160,7 @@ export interface NotificationDelivery {
 export interface LLMProfile {
   id: string;
   name: string;
-  format: "openai" | "anthropic" | "openai-responses" | "ollama" | "bedrock-gateway";
+  format: "openai" | "anthropic" | "openai-responses" | "ollama" | "bedrock-gateway" | "claude-code";
   base_url?: string;
   proxy?: string;
   model: string;
