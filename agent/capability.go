@@ -71,7 +71,7 @@ func isCapabilityNode(n *db.Node) (capabilityPayload, bool) {
 
 func (t *ToolSet) recordCapability() actool.CoreTool {
 	return t.writeExpTool("record_capability",
-		"Record a capability (held, required by an open goal, or closed/unreachable) in the capability ledger (#613). Evidence and confidence are mandatory; held capabilities without a proving finding/fact/traffic reference are stored as unverified and cannot satisfy a goal.",
+		"Record an exploitation capability (held, required by an open goal, or closed/unreachable) in the exploitation capability ledger (#613). A capability is a power the operator has obtained over the target (an actor can now do an action on an object), not a permission granted to this agent: scope, constraints and the intercept gate remain the agent's permission model. Evidence and confidence are mandatory; held capabilities without a proving finding/fact/traffic reference are stored as unverified and cannot satisfy a goal.",
 		obj(map[string]any{
 			"status":       map[string]any{"type": "string", "enum": []string{"held", "required", "closed"}, "description": "held (acquired), required (needed by open goal), or closed (proven unreachable)"},
 			"holder":       str("actor/principal holding or needing the capability (e.g. member_session, edge_peer)"),
