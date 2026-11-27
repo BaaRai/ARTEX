@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
@@ -914,6 +915,7 @@ func (e *Engine) plannerGateContext(ctx context.Context, t *Task, wait time.Dura
 		a.Worker = "planner"
 		e.emitActivity(t, a)
 	}
+	ctx = accessaudit.WithStore(ctx, e.m.audit)
 	ctx = intercept.WithTaskContext(ctx, t.ID, "planner", emit)
 	return intercept.WithTargetScope(ctx, t.targetScope(wait))
 }
@@ -1237,6 +1239,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		emit(a)
 	}
 	label := fmt.Sprintf("%s · #%d", name, iid)
+	workCtx = accessaudit.WithStore(workCtx, e.m.audit)
 	workCtx = intercept.WithTaskContext(workCtx, t.ID, label, taskEmit)
 	workCtx = intercept.WithTargetScope(workCtx, t.targetScope(intercept.DefaultTargetWaitBound))
 	// Run budget (off by default): meter this run's calls; its effective budget is

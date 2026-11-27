@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/traffic/rewrite"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
 )
@@ -642,6 +643,9 @@ func (s *sink) applyStreamResponse(f *mproxy.Flow, res rewrite.Result) {
 // not the interception, may be at fault. Its log names the host, the error class
 // and the rules, never the URL or the error text.
 func (s *sink) RequestError(f *mproxy.Flow, err error) {
+	if f != nil && f.Request != nil && f.Request.URL != nil {
+		s.t.accessAudit.Load().Record(accessaudit.Event{Source: "recording_proxy", Outcome: "transport_error", Method: f.Request.Method, URL: f.Request.URL.String()})
+	}
 	if f != nil {
 		s.bypass.Delete(keyOf(f))
 		if snap := s.t.snaps.take(keyOf(f)); snap != nil && snap.requestRewritten() {

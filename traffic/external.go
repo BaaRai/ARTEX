@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/db"
 )
 
@@ -72,6 +73,7 @@ func (t *Traffic) RecordExternal(e ExternalExchange) error {
 		slog.Error("[traffic] failed to ingest external exchange", "url", u.String(), "err", err)
 		return err
 	}
+	t.accessAudit.Load().Record(accessaudit.Event{Source: "extension_ingest", Outcome: "reported_exchange", Method: method, URL: u.String(), Status: status})
 	return nil
 }
 

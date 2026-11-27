@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
@@ -589,6 +590,7 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 	// The conversation's opt-in flag is the one read when the turn started: a
 	// switch through the API applies from the next turn.
 	gate := c.TargetGate
+	ctx = accessaudit.WithStore(ctx, s.m.audit)
 	gctx := intercept.WithTargetScope(ctx, intercept.TargetScope{ConversationID: c.ID, Enabled: func() bool { return gate },
 		WaitBound: intercept.DefaultTargetWaitBound, Interceptor: s.m.interceptor})
 	// On a manual stop ctx is cancelled; Chat already emits a clean "stopped by the user"

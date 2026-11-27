@@ -31,6 +31,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/traffic/rewrite"
 	"github.com/Autumn-27/norma/permission"
@@ -237,12 +238,13 @@ const TrafficGetDescription = "Fetch the raw request/response of one captured tr
 
 // Traffic runs the recording proxy and owns the file tree + index.
 type Traffic struct {
-	dir   string
-	addr  string
-	db    *sql.DB
-	wmu   sync.Mutex // serializes record() vs DeleteHost (incl. blob GC)
-	seq   atomic.Int64
-	proxy *mproxy.Proxy
+	accessAudit atomic.Pointer[accessaudit.Store]
+	dir         string
+	addr        string
+	db          *sql.DB
+	wmu         sync.Mutex // serializes record() vs DeleteHost (incl. blob GC)
+	seq         atomic.Int64
+	proxy       *mproxy.Proxy
 	// fts reports whether the full-text index is available. False on a driver
 	// build without FTS5: recording and metadata search still work, body search
 	// degrades to unsupported rather than erroring.

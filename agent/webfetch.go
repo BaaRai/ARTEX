@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/url"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
 	actool "github.com/Autumn-27/norma/tool"
@@ -25,8 +27,17 @@ import (
 func withWebFetch(ctx context.Context, tools []actool.CoreTool, proxy, caCert string) []actool.CoreTool {
 	scope, scoped := intercept.TargetScopeFromContext(ctx)
 	gated := scoped && scope.Enabled != nil && scope.Enabled()
-	webFetch := actool.NewWebFetch(actool.WebFetchConfig{Proxy: proxy, CACert: caCert, CheckRedirect: intercept.RedirectCheck("WebFetch"),
+	webFetch := actool.NewWebFetch(actool.WebFetchConfig{Proxy: proxy, CACert: caCert, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if err := intercept.RedirectCheck("WebFetch")(req, via); err != nil {
+			return err
+		}
+		accessaudit.FetchRedirect(req)
+		return nil
+	},
 		DialContext: intercept.PinnedDialer("WebFetch", scoped), DisableDirectRetry: gated})
+	// Norma can restart the original URL on its direct fallback without an HTTP
+	// request callback. Do not attach exact-URL network evidence to that mode.
+	webFetch = observedFetch{webFetch, proxy == "" || gated}
 	return append(tools[:len(tools):len(tools)], governedFetch{webFetch})
 }
 
@@ -59,4 +70,27 @@ func (f governedFetch) Call(ctx context.Context, input json.RawMessage, tc *acto
 	return egress.Do(egressGovernor(), ctx, u, func() (actool.Result, error) {
 		return f.CoreTool.Call(ctx, input, tc)
 	})
+}
+
+// observedFetch keeps the governor/authorization behavior unchanged. A proxy
+// fallback-enabled call is recorded only as an attempt, not a network fact.
+type observedFetch struct {
+	actool.CoreTool
+	trace bool
+}
+
+func (f observedFetch) Call(ctx context.Context, input json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+	var in struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal(input, &in) == nil {
+		if u, err := url.Parse(in.URL); err == nil && u.Host != "" {
+			if f.trace {
+				ctx = accessaudit.TraceFetch(ctx, u)
+			} else {
+				accessaudit.Record(ctx, accessaudit.Event{Source: "webfetch_trace", Outcome: "tool_attempt", Tool: "WebFetch", Method: "GET", URL: in.URL})
+			}
+		}
+	}
+	return f.CoreTool.Call(ctx, input, tc)
 }

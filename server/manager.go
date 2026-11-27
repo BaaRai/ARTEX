@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/config"
 	pgdb "github.com/Autumn-27/artex/db"
@@ -260,6 +261,7 @@ type Manager struct {
 	dir         string
 	pg          *pgdb.DB
 	assets      *pgdb.AssetStore
+	audit       *accessaudit.Store
 	traffic     *traffic.Traffic       // process-wide recording proxy (may be nil)
 	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
@@ -476,6 +478,18 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	m.interceptor.SetToolProxyCheck(m.toolUsesProxy)
 	// The platform's own endpoints need no target approval.
 	m.interceptor.SetDerivedExemptions(m.targetGateEndpoints)
+	// The public proxy CA below traffic/_ca must remain traversable by the
+	// executor. Only the audit/index directory is private, not its shared parent.
+	if err := os.MkdirAll(filepath.Join(dir, "traffic"), 0o755); err != nil {
+		pg.Close()
+		return nil, err
+	}
+	audit, auditErr := accessaudit.Open(filepath.Join(dir, "traffic", "_index", "access.sqlite"))
+	if auditErr != nil {
+		pg.Close()
+		return nil, fmt.Errorf("open access audit: %w", auditErr)
+	}
+	m.audit = audit
 	if proxyAddr != "" {
 		tr, err := traffic.Open(filepath.Join(dir, "traffic"), proxyAddr)
 		if err != nil {
@@ -496,11 +510,13 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 			if err != nil {
 				_ = tr.Close()
 				_ = pg.Close()
+				m.audit.Close()
 				return nil, fmt.Errorf("recover traffic delete staging: %w", err)
 			}
 		}
 		if tr != nil {
 			m.traffic = tr
+			tr.SetAccessAudit(m.audit)
 			m.reloadRewriteRules() // in place before the proxy accepts a connection
 			m.reloadTamperHooks()  // opt-in behind ARTEX_TAMPER_HOOKS_ENABLED=1
 			if scfg, ok := traffic.SOCKS5ConfigFromEnv(); ok {
@@ -575,7 +591,8 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 }
 
 // TrafficEnabled reports whether traffic capture is on (default off). When off,
-// no proxy/traffic tools/prompt are injected into agents (nothing is recorded).
+// no recording proxy/traffic tools/prompt are injected into agents. Independent
+// access metadata remains enabled for the instrumented HTTP paths.
 func (m *Manager) TrafficEnabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -992,6 +1009,9 @@ func (m *Manager) Close() error {
 	defer m.mu.Unlock()
 	if m.traffic != nil {
 		m.traffic.Close()
+	}
+	if m.audit != nil {
+		m.audit.Close()
 	}
 	return m.pg.Close()
 }
