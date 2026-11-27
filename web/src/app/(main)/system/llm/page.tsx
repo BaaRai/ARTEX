@@ -339,6 +339,7 @@ function ProfileSheet({
   const [format, setFormat] = React.useState<ProfileFormat>("anthropic");
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
+  const [baseUrlPreset, setBaseUrlPreset] = React.useState("custom");
   const [proxy, setProxy] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
   const [keyHint, setKeyHint] = React.useState("");
@@ -377,6 +378,7 @@ function ProfileSheet({
     );
     setModel(profile?.model ?? "");
     setBaseUrl(profile?.base_url ?? "");
+    setBaseUrlPreset("custom");
     setProxy(profile?.proxy ?? "");
     setRps(String(profile?.rate_per_second ?? 0));
     setRpm(String(profile?.rate_per_minute ?? 0));
@@ -664,13 +666,26 @@ function ProfileSheet({
 
           <div className="grid gap-2">
             <Label htmlFor="p-base-url">{format === "bedrock-gateway" ? "Gateway base URL (required)" : t("Base URL (optional)")}</Label>
-            <Input
-              id="p-base-url"
-              className="font-mono"
-              placeholder={basePlaceholder}
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="p-base-url"
+                className="font-mono flex-1"
+                placeholder={basePlaceholder}
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+              />
+              {format === "openai" && (
+                <Select value={baseUrlPreset} onValueChange={(v) => { setBaseUrlPreset(v); if (v !== "custom") setBaseUrl(v); }}>
+                  <SelectTrigger className="w-48 shrink-0">
+                    <SelectValue placeholder={t("Preset")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="custom">{t("Custom")}</SelectItem>
+                    <SelectItem value="https://integrate.api.nvidia.com/v1">NVIDIA NIM</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
           </div>
 
           {format === "bedrock-gateway" && (

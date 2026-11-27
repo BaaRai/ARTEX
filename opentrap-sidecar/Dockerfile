@@ -1,64 +1,66 @@
-# OpenTRAP sidecar — wraps the OpenTRAP AppImage behind a REST API.
-# This is a placeholder Dockerfile. The actual sidecar implementation needs a Go
-# service that starts the OpenTRAP AppImage (Java Swing) in headless mode and
-# exposes the REST endpoints: /v1/status, /v1/history, /v1/history/{id},
-# /v1/scope (GET/PUT), /v1/replay (POST with X-OpenTrap-* headers).
-#
-# Build:
-#   docker build -t artex-opentrap-sidecar:local ./opentrap-sidecar
-#
-# The image expects the OpenTRAP AppImage to be available at build time.
-# Download it from https://github.com/opentrap/opentrap/releases/latest/download/opentrap-x86_64.appimage
-# and place it in this directory, or adjust the ADD line below.
+# OpenTRAP sidecar — wraps OpenTRAP Java app behind a REST API
+# Build: docker build -t artex-opentrap-sidecar:local ./opentrap-sidecar
 
-FROM eclipse-temurin:21-jre-alpine AS base
+# Stage 1: Build Go wrapper
+FROM golang:1.26.11-bookworm AS wrapper-builder
+WORKDIR /build
+COPY wrapper/go.mod wrapper/go.sum ./
+RUN go mod download
+COPY wrapper/ ./
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o opentrap-wrapper .
 
-# Install dependencies for the AppImage (FUSE for AppImage extraction, fonts for Swing)
-RUN apk add --no-cache \
-    fuse3 \
-    fontconfig \
-    ttf-dejavu \
-    libstdc++ \
-    ca-certificates \
-    curl
+# Stage 2: Build OpenTRAP Java app
+FROM eclipse-temurin:21-jdk-jammy AS opentrap-builder
+WORKDIR /app
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    unzip curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy OpenTRAP source
+COPY opentrap-src/ /app/opentrap-src/
+
+# Fetch dependencies and build
+WORKDIR /app/opentrap-src
+# Fix line endings from Windows checkout
+RUN find . -type f \( -name "*.sh" -o -name "versions" \) -exec sed -i 's/\r$//' {} \;
+RUN ./fetch-jdk.sh && ./fetch-zap.sh && ./fetch-browser.sh
+RUN ./build.sh
+
+# Stage 3: Runtime image
+FROM eclipse-temurin:21-jre-jammy AS runtime
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup -g 10001 -S opentrap && \
-    adduser -u 10001 -S -G opentrap -h /home/opentrap opentrap
+RUN groupadd --system --gid 10001 opentrap \
+    && useradd --system --uid 10001 --gid opentrap --home-dir /home/opentrap --create-home opentrap
 
 WORKDIR /app
 
-# Download the OpenTRAP AppImage (pinned to a specific release for reproducibility)
-# Replace the version and digest as needed.
-ARG OPENTRAP_VERSION=latest
-ARG OPENTRAP_URL=https://github.com/opentrap/opentrap/releases/download/${OPENTRAP_VERSION}/opentrap-x86_64.appimage
-ARG OPENTRAP_SHA256=
+# Copy OpenTRAP jar and engine
+COPY --from=opentrap-builder /app/opentrap-src/dist/opentrap.jar /app/opentrap.jar
+COPY --from=opentrap-builder /app/opentrap-src/engine /app/engine
 
-ADD ${OPENTRAP_URL} /app/opentrap.appimage
-RUN if [ -n "${OPENTRAP_SHA256}" ]; then \
-      echo "${OPENTRAP_SHA256}  /app/opentrap.appimage" | sha256sum -c -; \
-    fi && \
-    chmod +x /app/opentrap.appimage
+# Copy Go wrapper
+COPY --from=wrapper-builder /build/opentrap-wrapper /app/opentrap-wrapper
 
-# The AppImage needs FUSE to extract. Use --appimage-extract to unpack it.
-RUN /app/opentrap.appimage --appimage-extract && \
-    mv squashfs-root /app/opentrap && \
-    rm /app/opentrap.appimage
+# Data directory
+RUN mkdir -p /app/data && chown -R opentrap:opentrap /app
 
-# Copy the Go wrapper binary (built separately) or use a script to start the
-# OpenTRAP Java app and the REST API. For now this is a placeholder.
-# COPY opentrap-wrapper /app/opentrap-wrapper
-
-ENV PORT=8081
-ENV DATA_DIR=/app/data
-ENV JAVA_HOME=/opt/java/openjdk
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
+ENV PORT=8081 \
+    DATA_DIR=/app/data \
+    JAVA_HOME=/opt/java/openjdk \
+    PATH="/opt/java/openjdk/bin:${PATH}"
 
 USER 10001:10001
 
 VOLUME ["/app/data"]
 EXPOSE 8081
 
-# The wrapper would start the OpenTRAP app and the REST API server.
-# CMD ["/app/opentrap-wrapper"]
-CMD ["sh", "-c", "echo 'OpenTRAP sidecar placeholder - implement the REST wrapper'; sleep infinity"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl --fail --silent http://127.0.0.1:8081/v1/healthz >/dev/null || exit 1
+
+CMD ["/app/opentrap-wrapper"]

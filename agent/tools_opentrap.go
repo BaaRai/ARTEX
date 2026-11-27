@@ -25,7 +25,7 @@ func opentrapUnavailable(err error) (actool.Result, error) {
 	return actool.Errorf("OpenTRAP request failed: " + err.Error()), nil
 }
 
-func clipToolJSON(raw json.RawMessage) string {
+func opentrapClipJSON(raw json.RawMessage) string {
 	if len(raw) <= opentrapMaxToolBytes {
 		return string(raw)
 	}
@@ -75,11 +75,11 @@ func (t *ToolSet) opentrapHistory() actool.CoreTool {
 			}
 			ctx, cancel := context.WithTimeout(ctx, opentrapTimeout)
 			defer cancel()
-			res, err := c.History(ctx, clampPage(a.Limit), a.Offset)
+			res, err := c.History(ctx, opentrapClampPage(a.Limit), a.Offset)
 			if err != nil {
 				return opentrapUnavailable(err)
 			}
-			return actool.Text(clipToolJSON(res)), nil
+			return actool.Text(opentrapClipJSON(res)), nil
 		})
 }
 
@@ -107,7 +107,7 @@ func (t *ToolSet) opentrapHistoryItem() actool.CoreTool {
 			if err != nil {
 				return opentrapUnavailable(err)
 			}
-			return actool.Text(clipToolJSON(res)), nil
+			return actool.Text(opentrapClipJSON(res)), nil
 		})
 }
 
@@ -127,7 +127,7 @@ func (t *ToolSet) opentrapScopeGet() actool.CoreTool {
 			if err != nil {
 				return opentrapUnavailable(err)
 			}
-			return actool.Text(clipToolJSON(res)), nil
+			return actool.Text(opentrapClipJSON(res)), nil
 		})
 }
 
@@ -155,7 +155,7 @@ func (t *ToolSet) opentrapScopePut() actool.CoreTool {
 			if err != nil {
 				return opentrapUnavailable(err)
 			}
-			return actool.Text(clipToolJSON(res)), nil
+			return actool.Text(opentrapClipJSON(res)), nil
 		})
 }
 
@@ -189,11 +189,11 @@ func (t *ToolSet) opentrapReplay() actool.CoreTool {
 			if err != nil {
 				return opentrapUnavailable(err)
 			}
-			return actool.Text(clipToolJSON(res)), nil
+			return actool.Text(opentrapClipJSON(res)), nil
 		})
 }
 
-func clampPage(limit int) int {
+func opentrapClampPage(limit int) int {
 	switch {
 	case limit <= 0:
 		return 50

@@ -15,25 +15,17 @@ services:
         condition: service_healthy
 
   opentrap:
-    # Build from the opentrap repository. The image is not published on Docker Hub;
-    # build it locally or use a private registry. The build expects the AppImage
-    # at /app/opentrap/opentrap-x86_64.appimage inside the build context.
-    build:
-      context: ./opentrap-sidecar
-      dockerfile: Dockerfile
+    # Built locally from opentrap-sidecar/
     image: artex-opentrap-sidecar:local
     # No host port. The service has no authentication of its own, so it is
     # reachable only from the compose network; publishing it would expose an
     # unauthenticated proxy/replay endpoint to every process on the host.
     volumes:
       - opentrap-data:/app/data
-    environment:
-      # Sidecar listens on 0.0.0.0:8081 inside the container.
-      PORT: "8081"
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8081/v1/status >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8081/v1/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 10
