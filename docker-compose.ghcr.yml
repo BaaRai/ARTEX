@@ -56,6 +56,11 @@ services:
       # (e.g. host.docker.internal:11434 for Ollama).
       ARTEX_LLM_PRIVATE_ENDPOINTS: ${ARTEX_LLM_PRIVATE_ENDPOINTS:-}
       ARTEX_JWT_KEY_DIR: /app/keys
+      # claude-code LLM profiles: optional token from `claude setup-token`, and the CLI's
+      # config dir (its login), kept in the root-only keys volume, out of the agents' reach.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ARTEX_CLAUDE_CODE_CONFIG_DIR: /app/keys/claude-code
+      ARTEX_CLAUDE_CODE_MAX_PROCS: ${ARTEX_CLAUDE_CODE_MAX_PROCS:-}
       # Optional: key for secrets at rest; empty = keys/secret.key (generated at
       # first start).
       ARTEX_SECRET_KEY: ${ARTEX_SECRET_KEY:-}

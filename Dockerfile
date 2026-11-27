@@ -274,6 +274,10 @@ RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "@playwright/cli@
     && playwright install --with-deps chromium \
     && "$(npm root -g)/@playwright/mcp/node_modules/.bin/playwright-core" install chromium \
     && rm -rf /var/lib/apt/lists/*
+# Claude Code CLI for "claude-code" LLM profiles (agent/claude_code.go): the
+# server runs it as the model, with every built-in tool disabled.
+ARG CLAUDE_CODE_VERSION=2.1.332
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && claude --version
 # Agent processes run as the executor with HOME and XDG_CACHE_HOME in the data
 # directory (server/execpriv_unix.go); the browsers installed above stay in root's
 # cache, which /root's 0711 lets the executor reach.

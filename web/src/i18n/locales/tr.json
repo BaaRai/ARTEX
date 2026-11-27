@@ -2752,5 +2752,10 @@
   "Only for a self-hosted Bot API server or a relay. Changing it requires entering the token again.": "Yalnızca kendi barındırdığınız bir Bot API sunucusu veya aktarıcı için. Değiştirirseniz token'ı yeniden girmeniz gerekir.",
   "The bot uses long polling, so ARTEX opens no inbound port. Messages it sends contain summaries and links, never evidence bodies or credentials.": "Bot uzun yoklama kullanır, bu yüzden ARTEX gelen bağlantılar için port açmaz. Gönderdiği mesajlar yalnızca özet ve bağlantı içerir; asla kanıt gövdesi veya kimlik bilgisi içermez.",
   "The bot is off. Enter a token and switch it on.": "Bot kapalı. Bir token girin ve botu açın.",
-  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "Henüz hiçbir sohbete izin verilmedi: bot her sohbeti reddeder ve sohbet kimliğini yanıtında bildirir. Kullanmaya başlamak için sohbet kimliğinizi buraya ekleyin."
+  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "Henüz hiçbir sohbete izin verilmedi: bot her sohbeti reddeder ve sohbet kimliğini yanıtında bildirir. Kullanmaya başlamak için sohbet kimliğinizi buraya ekleyin.",
+  "Only selectable for the openai format. The Claude Code CLI sets its own output cap.": "Yalnızca openai biçiminde seçilebilir. Claude Code CLI kendi çıktı sınırını belirler.",
+  "Token (optional for Claude Code)": "Token (Claude Code için isteğe bağlı)",
+  "optional — claude setup-token output; empty uses the CLI's own login": "isteğe bağlı — claude setup-token çıktısı; boş bırakılırsa CLI'nin kendi oturumu kullanılır",
+  "Claude Code CLI (subscription, no key needed)": "Claude Code CLI (abonelik, anahtar gerekmez)",
+  "Runs the local claude CLI with every built-in tool disabled; ARTEX's own tools are passed in the prompt. Use an alias (opus, sonnet, haiku) or a full model ID.": "Yerel claude CLI'yi tüm yerleşik araçları kapalı olarak çalıştırır; ARTEX'in kendi araçları istemde iletilir. Bir takma ad (opus, sonnet, haiku) veya tam model kimliği kullanın."
 }

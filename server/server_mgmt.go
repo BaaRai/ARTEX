@@ -2697,6 +2697,12 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "enter the Bedrock model ID manually; this gateway has no model-list endpoint"})
 		return
 	}
+	// The Claude Code CLI has no model-list endpoint: offer its aliases. A full
+	// model ID (e.g. claude-opus-5-5) can still be typed in.
+	if strings.TrimSpace(req.Provider) == string(agent.FormatClaudeCode) {
+		writeJSON(w, 200, map[string]any{"ok": true, "models": agent.ClaudeCodeModels})
+		return
+	}
 	// Resolve API key: form input > profile stored key. The stored key is only
 	// sent to the endpoint it was saved for, since base_url comes from the form.
 	apiKey := strings.TrimSpace(req.APIKey)
