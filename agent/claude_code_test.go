@@ -297,6 +297,95 @@ func TestClaudeCodeListModelsFailsClosed(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeExitDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		category string
+	}{
+		{"auth", "auth"},
+		{"network", "network"},
+		{"rate-limit", "rate-limit"},
+		{"model", "model"},
+		{"context", "context"},
+		{"max-turns", "max-turns"},
+		{"auth-errors-array", "auth"},
+		{"rate-limit-status-string", "rate-limit"},
+		{"policy", "policy"},
+		{"policy-403", "policy"},
+		{"policy-stderr", "policy"},
+		{"policy-prompt", "unknown"},
+		{"unknown", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ARTEX_CLAUDE_EXIT_TEST", tc.name)
+			_, err := claudeCodeCommand(os.Args[0])(t.Context(), []string{"-test.run=^TestClaudeCodeExitHelper$"}, "")
+			if err == nil || !strings.Contains(err.Error(), "category: "+tc.category) {
+				t.Fatalf("exit diagnostic = %v; want category %q", err, tc.category)
+			}
+			for _, secret := range []string{"secret_token_123", "/private/secret/path"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatalf("exit diagnostic leaked private CLI output: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeCodeExitQuotaPreserved(t *testing.T) {
+	for _, mode := range []string{"quota-stderr", "quota-stdout"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("ARTEX_CLAUDE_EXIT_TEST", mode)
+			out, err := claudeCodeCommand(os.Args[0])(t.Context(), []string{"-test.run=^TestClaudeCodeExitHelper$"}, "")
+			if !isClaudeSubscriptionLimit(string(out)) {
+				t.Fatalf("quota marker missing from CLI result: %s", out)
+			}
+			if mode == "quota-stderr" && err != nil {
+				t.Fatalf("stderr quota should be normalized before returning: %v", err)
+			}
+			if err != nil && strings.Contains(err.Error(), "secret_token_123") {
+				t.Fatalf("quota diagnostic leaked private CLI output: %v", err)
+			}
+		})
+	}
+}
+func TestClaudeCodeExitHelper(t *testing.T) {
+	switch os.Getenv("ARTEX_CLAUDE_EXIT_TEST") {
+	case "auth":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"subtype":"error_during_execution","result":"Authentication failed: secret_token_123 /private/secret/path"}`)
+	case "network":
+		_, _ = os.Stderr.WriteString("ECONNRESET: secret_token_123 /private/secret/path")
+	case "rate-limit":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"result":"rate_limit: too many requests; secret_token_123 /private/secret/path"}`)
+	case "model":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"error":{"type":"model_not_found","message":"secret_token_123 /private/secret/path"}}`)
+	case "context":
+		_, _ = os.Stderr.WriteString("maximum context length exceeded: secret_token_123 /private/secret/path")
+	case "max-turns":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"subtype":"error_max_turns","result":"secret_token_123 /private/secret/path"}`)
+	case "quota-stderr":
+		_, _ = os.Stderr.WriteString("You've hit your session limit. secret_token_123")
+	case "quota-stdout":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"result":"You've hit your session limit. secret_token_123"}`)
+	case "auth-errors-array":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"errors":[{"type":"authentication_failed","message":"secret_token_123 /private/secret/path"}]}`)
+	case "rate-limit-status-string":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"api_error_status":"429","result":"secret_token_123 /private/secret/path"}`)
+	case "policy":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"result":"content_filter: secret_token_123 /private/secret/path"}`)
+	case "policy-403":
+		_, _ = os.Stdout.WriteString(`{"is_error":true,"api_error_status":403,"result":"content_filter: secret_token_123 /private/secret/path"}`)
+	case "policy-stderr":
+		_, _ = os.Stderr.WriteString("content_filter: secret_token_123 /private/secret/path")
+	case "policy-prompt":
+		_, _ = os.Stdout.WriteString(`{"is_error":false,"result":"The user asked about a policy violation. secret_token_123 /private/secret/path"}`)
+	case "unknown":
+		_, _ = os.Stdout.WriteString("secret_token_123 /private/secret/path")
+		_, _ = os.Stderr.WriteString("secret_token_123 /private/secret/path")
+	default:
+		return
+	}
+	os.Exit(1)
+}
 func containsString(xs []string, s string) bool {
 	for _, x := range xs {
 		if x == s {

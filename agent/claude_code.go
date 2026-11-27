@@ -443,6 +443,70 @@ func (b *claudeCodeBuffer) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// claudeCodeExitCategory extracts only a fixed diagnostic category. Claude's
+// stdout/stderr may contain the full prompt, credentials, or local paths, so
+// their raw text must never be included in an ARTEX error or worker trace.
+func claudeCodeExitCategory(stdout, stderr []byte) string {
+	var result map[string]json.RawMessage
+	var detail, policyDetail, apiStatus string
+	if json.Unmarshal(stdout, &result) == nil {
+		for _, field := range []string{"subtype", "error", "errors"} {
+			detail += " " + string(result[field])
+		}
+		policyDetail = string(result["subtype"]) + " " + string(result["error"]) + " " + string(result["errors"])
+		if string(result["is_error"]) == "true" {
+			policyDetail += " " + string(result["result"])
+			detail += " " + string(result["result"])
+		}
+		apiStatus = strings.Trim(strings.TrimSpace(string(result["api_error_status"])), `"`)
+	} else {
+		detail = string(stdout)
+	}
+	detail = strings.ToLower(detail + " " + string(stderr))
+	policyDetail = strings.ToLower(policyDetail + " " + string(stderr))
+	for _, marker := range []string{"content_filter", "content filter", "safety stop", "policy_violation", "policy violation"} {
+		if strings.Contains(policyDetail, marker) {
+			return "policy"
+		}
+	}
+	switch apiStatus {
+	case "401", "403":
+		return "auth"
+	case "429":
+		return "rate-limit"
+	}
+	for _, marker := range []string{"error_max_turns", "max_turns", "max turns", "turn limit"} {
+		if strings.Contains(detail, marker) {
+			return "max-turns"
+		}
+	}
+	for _, marker := range []string{"authentication_failed", "not logged in", "login required", "authentication failed", "unauthorized", "oauth", "token expired", "invalid api key"} {
+		if strings.Contains(detail, marker) {
+			return "auth"
+		}
+	}
+	for _, marker := range []string{"model_not_found", "model not found", "invalid model", "unknown model", "model unavailable"} {
+		if strings.Contains(detail, marker) {
+			return "model"
+		}
+	}
+	for _, marker := range []string{"context_length", "context length", "maximum context", "prompt too long", "input too large"} {
+		if strings.Contains(detail, marker) {
+			return "context"
+		}
+	}
+	for _, marker := range []string{"rate_limit", "rate limit", "too many requests", "status 429"} {
+		if strings.Contains(detail, marker) {
+			return "rate-limit"
+		}
+	}
+	for _, marker := range []string{"econn", "network", "connection", "dns", "timeout", "timed out", "tls", "certificate", "overloaded", "server_error"} {
+		if strings.Contains(detail, marker) {
+			return "network"
+		}
+	}
+	return "unknown"
+}
 func claudeCodeCommand(path string) claudeCodeRun {
 	return func(ctx context.Context, args []string, stdin string) ([]byte, error) {
 		env := os.Environ()
@@ -470,9 +534,14 @@ func claudeCodeCommand(path string) claudeCodeRun {
 				return []byte(`{"is_error":true,"result":"usage_limit_reached"}`), nil
 			}
 			if errors.Is(err, exec.ErrNotFound) {
-				return nil, fmt.Errorf("Claude Code executable not found: %w", err)
+				return nil, fmt.Errorf("Claude Code executable not found")
 			}
-			return stdout.data.Bytes(), fmt.Errorf("Claude Code exited: %w", err)
+			category := claudeCodeExitCategory(stdout.data.Bytes(), stderr.data.Bytes())
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				return stdout.data.Bytes(), fmt.Errorf("Claude Code exited: exit status %d (category: %s)", exitErr.ExitCode(), category)
+			}
+			return stdout.data.Bytes(), fmt.Errorf("Claude Code command failed (category: %s)", category)
 		}
 		return stdout.data.Bytes(), nil
 	}
