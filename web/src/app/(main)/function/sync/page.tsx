@@ -17,6 +17,8 @@ import { api } from "@/lib/api";
 import type { SSProject, SSTask } from "@/lib/types";
 import { t } from "@/i18n";
 
+import { type Dimension, initialSyncWorkbenchState, syncWorkbenchReducer } from "./_state/sync-workbench.reducer";
+
 type SSStatus = {
   exists: boolean;
   configured: boolean;
@@ -25,8 +27,6 @@ type SSStatus = {
   url?: string;
   tools: string[];
 };
-
-type Dimension = "project" | "task";
 
 const ASSET_TYPES: { key: string; label: string }[] = [
   { key: "subdomain", label: t("Subdomain") },
@@ -221,35 +221,25 @@ function StatusBadge({ status, loading }: { status: SSStatus | null; loading: bo
 // ── Sync workbench (project / task dimension) ────────────────────────────────────────────────
 
 function SyncWorkbench() {
-  const [dimension, setDimension] = React.useState<Dimension>("project");
-  const [assetTypes, setAssetTypes] = React.useState<Record<string, boolean>>({
-    subdomain: true,
-    service: true,
-    app: true,
-  });
-  const [createCompany, setCreateCompany] = React.useState(true);
-
-  const [projects, setProjects] = React.useState<SSProject[]>([]);
-  const [tasks, setTasks] = React.useState<SSTask[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [search, setSearch] = React.useState("");
-  const [page, setPage] = React.useState(1);
-  const [selected, setSelected] = React.useState<Set<string>>(new Set());
-
-  const [syncing, setSyncing] = React.useState(false);
-  const [result, setResult] = React.useState<Awaited<ReturnType<typeof api.ssSync>> | null>(null);
+  const [state, dispatch] = React.useReducer(syncWorkbenchReducer, initialSyncWorkbenchState);
+  const { dimension, search } = state.browse;
+  const { page, size } = state.pagination;
+  const { projects, tasks, loading } = state.list;
+  const { assetTypes, createCompany } = state.options;
+  const syncing = state.requests.sync.pending;
+  const result = state.syncResult;
+  const selected = state.selection;
 
   const load = React.useCallback(() => {
-    setLoading(true);
-    setSelected(new Set());
+    dispatch({ type: "listLoadStarted" });
     const fn =
       dimension === "project"
-        ? api.ssProjects(page, 50, search).then((r) => setProjects(r.projects))
-        : api.ssTasks(page, 50, search).then(setTasks);
+        ? api.ssProjects(page, size, search).then((r) => dispatch({ type: "projectsLoaded", projects: r.projects }))
+        : api.ssTasks(page, size, search).then((r) => dispatch({ type: "tasksLoaded", tasks: r }));
     fn.catch((e) => toast.error(t("Failed to load the list: {error}", { error: e.message }))).finally(() =>
-      setLoading(false),
+      dispatch({ type: "listLoadFinished" }),
     );
-  }, [dimension, page, search]);
+  }, [dimension, page, size, search]);
 
   React.useEffect(() => {
     load();
@@ -259,15 +249,10 @@ function SyncWorkbench() {
   const idOf = (row: SSProject | SSTask) => (dimension === "project" ? (row as SSProject).id : (row as SSTask).name);
 
   const toggle = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    dispatch({ type: "selection/toggled", id });
   };
   const toggleAll = () => {
-    setSelected((prev) => (prev.size === rows.length ? new Set() : new Set(rows.map(idOf))));
+    dispatch({ type: "allRowsToggled", ids: rows.map(idOf) });
   };
 
   const chosenTypes = ASSET_TYPES.filter((t) => assetTypes[t.key]).map((t) => t.key);
@@ -276,8 +261,7 @@ function SyncWorkbench() {
     if (selected.size === 0)
       return toast.error(dimension === "project" ? t("Select at least one project") : t("Select at least one task"));
     if (chosenTypes.length === 0) return toast.error(t("Select at least one asset type"));
-    setSyncing(true);
-    setResult(null);
+    dispatch({ type: "syncStarted" });
     try {
       const r = await api.ssSync({
         dimension,
@@ -285,13 +269,13 @@ function SyncWorkbench() {
         asset_types: chosenTypes,
         create_company: dimension === "project" ? createCompany : false,
       });
-      setResult(r);
+      dispatch({ type: "syncSucceeded", result: r });
       const total = Object.values(r.synced ?? {}).reduce((a, b) => a + b, 0);
       toast.success(t("Sync finished; {count} assets ingested in total", { count: total }));
     } catch (e) {
       toast.error(t("Sync failed: {error}", { error: (e as Error).message }));
     } finally {
-      setSyncing(false);
+      dispatch({ type: "request/finished", key: "sync" });
     }
   };
 
@@ -352,8 +336,7 @@ function SyncWorkbench() {
         <Tabs
           value={dimension}
           onValueChange={(v) => {
-            setDimension(v as Dimension);
-            setPage(1);
+            dispatch({ type: "dimensionChanged", dimension: v as Dimension });
           }}
         >
           <TabsList>
@@ -370,14 +353,18 @@ function SyncWorkbench() {
               <Checkbox
                 id={`at-${t.key}`}
                 checked={!!assetTypes[t.key]}
-                onCheckedChange={(c) => setAssetTypes((prev) => ({ ...prev, [t.key]: !!c }))}
+                onCheckedChange={(c) => dispatch({ type: "assetTypeToggled", key: t.key, checked: !!c })}
               />
               {t.label}
             </label>
           ))}
           {dimension === "project" && (
             <label htmlFor="create-company" className="flex items-center gap-1.5 text-sm">
-              <Checkbox id="create-company" checked={createCompany} onCheckedChange={(c) => setCreateCompany(!!c)} />
+              <Checkbox
+                id="create-company"
+                checked={createCompany}
+                onCheckedChange={(c) => dispatch({ type: "createCompanyChanged", checked: !!c })}
+              />
               {t("Create a company per project and write its asset scope")}
             </label>
           )}
@@ -391,10 +378,10 @@ function SyncWorkbench() {
               className="pl-8"
               placeholder={dimension === "project" ? t("Search project names") : t("Search task names")}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => dispatch({ type: "searchChanged", search: e.target.value })}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  setPage(1);
+                  dispatch({ type: "searchSubmitted" });
                   load();
                 }
               }}
@@ -438,15 +425,20 @@ function SyncWorkbench() {
 
         {/* Pagination */}
         <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1 || loading}
+            onClick={() => dispatch({ type: "pageStepped", delta: -1 })}
+          >
             {t("Previous")}
           </Button>
           <span className="text-muted-foreground text-xs">{t("Page {page}", { page })}</span>
           <Button
             variant="outline"
             size="sm"
-            disabled={rows.length < 50 || loading}
-            onClick={() => setPage((p) => p + 1)}
+            disabled={rows.length < size || loading}
+            onClick={() => dispatch({ type: "pageStepped", delta: 1 })}
           >
             {t("Next")}
           </Button>

@@ -43,36 +43,30 @@ import {
 import { formatBytes, formatShortDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import type { WorkspaceEntry, WorkspaceFile } from "@/lib/types";
+import type { WorkspaceEntry } from "@/lib/types";
 import { t } from "@/i18n";
 
-type EditState = {
-  file: WorkspaceFile;
-  content: string;
-  dirty: boolean;
-  saving: boolean;
-};
+import { initialWorkspacePageState, workspacePageReducer } from "./_state/workspace-page.reducer";
 
 export default function WorkspacePage() {
-  const [path, setPath] = React.useState("");
-  const [entries, setEntries] = React.useState<WorkspaceEntry[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [edit, setEdit] = React.useState<EditState | null>(null);
-  const [mkdirOpen, setMkdirOpen] = React.useState(false);
-  const [mkdirName, setMkdirName] = React.useState("");
+  const [state, dispatch] = React.useReducer(workspacePageReducer, initialWorkspacePageState);
+  const { path, list } = state;
+  const { items: entries } = list;
+  // Counts as loading until the first listing settles (the list starts out idle).
+  const loading = list.loading || !list.loaded;
+  const { editor: edit, mkdir } = state;
   const uploadRef = React.useRef<HTMLInputElement>(null);
 
   const load = React.useCallback(
     (p: string) => {
-      setLoading(true);
+      dispatch({ type: "list/loadStarted" });
       api
         .workspaceList(p)
         .then((r) => {
-          setEntries(r.entries);
-          setPath(r.path);
+          dispatch({ type: "directoryLoaded", path: r.path, entries: r.entries });
         })
         .catch((e) => toast.error(t("Failed to read directory: {error}", { error: (e as Error).message })))
-        .finally(() => setLoading(false));
+        .finally(() => dispatch({ type: "list/loadFinished" }));
     },
     [],
   );
@@ -95,23 +89,23 @@ export default function WorkspacePage() {
   const openFile = (e: WorkspaceEntry) => {
     api
       .workspaceRead(e.path)
-      .then((f) => setEdit({ file: f, content: f.content ?? "", dirty: false, saving: false }))
+      .then((f) => dispatch({ type: "fileOpened", file: f }))
       .catch((err) => toast.error(t("Failed to open file: {error}", { error: (err as Error).message })));
   };
 
   const saveFile = () => {
     if (!edit) return;
-    setEdit({ ...edit, saving: true });
+    dispatch({ type: "saveStarted" });
     api
       .workspaceWrite(edit.file.path, edit.content)
       .then(() => {
         toast.success(t("Saved"));
-        setEdit((cur) => (cur ? { ...cur, dirty: false, saving: false } : cur));
+        dispatch({ type: "saveSucceeded" });
         load(path);
       })
       .catch((err) => {
         toast.error(t("Save failed: {error}", { error: (err as Error).message }));
-        setEdit((cur) => (cur ? { ...cur, saving: false } : cur));
+        dispatch({ type: "saveFailed" });
       });
   };
 
@@ -144,15 +138,14 @@ export default function WorkspacePage() {
   };
 
   const doMkdir = () => {
-    const name = mkdirName.trim();
+    const name = mkdir.name.trim();
     if (!name) return;
     const target = path ? `${path}/${name}` : name;
     api
       .workspaceMkdir(target)
       .then(() => {
         toast.success(t("Directory created"));
-        setMkdirOpen(false);
-        setMkdirName("");
+        dispatch({ type: "directoryCreated" });
         load(path);
       })
       .catch((err) => toast.error(t("Create failed: {error}", { error: (err as Error).message })));
@@ -181,7 +174,7 @@ export default function WorkspacePage() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setMkdirOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => dispatch({ type: "mkdirOpenChanged", open: true })}>
             <FolderPlusIcon /> {t("New folder")}
           </Button>
           <Button variant="outline" size="sm" onClick={() => uploadRef.current?.click()}>
@@ -279,7 +272,7 @@ export default function WorkspacePage() {
       </Card>
 
       {/* File view / edit */}
-      <Sheet open={edit !== null} onOpenChange={(o) => !o && setEdit(null)}>
+      <Sheet open={edit !== null} onOpenChange={(o) => !o && dispatch({ type: "editorClosed" })}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-2xl">
           {edit && (
             <>
@@ -309,7 +302,7 @@ export default function WorkspacePage() {
                   <div className="min-h-0 flex-1 p-3">
                     <Textarea
                       value={edit.content}
-                      onChange={(ev) => setEdit({ ...edit, content: ev.target.value, dirty: true })}
+                      onChange={(ev) => dispatch({ type: "editorContentChanged", content: ev.target.value })}
                       spellCheck={false}
                       className="h-full min-h-[50vh] resize-none font-mono text-xs leading-relaxed"
                     />
@@ -338,23 +331,23 @@ export default function WorkspacePage() {
       </Sheet>
 
       {/* New folder */}
-      <Dialog open={mkdirOpen} onOpenChange={setMkdirOpen}>
+      <Dialog open={mkdir.open} onOpenChange={(open) => dispatch({ type: "mkdirOpenChanged", open })}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>{t("New folder")}</DialogTitle>
           </DialogHeader>
           <Input
             autoFocus
-            value={mkdirName}
-            onChange={(e) => setMkdirName(e.target.value)}
+            value={mkdir.name}
+            onChange={(e) => dispatch({ type: "mkdirNameChanged", name: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && doMkdir()}
             placeholder={t("Folder name")}
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setMkdirOpen(false)}>
+            <Button variant="outline" onClick={() => dispatch({ type: "mkdirOpenChanged", open: false })}>
               {t("Cancel")}
             </Button>
-            <Button onClick={doMkdir} disabled={!mkdirName.trim()}>
+            <Button onClick={doMkdir} disabled={!mkdir.name.trim()}>
               {t("Create")}
             </Button>
           </DialogFooter>

@@ -63,33 +63,13 @@ import {
   isTraceLineMasked,
   parseHeaderLines,
 } from "@/lib/tamper-hooks";
-import type {
-  TamperDryRunRequest,
-  TamperDryRunResult,
-  TamperHook,
-  TamperHookPhase,
-  TamperHookVersion,
-  TrafficExchange,
-} from "@/lib/types";
+import type { TamperDryRunRequest, TamperHook, TamperHookPhase, TrafficExchange } from "@/lib/types";
 
-interface EditorState {
-  mode: "create" | "edit";
-  id?: number;
-  enabled: boolean;
-  name: string;
-  phase: TamperHookPhase;
-  priority: string;
-  note: string;
-  methods: string;
-  host: string;
-  urlRegex: string;
-  headers: string;
-  bodyRegex: string;
-  status: string;
-  respHeaders: string;
-  respBodyRegex: string;
-  source: string;
-}
+import {
+  type EditorState,
+  initialTamperHooksPanelState,
+  tamperHooksPanelReducer,
+} from "../_state/tamper-hooks-panel.reducer";
 
 function emptyEditor(phase: TamperHookPhase = "request"): EditorState {
   return {
@@ -132,69 +112,22 @@ function editorFromHook(h: TamperHook): EditorState {
   };
 }
 
-interface DryRunTarget {
-  label: string;
-  hookId?: number;
-  inline?: {
-    name: string;
-    phase: TamperHookPhase;
-    matchers: ReturnType<typeof buildMatchers>;
-    source: string;
-  };
-}
-
 export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: TrafficExchange[] }) {
-  const [hooks, setHooks] = React.useState<TamperHook[]>([]);
-  const [enabledByEnv, setEnabledByEnv] = React.useState<boolean>(true);
-  const [loading, setLoading] = React.useState(true);
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [togglingId, setTogglingId] = React.useState<number | null>(null);
-
-  // Create / Edit dialog state
-  const [editor, setEditor] = React.useState<EditorState | null>(null);
-  const [saving, setSaving] = React.useState(false);
-  const [formError, setFormError] = React.useState<string | null>(null);
-
-  // Delete confirmation
-  const [deleteTarget, setDeleteTarget] = React.useState<TamperHook | null>(null);
-  const [deleting, setDeleting] = React.useState(false);
-
-  // Versions sheet
-  const [versionsHook, setVersionsHook] = React.useState<TamperHook | null>(null);
-  const [versions, setVersions] = React.useState<TamperHookVersion[]>([]);
-  const [versionsLoading, setVersionsLoading] = React.useState(false);
-  const [expandedVersion, setExpandedVersion] = React.useState<number | null>(null);
-  const [rollbackTarget, setRollbackTarget] = React.useState<TamperHookVersion | null>(null);
-  const [rollingBack, setRollingBack] = React.useState(false);
-
-  // Dry-run sheet
-  const [dryRunTarget, setDryRunTarget] = React.useState<DryRunTarget | null>(null);
-  const [dryRunInputMode, setDryRunInputMode] = React.useState<"synthetic" | "exchange">("synthetic");
-  const [dryRunExchangeId, setDryRunExchangeId] = React.useState("");
-  const [dryRunLoadingExchange, setDryRunLoadingExchange] = React.useState(false);
-  const [dryRunExchangeWarning, setDryRunExchangeWarning] = React.useState<string | null>(null);
-  const [dryRunMethod, setDryRunMethod] = React.useState("GET");
-  const [dryRunUrl, setDryRunUrl] = React.useState("https://example.test/api/v1/items");
-  const [dryRunReqHeaders, setDryRunReqHeaders] = React.useState("Accept: application/json");
-  const [dryRunReqBody, setDryRunReqBody] = React.useState("");
-  const [dryRunStatus, setDryRunStatus] = React.useState("200");
-  const [dryRunRespHeaders, setDryRunRespHeaders] = React.useState("Content-Type: application/json");
-  const [dryRunRespBody, setDryRunRespBody] = React.useState('{"ok":true}');
-  const [dryRunRunning, setDryRunRunning] = React.useState(false);
-  const [dryRunError, setDryRunError] = React.useState<string | null>(null);
-  const [dryRunResult, setDryRunResult] = React.useState<TamperDryRunResult | null>(null);
+  const [state, dispatch] = React.useReducer(tamperHooksPanelReducer, initialTamperHooksPanelState);
+  const { list, editor, deleteTarget, versionHistory, dryRun, requests } = state;
+  const { hooks, enabledByEnv, loading } = list;
+  const { hook: versionsHook, items: versions, rollbackTarget } = versionHistory;
+  const dryRunTarget = dryRun.target;
 
   const loadHooks = React.useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
+    dispatch({ type: "hooksLoadStarted" });
     try {
       const res = await api.trafficHooks();
-      setHooks(res.hooks ?? []);
-      setEnabledByEnv(Boolean(res.enabled_by_env));
+      dispatch({ type: "hooksLoaded", hooks: res.hooks ?? [], enabledByEnv: Boolean(res.enabled_by_env) });
     } catch (e) {
-      setLoadError((e as Error).message);
+      dispatch({ type: "hooksLoadFailed", error: (e as Error).message });
     } finally {
-      setLoading(false);
+      dispatch({ type: "hooksLoadFinished" });
     }
   }, []);
 
@@ -203,26 +136,26 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
   }, [loadHooks]);
 
   const handleToggle = async (hook: TamperHook, next: boolean) => {
-    setTogglingId(hook.id);
+    dispatch({ type: "toggleStarted", id: hook.id });
     try {
       const updated = await api.toggleTrafficHook(hook.id, next);
-      setHooks((prev) => prev.map((h) => (h.id === hook.id ? updated : h)));
+      dispatch({ type: "hookUpdated", hook: updated });
       toast.success(
         next ? t('Hook "{name}" enabled', { name: hook.name }) : t('Hook "{name}" disabled', { name: hook.name }),
       );
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setTogglingId(null);
+      dispatch({ type: "toggleFinished" });
     }
   };
 
   const handleSave = async () => {
     if (!editor) return;
-    setFormError(null);
+    dispatch({ type: "request/errorCleared", key: "save" });
     const priority = Number.parseInt(editor.priority, 10);
     if (Number.isNaN(priority)) {
-      setFormError(t("Priority must be an integer"));
+      dispatch({ type: "request/failed", key: "save", error: t("Priority must be an integer") });
       return;
     }
     const payload = {
@@ -234,7 +167,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       source: editor.source,
       note: editor.note.trim(),
     };
-    setSaving(true);
+    dispatch({ type: "request/started", key: "save" });
     try {
       if (editor.mode === "create") {
         await api.createTrafficHook(payload);
@@ -243,105 +176,92 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
         await api.updateTrafficHook(editor.id, payload);
         toast.success(t("Hook updated"));
       }
-      setEditor(null);
+      dispatch({ type: "editorClosed" });
       await loadHooks();
     } catch (e) {
-      setFormError((e as Error).message);
+      dispatch({ type: "request/failed", key: "save", error: (e as Error).message });
     } finally {
-      setSaving(false);
+      dispatch({ type: "request/finished", key: "save" });
     }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    setDeleting(true);
+    dispatch({ type: "request/started", key: "delete" });
     try {
       await api.deleteTrafficHook(deleteTarget.id);
       toast.success(t("Hook deleted"));
-      setDeleteTarget(null);
+      dispatch({ type: "deleteDialogClosed" });
       await loadHooks();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setDeleting(false);
+      dispatch({ type: "request/finished", key: "delete" });
     }
   };
 
   const openVersions = async (hook: TamperHook) => {
-    setVersionsHook(hook);
-    setVersions([]);
-    setExpandedVersion(null);
-    setVersionsLoading(true);
+    dispatch({ type: "versionsOpened", hook });
     try {
       const res = await api.trafficHookVersions(hook.id);
-      setVersions(res.versions ?? []);
+      dispatch({ type: "versionsLoaded", versions: res.versions ?? [] });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setVersionsLoading(false);
+      dispatch({ type: "versionsLoadFinished" });
     }
   };
 
   const handleRollback = async () => {
     if (!versionsHook || !rollbackTarget) return;
-    setRollingBack(true);
+    dispatch({ type: "request/started", key: "rollback" });
     try {
       const updated = await api.rollbackTrafficHook(versionsHook.id, rollbackTarget.version);
       toast.success(
         t("Rolled back to v{version} (now v{current})", { version: rollbackTarget.version, current: updated.version }),
       );
-      setRollbackTarget(null);
-      setVersionsHook(updated);
+      dispatch({ type: "rolledBack", hook: updated });
       await loadHooks();
       const res = await api.trafficHookVersions(updated.id);
-      setVersions(res.versions ?? []);
+      dispatch({ type: "versionsLoaded", versions: res.versions ?? [] });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setRollingBack(false);
+      dispatch({ type: "request/finished", key: "rollback" });
     }
   };
 
   const openDryRunForHook = (hook: TamperHook) => {
-    setDryRunTarget({ label: `${hook.name} (v${hook.version}, ${hook.phase})`, hookId: hook.id });
-    setDryRunError(null);
-    setDryRunResult(null);
-    setDryRunExchangeWarning(null);
+    dispatch({
+      type: "dryRunOpened",
+      target: { label: `${hook.name} (v${hook.version}, ${hook.phase})`, hookId: hook.id },
+    });
   };
 
   const openDryRunForDraft = () => {
     if (!editor) return;
-    setDryRunTarget({
-      label: t("Draft: {name} ({phase})", { name: editor.name.trim() || t("untitled"), phase: editor.phase }),
-      inline: {
-        name: editor.name.trim() || "dry-run",
-        phase: editor.phase,
-        matchers: buildMatchers(editor),
-        source: editor.source,
+    dispatch({
+      type: "dryRunOpened",
+      target: {
+        label: t("Draft: {name} ({phase})", { name: editor.name.trim() || t("untitled"), phase: editor.phase }),
+        inline: {
+          name: editor.name.trim() || "dry-run",
+          phase: editor.phase,
+          matchers: buildMatchers(editor),
+          source: editor.source,
+        },
       },
     });
-    setDryRunError(null);
-    setDryRunResult(null);
-    setDryRunExchangeWarning(null);
   };
 
   const loadExchangeIntoDryRun = async (id: string) => {
     const trimmed = id.trim();
     if (!trimmed) return;
-    setDryRunLoadingExchange(true);
-    setDryRunError(null);
-    setDryRunExchangeWarning(null);
+    dispatch({ type: "exchangeLoadStarted" });
     try {
       const detail = await api.trafficExchange(trimmed);
       const matched = recentExchanges.find((ex) => ex.id === trimmed);
       const converted = exchangeDetailToDryRunIO(detail, matched?.url);
-      setDryRunMethod(converted.io.request.method);
-      setDryRunUrl(converted.io.request.url);
-      setDryRunReqHeaders(formatHeaderLines(converted.io.request.headers));
-      setDryRunReqBody(converted.io.request.body);
-      setDryRunStatus(String(converted.io.response.status));
-      setDryRunRespHeaders(formatHeaderLines(converted.io.response.headers));
-      setDryRunRespBody(converted.io.response.body);
       const warnings: string[] = [];
       if (converted.reqBinary || converted.respBinary) {
         warnings.push(t("Binary body detected; binary bodies are skipped by hooks in 0.7."));
@@ -349,21 +269,32 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       if (converted.reqPreviewOnly || converted.respPreviewOnly) {
         warnings.push(t("Body was truncated in the recorded preview; only the inline preview was loaded."));
       }
-      if (warnings.length) setDryRunExchangeWarning(warnings.join(" "));
+      dispatch({
+        type: "exchangeLoaded",
+        input: {
+          method: converted.io.request.method,
+          url: converted.io.request.url,
+          reqHeaders: formatHeaderLines(converted.io.request.headers),
+          reqBody: converted.io.request.body,
+          status: String(converted.io.response.status),
+          respHeaders: formatHeaderLines(converted.io.response.headers),
+          respBody: converted.io.response.body,
+        },
+        warning: warnings.length ? warnings.join(" ") : null,
+      });
       toast.success(t("Loaded exchange {id}", { id: trimmed }));
     } catch (e) {
-      setDryRunError((e as Error).message);
+      dispatch({ type: "exchangeLoadFailed", error: (e as Error).message });
     } finally {
-      setDryRunLoadingExchange(false);
+      dispatch({ type: "exchangeLoadFinished" });
     }
   };
 
   const runDryRun = async () => {
     if (!dryRunTarget) return;
-    setDryRunRunning(true);
-    setDryRunError(null);
-    setDryRunResult(null);
-    const statusNum = Number.parseInt(dryRunStatus, 10);
+    dispatch({ type: "dryRunStarted" });
+    const { input } = dryRun;
+    const statusNum = Number.parseInt(input.status, 10);
     const body: TamperDryRunRequest = {
       ...(dryRunTarget.hookId
         ? { hook_id: dryRunTarget.hookId }
@@ -374,24 +305,24 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
             source: dryRunTarget.inline?.source,
           }),
       request: {
-        method: dryRunMethod.trim().toUpperCase() || "GET",
-        url: dryRunUrl.trim() || "https://example.test/",
-        headers: parseHeaderLines(dryRunReqHeaders),
-        body: dryRunReqBody,
+        method: input.method.trim().toUpperCase() || "GET",
+        url: input.url.trim() || "https://example.test/",
+        headers: parseHeaderLines(input.reqHeaders),
+        body: input.reqBody,
       },
       response: {
         status: Number.isNaN(statusNum) ? 200 : statusNum,
-        headers: parseHeaderLines(dryRunRespHeaders),
-        body: dryRunRespBody,
+        headers: parseHeaderLines(input.respHeaders),
+        body: input.respBody,
       },
     };
     try {
       const res = await api.dryRunTrafficHook(body);
-      setDryRunResult(res);
+      dispatch({ type: "dryRunSucceeded", result: res });
     } catch (e) {
-      setDryRunError((e as Error).message);
+      dispatch({ type: "dryRunFailed", error: (e as Error).message });
     } finally {
-      setDryRunRunning(false);
+      dispatch({ type: "dryRunFinished" });
     }
   };
 
@@ -408,9 +339,9 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
         </Alert>
       )}
 
-      {loadError && (
+      {list.error && (
         <Alert variant="destructive" className="py-2">
-          <AlertDescription className="text-xs">{loadError}</AlertDescription>
+          <AlertDescription className="text-xs">{list.error}</AlertDescription>
         </Alert>
       )}
 
@@ -428,10 +359,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
           <Button
             size="sm"
             className="h-8"
-            onClick={() => {
-              setFormError(null);
-              setEditor(emptyEditor("request"));
-            }}
+            onClick={() => dispatch({ type: "editorOpened", form: emptyEditor("request") })}
           >
             <PlusIcon className="size-3.5" />
             {t("New hook")}
@@ -483,7 +411,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   <TableCell>
                     <Switch
                       checked={hook.enabled}
-                      disabled={togglingId === hook.id}
+                      disabled={list.togglingId === hook.id}
                       aria-label={t("Toggle hook {name}", { name: hook.name })}
                       onCheckedChange={(checked) => void handleToggle(hook, checked)}
                     />
@@ -543,10 +471,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                         size="icon-xs"
                         title={t("Edit")}
                         aria-label={t("Edit")}
-                        onClick={() => {
-                          setFormError(null);
-                          setEditor(editorFromHook(hook));
-                        }}
+                        onClick={() => dispatch({ type: "editorOpened", form: editorFromHook(hook) })}
                       >
                         <PencilIcon className="size-3.5" />
                       </Button>
@@ -556,7 +481,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                         title={t("Delete")}
                         aria-label={t("Delete")}
                         className="text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget(hook)}
+                        onClick={() => dispatch({ type: "deleteRequested", hook })}
                       >
                         <Trash2Icon className="size-3.5" />
                       </Button>
@@ -573,10 +498,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       <Dialog
         open={editor !== null}
         onOpenChange={(open) => {
-          if (!open) {
-            setEditor(null);
-            setFormError(null);
-          }
+          if (!open) dispatch({ type: "editorClosed" });
         }}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
@@ -591,10 +513,12 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
 
           {editor && (
             <div className="space-y-4 py-2">
-              {formError && (
+              {requests.save.error && (
                 <Alert variant="destructive">
                   <AlertTriangleIcon className="size-4" />
-                  <AlertDescription className="font-mono text-xs whitespace-pre-wrap">{formError}</AlertDescription>
+                  <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
+                    {requests.save.error}
+                  </AlertDescription>
                 </Alert>
               )}
 
@@ -605,7 +529,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                     id="hook-name"
                     value={editor.name}
                     placeholder="sign-api-requests"
-                    onChange={(e) => setEditor({ ...editor, name: e.target.value })}
+                    onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { name: e.target.value } })}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -618,14 +542,16 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                         editor.mode === "create" &&
                         (editor.source.trim() === DEFAULT_REQUEST_HOOK_SOURCE.trim() ||
                           editor.source.trim() === DEFAULT_RESPONSE_HOOK_SOURCE.trim());
-                      setEditor({
-                        ...editor,
-                        phase: nextPhase,
-                        source: shouldSwapTemplate
-                          ? nextPhase === "response"
-                            ? DEFAULT_RESPONSE_HOOK_SOURCE
-                            : DEFAULT_REQUEST_HOOK_SOURCE
-                          : editor.source,
+                      dispatch({
+                        type: "editorFieldsChanged",
+                        patch: {
+                          phase: nextPhase,
+                          source: shouldSwapTemplate
+                            ? nextPhase === "response"
+                              ? DEFAULT_RESPONSE_HOOK_SOURCE
+                              : DEFAULT_REQUEST_HOOK_SOURCE
+                            : editor.source,
+                        },
                       });
                     }}
                   >
@@ -644,7 +570,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                     id="hook-priority"
                     type="number"
                     value={editor.priority}
-                    onChange={(e) => setEditor({ ...editor, priority: e.target.value })}
+                    onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { priority: e.target.value } })}
                   />
                 </div>
               </div>
@@ -655,7 +581,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   id="hook-note"
                   value={editor.note}
                   placeholder={t("Optional operator note")}
-                  onChange={(e) => setEditor({ ...editor, note: e.target.value })}
+                  onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { note: e.target.value } })}
                 />
               </div>
 
@@ -674,7 +600,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                       className="h-8 font-mono text-xs"
                       value={editor.methods}
                       placeholder="POST, PUT"
-                      onChange={(e) => setEditor({ ...editor, methods: e.target.value })}
+                      onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { methods: e.target.value } })}
                     />
                   </div>
                   <div className="space-y-1">
@@ -686,7 +612,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                       className="h-8 font-mono text-xs"
                       value={editor.host}
                       placeholder="*.example.test"
-                      onChange={(e) => setEditor({ ...editor, host: e.target.value })}
+                      onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { host: e.target.value } })}
                     />
                   </div>
                   <div className="space-y-1">
@@ -698,7 +624,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                       className="h-8 font-mono text-xs"
                       value={editor.urlRegex}
                       placeholder="^/api/v1/"
-                      onChange={(e) => setEditor({ ...editor, urlRegex: e.target.value })}
+                      onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { urlRegex: e.target.value } })}
                     />
                   </div>
                   <div className="space-y-1">
@@ -710,7 +636,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                       className="h-8 font-mono text-xs"
                       value={editor.bodyRegex}
                       placeholder="token"
-                      onChange={(e) => setEditor({ ...editor, bodyRegex: e.target.value })}
+                      onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { bodyRegex: e.target.value } })}
                     />
                   </div>
                 </div>
@@ -724,7 +650,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                     className="font-mono text-xs"
                     value={editor.headers}
                     placeholder={"Content-Type: application/json\nX-Api-Key"}
-                    onChange={(e) => setEditor({ ...editor, headers: e.target.value })}
+                    onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { headers: e.target.value } })}
                   />
                 </div>
 
@@ -739,7 +665,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                         className="h-8 font-mono text-xs"
                         value={editor.status}
                         placeholder="200, 2xx"
-                        onChange={(e) => setEditor({ ...editor, status: e.target.value })}
+                        onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { status: e.target.value } })}
                       />
                     </div>
                     <div className="space-y-1">
@@ -750,7 +676,9 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                         id="m-resp-body"
                         className="h-8 font-mono text-xs"
                         value={editor.respBodyRegex}
-                        onChange={(e) => setEditor({ ...editor, respBodyRegex: e.target.value })}
+                        onChange={(e) =>
+                          dispatch({ type: "editorFieldsChanged", patch: { respBodyRegex: e.target.value } })
+                        }
                       />
                     </div>
                     <div className="space-y-1 sm:col-span-2">
@@ -763,7 +691,9 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                         className="font-mono text-xs"
                         value={editor.respHeaders}
                         placeholder="Content-Type: application/json"
-                        onChange={(e) => setEditor({ ...editor, respHeaders: e.target.value })}
+                        onChange={(e) =>
+                          dispatch({ type: "editorFieldsChanged", patch: { respHeaders: e.target.value } })
+                        }
                       />
                     </div>
                   </div>
@@ -783,10 +713,12 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                     size="sm"
                     className="h-6 px-2 text-xs"
                     onClick={() =>
-                      setEditor({
-                        ...editor,
-                        source:
-                          editor.phase === "response" ? DEFAULT_RESPONSE_HOOK_SOURCE : DEFAULT_REQUEST_HOOK_SOURCE,
+                      dispatch({
+                        type: "editorFieldsChanged",
+                        patch: {
+                          source:
+                            editor.phase === "response" ? DEFAULT_RESPONSE_HOOK_SOURCE : DEFAULT_REQUEST_HOOK_SOURCE,
+                        },
                       })
                     }
                   >
@@ -799,7 +731,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   spellCheck={false}
                   className="font-mono text-xs leading-relaxed"
                   value={editor.source}
-                  onChange={(e) => setEditor({ ...editor, source: e.target.value })}
+                  onChange={(e) => dispatch({ type: "editorFieldsChanged", patch: { source: e.target.value } })}
                 />
                 <p className="text-xs text-muted-foreground">
                   {editor.phase === "response"
@@ -816,11 +748,16 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
               {t("Dry-run draft")}
             </Button>
             <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" onClick={() => setEditor(null)} disabled={saving}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => dispatch({ type: "editorClosed" })}
+                disabled={requests.save.pending}
+              >
                 {t("Cancel")}
               </Button>
-              <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-                {saving && <Loader2Icon className="size-3.5 animate-spin" />}
+              <Button type="button" onClick={() => void handleSave()} disabled={requests.save.pending}>
+                {requests.save.pending && <Loader2Icon className="size-3.5 animate-spin" />}
                 {editor?.mode === "edit" ? t("Save changes") : t("Create hook")}
               </Button>
             </div>
@@ -829,7 +766,10 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       </Dialog>
 
       {/* Delete confirmation */}
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && dispatch({ type: "deleteDialogClosed" })}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("Delete tampering hook?")}</AlertDialogTitle>
@@ -840,16 +780,16 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>{t("Cancel")}</AlertDialogCancel>
+            <AlertDialogCancel disabled={requests.delete.pending}>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
                 void handleDelete();
               }}
-              disabled={deleting}
+              disabled={requests.delete.pending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting && <Loader2Icon className="size-3.5 animate-spin" />}
+              {requests.delete.pending && <Loader2Icon className="size-3.5 animate-spin" />}
               {t("Delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -857,7 +797,10 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       </AlertDialog>
 
       {/* Versions Sheet */}
-      <Sheet open={versionsHook !== null} onOpenChange={(open) => !open && setVersionsHook(null)}>
+      <Sheet
+        open={versionsHook !== null}
+        onOpenChange={(open) => !open && dispatch({ type: "versionHistoryChanged", patch: { hook: null } })}
+      >
         <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
           <SheetHeader>
             <SheetTitle>{t("Versions: {name}", { name: versionsHook?.name ?? "" })}</SheetTitle>
@@ -867,7 +810,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
           </SheetHeader>
 
           <div className="mt-4 space-y-3">
-            {versionsLoading ? (
+            {versionHistory.loading ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
                 <Loader2Icon className="mx-auto mb-2 size-5 animate-spin" />
                 {t("Loading versions…")}
@@ -877,7 +820,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
             ) : (
               versions.map((v) => {
                 const isCurrent = versionsHook?.version === v.version;
-                const isExpanded = expandedVersion === v.version;
+                const isExpanded = versionHistory.expanded === v.version;
                 return (
                   <Card key={v.id} className="space-y-2 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -901,7 +844,12 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-xs"
-                        onClick={() => setExpandedVersion(isExpanded ? null : v.version)}
+                        onClick={() =>
+                          dispatch({
+                            type: "versionHistoryChanged",
+                            patch: { expanded: isExpanded ? null : v.version },
+                          })
+                        }
                       >
                         <Code2Icon className="size-3.5" />
                         {isExpanded ? t("Hide source") : t("View source")}
@@ -911,7 +859,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                           variant="outline"
                           size="sm"
                           className="h-7 px-2.5 text-xs"
-                          onClick={() => setRollbackTarget(v)}
+                          onClick={() => dispatch({ type: "versionHistoryChanged", patch: { rollbackTarget: v } })}
                         >
                           <RotateCcwIcon className="size-3.5" />
                           {t("Rollback to v{version}", { version: v.version })}
@@ -932,7 +880,10 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       </Sheet>
 
       {/* Rollback confirmation */}
-      <AlertDialog open={rollbackTarget !== null} onOpenChange={(open) => !open && setRollbackTarget(null)}>
+      <AlertDialog
+        open={rollbackTarget !== null}
+        onOpenChange={(open) => !open && dispatch({ type: "versionHistoryChanged", patch: { rollbackTarget: null } })}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -946,15 +897,15 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={rollingBack}>{t("Cancel")}</AlertDialogCancel>
+            <AlertDialogCancel disabled={requests.rollback.pending}>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
                 void handleRollback();
               }}
-              disabled={rollingBack}
+              disabled={requests.rollback.pending}
             >
-              {rollingBack && <Loader2Icon className="size-3.5 animate-spin" />}
+              {requests.rollback.pending && <Loader2Icon className="size-3.5 animate-spin" />}
               {t("Rollback")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -962,7 +913,10 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       </AlertDialog>
 
       {/* Dry-run Sheet */}
-      <Sheet open={dryRunTarget !== null} onOpenChange={(open) => !open && setDryRunTarget(null)}>
+      <Sheet
+        open={dryRunTarget !== null}
+        onOpenChange={(open) => !open && dispatch({ type: "dryRunChanged", patch: { target: null } })}
+      >
         <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
           <SheetHeader>
             <SheetTitle>{t("Dry-run: {target}", { target: dryRunTarget?.label ?? "" })}</SheetTitle>
@@ -974,7 +928,12 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
           </SheetHeader>
 
           <div className="mt-4 space-y-4">
-            <Tabs value={dryRunInputMode} onValueChange={(v) => setDryRunInputMode(v as "synthetic" | "exchange")}>
+            <Tabs
+              value={dryRun.inputMode}
+              onValueChange={(v) =>
+                dispatch({ type: "dryRunChanged", patch: { inputMode: v as "synthetic" | "exchange" } })
+              }
+            >
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="exchange">{t("From exchange ID")}</TabsTrigger>
                 <TabsTrigger value="synthetic">{t("Synthetic input")}</TabsTrigger>
@@ -989,9 +948,9 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                     <Input
                       id="dryrun-ex-id"
                       className="h-8 font-mono text-xs"
-                      value={dryRunExchangeId}
+                      value={dryRun.exchangeId}
                       placeholder={t("Paste a recorded exchange ID")}
-                      onChange={(e) => setDryRunExchangeId(e.target.value)}
+                      onChange={(e) => dispatch({ type: "dryRunChanged", patch: { exchangeId: e.target.value } })}
                     />
                   </div>
                   <Button
@@ -999,10 +958,10 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                     variant="outline"
                     size="sm"
                     className="h-8"
-                    disabled={dryRunLoadingExchange || !dryRunExchangeId.trim()}
-                    onClick={() => void loadExchangeIntoDryRun(dryRunExchangeId)}
+                    disabled={dryRun.loadingExchange || !dryRun.exchangeId.trim()}
+                    onClick={() => void loadExchangeIntoDryRun(dryRun.exchangeId)}
                   >
-                    {dryRunLoadingExchange && <Loader2Icon className="size-3.5 animate-spin" />}
+                    {dryRun.loadingExchange && <Loader2Icon className="size-3.5 animate-spin" />}
                     {t("Load exchange")}
                   </Button>
                 </div>
@@ -1013,7 +972,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                     <Select
                       value=""
                       onValueChange={(id) => {
-                        setDryRunExchangeId(id);
+                        dispatch({ type: "dryRunChanged", patch: { exchangeId: id } });
                         void loadExchangeIntoDryRun(id);
                       }}
                     >
@@ -1032,10 +991,10 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   </div>
                 )}
 
-                {dryRunExchangeWarning && (
+                {dryRun.exchangeWarning && (
                   <Alert className="border-amber-500/40 bg-amber-500/10 py-2">
                     <AlertTriangleIcon className="size-4 text-amber-500" />
-                    <AlertDescription className="text-xs">{dryRunExchangeWarning}</AlertDescription>
+                    <AlertDescription className="text-xs">{dryRun.exchangeWarning}</AlertDescription>
                   </Alert>
                 )}
               </TabsContent>
@@ -1054,30 +1013,30 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                 <div className="flex gap-2">
                   <Input
                     className="h-8 w-24 font-mono text-xs"
-                    value={dryRunMethod}
-                    onChange={(e) => setDryRunMethod(e.target.value)}
+                    value={dryRun.input.method}
+                    onChange={(e) => dispatch({ type: "dryRunInputChanged", patch: { method: e.target.value } })}
                     aria-label={t("Method")}
                   />
                   <Input
                     className="h-8 flex-1 font-mono text-xs"
-                    value={dryRunUrl}
-                    onChange={(e) => setDryRunUrl(e.target.value)}
+                    value={dryRun.input.url}
+                    onChange={(e) => dispatch({ type: "dryRunInputChanged", patch: { url: e.target.value } })}
                     aria-label={t("URL")}
                   />
                 </div>
                 <Textarea
                   rows={3}
                   className="font-mono text-xs"
-                  value={dryRunReqHeaders}
+                  value={dryRun.input.reqHeaders}
                   placeholder="Header: value"
-                  onChange={(e) => setDryRunReqHeaders(e.target.value)}
+                  onChange={(e) => dispatch({ type: "dryRunInputChanged", patch: { reqHeaders: e.target.value } })}
                 />
                 <Textarea
                   rows={3}
                   className="font-mono text-xs"
-                  value={dryRunReqBody}
+                  value={dryRun.input.reqBody}
                   placeholder={t("Request body")}
-                  onChange={(e) => setDryRunReqBody(e.target.value)}
+                  onChange={(e) => dispatch({ type: "dryRunInputChanged", patch: { reqBody: e.target.value } })}
                 />
               </div>
 
@@ -1086,56 +1045,56 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                 <Input
                   className="h-8 w-28 font-mono text-xs"
                   type="number"
-                  value={dryRunStatus}
-                  onChange={(e) => setDryRunStatus(e.target.value)}
+                  value={dryRun.input.status}
+                  onChange={(e) => dispatch({ type: "dryRunInputChanged", patch: { status: e.target.value } })}
                   aria-label={t("Status")}
                 />
                 <Textarea
                   rows={3}
                   className="font-mono text-xs"
-                  value={dryRunRespHeaders}
+                  value={dryRun.input.respHeaders}
                   placeholder="Header: value"
-                  onChange={(e) => setDryRunRespHeaders(e.target.value)}
+                  onChange={(e) => dispatch({ type: "dryRunInputChanged", patch: { respHeaders: e.target.value } })}
                 />
                 <Textarea
                   rows={3}
                   className="font-mono text-xs"
-                  value={dryRunRespBody}
+                  value={dryRun.input.respBody}
                   placeholder={t("Response body")}
-                  onChange={(e) => setDryRunRespBody(e.target.value)}
+                  onChange={(e) => dispatch({ type: "dryRunInputChanged", patch: { respBody: e.target.value } })}
                 />
               </div>
             </div>
 
             <div className="flex justify-end">
-              <Button type="button" size="sm" onClick={() => void runDryRun()} disabled={dryRunRunning}>
-                {dryRunRunning ? <Loader2Icon className="size-3.5 animate-spin" /> : <PlayIcon className="size-3.5" />}
+              <Button type="button" size="sm" onClick={() => void runDryRun()} disabled={dryRun.running}>
+                {dryRun.running ? <Loader2Icon className="size-3.5 animate-spin" /> : <PlayIcon className="size-3.5" />}
                 {t("Run dry-run")}
               </Button>
             </div>
 
-            {dryRunError && (
+            {dryRun.error && (
               <Alert variant="destructive">
                 <AlertTriangleIcon className="size-4" />
-                <AlertDescription className="font-mono text-xs whitespace-pre-wrap">{dryRunError}</AlertDescription>
+                <AlertDescription className="font-mono text-xs whitespace-pre-wrap">{dryRun.error}</AlertDescription>
               </Alert>
             )}
 
-            {dryRunResult && (
+            {dryRun.result && (
               <div className="space-y-3 border-t pt-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">{t("Dry-run result")}</span>
-                  <Badge variant={dryRunResult.changed ? "default" : "secondary"}>
-                    {dryRunResult.changed ? t("Modified") : t("Unchanged")}
+                  <Badge variant={dryRun.result.changed ? "default" : "secondary"}>
+                    {dryRun.result.changed ? t("Modified") : t("Unchanged")}
                   </Badge>
                 </div>
 
                 {/* Trace lines */}
                 <div className="space-y-1.5">
                   <div className="text-xs font-medium text-muted-foreground">
-                    {t("Trace lines ({count})", { count: dryRunResult.lines?.length ?? 0 })}
+                    {t("Trace lines ({count})", { count: dryRun.result.lines?.length ?? 0 })}
                   </div>
-                  {!dryRunResult.lines || dryRunResult.lines.length === 0 ? (
+                  {!dryRun.result.lines || dryRun.result.lines.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
                       {t("No trace lines recorded (matcher did not match or hook made no changes).")}
                     </p>
@@ -1151,7 +1110,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {dryRunResult.lines.map((line, idx) => {
+                          {dryRun.result.lines.map((line, idx) => {
                             const masked = isTraceLineMasked(line);
                             const decodedAfter = decodeTraceAfter(line.After);
                             return (
@@ -1213,13 +1172,13 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   <div className="space-y-1">
                     <div className="text-xs font-medium text-muted-foreground">{t("Resulting request")}</div>
                     <pre className="max-h-48 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs">
-                      {`${dryRunResult.request.method} ${dryRunResult.request.url}\n${formatHeaderLines(dryRunResult.request.headers)}${dryRunResult.request.body ? `\n\n${dryRunResult.request.body}` : ""}`}
+                      {`${dryRun.result.request.method} ${dryRun.result.request.url}\n${formatHeaderLines(dryRun.result.request.headers)}${dryRun.result.request.body ? `\n\n${dryRun.result.request.body}` : ""}`}
                     </pre>
                   </div>
                   <div className="space-y-1">
                     <div className="text-xs font-medium text-muted-foreground">{t("Resulting response")}</div>
                     <pre className="max-h-48 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs">
-                      {`HTTP ${dryRunResult.response.status}\n${formatHeaderLines(dryRunResult.response.headers)}${dryRunResult.response.body ? `\n\n${dryRunResult.response.body}` : ""}`}
+                      {`HTTP ${dryRun.result.response.status}\n${formatHeaderLines(dryRun.result.response.headers)}${dryRun.result.response.body ? `\n\n${dryRun.result.response.body}` : ""}`}
                     </pre>
                   </div>
                 </div>

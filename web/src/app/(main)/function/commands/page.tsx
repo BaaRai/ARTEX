@@ -14,9 +14,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { formatShortDateTime } from "@/lib/format";
-import type { CommandRecord, ToolStat } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { t } from "@/i18n";
+
+import { commandsPageReducer, initialCommandsPageState } from "./_state/commands-page.reducer";
 
 // toolInput renders a tool's raw input for display. Bash's {"command":"..."} is
 // unwrapped to the bare command; other tools show their pretty-printed JSON args.
@@ -42,76 +43,56 @@ const PAGE_SIZES = [25, 50, 100];
 const CMD_MAX_LEN = 80;
 
 export default function CommandsPage() {
-  const [page, setPage] = React.useState(0);
-  const [size, setSize] = React.useState(50);
-  const [query, setQuery] = React.useState("");
-  const [queryQ, setQueryQ] = React.useState("");
-  const [taskFilter, setTaskFilter] = React.useState("");
-
-  const [commands, setCommands] = React.useState<CommandRecord[]>([]);
-  const [total, setTotal] = React.useState(0);
-  const [loading, setLoading] = React.useState(false);
-
-  // Per-tool call counts. Fetched only when the dialog opens (one extra aggregate query, no need to pay for it on every page turn).
-  const [statsOpen, setStatsOpen] = React.useState(false);
-  const [stats, setStats] = React.useState<ToolStat[]>([]);
-  const [statsLoading, setStatsLoading] = React.useState(false);
-
-  // Selected execution is rendered in a right-side detail sheet.
-  const [selected, setSelected] = React.useState<CommandRecord | null>(null);
+  const [state, dispatch] = React.useReducer(commandsPageReducer, initialCommandsPageState);
+  const { filters, pagination, list, stats, selected } = state;
+  const { page, size } = pagination;
 
   // Debounce search input.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the reducer reads the latest query; re-arm on every keystroke.
   React.useEffect(() => {
-    const t = setTimeout(() => setQueryQ(query.trim()), 300);
+    const t = setTimeout(() => dispatch({ type: "queryDebounced" }), 300);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [filters.query]);
 
-  // Reset page on filter change.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: every filter change intentionally resets pagination.
-  React.useEffect(() => {
-    setPage(0);
-  }, [queryQ, taskFilter, size]);
-
-  // Load data.
+  // Load data. Filter changes reset the page inside the reducer, so this runs once per change.
   React.useEffect(() => {
     let alive = true;
-    setLoading(true);
+    dispatch({ type: "list/loadStarted" });
     api
-      .commands({ task: taskFilter || undefined, q: queryQ || undefined, page, size })
+      .commands({ task: filters.task || undefined, q: filters.debouncedQuery || undefined, page, size })
       .then((r) => {
         if (!alive) return;
-        setCommands(r.commands ?? []);
-        setTotal(r.total ?? 0);
+        dispatch({ type: "list/loaded", items: r.commands ?? [], total: r.total ?? 0 });
       })
       .catch(() => {
         if (!alive) return;
-        setCommands([]);
-        setTotal(0);
+        dispatch({ type: "list/loaded", items: [], total: 0 });
       })
-      .finally(() => alive && setLoading(false));
+      .finally(() => alive && dispatch({ type: "list/loadFinished" }));
     return () => {
       alive = false;
     };
-  }, [page, size, queryQ, taskFilter]);
+  }, [page, size, filters.debouncedQuery, filters.task]);
 
   // Stats follow the filters and describe the same set of records as the table (without pagination).
   React.useEffect(() => {
-    if (!statsOpen) return;
+    if (!stats.open) return;
     let alive = true;
-    setStatsLoading(true);
+    dispatch({ type: "statsLoadStarted" });
     api
-      .commandStats({ task: taskFilter || undefined, q: queryQ || undefined })
-      .then((r) => alive && setStats(r.stats ?? []))
-      .catch(() => alive && setStats([]))
-      .finally(() => alive && setStatsLoading(false));
+      .commandStats({ task: filters.task || undefined, q: filters.debouncedQuery || undefined })
+      .then((r) => alive && dispatch({ type: "statsLoaded", items: r.stats ?? [] }))
+      .catch(() => alive && dispatch({ type: "statsLoaded", items: [] }))
+      .finally(() => alive && dispatch({ type: "statsLoadFinished" }));
     return () => {
       alive = false;
     };
-  }, [statsOpen, queryQ, taskFilter]);
+  }, [stats.open, filters.debouncedQuery, filters.task]);
 
-  const statsTotal = stats.reduce((n, s) => n + s.total, 0);
-  const statsErrors = stats.reduce((n, s) => n + s.errors, 0);
-  const statsMax = stats.reduce((n, s) => Math.max(n, s.total), 0);
+  const { items: commands, total, loading } = list;
+  const statsTotal = stats.items.reduce((n, s) => n + s.total, 0);
+  const statsErrors = stats.items.reduce((n, s) => n + s.errors, 0);
+  const statsMax = stats.items.reduce((n, s) => Math.max(n, s.total), 0);
   const totalPages = Math.max(1, Math.ceil(total / size));
   const rangeStart = total === 0 ? 0 : page * size + 1;
   const rangeEnd = page * size + commands.length;
@@ -133,18 +114,21 @@ export default function CommandsPage() {
           <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder={t("Search tools / arguments...")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={filters.query}
+            onChange={(e) => dispatch({ type: "queryChanged", query: e.target.value })}
             className="h-8 pl-8"
           />
         </div>
         <Input
           placeholder={t("Task ID")}
           className="h-8 w-28"
-          value={taskFilter}
-          onChange={(e) => setTaskFilter(e.target.value.replace(/\D/g, ""))}
+          value={filters.task}
+          onChange={(e) => dispatch({ type: "taskFilterChanged", task: e.target.value })}
         />
-        <Select value={String(size)} onValueChange={(v) => setSize(Number(v))}>
+        <Select
+          value={String(size)}
+          onValueChange={(v) => dispatch({ type: "pagination/sizeChanged", size: Number(v) })}
+        >
           <SelectTrigger size="sm" className="w-28">
             <SelectValue />
           </SelectTrigger>
@@ -157,7 +141,12 @@ export default function CommandsPage() {
           </SelectContent>
         </Select>
 
-        <Button variant="outline" size="sm" className="h-8" onClick={() => setStatsOpen(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8"
+          onClick={() => dispatch({ type: "statsOpenChanged", open: true })}
+        >
           <BarChart3Icon className="size-4" />
           {t("Stats")}
         </Button>
@@ -171,7 +160,7 @@ export default function CommandsPage() {
             size="icon"
             className="size-8"
             disabled={page <= 0}
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            onClick={() => dispatch({ type: "pagination/pageChanged", page: page - 1 })}
           >
             <ChevronLeftIcon />
           </Button>
@@ -183,7 +172,7 @@ export default function CommandsPage() {
             size="icon"
             className="size-8"
             disabled={page + 1 >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            onClick={() => dispatch({ type: "pagination/pageChanged", page: Math.min(totalPages - 1, page + 1) })}
           >
             <ChevronRightIcon />
           </Button>
@@ -223,7 +212,7 @@ export default function CommandsPage() {
                     <TableRow
                       key={cmd.id}
                       className={cn("cursor-pointer", selected?.id === cmd.id && "bg-accent hover:bg-accent")}
-                      onClick={() => setSelected(cmd)}
+                      onClick={() => dispatch({ type: "selected", command: cmd })}
                     >
                       <TableCell className="text-xs text-muted-foreground tabular-nums">
                         {formatShortDateTime(cmd.created_at)}
@@ -265,16 +254,18 @@ export default function CommandsPage() {
       </div>
 
       {/* Tool call stats: the same set of records as the table (same filters, no pagination) */}
-      <Dialog open={statsOpen} onOpenChange={setStatsOpen}>
+      <Dialog open={stats.open} onOpenChange={(open) => dispatch({ type: "statsOpenChanged", open })}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{t("Tool call stats")}</DialogTitle>
             <DialogDescription>
-              {taskFilter || queryQ ? t("All records under the current filters") : t("All tool execution records")}
-              {stats.length > 0 && (
+              {filters.task || filters.debouncedQuery
+                ? t("All records under the current filters")
+                : t("All tool execution records")}
+              {stats.items.length > 0 && (
                 <span className="tabular-nums">
                   {" · "}
-                  {t("{tools} tools · {calls} calls", { tools: stats.length, calls: statsTotal })}
+                  {t("{tools} tools · {calls} calls", { tools: stats.items.length, calls: statsTotal })}
                   {statsErrors > 0 && (
                     <>
                       {" · "}
@@ -286,15 +277,15 @@ export default function CommandsPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {statsLoading && stats.length === 0 ? (
+          {stats.loading && stats.items.length === 0 ? (
             <div className="py-10 text-center">
               <Loader2Icon className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : stats.length === 0 ? (
+          ) : stats.items.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">{t("No stats data")}</div>
           ) : (
             <div className="-mr-2 max-h-[55vh] space-y-1 overflow-auto pr-2">
-              {stats.map((s) => (
+              {stats.items.map((s) => (
                 <div key={s.tool} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md p-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -325,7 +316,7 @@ export default function CommandsPage() {
         </DialogContent>
       </Dialog>
 
-      <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
+      <Sheet open={selected !== null} onOpenChange={(open) => !open && dispatch({ type: "selected", command: null })}>
         <SheetContent className="w-full! max-w-none! gap-0 p-0 sm:w-[46rem]! sm:max-w-[46rem]!">
           {selected && (
             <>

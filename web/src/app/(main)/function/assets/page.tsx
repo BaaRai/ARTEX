@@ -67,6 +67,8 @@ import { cn } from "@/lib/utils";
 import { useActiveCompanyID } from "@/stores/company/company-store";
 import { t } from "@/i18n";
 
+import { assetsPageReducer, initialAssetsPageState } from "./_state/assets-page.reducer";
+
 const METHOD_COLOR: Record<string, string> = {
   GET: "bg-emerald-100 text-emerald-700",
   POST: "bg-blue-100 text-blue-700",
@@ -106,43 +108,47 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
 export default function AssetsPage() {
   // The sidebar's company switcher narrows the data tabs to that company.
   const companyId = useActiveCompanyID();
-  const [rows, setRows] = React.useState<Asset[]>([]);
-  const [total, setTotal] = React.useState(0);
-  const [companies, setCompanies] = React.useState<Company[]>([]);
-  const [counts, setCounts] = React.useState<Record<string, number>>({});
-  const [tab, setTab] = React.useState("company");
-  const [query, setQuery] = React.useState("");
-  const [loaded, setLoaded] = React.useState(false);
-  const [loading, setLoading] = React.useState(false);
-  const [page, setPage] = React.useState(0);
-  const [size, setSize] = React.useState(50);
-  const [dslError, setDslError] = React.useState("");
-  const [refreshKey, setRefreshKey] = React.useState(0);
+  const [state, dispatch] = React.useReducer(assetsPageReducer, initialAssetsPageState);
+  const { tab, query } = state.filters;
+  const { page, size } = state.pagination;
+  const { items: rows, total, loading, loaded } = state.list;
+  const { rowsTab, dslError, refreshKey } = state.listInfo;
+  const { companies, counts } = state.meta;
   const assetsRequestRef = React.useRef(0);
-  const [rowsTab, setRowsTab] = React.useState("");
 
   // asset selection & delete
-  const [selected, setSelected] = React.useState<Set<number>>(new Set());
-  const [deleteIds, setDeleteIds] = React.useState<number[]>([]);
-  const [deleteOpen, setDeleteOpen] = React.useState(false);
-  const [deleting, setDeleting] = React.useState(false);
+  const selected = state.selection;
+  const { ids: deleteIds, open: deleteOpen, deleting } = state.assetDelete;
 
   // company delete
-  const [companyDeleteTarget, setCompanyDeleteTarget] = React.useState<Company | null>(null);
-  const [companyDeleteAssets, setCompanyDeleteAssets] = React.useState(false);
-  const [companyDeleting, setCompanyDeleting] = React.useState(false);
+  const {
+    target: companyDeleteTarget,
+    deleteAssets: companyDeleteAssets,
+    deleting: companyDeleting,
+  } = state.companyDelete;
+
+  // Stable callbacks with the setter signatures the children expect.
+  const setQuery = React.useCallback((q: string) => dispatch({ type: "queryChanged", query: q }), []);
+  const setPage = React.useCallback(
+    (p: React.SetStateAction<number>) => dispatch({ type: "pageChanged", page: p }),
+    [],
+  );
+  const setSize = React.useCallback(
+    (n: React.SetStateAction<number>) => dispatch({ type: "pageSizeChanged", size: n }),
+    [],
+  );
 
   // Companies + per-type counts (tab badges) — loaded on demand, no background polling.
   const loadMeta = React.useCallback(() => {
     api
       .companies()
-      .then(setCompanies)
+      .then((c) => dispatch({ type: "companiesLoaded", companies: c }))
       .catch(() => {
         /* Keep the last successful company snapshot on a transient failure. */
       });
     api
       .assetCounts()
-      .then(setCounts)
+      .then((c) => dispatch({ type: "countsLoaded", counts: c }))
       .catch(() => {
         /* Keep the last successful counters on a transient failure. */
       });
@@ -151,59 +157,38 @@ export default function AssetsPage() {
   // Manual refresh: reload counts/companies and re-fetch the current page.
   const refresh = React.useCallback(() => {
     loadMeta();
-    setRefreshKey((k) => k + 1);
-    setSelected(new Set());
+    dispatch({ type: "refreshRequested" });
   }, [loadMeta]);
 
   const toggleSelect = (id: number) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    dispatch({ type: "selection/toggled", id });
   };
 
   const toggleSelectAll = (ids: number[]) => {
-    setSelected((prev) => {
-      const allSelected = ids.every((id) => prev.has(id));
-      const next = new Set(prev);
-      if (allSelected) {
-        ids.forEach((id) => {
-          next.delete(id);
-        });
-      } else {
-        ids.forEach((id) => {
-          next.add(id);
-        });
-      }
-      return next;
-    });
+    dispatch({ type: "pageRowsToggled", ids });
   };
 
   const openDelete = (ids: number[]) => {
-    setDeleteIds(ids);
-    setDeleteOpen(true);
+    dispatch({ type: "assetDeleteChanged", patch: { ids, open: true } });
   };
 
   const confirmDelete = async () => {
-    setDeleting(true);
+    dispatch({ type: "assetDeleteStarted" });
     try {
       const res = await api.deleteAssets(deleteIds);
       toast.success(t("Deleted {count} assets", { count: res.deleted }));
-      setSelected(new Set());
+      dispatch({ type: "selection/cleared" });
       refresh();
     } catch (e) {
       toast.error(t("Delete failed: {error}", { error: String((e as Error)?.message ?? e) }));
     } finally {
-      setDeleting(false);
-      setDeleteOpen(false);
+      dispatch({ type: "assetDeleteFinished" });
     }
   };
 
   const confirmDeleteCompany = async () => {
     if (!companyDeleteTarget) return;
-    setCompanyDeleting(true);
+    dispatch({ type: "companyDeleteStarted" });
     try {
       const res = await api.deleteCompany(companyDeleteTarget.id, companyDeleteAssets);
       const msg =
@@ -215,9 +200,7 @@ export default function AssetsPage() {
     } catch (e) {
       toast.error(t("Delete failed: {error}", { error: String((e as Error)?.message ?? e) }));
     } finally {
-      setCompanyDeleting(false);
-      setCompanyDeleteTarget(null);
-      setCompanyDeleteAssets(false);
+      dispatch({ type: "companyDeleteFinished" });
     }
   };
 
@@ -225,20 +208,10 @@ export default function AssetsPage() {
     loadMeta();
   }, [loadMeta]);
 
-  // Reset query + page + selection when switching tabs
-  // biome-ignore lint/correctness/useExhaustiveDependencies: tab changes intentionally reset tab-local controls.
-  React.useEffect(() => {
-    setQuery("");
-    setDslError("");
-    setSelected(new Set());
-    setRows([]);
-    setRowsTab("");
-    setTotal(0);
-    setLoaded(false);
-  }, [tab]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: these controls intentionally reset server pagination.
-  React.useEffect(() => setPage(0), [tab, size, query, companyId]);
+  // Switching tabs resets query + page + selection, and tab, size and query changes reset the page,
+  // inside the reducer. The company switcher lives outside it, so its page reset stays here.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a company change intentionally resets server pagination.
+  React.useEffect(() => dispatch({ type: "pagination/pageChanged", page: 0 }), [companyId]);
 
   const dslMode = query.trim() !== "";
 
@@ -248,7 +221,7 @@ export default function AssetsPage() {
     if (tab === "company") return;
     const request = ++assetsRequestRef.current;
     const dsl = query.trim();
-    setLoading(true);
+    dispatch({ type: "list/loadStarted" });
     const offset = page * size;
     const run = async () => {
       try {
@@ -256,20 +229,13 @@ export default function AssetsPage() {
           ? await api.searchAssets(dsl, tab, size, offset, companyId)
           : await api.assets(tab, size, offset, companyId);
         if (assetsRequestRef.current !== request) return;
-        setRows(r.assets);
-        setRowsTab(tab);
-        setTotal(r.total);
-        setDslError("");
+        dispatch({ type: "listLoaded", tab, rows: r.assets, total: r.total });
       } catch (e) {
         if (assetsRequestRef.current !== request) return;
-        setDslError(String((e as Error)?.message ?? e));
-        setRows([]);
-        setRowsTab(tab);
-        setTotal(0);
+        dispatch({ type: "listLoadFailed", tab, error: String((e as Error)?.message ?? e) });
       } finally {
         if (assetsRequestRef.current === request) {
-          setLoading(false);
-          setLoaded(true);
+          dispatch({ type: "list/loadFinished" });
         }
       }
     };
@@ -284,7 +250,7 @@ export default function AssetsPage() {
     if (tab === "company") return;
     const lastPage = Math.max(0, Math.ceil(total / size) - 1);
     if (page > lastPage) setPage(lastPage);
-  }, [page, size, tab, total]);
+  }, [page, size, tab, total, setPage]);
 
   const companyById = React.useMemo(() => {
     const m = new Map<number, string>();
@@ -334,7 +300,11 @@ export default function AssetsPage() {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => dispatch({ type: "tabChanged", tab: v })}
+        className="flex min-h-0 flex-1 flex-col gap-4"
+      >
         <div className="overflow-x-auto overflow-y-hidden">
           <TabsList variant="default">
             {TABS.map((t) => (
@@ -392,8 +362,7 @@ export default function AssetsPage() {
                             size="icon"
                             className="size-7 text-muted-foreground hover:text-destructive"
                             onClick={() => {
-                              setCompanyDeleteTarget(c);
-                              setCompanyDeleteAssets(false);
+                              dispatch({ type: "companyDeleteRequested", company: c });
                             }}
                             aria-label={t("Delete company {name}", { name: c.name })}
                           >
@@ -739,7 +708,7 @@ export default function AssetsPage() {
         </TabsContent>
       </Tabs>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => dispatch({ type: "assetDeleteChanged", patch: { open } })}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("Confirm delete")}</AlertDialogTitle>
@@ -769,8 +738,7 @@ export default function AssetsPage() {
         open={!!companyDeleteTarget}
         onOpenChange={(o) => {
           if (!o) {
-            setCompanyDeleteTarget(null);
-            setCompanyDeleteAssets(false);
+            dispatch({ type: "companyDeleteDismissed" });
           }
         }}
       >
@@ -793,7 +761,7 @@ export default function AssetsPage() {
                   <Checkbox
                     id="delete-assets-opt"
                     checked={companyDeleteAssets}
-                    onCheckedChange={(v) => setCompanyDeleteAssets(!!v)}
+                    onCheckedChange={(v) => dispatch({ type: "companyDeleteAssetsChanged", deleteAssets: !!v })}
                   />
                   <span className="text-sm leading-snug">
                     {t("Also delete all assets under this company")}

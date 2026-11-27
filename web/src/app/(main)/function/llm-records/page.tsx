@@ -48,7 +48,8 @@ import { formatShortDateTime, formatTokens } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
-import type { LLMRecordItem, LLMRecordDetail, LLMTask } from "@/lib/types";
+
+import { initialLLMRecordsPageState, llmRecordsPageReducer } from "./_state/llm-records-page.reducer";
 
 function fmtLatency(ms: number) {
   if (ms < 1000) return `${ms}ms`;
@@ -107,31 +108,23 @@ function CopyButton({ text }: { text: string }) {
 const PAGE_SIZES = [25, 50, 100];
 
 export default function LLMRecordsPage() {
-  const [page, setPage] = React.useState(0);
-  const [size, setSize] = React.useState(50);
-  const [session, setSession] = React.useState("");
-  const [sessionQ, setSessionQ] = React.useState("");
-  const [model, setModel] = React.useState("");
-
-  const [records, setRecords] = React.useState<LLMRecordItem[]>([]);
-  const [total, setTotal] = React.useState(0);
-  const [loading, setLoading] = React.useState(false);
+  const [state, dispatch] = React.useReducer(llmRecordsPageReducer, initialLLMRecordsPageState);
+  const { filters, tasks } = state;
+  const { session, model, task: pickedTask } = filters;
+  const { page, size } = state.pagination;
+  const { items: records, total, loading } = state.list;
+  const { reloadTick } = state;
 
   // Recording on/off toggle (settings.llm_record; default off). When off the
   // backend records nothing.
-  const [recEnabled, setRecEnabled] = React.useState(false);
   // recKnown flips once the settings call resolves, so the empty state does not
   // claim "recording is off" while the answer is still in flight.
-  const [recKnown, setRecKnown] = React.useState(false);
-  const [recBusy, setRecBusy] = React.useState(false);
+  const { enabled: recEnabled, known: recKnown, busy: recBusy } = state.recording;
 
   // Inline detail panel (Burp-style split, not a dialog)
-  const [selected, setSelected] = React.useState<LLMRecordItem | null>(null);
-  const [detail, setDetail] = React.useState<LLMRecordDetail | null>(null);
-  const [detailLoading, setDetailLoading] = React.useState(false);
   // Normalized view / raw HTTP view. The raw exchange is the only authoritative source when debugging
   // provider-side issues: the normalized view lacks tool schemas and the response has no tool_use blocks.
-  const [rawView, setRawView] = React.useState(false);
+  const { selected, data: detail, loading: detailLoading, rawView } = state.detail;
 
   const hasRaw = !!(detail?.raw_request || detail?.raw_response);
   // The toggle keeps the user's choice, but switching to an old record without raw data falls back to the parsed view instead of showing blank.
@@ -146,11 +139,8 @@ export default function LLMRecordsPage() {
     : detail?.response_body && tryFormatJSON(detail.response_body);
 
   // Per-task delete (task picker + confirm dialog)
-  const [tasks, setTasks] = React.useState<LLMTask[]>([]);
-  const [pickedTask, setPickedTask] = React.useState("");
-  const [deleteOpen, setDeleteOpen] = React.useState(false);
-  const [deleting, setDeleting] = React.useState(false);
-  const [reloadTick, setReloadTick] = React.useState(0); // manual refetch trigger
+  const deleteOpen = state.deleteDialogOpen;
+  const deleting = state.requests.deleteTask.pending;
 
   // Load recording toggle state on mount.
   React.useEffect(() => {
@@ -159,88 +149,87 @@ export default function LLMRecordsPage() {
       .settings()
       .then((s) => {
         if (!alive) return;
-        setRecEnabled(!!s.llm_record);
-        setRecKnown(true);
+        dispatch({ type: "recordingLoaded", enabled: !!s.llm_record });
       })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
 
   const toggleRecording = async (on: boolean) => {
-    setRecBusy(true);
-    setRecEnabled(on); // optimistic
+    dispatch({ type: "recordingToggleStarted", on }); // optimistic
     try {
       const s = await api.setSettings({ llm_record: on });
-      setRecEnabled(!!s.llm_record);
+      dispatch({ type: "recordingSaved", enabled: !!s.llm_record });
     } catch {
-      setRecEnabled(!on); // revert on failure
+      dispatch({ type: "recordingSaveFailed", on }); // revert on failure
     } finally {
-      setRecBusy(false);
+      dispatch({ type: "recordingToggleFinished" });
     }
   };
 
   // Debounce session filter.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the reducer reads the latest session; re-arm on every keystroke.
   React.useEffect(() => {
-    const t = setTimeout(() => setSessionQ(session.trim()), 300);
+    const t = setTimeout(() => dispatch({ type: "sessionDebounced" }), 300);
     return () => clearTimeout(t);
   }, [session]);
 
-  // Reset page on filter change.
-  React.useEffect(() => {
-    setPage(0);
-  }, [sessionQ, model, size, pickedTask]);
-
-  // Load list.
+  // Load list. Filter changes reset the page inside the reducer, so this runs once per change.
   React.useEffect(() => {
     let alive = true;
-    setLoading(true);
+    dispatch({ type: "list/loadStarted" });
     api
-      .llmRecords({ model: model || undefined, session: sessionQ || undefined, task: pickedTask || undefined, page, size })
+      .llmRecords({
+        model: model || undefined,
+        session: filters.debouncedSession || undefined,
+        task: pickedTask || undefined,
+        page,
+        size,
+      })
       .then((r) => {
         if (!alive) return;
-        setRecords(r.records ?? []);
-        setTotal(r.total ?? 0);
+        dispatch({ type: "list/loaded", items: r.records ?? [], total: r.total ?? 0 });
       })
       .catch(() => {})
-      .finally(() => alive && setLoading(false));
+      .finally(() => alive && dispatch({ type: "list/loadFinished" }));
     api
       .llmTasks()
-      .then((r) => { if (alive) setTasks(r.tasks ?? []); })
+      .then((r) => {
+        if (alive) dispatch({ type: "tasksLoaded", tasks: r.tasks ?? [] });
+      })
       .catch(() => {});
     return () => { alive = false; };
-  }, [page, size, sessionQ, model, pickedTask, reloadTick]);
+  }, [page, size, filters.debouncedSession, model, pickedTask, reloadTick]);
 
   // Delete every LLM record for the picked task, then refetch.
   const confirmDelete = () => {
-    setDeleting(true);
+    dispatch({ type: "request/started", key: "deleteTask" });
     api
       .llmRecordsDeleteTask(pickedTask)
       .then(() => {
-        setDeleteOpen(false);
-        setSelected(null);
-        setDetail(null);
-        setPickedTask("");
-        setPage(0);
-        setReloadTick((t) => t + 1);
+        dispatch({ type: "taskRecordsDeleted" });
       })
       .catch(() => {})
-      .finally(() => setDeleting(false));
+      .finally(() => dispatch({ type: "request/finished", key: "deleteTask" }));
   };
 
   // Lazy-load full request/response when a row is selected.
   React.useEffect(() => {
     if (!selected) {
-      setDetail(null);
+      dispatch({ type: "detailCleared" });
       return;
     }
     let alive = true;
-    setDetailLoading(true);
-    setDetail(null);
+    dispatch({ type: "detailLoadStarted" });
     api
       .llmRecordDetail(selected.id)
-      .then((d) => { if (alive) setDetail(d); })
+      .then((d) => {
+        if (alive) dispatch({ type: "detailLoaded", detail: d });
+      })
       .catch(() => {})
-      .finally(() => { if (alive) setDetailLoading(false); });
+      .finally(() => {
+        if (alive) dispatch({ type: "detailLoadFinished" });
+      });
     return () => { alive = false; };
   }, [selected]);
 
@@ -266,7 +255,7 @@ export default function LLMRecordsPage() {
           <Input
             placeholder={t("Search Session ID...")}
             value={session}
-            onChange={(e) => setSession(e.target.value)}
+            onChange={(e) => dispatch({ type: "sessionChanged", session: e.target.value })}
             className="h-8 pl-8"
           />
         </div>
@@ -274,9 +263,9 @@ export default function LLMRecordsPage() {
           placeholder={t("Model")}
           className="h-8 w-48"
           value={model}
-          onChange={(e) => setModel(e.target.value)}
+          onChange={(e) => dispatch({ type: "modelFilterChanged", model: e.target.value })}
         />
-        <Select value={pickedTask} onValueChange={setPickedTask}>
+        <Select value={pickedTask} onValueChange={(task) => dispatch({ type: "taskFilterChanged", task })}>
           <SelectTrigger size="sm" className="w-56">
             <SelectValue placeholder={t("Select a task…")} />
           </SelectTrigger>
@@ -301,12 +290,15 @@ export default function LLMRecordsPage() {
           className="h-8"
           disabled={!pickedTask || deleting}
           title={pickedTask ? undefined : t("Select a task above first")}
-          onClick={() => setDeleteOpen(true)}
+          onClick={() => dispatch({ type: "deleteDialogOpenChanged", open: true })}
         >
           <Trash2Icon className="size-3.5" />
           {t("Delete task conversations")}
         </Button>
-        <Select value={String(size)} onValueChange={(v) => setSize(Number(v))}>
+        <Select
+          value={String(size)}
+          onValueChange={(v) => dispatch({ type: "pagination/sizeChanged", size: Number(v) })}
+        >
           <SelectTrigger size="sm" className="w-28">
             <SelectValue />
           </SelectTrigger>
@@ -348,7 +340,7 @@ export default function LLMRecordsPage() {
             size="icon"
             className="size-8"
             disabled={page <= 0}
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            onClick={() => dispatch({ type: "pagination/pageChanged", page: page - 1 })}
           >
             <ChevronLeftIcon />
           </Button>
@@ -360,7 +352,7 @@ export default function LLMRecordsPage() {
             size="icon"
             className="size-8"
             disabled={page + 1 >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            onClick={() => dispatch({ type: "pagination/pageChanged", page: Math.min(totalPages - 1, page + 1) })}
           >
             <ChevronRightIcon />
           </Button>
@@ -407,7 +399,7 @@ export default function LLMRecordsPage() {
                         "cursor-pointer",
                         selected?.id === rec.id && "bg-accent hover:bg-accent",
                       )}
-                      onClick={() => setSelected(rec)}
+                      onClick={() => dispatch({ type: "recordSelected", record: rec })}
                     >
                       <TableCell className="text-xs text-muted-foreground tabular-nums">
                         {formatShortDateTime(rec.ts)}
@@ -491,7 +483,7 @@ export default function LLMRecordsPage() {
                     ? t("View the raw HTTP actually exchanged with the provider")
                     : t("This record was captured before the feature launched; no raw data")
                 }
-                onClick={() => setRawView((v) => !v)}
+                onClick={() => dispatch({ type: "rawViewToggled" })}
               >
                 {t("Raw")}
               </Button>
@@ -499,7 +491,7 @@ export default function LLMRecordsPage() {
                 variant="ghost"
                 size="icon"
                 className="size-7 shrink-0"
-                onClick={() => setSelected(null)}
+                onClick={() => dispatch({ type: "recordSelected", record: null })}
               >
                 <XIcon />
               </Button>
@@ -550,7 +542,7 @@ export default function LLMRecordsPage() {
         )}
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => dispatch({ type: "deleteDialogOpenChanged", open })}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('Delete all LLM conversations for task "{task}"?', { task: pickedTask })}</AlertDialogTitle>
