@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 )
@@ -96,6 +97,9 @@ type bedrockGatewayTransport struct {
 	token   string
 	model   string
 	headers http.Header
+
+	mu          sync.Mutex
+	chatRequest bool // endpoint rejected the Anthropic body; send chat completions
 }
 
 func (t *bedrockGatewayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -130,28 +134,34 @@ func (t *bedrockGatewayTransport) RoundTrip(req *http.Request) (*http.Response, 
 		u.Path += "-with-response-stream"
 		u.RawPath += "-with-response-stream"
 	}
-	q := req.Clone(req.Context())
-	q.URL = u
-	q.Host = u.Host
-	q.Body = io.NopCloser(bytes.NewReader(raw))
-	q.ContentLength = int64(len(raw))
-	q.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
-	q.Header = req.Header.Clone()
-	q.Header.Del("x-api-key")
-	q.Header.Del("anthropic-version")
-	q.Header.Set("Authorization", "Bearer "+t.token)
-	q.Header.Set("Content-Type", "application/json")
-	q.Header.Set("X-Amzn-Bedrock-Accept", "application/json")
-	q.Header.Set("Accept", "application/json")
-	if streaming {
-		q.Header.Set("Accept", "application/vnd.amazon.eventstream")
+	t.mu.Lock()
+	preferChat := t.chatRequest
+	t.mu.Unlock()
+	sentChat := false
+	if preferChat {
+		if rewritten, ok := anthropicRequestToChatCompletion(raw); ok {
+			raw, sentChat = rewritten, true
+		}
 	}
-	for name, values := range t.headers {
-		q.Header[name] = append([]string(nil), values...)
-	}
-	resp, err := t.base.RoundTrip(q)
+	resp, err := t.invoke(req, u, raw, streaming)
 	if err != nil {
 		return resp, err
+	}
+	// A tool-bearing Anthropic body is rejected by OpenAI-shaped InvokeModel
+	// endpoints. Retry once as a chat completion and keep that shape.
+	if resp.StatusCode == http.StatusBadRequest && !sentChat {
+		if rewritten, ok := anthropicRequestToChatCompletion(raw); ok {
+			_ = resp.Body.Close()
+			resp, err = t.invoke(req, u, rewritten, streaming)
+			if err != nil {
+				return resp, err
+			}
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				t.mu.Lock()
+				t.chatRequest = true
+				t.mu.Unlock()
+			}
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Gateways may echo authorization material in error bodies or headers.
@@ -309,6 +319,212 @@ func cloneHeader(h http.Header) http.Header {
 		out = make(http.Header)
 	}
 	return out
+}
+
+func (t *bedrockGatewayTransport) invoke(req *http.Request, u *url.URL, raw []byte, streaming bool) (*http.Response, error) {
+	q := req.Clone(req.Context())
+	q.URL = u
+	q.Host = u.Host
+	q.Body = io.NopCloser(bytes.NewReader(raw))
+	q.ContentLength = int64(len(raw))
+	q.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
+	q.Header = req.Header.Clone()
+	q.Header.Del("x-api-key")
+	q.Header.Del("anthropic-version")
+	q.Header.Set("Authorization", "Bearer "+t.token)
+	q.Header.Set("Content-Type", "application/json")
+	q.Header.Set("X-Amzn-Bedrock-Accept", "application/json")
+	q.Header.Set("Accept", "application/json")
+	if streaming {
+		q.Header.Set("Accept", "application/vnd.amazon.eventstream")
+	}
+	for name, values := range t.headers {
+		q.Header[name] = append([]string(nil), values...)
+	}
+	return t.base.RoundTrip(q)
+}
+
+type anthInMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
+type anthInBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
+	Content   json.RawMessage `json:"content"`
+}
+
+type oaOutMessage struct {
+	Role       string      `json:"role"`
+	Content    string      `json:"content,omitempty"`
+	Reasoning  string      `json:"reasoning,omitempty"`
+	ToolCallID string      `json:"tool_call_id,omitempty"`
+	ToolCalls  []oaOutCall `json:"tool_calls,omitempty"`
+}
+
+type oaOutCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+type oaOutTool struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		Parameters  json.RawMessage `json:"parameters,omitempty"`
+	} `json:"function"`
+}
+
+type chatInvokeRequest struct {
+	MaxTokens   int            `json:"max_tokens,omitempty"`
+	Temperature *float64       `json:"temperature,omitempty"`
+	Stop        []string       `json:"stop,omitempty"`
+	Messages    []oaOutMessage `json:"messages"`
+	Tools       []oaOutTool    `json:"tools,omitempty"`
+}
+
+// anthropicRequestToChatCompletion rebuilds an Anthropic Messages body as an
+// OpenAI chat completion.
+func anthropicRequestToChatCompletion(raw []byte) ([]byte, bool) {
+	var doc struct {
+		MaxTokens     int             `json:"max_tokens"`
+		Temperature   *float64        `json:"temperature"`
+		StopSequences []string        `json:"stop_sequences"`
+		System        json.RawMessage `json:"system"`
+		Messages      []anthInMessage `json:"messages"`
+		Tools         []struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			InputSchema json.RawMessage `json:"input_schema"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return nil, false
+	}
+	var msgs []oaOutMessage
+	if system := jsonText(doc.System); system != "" {
+		msgs = append(msgs, oaOutMessage{Role: "system", Content: system})
+	}
+	for _, m := range doc.Messages {
+		msgs = append(msgs, openAIMessages(m)...)
+	}
+	if len(msgs) == 0 {
+		return nil, false
+	}
+	out := chatInvokeRequest{
+		MaxTokens:   doc.MaxTokens,
+		Temperature: doc.Temperature,
+		Stop:        doc.StopSequences,
+		Messages:    msgs,
+	}
+	for _, tool := range doc.Tools {
+		if tool.Name == "" {
+			continue
+		}
+		params := tool.InputSchema
+		if len(params) == 0 || string(params) == "null" {
+			params = json.RawMessage(`{"type":"object"}`)
+		}
+		var ot oaOutTool
+		ot.Type = "function"
+		ot.Function.Name = tool.Name
+		ot.Function.Description = tool.Description
+		ot.Function.Parameters = params
+		out.Tools = append(out.Tools, ot)
+	}
+	rewritten, err := json.Marshal(out)
+	if err != nil {
+		return nil, false
+	}
+	return rewritten, true
+}
+
+func jsonStarts(raw json.RawMessage, c byte) bool {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	return len(raw) > 0 && raw[0] == c
+}
+
+func openAIMessages(m anthInMessage) []oaOutMessage {
+	if !jsonStarts(m.Content, '[') {
+		text := jsonText(m.Content)
+		if text == "" && m.Role == "" {
+			return nil
+		}
+		if m.Role == "assistant" && text == "" {
+			text = "…"
+		}
+		if text == "" {
+			return nil
+		}
+		return []oaOutMessage{{Role: m.Role, Content: text}}
+	}
+	var blocks []anthInBlock
+	if json.Unmarshal(m.Content, &blocks) != nil {
+		return nil
+	}
+	if m.Role == "assistant" {
+		msg := oaOutMessage{Role: "assistant"}
+		var text strings.Builder
+		var reasoning strings.Builder
+		for _, b := range blocks {
+			switch b.Type {
+			case "text":
+				text.WriteString(b.Text)
+			case "thinking":
+				reasoning.WriteString(b.Thinking)
+			case "tool_use":
+				call := oaOutCall{ID: b.ID, Type: "function"}
+				if call.ID == "" {
+					call.ID = fmt.Sprintf("tool_%d", len(msg.ToolCalls))
+				}
+				call.Function.Name = b.Name
+				call.Function.Arguments = toolArguments(b.Input)
+				msg.ToolCalls = append(msg.ToolCalls, call)
+			}
+		}
+		msg.Content = text.String()
+		msg.Reasoning = reasoning.String()
+		if msg.Content == "" && len(msg.ToolCalls) == 0 {
+			msg.Content = "…"
+		}
+		return []oaOutMessage{msg}
+	}
+	var text strings.Builder
+	var toolMsgs []oaOutMessage
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			text.WriteString(b.Text)
+		case "tool_result":
+			toolMsgs = append(toolMsgs, oaOutMessage{Role: "tool", ToolCallID: b.ToolUseID, Content: jsonText(b.Content)})
+		}
+	}
+	if s := text.String(); s != "" {
+		toolMsgs = append(toolMsgs, oaOutMessage{Role: "user", Content: s})
+	}
+	return toolMsgs
+}
+
+func toolArguments(raw json.RawMessage) string {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return "{}"
+	}
+	if json.Valid(raw) && (raw[0] == '{' || raw[0] == '[') {
+		return string(raw)
+	}
+	return "{}"
 }
 
 // rewriteBedrockModelJSON passes an Anthropic Messages body through and rewrites
