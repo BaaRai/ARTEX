@@ -93,8 +93,10 @@ func retryableWorkerModelError(reason harness.TerminalReason, err error) bool {
 // (re)installed at runtime (LLM configured from the UI); the loops always run
 // but idle until an LLM is set.
 type Engine struct {
-	m        *Manager
-	debounce time.Duration
+	statefulGuardOnce sync.Once
+	statefulGuard     *intercept.StatefulTargetGuard
+	m                 *Manager
+	debounce          time.Duration
 
 	bc *Broadcaster // live activity pub/sub (SSE)
 
@@ -492,6 +494,12 @@ func (e *Engine) detachWork(intentID int64) (action string, complete func(error)
 // worker has fully stopped writing. Cancellation cleanup is performed by the API
 // handler after this returns; pause state is committed by runWorkerStep itself.
 func (e *Engine) ControlWork(ctx context.Context, intentID int64, action string) error {
+	return e.ControlWorkWithCause(ctx, intentID, action, nil)
+}
+
+// ControlWorkWithCause requests a pause/cancel with an optional explicit AbortCause
+// (e.g. agent.AbortOperatorHandoff for ask_operator pauses).
+func (e *Engine) ControlWorkWithCause(ctx context.Context, intentID int64, action string, customCause error) error {
 	if action != "pause" && action != "cancel" {
 		return fmt.Errorf("unsupported work action %q", action)
 	}
@@ -510,9 +518,12 @@ func (e *Engine) ControlWork(ctx context.Context, intentID int64, action string)
 	}
 	run.action = action
 	done := run.done
-	cause := error(agent.AbortWorkPausedByUser)
-	if action == "cancel" {
-		cause = agent.AbortWorkCancelledByUser
+	cause := customCause
+	if cause == nil {
+		cause = error(agent.AbortWorkPausedByUser)
+		if action == "cancel" {
+			cause = agent.AbortWorkCancelledByUser
+		}
 	}
 	run.cancel(cause)
 	e.workMu.Unlock()
@@ -1239,6 +1250,11 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	label := fmt.Sprintf("%s · #%d", name, iid)
 	workCtx = intercept.WithTaskContext(workCtx, t.ID, label, taskEmit)
 	workCtx = intercept.WithTargetScope(workCtx, t.targetScope(intercept.DefaultTargetWaitBound))
+	if sg := e.statefulGuardForTask(); sg != nil {
+		workCtx = intercept.WithStatefulGuard(workCtx, sg)
+		workCtx = intercept.WithStatefulActor(workCtx, t.ID, iid)
+		defer sg.ReleaseIntent(t.ID, iid)
+	}
 	// Run budget (off by default): meter this run's calls; its effective budget is
 	// min(intent budget, task remaining above the wrap-up reserve).
 	workCtx, meter := e.budgetIntent(workCtx, t.ID)
@@ -1300,7 +1316,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// still settles the stopped run into a recoverable state.
 	if action == "" {
 		switch {
-		case errors.Is(workCause, agent.AbortWorkPausedByUser):
+		case errors.Is(workCause, agent.AbortWorkPausedByUser), errors.Is(workCause, agent.AbortOperatorHandoff):
 			action = "pause"
 		case errors.Is(workCause, agent.AbortWorkCancelledByUser):
 			action = "cancel"
@@ -1336,6 +1352,15 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// write (the fence would reject every write below).
 	if errors.Is(workCause, agent.AbortWorkClaimLost) {
 		log.Printf("[worker %s] task %s intent #%d claim lost to another worker, result discarded", name, t.ID, intent.ID)
+		return true
+	}
+	if errors.Is(err, agent.ErrPollLoopDetected) || errors.Is(workCause, agent.ErrPollLoopDetected) {
+		workCancel(agent.AbortOperatorHandoff)
+		e.emitPollLoopOperatorHandoff(t, name, intent.ID)
+		if perr := t.Store.SettleIntentClaim(intent.ID, token, "paused"); perr != nil {
+			log.Printf("[worker %s] task %s intent #%d failed to pause after poll loop: %v", name, t.ID, intent.ID, perr)
+		}
+		e.touch(t.ID)
 		return true
 	}
 	// if a pause cancelled this run mid-flight, return the intent to the frontier
@@ -1504,4 +1529,32 @@ func (e *Engine) claimNext(t *Task, name string) (*db.Node, string) {
 		}
 	}
 	return nil, ""
+}
+
+func (e *Engine) statefulGuardForTask() *intercept.StatefulTargetGuard {
+	if e == nil {
+		return nil
+	}
+	e.statefulGuardOnce.Do(func() {
+		e.statefulGuard = intercept.NewStatefulTargetGuard()
+	})
+	return e.statefulGuard
+}
+
+func (e *Engine) emitPollLoopOperatorHandoff(t *Task, workerName string, intentID int64) {
+	q := "Repeated identical read-only polls detected (target state appears unchanged or waiting for an external reset). Please reset/restart the instance and reply with the new base URL or instructions to continue."
+	text := "OPERATOR INPUT REQUESTED: " + q + " (this intent is pausing; reply here to resume it with your answer)"
+	act := askOperatorActivity(text, nil, targetDerivedHosts(q, goalTargets(t.Goal)))
+	act.NodeID = &intentID
+	act.Worker = workerName
+	act.IsError = false
+	e.emitActivity(t, act)
+	e.emitActivity(t, db.Activity{
+		NodeID:  &intentID,
+		Worker:  workerName,
+		Kind:    "result",
+		IsError: false,
+		Summary: "(paused for operator input: " + agent.AbortOperatorHandoff.Short + "; waiting for operator reply)",
+		Detail:  agent.AbortOperatorHandoff.Text,
+	})
 }
