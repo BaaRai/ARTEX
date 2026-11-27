@@ -382,3 +382,33 @@ func TestTrimErrKeepsValidUTF8(t *testing.T) {
 		t.Fatalf("trimErr = %q (%d bytes), want at most 300 bytes plus …", got, len(got))
 	}
 }
+
+// The window filter must charge the response budget as well as the prompt. A
+// profile whose window cannot hold prompt + max_tokens rejects the call with a
+// 400, and shouldFailover never retries a 400, so the request would fail
+// outright instead of moving to the profile that can hold it.
+func TestWindowFilterChargesMaxTokens(t *testing.T) {
+	small, big := okProv("small", "s"), okProv("big", "b")
+	ms := member(1, "small", 10, small)
+	ms.WindowTokens = 20_000
+	mb := member(2, "big", 5, big)
+	mb.WindowTokens = 1_000_000
+	p := New([]*Member{ms, mb}, NewRegistry(nil, nil))
+
+	// ~16K prompt tokens (56K chars at the estimator's ~3.5 chars/token) plus an
+	// 8K response cap is 24K, which no 20K window can hold.
+	req := llm.CompletionRequest{
+		Messages:  []llm.Message{llm.UserText(strings.Repeat("x", 56_000))},
+		MaxTokens: 8192,
+	}
+	got, err := drain(p.Stream(context.Background(), req))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "b" {
+		t.Fatalf("text=%q, want the large-window member to serve it", got)
+	}
+	if small.calls != 0 {
+		t.Fatalf("sent a request whose prompt+max_tokens cannot fit the window (calls=%d)", small.calls)
+	}
+}

@@ -275,6 +275,11 @@ func trimErr(err error) string {
 // estimateTokens roughly sizes a request so members whose context window clearly
 // can't hold it are skipped. Deliberately crude (~3.5 chars/token) and biased to
 // over-estimate slightly; it only needs to tell "fits" from "nowhere near".
+//
+// The response budget counts as part of the request: a provider rejects a call
+// whose prompt plus max_tokens exceeds the window, and shouldFailover never
+// retries a 400, so a member that can hold only the prompt is a member that
+// fails the whole call.
 func estimateTokens(req llm.CompletionRequest) int {
 	n := 0
 	for _, s := range req.System {
@@ -287,6 +292,9 @@ func estimateTokens(req llm.CompletionRequest) int {
 		// InputSchema is a decoded map, so its serialized size isn't available
 		// cheaply — charge a flat ~120 chars per top-level property instead.
 		n += len(t.Name) + len(t.Description) + len(t.InputSchema)*120
+	}
+	if req.MaxTokens > 0 {
+		n += req.MaxTokens * 7 / 2 // max_tokens is in tokens; n accumulates chars
 	}
 	return n * 2 / 7 // ≈ len/3.5
 }
