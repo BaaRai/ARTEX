@@ -130,3 +130,78 @@ func TestStartTaskEngineFailsTaskOnPlainTextDecomposer(t *testing.T) {
 		t.Fatalf("expected error activity describing goal decomposition failure, got %+v", acts)
 	}
 }
+
+// TestCreateGoalsNoProviderSeedsRawGoalAndKeepsTaskAlive verifies that when no
+// LLM provider is configured, createGoals falls back to seeding the raw task
+// goal as a single goal node linked from the origin fact, keeping the task
+// alive instead of marking it failed.
+func TestCreateGoalsNoProviderSeedsRawGoalAndKeepsTaskAlive(t *testing.T) {
+	skipWithoutDSN(t)
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	if m.pg == nil {
+		db.SkipNoPG(t)
+	}
+	// Ensure no global LLM profile is configured in this test DB.
+	profiles, err := m.pg.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) > 0 {
+		t.Skip("test database already has configured LLM profiles")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, "", m.dir, m.dir)
+	t.Cleanup(func() { stopTestServer(t, s, cancel) })
+
+	const rawGoal = "Probe http://127.0.0.1:9/v1 for unauthenticated exposure"
+	task, err := m.CreateTaskWithOptions("no-provider fallback", rawGoal, db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = m.DeleteTask(task.ID, DeleteTaskOptions{}) })
+
+	// Seed origin fact as launchTask does so the spawns link is exercised.
+	s.seed(task, rawGoal)
+	originID, err := task.Store.OriginFactID()
+	if err != nil || originID <= 0 {
+		t.Fatalf("expected origin fact seeded, got id=%d err=%v", originID, err)
+	}
+
+	goals, err := s.createGoals(ctx, task, nil)
+	if err != nil {
+		t.Fatalf("createGoals without provider must fall back cleanly, got err=%v", err)
+	}
+	if len(goals) != 1 || goals[0].Text != rawGoal {
+		t.Fatalf("unexpected fallback goals: %+v", goals)
+	}
+
+	nodes, err := task.Store.ListByKind(db.KindGoal, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 persisted goal node, got %d", len(nodes))
+	}
+	edges, err := task.Store.Edges(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked := false
+	for _, e := range edges {
+		if e.From == originID && e.Rel == db.RelSpawns && e.To == nodes[0].ID {
+			linked = true
+			break
+		}
+	}
+	if !linked {
+		t.Fatalf("fallback goal node #%d not linked from origin fact #%d via %q (edges=%+v)", nodes[0].ID, originID, db.RelSpawns, edges)
+	}
+	if st := task.lifecycleSnapshot().Status; st == "failed" {
+		t.Fatalf("task without provider must stay alive, got status=%q", st)
+	}
+}

@@ -264,3 +264,16 @@ func TestPlannerRefusesEmptyContextAndOverviewOmitsEmptyFields(t *testing.T) {
 		t.Fatalf("expected 1 LLM call when context is valid, got %d", prov.calls())
 	}
 }
+func TestDecomposeGoalsNoProviderReturnsSentinel(t *testing.T) {
+	ts := guardTaskStore(t)
+	got, err := DecomposeGoals(t.Context(), nil, t.TempDir(), "Audit target", "desc", nil, ts, 0, nil)
+	if !errors.Is(err, ErrGoalDecompositionNoProvider) {
+		t.Fatalf("expected ErrGoalDecompositionNoProvider, got goals=%+v err=%v", got, err)
+	}
+	if errors.Is(err, ErrGoalDecompositionContract) {
+		t.Fatalf("no-provider error must not match ErrGoalDecompositionContract: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no goals returned, got %+v", got)
+	}
+}

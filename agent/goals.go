@@ -83,6 +83,11 @@ var ErrGoalDecompositionContract = errors.New("goal decomposition did not produc
 // with an empty task goal.
 var ErrGoalDecompositionEmptyInput = errors.New("goal decomposition requires a non-empty task goal")
 
+// ErrGoalDecompositionNoProvider reports that goal decomposition cannot run
+// because no LLM provider is configured. Callers distinguish this from a
+// structured tool-call contract failure (ErrGoalDecompositionContract).
+var ErrGoalDecompositionNoProvider = errors.New("goal decomposition failed: no LLM provider configured")
+
 // goalsStrictRetryPrompt is sent once when the initial goal decomposition run
 // finishes without persisting any non-empty goal via a structured set_goals
 // tool call (e.g. the model emitted set_goals in plain text instead).
@@ -122,7 +127,7 @@ func DecomposeGoals(ctx context.Context, prov llm.Provider, dataDir, goalText, d
 // per-reply output cap (0 = send none).
 func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, nonStreaming bool, maxTokens int, emit func(db.Activity)) ([]GoalSpec, error) {
 	if prov == nil {
-		return nil, errors.New("goal decomposition failed: no LLM provider configured")
+		return nil, ErrGoalDecompositionNoProvider
 	}
 	if ts == nil {
 		return nil, errors.New("goal decomposition failed: exploration store is not initialized")

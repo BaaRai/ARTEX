@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -406,6 +407,23 @@ func (s *Server) createGoals(ctx context.Context, t *Task, emit func(db.Activity
 	decomposed, err := agent.DecomposeGoalsWithProvider(ctx, goalRuntime, s.m.dir, t.Goal, t.Description, as, t.Store, taskID, goalRuntime.nonStreaming(), goalRuntime.maxTokens(), emit)
 	s.engine.EndLLMCall(t.ID)
 	if err != nil {
+		if errors.Is(err, agent.ErrGoalDecompositionNoProvider) {
+			// No LLM provider is configured yet: preserve the pre-existing fallback
+			// so the task gets a single raw goal node linked to its origin fact and
+			// stays alive until an LLM is configured. Structured contract failures
+			// from an actual model remain strict and fail the task.
+			g := strings.TrimSpace(t.Goal)
+			log.Printf("[goals] task %s: no LLM provider configured, seeding raw goal as a single goal", t.ID)
+			origin, _ := t.Store.OriginFactID()
+			id, addErr := t.Store.AddNode(db.KindGoal, map[string]any{"text": g}, 0, "open", "system", nil)
+			if addErr != nil {
+				return nil, fmt.Errorf("seed raw goal: %w", addErr)
+			}
+			if origin > 0 && id > 0 {
+				_ = t.Store.Link(origin, db.RelSpawns, id) // goal descends from the task root (origin fact)
+			}
+			return []goalSpec{{Text: g}}, nil
+		}
 		return nil, err
 	}
 	var specs []goalSpec

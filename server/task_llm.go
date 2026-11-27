@@ -248,7 +248,7 @@ func (r *taskLLMRuntime) currentFor(ctx context.Context) (taskLLMSelection, erro
 	}
 	prov, cfg, id, ok := r.s.globalProviderWithProfile()
 	if !ok {
-		return sel, fmt.Errorf("task %s has no available fallback LLM provider", r.taskID)
+		return sel, fmt.Errorf("task %s has no available fallback LLM provider: %w", r.taskID, agent.ErrGoalDecompositionNoProvider)
 	}
 	sel.provider, sel.retry = prov, cfg.Retry
 	sel.healthProfileID = healthIDFor(prov, id)
