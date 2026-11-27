@@ -47,7 +47,7 @@ func TestLLMTestHonorsMaxTokensField(t *testing.T) {
 
 	pid, err := m.pg.SaveProfile(&db.LLMProfile{
 		Name: "mct-field", Format: "openai", Model: "gpt-x",
-		BaseURL: fake.URL, APIKey: "k1", MaxTokensField: "max_completion_tokens",
+		BaseURL: fake.URL, APIKey: "k1", MaxTokensField: "max_completion_tokens", ReasoningEffort: "high",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +96,9 @@ func TestLLMTestHonorsMaxTokensField(t *testing.T) {
 		// List-view test button: only the profile id, the field comes from the row.
 		body := run(t, map[string]any{"profile_id": pid, "api_key": "", "streaming": false})
 		wantKey(t, body, "max_completion_tokens", "max_tokens")
+		if body["reasoning_effort"] != "high" {
+			t.Fatalf("stored effort was not used: %v", body["reasoning_effort"])
+		}
 	})
 
 	t.Run("form override to default", func(t *testing.T) {
@@ -105,6 +108,16 @@ func TestLLMTestHonorsMaxTokensField(t *testing.T) {
 			"api_key": "", "profile_id": pid, "streaming": false, "max_tokens_field": "",
 		})
 		wantKey(t, body, "max_tokens", "max_completion_tokens")
+	})
+
+	t.Run("form effort override to default", func(t *testing.T) {
+		body := run(t, map[string]any{
+			"provider": "openai", "model": "gpt-x", "base_url": fake.URL,
+			"api_key": "", "profile_id": pid, "streaming": false, "reasoning_effort": "",
+		})
+		if _, sent := body["reasoning_effort"]; sent {
+			t.Fatalf("explicit default effort still sent the stored override: %v", body["reasoning_effort"])
+		}
 	})
 
 	t.Run("unknown value falls back to default", func(t *testing.T) {

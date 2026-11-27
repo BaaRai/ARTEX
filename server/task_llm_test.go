@@ -119,6 +119,8 @@ func TestIsQuotaExhaustedError(t *testing.T) {
 		`HTTP status 402 Payment Required`,
 		`insufficient balance, please top up`,
 		`credit balance is too low`,
+		`status 429: subscription_sharing_usage_limit_exceeded`,
+		`rate_limit: claude_subscription_usage_limit_exceeded`,
 	}
 	for _, message := range positive {
 		if !isQuotaExhaustedError(errors.New(message)) {
@@ -128,6 +130,7 @@ func TestIsQuotaExhaustedError(t *testing.T) {
 
 	negative := []string{
 		`HTTP status 429: rate limit exceeded`,
+		`HTTP status 429: subscription_sharing_usage_unavailable`,
 		`RESOURCE_EXHAUSTED: rate limit exceeded`,
 		`HTTP status 429: quota exceeded for quota metric GenerateRequestsPerMinutePerProjectPerBaseModel`,
 		`RESOURCE_EXHAUSTED: TPM quota exceeded`,
@@ -724,5 +727,173 @@ func TestProfileDeleteRestoresQuotaBlockedIntentWhenFallbackAvailable(t *testing
 	state := task.llmStateSnapshot()
 	if len(state.ProfileIDs) != 0 || state.FailoverState != "default" {
 		t.Fatalf("task did not return to fallback state: %+v", state)
+	}
+}
+
+func TestTaskLLMContentPolicyRejectionStopsWithoutRetryOrRotation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "complete"
+		if stream {
+			name = "stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			resetLLMFailStreaksForTest()
+			defer resetLLMFailStreaksForTest()
+			rejection := errors.New("codex: This content was flagged for possible cybersecurity risk")
+			provider := &scriptedLLMProvider{err: rejection}
+			exhausted := 0
+			hooks := taskLLMStreamHooks{
+				current: func(context.Context) (taskLLMSelection, error) {
+					return taskLLMSelection{profileID: 11, provider: provider, retry: agent.RetryConfig{StreamAttempts: 2, StreamInterval: time.Millisecond}}, nil
+				},
+				exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
+					exhausted++
+					return db.TaskLLMTransition{}, nil
+				},
+			}
+			for range 3 {
+				var err error
+				if stream {
+					_, err = collectTaskLLMStream(streamTaskLLM(context.Background(), "policy-test", llm.CompletionRequest{}, hooks))
+				} else {
+					_, _, _, err = completeTaskLLM(context.Background(), "policy-test", llm.CompletionRequest{}, hooks)
+				}
+				if !errors.Is(err, rejection) {
+					t.Fatalf("error = %v, want original policy rejection", err)
+				}
+			}
+			if provider.calls != 3 || exhausted != 0 {
+				t.Fatalf("calls=%d chain rotations=%d, want 3/0", provider.calls, exhausted)
+			}
+		})
+	}
+}
+
+func TestWorkerModelErrorDoesNotRetryContentPolicyRejection(t *testing.T) {
+	for _, err := range []error{
+		errors.New("This content was flagged for possible cybersecurity risk"),
+		fmt.Errorf("LLM failover: all profiles unavailable: %w", errors.New("This content was flagged for possible cybersecurity risk")),
+		errors.New("claude-code: CLI run failed: Claude Code exited: exit status 1 (category: policy)"),
+	} {
+		if retryableWorkerModelError(harness.ReasonModelError, err) {
+			t.Fatalf("worker would rerun a rejected intent: %v", err)
+		}
+	}
+	if !retryableWorkerModelError(harness.ReasonModelError, errors.New("connection reset by peer")) {
+		t.Fatal("network failure should remain retryable")
+	}
+}
+func TestTaskLLMDoesNotRetryTaggedClaudeExit(t *testing.T) {
+	for _, category := range []string{"auth", "model", "context", "max-turns", "unknown"} {
+		t.Run(category, func(t *testing.T) {
+			for _, stream := range []bool{false, true} {
+				err := fmt.Errorf("claude-code: CLI run failed: Claude Code exited: exit status 1 (category: %s)", category)
+				provider := &scriptedLLMProvider{err: err}
+				hooks := taskLLMStreamHooks{
+					current: func(context.Context) (taskLLMSelection, error) {
+						return taskLLMSelection{provider: provider, retry: agent.RetryConfig{StreamAttempts: 2, StreamInterval: time.Millisecond}}, nil
+					},
+				}
+				if stream {
+					_, _ = collectTaskLLMStream(streamTaskLLM(context.Background(), "claude-exit-test", llm.CompletionRequest{}, hooks))
+				} else {
+					_, _, _, _ = completeTaskLLM(context.Background(), "claude-exit-test", llm.CompletionRequest{}, hooks)
+				}
+				if provider.calls != 1 {
+					t.Fatalf("category=%s stream=%v calls=%d, want 1", category, stream, provider.calls)
+				}
+			}
+		})
+	}
+	for _, category := range []string{"network", "rate-limit"} {
+		err := fmt.Errorf("claude-code: CLI run failed: Claude Code exited: exit status 1 (category: %s)", category)
+		if !isRetryableStreamError(err) {
+			t.Fatalf("category=%s should remain retryable", category)
+		}
+	}
+}
+func TestWorkerModelErrorDoesNotRetryTaggedClaudeExit(t *testing.T) {
+	for _, category := range []string{"auth", "model", "context", "max-turns", "unknown"} {
+		err := fmt.Errorf("LLM failover: all profiles unavailable: claude-code: CLI run failed: Claude Code exited: exit status 1 (category: %s)", category)
+		if retryableWorkerModelError(harness.ReasonModelError, err) {
+			t.Fatalf("worker would rerun deterministic Claude exit category %s", category)
+		}
+	}
+	for _, category := range []string{"network", "rate-limit"} {
+		err := fmt.Errorf("claude-code: CLI run failed: Claude Code exited: exit status 1 (category: %s)", category)
+		if !retryableWorkerModelError(harness.ReasonModelError, err) {
+			t.Fatalf("worker should retry transient Claude exit category %s", category)
+		}
+	}
+}
+
+func TestTaskLLMClaudePolicyTagStopsWithoutRetryOrRotation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			resetLLMFailStreaksForTest()
+			defer resetLLMFailStreaksForTest()
+			refusal := errors.New("claude-code: CLI run failed: Claude Code exited: exit status 1 (category: policy)")
+			provider := &scriptedLLMProvider{err: refusal}
+			exhausted := 0
+			hooks := taskLLMStreamHooks{
+				current: func(context.Context) (taskLLMSelection, error) {
+					return taskLLMSelection{profileID: 11, provider: provider, retry: agent.RetryConfig{StreamAttempts: 2, StreamInterval: time.Millisecond}}, nil
+				},
+				exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
+					exhausted++
+					return db.TaskLLMTransition{}, nil
+				},
+			}
+			for range 3 {
+				var err error
+				if stream {
+					_, err = collectTaskLLMStream(streamTaskLLM(context.Background(), "policy-tag-test", llm.CompletionRequest{}, hooks))
+				} else {
+					_, _, _, err = completeTaskLLM(context.Background(), "policy-tag-test", llm.CompletionRequest{}, hooks)
+				}
+				if !errors.Is(err, refusal) {
+					t.Fatalf("error = %v, want original policy rejection", err)
+				}
+			}
+			if provider.calls != 3 || exhausted != 0 {
+				t.Fatalf("calls=%d chain rotations=%d, want 3/0", provider.calls, exhausted)
+			}
+		})
+	}
+}
+
+func TestTaskLLMPolicyRejectionResetsFailureStreak(t *testing.T) {
+	for _, policy := range []string{
+		"This content was flagged for possible cybersecurity risk",
+		"claude-code: CLI run failed: Claude Code exited: exit status 1 (category: policy)",
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("policy=%q/stream=%v", policy, stream), func(t *testing.T) {
+				resetLLMFailStreaksForTest()
+				defer resetLLMFailStreaksForTest()
+				provider := &scriptedLLMProvider{}
+				exhausted := 0
+				hooks := taskLLMStreamHooks{
+					current: func(context.Context) (taskLLMSelection, error) {
+						return taskLLMSelection{profileID: 11, provider: provider, retry: agent.RetryConfig{StreamAttempts: -1}}, nil
+					},
+					exhaust: func(taskLLMSelection, error) (db.TaskLLMTransition, error) {
+						exhausted++
+						return db.TaskLLMTransition{}, nil
+					},
+				}
+				for _, message := range []string{"connection reset", "connection reset", policy, "connection reset"} {
+					provider.err = errors.New(message)
+					if stream {
+						_, _ = collectTaskLLMStream(streamTaskLLM(context.Background(), "policy-reset-test", llm.CompletionRequest{}, hooks))
+					} else {
+						_, _, _, _ = completeTaskLLM(context.Background(), "policy-reset-test", llm.CompletionRequest{}, hooks)
+					}
+				}
+				if provider.calls != 4 || exhausted != 0 {
+					t.Fatalf("calls=%d chain rotations=%d, want 4/0", provider.calls, exhausted)
+				}
+			})
+		}
 	}
 }

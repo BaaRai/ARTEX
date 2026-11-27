@@ -62,6 +62,68 @@ func TestPoolProfilesOrder(t *testing.T) {
 	}
 }
 
+func TestSubscriptionProfilesEnterPoolWithoutAPIKeys(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	sfx := fmt.Sprintf("-%d", time.Now().UnixNano())
+	for _, format := range []string{"chatgpt-plan", "claude-code"} {
+		id, err := d.SaveProfile(&LLMProfile{
+			Name: "t-subscription-" + format + sfx, Format: format, Model: "test-model",
+		})
+		if err != nil {
+			t.Fatalf("save %s: %v", format, err)
+		}
+		t.Cleanup(func() { deleteTestProfile(t, d, id) })
+		profiles, err := d.PoolProfiles()
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, profile := range profiles {
+			if profile.ID == id {
+				found = true
+				if profile.APIKey != "" {
+					t.Fatalf("%s unexpectedly has an API key", format)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s keyless profile absent from pool", format)
+		}
+	}
+}
+
+func TestSwitchingToSubscriptionProfileClearsStoredAPIKey(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	id, err := d.SaveProfile(&LLMProfile{
+		Name:   fmt.Sprintf("t-subscription-key-clear-%d", time.Now().UnixNano()),
+		Format: "openai", Model: "test-model", APIKey: "synthetic-api-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { deleteTestProfile(t, d, id) })
+	if _, err := d.SaveProfile(&LLMProfile{ID: id, Name: fmt.Sprintf("t-subscription-key-clear-%d", id), Format: "chatgpt-plan", Model: "test-model"}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := d.ProfileByID(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.APIKey != "" {
+		t.Fatal("API key retained after switching to subscription format")
+	}
+}
+
 // deleteTestProfile removes a profile a test created and reports a failed delete
 // instead of silently leaving the row for the next run.
 func deleteTestProfile(t *testing.T, d *DB, id int64) {

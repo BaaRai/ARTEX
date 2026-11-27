@@ -45,7 +45,14 @@ update_docker(){
   docker compose build artex
   info "Recreating artex (schema migrates automatically on restart)…"
   docker compose up -d artex
+  local cli_version
+  if cli_version=$(docker compose exec -T artex claude --version 2>/dev/null); then
+    info "Bundled Claude Code CLI: $cli_version"
+  else
+    warn "Claude Code version check unavailable while artex starts; inspect docker compose logs artex"
+  fi
   ok "Update complete → http://localhost:8787"
+  info "Claude subscription login (once per volume): docker compose exec artex env -u ANTHROPIC_API_KEY claude auth login"
   info "View logs: docker compose logs -f artex"
   info "Clean up old images (optional): docker image prune -f"
 }
@@ -72,7 +79,7 @@ update_local(){
 
 echo "=============================="
 echo "  ARTEX Update"
-echo "  1) Docker update (pull new image and rebuild)"
+echo "  1) Docker update (build from this checkout)"
 echo "  2) Local update (rebuild with go)"
 echo "=============================="
 case "$(ask 'Choose' 1)" in

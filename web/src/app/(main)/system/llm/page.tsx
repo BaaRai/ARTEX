@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import {
+  ChevronDownIcon,
   Loader2Icon,
   PlugZapIcon,
   PlusIcon,
@@ -18,6 +19,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { CopyButton } from "@/components/copy-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -67,7 +69,24 @@ const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
 };
 // LLM profile formats. The default in the create form is "anthropic"; "ollama" is the
 // keyless local-server format (base URL defaults to http://127.0.0.1:11434/v1).
-type ProfileFormat = "anthropic" | "openai" | "openai-responses" | "ollama" | "bedrock-gateway";
+type ProfileFormat = "anthropic" | "openai" | "openai-responses" | "ollama" | "bedrock-gateway" | "chatgpt-plan" | "claude-code";
+type SubscriptionFormat = "chatgpt-plan" | "claude-code";
+type LoginState = "connected" | "disconnected" | "unknown";
+const isSubscriptionFormat = (format: string): format is SubscriptionFormat =>
+  format === "chatgpt-plan" || format === "claude-code";
+const MODEL_PLACEHOLDERS: Partial<Record<ProfileFormat, string>> = {
+  ollama: "llama3.2",
+  "chatgpt-plan": "gpt-6.1-sol",
+  "claude-code": "sonnet",
+};
+const CLAUDE_MODEL_SUGGESTIONS = ["sonnet", "opus", "haiku"];
+const CLAUDE_DOCKER_LOGIN_COMMAND = "sudo docker compose exec artex env -u ANTHROPIC_API_KEY claude auth login";
+const CLAUDE_DOCKER_STATUS_COMMAND = "sudo docker compose exec artex env -u ANTHROPIC_API_KEY claude auth status";
+const LOGIN_LABELS: Record<LoginState, string> = {
+  connected: t("Connected on this ARTEX server"),
+  disconnected: t("Sign-in required"),
+  unknown: t("Login status unknown"),
+};
 const OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1";
 const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: NONE, label: t("Not sent (default)") },
@@ -77,6 +96,7 @@ const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: "xhigh", label: "xhigh" },
   { value: "max", label: "max" },
 ];
+const SUBSCRIPTION_EFFORT_LEVELS = [{ value: NONE, label: t("Model default") }, ...EFFORT_LEVELS.slice(1)];
 
 function cooldownText(secs: number) {
   if (secs <= 0) return "";
@@ -85,11 +105,16 @@ function cooldownText(secs: number) {
 }
 
 // The "healthy or not" badge a profile shows on its card. A profile without a Key cannot send any request at all — say that before the breaker;
-// the exception is Ollama, a keyless local server that IS callable without a key. The other states come from the pool's breaker
+// keyless Ollama and signed-in subscription formats are also callable. The other states come from the pool's breaker
 // records (with polling off no new records appear, so "healthy" = no known failure).
 type Health = { label: string; cls: string; hint?: string };
-function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
-  if (!p.api_key_hint && p.format !== "ollama") {
+function healthOf(p: LLMProfile, m?: LLMPoolMember, loginState?: LoginState): Health {
+  if (isSubscriptionFormat(p.format) && loginState !== "connected") {
+    return loginState === "disconnected"
+      ? { label: t("Sign-in required"), cls: "border-amber-500/50 text-amber-600 dark:text-amber-400" }
+      : { label: t("Login status unknown"), cls: "border-muted-foreground/40 text-muted-foreground" };
+  }
+  if (!p.api_key_hint && p.format !== "ollama" && !isSubscriptionFormat(p.format)) {
     return {
       label: t("No Key configured"),
       cls: "border-muted-foreground/40 text-muted-foreground",
@@ -234,7 +259,7 @@ function PoolSheet({
                 {inChain.length < 2 && (
                   <p className="text-muted-foreground text-xs">
                     {t(
-                      "Only {count} usable profile(s) right now, so the pool has no effect — at least 2 usable profiles (API Key set, or Ollama) with pool participation are required.",
+                      "Only {count} usable profile(s) right now, so the pool has no effect — at least 2 profiles with API keys, local Ollama, or subscription sign-in and pool participation are required.",
                       { count: inChain.length },
                     )}
                   </p>
@@ -328,11 +353,13 @@ function ProfileSheet({
   open,
   onOpenChange,
   onSaved,
+  onAuthChanged,
 }: {
   profile: LLMProfile | null; // null = create
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onSaved: (id: string) => void;
+  onAuthChanged: () => void;
 }) {
   const isNew = !profile;
   const [name, setName] = React.useState("");
@@ -342,6 +369,8 @@ function ProfileSheet({
   const [proxy, setProxy] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
   const [keyHint, setKeyHint] = React.useState("");
+  const [loginState, setLoginState] = React.useState<LoginState>("unknown");
+  const [loginBusy, setLoginBusy] = React.useState(false);
   const [rps, setRps] = React.useState("0");
   const [rpm, setRpm] = React.useState("0");
   const [cw, setCw] = React.useState("0"); // context window (K tokens); 0 = default 200K
@@ -361,17 +390,24 @@ function ProfileSheet({
   const [testing, setTesting] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [models, setModels] = React.useState<string[]>([]);
+  const [modelLabels, setModelLabels] = React.useState<Record<string, string>>({});
+  const [modelNotes, setModelNotes] = React.useState<Record<string, string>>({});
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [modelsOpen, setModelsOpen] = React.useState(false);
   const [modelQuery, setModelQuery] = React.useState(""); // filter text for the loaded model list; reset on open/close
+  const modelRequest = React.useRef(0);
+  const chatgptAuthTab = React.useRef<Window | null>(null);
+  const authChangedRef = React.useRef(onAuthChanged);
+  React.useEffect(() => { authChangedRef.current = onAuthChanged; }, [onAuthChanged]);
 
   // Every time it opens, the form is re-filled from the passed-in profile (reset to defaults when creating). Closing and reopening
   // the drawer is a clean start, leaving no leftovers from the previous profile.
   React.useEffect(() => {
     if (!open) return;
+    modelRequest.current += 1;
     setName(profile?.name ?? "");
     setFormat(
-      profile?.format === "openai" || profile?.format === "openai-responses" || profile?.format === "ollama" || profile?.format === "bedrock-gateway"
+      profile?.format === "openai" || profile?.format === "openai-responses" || profile?.format === "ollama" || profile?.format === "bedrock-gateway" || profile?.format === "chatgpt-plan" || profile?.format === "claude-code"
         ? profile.format
         : "anthropic",
     );
@@ -402,38 +438,197 @@ function ProfileSheet({
     setApiKey("");
     setKeyHint(profile?.api_key_hint ?? "");
     setModels([]);
+    setModelLabels({});
+    setModelNotes({});
+    setLoadingModels(false);
     setModelsOpen(false);
     setModelQuery("");
   }, [open, profile]);
+
+  React.useEffect(() => {
+    if (!open || !isSubscriptionFormat(format)) return;
+    let current = true;
+    const status = format === "chatgpt-plan" ? api.chatgptLoginStatus() : api.claudeCodeLoginStatus();
+    void status.then((result) => {
+      if (current) {
+        setLoginState(result.state);
+        if (format === "chatgpt-plan" && result.state === "connected") {
+          chatgptAuthTab.current = null;
+          setLoginBusy(false);
+        }
+        if (result.state !== "connected") {
+          modelRequest.current += 1;
+          setModels([]);
+          setModelLabels({});
+          setModelNotes({});
+          setLoadingModels(false);
+          setModelsOpen(false);
+        }
+      }
+    }).catch(() => {
+      if (current) {
+        setLoginState("unknown");
+        modelRequest.current += 1;
+        setModels([]);
+        setModelLabels({});
+        setModelNotes({});
+        setLoadingModels(false);
+        setModelsOpen(false);
+      }
+    });
+    return () => { current = false; };
+  }, [open, format]);
+
+  async function refreshLogin() {
+    if (!isSubscriptionFormat(format)) return;
+    modelRequest.current += 1;
+    setLoginState("unknown");
+    setModels([]);
+    setModelLabels({});
+    setModelNotes({});
+    setLoadingModels(false);
+    setModelsOpen(false);
+    setModelQuery("");
+    let refreshedState: LoginState = "unknown";
+    try {
+      const result = format === "chatgpt-plan" ? await api.chatgptLoginStatus() : await api.claudeCodeLoginStatus();
+      refreshedState = result.state;
+      setLoginState(result.state);
+    } catch {
+      setLoginState("unknown");
+    }
+    if (format === "chatgpt-plan" && (refreshedState === "connected" || !chatgptAuthTab.current)) {
+      chatgptAuthTab.current = null;
+      setLoginBusy(false);
+    }
+    onAuthChanged();
+  }
+
+  async function beginChatGPTLogin() {
+    if (loginBusy || chatgptAuthTab.current) return;
+    const authTab = window.open("about:blank", "_blank");
+    if (!authTab) {
+      toast.error(t("Browser blocked the sign-in tab. Allow pop-ups for ARTEX and try again."));
+      return;
+    }
+    authTab.opener = null;
+    chatgptAuthTab.current = authTab;
+    setLoginBusy(true);
+    try {
+      const { authorization_url: url } = await api.chatgptLogin();
+      if (chatgptAuthTab.current !== authTab) return;
+      authTab.location.replace(url);
+    } catch (e) {
+      if (chatgptAuthTab.current !== authTab) return;
+      authTab.close();
+      chatgptAuthTab.current = null;
+      toast.error(t("ChatGPT sign-in failed: {error}", { error: (e as Error).message }));
+      setLoginBusy(false);
+    }
+  }
+
+  function cancelChatGPTLogin() {
+    chatgptAuthTab.current?.close();
+    chatgptAuthTab.current = null;
+    setLoginBusy(false);
+  }
+
+  React.useEffect(() => {
+    if (!open || format !== "chatgpt-plan") return;
+    let active = true;
+    let checking = false;
+    const recheckAfterReturn = async () => {
+      if (!active || checking || document.visibilityState !== "visible" || (loginBusy && !chatgptAuthTab.current)) return;
+      checking = true;
+      try {
+        const result = await api.chatgptLoginStatus();
+        if (!active) return;
+        if (result.state !== loginState) {
+          modelRequest.current += 1;
+          setModels([]);
+          setModelLabels({});
+          setModelNotes({});
+          setModelsOpen(false);
+          setLoginState(result.state);
+          authChangedRef.current();
+        }
+        if (result.state === "connected") {
+          chatgptAuthTab.current = null;
+          setLoginBusy(false);
+        }
+      } catch {
+        if (active) setLoginState("unknown");
+      } finally {
+        checking = false;
+      }
+    };
+    window.addEventListener("focus", recheckAfterReturn);
+    document.addEventListener("visibilitychange", recheckAfterReturn);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", recheckAfterReturn);
+      document.removeEventListener("visibilitychange", recheckAfterReturn);
+    };
+  }, [open, format, loginBusy, loginState]);
+
+  async function disconnectChatGPT() {
+    if (loginBusy) return;
+    setLoginBusy(true);
+    try {
+      const result = await api.chatgptLogout();
+      await refreshLogin();
+      if (result.warning) toast.warning(result.warning);
+    } catch (e) {
+      toast.error(t("ChatGPT sign-out failed: {error}", { error: (e as Error).message }));
+    } finally {
+      setLoginBusy(false);
+    }
+  }
 
   const profileId = profile ? Number(profile.id) : undefined;
 
   // Case-insensitive substring filter, so a provider prefix ("deepseek/") or a
   // fragment ("flash") is enough to narrow a 400-entry list.
+  const availableModels = format === "claude-code" && models.length === 0 && !loadingModels ? CLAUDE_MODEL_SUGGESTIONS : models;
   const filteredModels = React.useMemo(() => {
     const q = modelQuery.trim().toLowerCase();
-    if (!q) return models;
-    return models.filter((m) => m.toLowerCase().includes(q));
-  }, [models, modelQuery]);
+    if (!q) return availableModels;
+    return availableModels.filter((m) => m.toLowerCase().includes(q) || modelLabels[m]?.toLowerCase().includes(q));
+  }, [availableModels, modelLabels, modelQuery]);
 
   async function loadModels() {
-    if (loadingModels) return;
+    if (loadingModels || (isSubscriptionFormat(format) && loginState !== "connected")) return;
+    const requestID = ++modelRequest.current;
     setLoadingModels(true);
     setModels([]);
+    setModelLabels({});
+    setModelNotes({});
     setModelQuery("");
     try {
       const r = await api.fetchLLMModels(format, baseUrl, apiKey, proxy, profileId);
+      if (requestID !== modelRequest.current) return;
       if (r.ok && r.models && r.models.length > 0) {
         setModels(r.models);
+        setModelLabels((r as typeof r & { model_labels?: Record<string, string> }).model_labels ?? {});
+        setModelNotes((r as typeof r & { model_notes?: Record<string, string> }).model_notes ?? {});
         setModelsOpen(true);
         toast.success(t("Loaded {count} models", { count: r.models.length }));
+      } else if (format === "claude-code") {
+        setModelsOpen(true);
+        toast.warning(t("Could not load Claude models. Showing common aliases; availability depends on your account."));
       } else {
         toast.error(t("Failed to load models: {error}", { error: r.error ?? t("no models returned") }));
       }
     } catch (e) {
-      toast.error(t("Error loading models: {error}", { error: (e as Error).message }));
+      if (requestID !== modelRequest.current) return;
+      if (format === "claude-code") {
+        setModelsOpen(true);
+        toast.warning(t("Could not load Claude models. Showing common aliases; availability depends on your account."));
+      } else {
+        toast.error(t("Error loading models: {error}", { error: (e as Error).message }));
+      }
     } finally {
-      setLoadingModels(false);
+      if (requestID === modelRequest.current) setLoadingModels(false);
     }
   }
 
@@ -485,30 +680,30 @@ function ProfileSheet({
         name: name.trim(),
         format,
         model: model.trim(),
-        base_url: baseUrl.trim(),
-        proxy: proxy.trim(),
-        api_key: apiKey,
-        rate_per_second: Number(rps) || 0,
-        rate_per_minute: Number(rpm) || 0,
+        base_url: isSubscriptionFormat(format) ? "" : baseUrl.trim(),
+        proxy: format === "claude-code" ? "" : proxy.trim(),
+        api_key: isSubscriptionFormat(format) ? "" : apiKey,
+        rate_per_second: format === "claude-code" ? 0 : Number(rps) || 0,
+        rate_per_minute: format === "claude-code" ? 0 : Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
         price_input_per_m: Math.max(0, Number(prices.input) || 0),
         price_output_per_m: Math.max(0, Number(prices.output) || 0),
         price_cache_read_per_m: Math.max(0, Number(prices.cacheRead) || 0),
         price_cache_write_per_m: Math.max(0, Number(prices.cacheWrite) || 0),
-        thinking_type: toStore(thinkingType),
+        thinking_type: isSubscriptionFormat(format) ? "" : toStore(thinkingType),
         reasoning_effort: toStore(effort),
         priority: Number(priority) || 0,
         pool_exclude: poolExclude,
         streaming,
-        max_tokens: Math.max(0, Number(maxTokens) || 0),
+        max_tokens: isSubscriptionFormat(format) ? 0 : Math.max(0, Number(maxTokens) || 0),
         // The field-name switch only matters for openai (Chat Completions); every other format falls back to the default,
         // and the backend re-applies the same normalization; this just keeps the UI from sending contradictory values.
         max_tokens_field: format === "openai" ? toStore(maxTokensField) : "",
-        session_header_key: sessionHeaderKey.trim(),
-        user_agent: userAgent.trim(),
+        session_header_key: format === "claude-code" ? "" : sessionHeaderKey.trim(),
+        user_agent: format === "claude-code" ? "" : userAgent.trim(),
         custom_headers: format === "bedrock-gateway" ? customHeaders : "",
         clear_custom_headers: clearCustomHeaders,
-        retry,
+        retry: format === "claude-code" ? ZERO_OVERRIDE : retry,
       });
       if (isNew) toast.success(t('Created: {name} (use "Set as active" on its card to enable it)', { name: name.trim() }));
       else
@@ -574,7 +769,20 @@ function ProfileSheet({
             </div>
             <div className="grid gap-2">
               <Label>{t("Format")}</Label>
-              <Select value={format} onValueChange={(v) => setFormat(v as ProfileFormat)}>
+              <Select value={format} onValueChange={(v) => {
+                const next = v as ProfileFormat;
+                setFormat(next);
+                setLoginState("unknown");
+                modelRequest.current += 1;
+                setModels([]);
+                setModelLabels({});
+                setModelNotes({});
+                setLoadingModels(false);
+                setModelsOpen(false);
+                setModelQuery("");
+                if (next === "chatgpt-plan") setModel("gpt-6.1-sol");
+                if (next === "claude-code") setModel("sonnet");
+              }}>
                 <SelectTrigger>
                   <SelectValue placeholder={t("Select a format")} />
                 </SelectTrigger>
@@ -584,6 +792,8 @@ function ProfileSheet({
                   <SelectItem value="openai-responses">OpenAI (Responses API)</SelectItem>
                   <SelectItem value="ollama">{t("Ollama (local, no key needed)")}</SelectItem>
                   <SelectItem value="bedrock-gateway">Bedrock gateway</SelectItem>
+                  <SelectItem value="chatgpt-plan">ChatGPT subscription</SelectItem>
+                  <SelectItem value="claude-code">Claude Code subscription</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -595,7 +805,7 @@ function ProfileSheet({
               <Input
                 id="p-model"
                 className="font-mono"
-                placeholder={format === "ollama" ? "llama3.2" : "claude-opus-4-8"}
+                placeholder={MODEL_PLACEHOLDERS[format] ?? "claude-opus-4-8"}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
@@ -613,22 +823,26 @@ function ProfileSheet({
                   <Button
                     type="button"
                     variant="outline"
-                    size="icon"
+                    size={isSubscriptionFormat(format) ? "sm" : "icon"}
                     className="shrink-0"
-                    disabled={loadingModels || format === "bedrock-gateway"}
-                    onClick={loadModels}
-                    title={t("Load available models from the API")}
+                    disabled={loadingModels || format === "bedrock-gateway" || (isSubscriptionFormat(format) && loginState !== "connected")}
+                    onClick={() => {
+                      if (!isSubscriptionFormat(format) || models.length === 0) void loadModels();
+                    }}
+                    title={isSubscriptionFormat(format) ? t("Choose a signed-in account model") : t("Load available models from the API")}
                   >
-                    {loadingModels ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
+                    {loadingModels && <Loader2Icon className="animate-spin" />}
+                    {!loadingModels && isSubscriptionFormat(format) && <>{t("Choose model")} <ChevronDownIcon /></>}
+                    {!loadingModels && !isSubscriptionFormat(format) && <RefreshCwIcon />}
                   </Button>
                 </PopoverTrigger>
-                {models.length > 0 && (
+                {availableModels.length > 0 && (
                   <PopoverContent className="w-80 gap-0 p-0" align="end">
                     <div className="border-b p-1">
                       <Input
                         autoFocus
                         className="h-8 border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
-                        placeholder={t("Search {count} models…", { count: models.length })}
+                        placeholder={t("Search {count} models…", { count: availableModels.length })}
                         value={modelQuery}
                         onChange={(e) => setModelQuery(e.target.value)}
                         spellCheck={false}
@@ -645,33 +859,128 @@ function ProfileSheet({
                           <button
                             key={m}
                             type="button"
-                            className="w-full shrink-0 rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-accent hover:text-accent-foreground"
+                            className="w-full shrink-0 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
                             onClick={() => {
                               setModel(m);
                               setModelsOpen(false);
                             }}
                           >
-                            {m}
+                            {modelLabels[m] && modelLabels[m] !== m ? (
+                              <>
+                                <span className="block font-medium">{modelLabels[m]}</span>
+                                <span className="block font-mono text-muted-foreground">{m}</span>
+                              </>
+                            ) : <span className="font-mono">{m}</span>}
+                            {modelNotes[m] && <span className="block text-muted-foreground">{modelNotes[m]}</span>}
                           </button>
                         ))
                       )}
                     </div>
+                    {format === "claude-code" && (
+                      <p className="border-t px-3 py-2 text-muted-foreground text-xs">
+                        {models.length === 0
+                          ? t("Common Claude aliases. Test connection sends a request and may use paid credits.")
+                          : t("Claude Code model suggestions. Test connection sends a request and may use paid credits.")}
+                      </p>
+                    )}
                   </PopoverContent>
                 )}
               </Popover>
+              {isSubscriptionFormat(format) && models.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  disabled={loadingModels || loginState !== "connected"}
+                  onClick={() => void loadModels()}
+                  title={t("Refresh model list")}
+                  aria-label={t("Refresh model list")}
+                >
+                  <RefreshCwIcon />
+                </Button>
+              )}
             </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="p-base-url">{format === "bedrock-gateway" ? "Gateway base URL (required)" : t("Base URL (optional)")}</Label>
-            <Input
-              id="p-base-url"
-              className="font-mono"
-              placeholder={basePlaceholder}
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-            />
-          </div>
+          {isSubscriptionFormat(format) && (
+            <div className="grid gap-2">
+              <Label htmlFor="p-subscription-effort">{t("Reasoning effort")}</Label>
+              <Select value={effort} onValueChange={setEffort}>
+                <SelectTrigger id="p-subscription-effort" className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUBSCRIPTION_EFFORT_LEVELS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                {format === "chatgpt-plan"
+                  ? t("Model default omits the effort override. Other levels depend on the model; use Test connection to verify your choice.")
+                  : t("Model default leaves effort to Claude Code. Available levels depend on the model and account; use Test connection to verify your choice.")}
+              </p>
+            </div>
+          )}
+
+          {isSubscriptionFormat(format) && (
+            <div className="grid gap-2 rounded-lg border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium text-sm">{format === "chatgpt-plan" ? t("ChatGPT sign-in") : t("Claude Code sign-in")}</p>
+                  <p className="text-muted-foreground text-xs">
+                    {LOGIN_LABELS[loginState]}
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={() => void refreshLogin()}>{t("Recheck")}</Button>
+              </div>
+              {format === "chatgpt-plan" ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {loginState !== "connected" ? (
+                    <Button type="button" size="sm" disabled={loginBusy} onClick={() => void beginChatGPTLogin()}>{t("Continue with ChatGPT")}</Button>
+                  ) : (
+                    <Button type="button" variant="outline" size="sm" disabled={loginBusy} onClick={() => void disconnectChatGPT()}>{t("Disconnect")}</Button>
+                  )}
+                  {loginState !== "connected" && loginBusy && chatgptAuthTab.current && (
+                    <Button type="button" variant="outline" size="sm" onClick={cancelChatGPTLogin}>{t("Cancel sign-in")}</Button>
+                  )}
+                  <p className="text-muted-foreground text-xs">{t("ChatGPT sign-in opens in a new tab; ARTEX stays open here. ARTEX stores the login outside model profiles.")}</p>
+                </div>
+              ) : (
+                <div className="grid gap-2 text-xs">
+                  <p className="text-muted-foreground">{t("From your ARTEX checkout on the host:")}</p>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded bg-muted px-2 py-1.5 font-mono">{CLAUDE_DOCKER_LOGIN_COMMAND}</code>
+                    <CopyButton text={CLAUDE_DOCKER_LOGIN_COMMAND} />
+                  </div>
+                  <p className="text-muted-foreground">{t("Then check the login:")}</p>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded bg-muted px-2 py-1.5 font-mono">{CLAUDE_DOCKER_STATUS_COMMAND}</code>
+                    <CopyButton text={CLAUDE_DOCKER_STATUS_COMMAND} />
+                  </div>
+                  <p className="text-muted-foreground">
+                    {t("Use a Claude subscription account, then click Recheck. If you run the ARTEX binary directly, run")}
+                    {" "}<code className="rounded bg-muted px-1 py-0.5">claude auth login</code>{" "}
+                    {t("as the same OS user that runs ARTEX.")}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isSubscriptionFormat(format) && (
+            <div className="grid gap-2">
+              <Label htmlFor="p-base-url">{format === "bedrock-gateway" ? "Gateway base URL (required)" : t("Base URL (optional)")}</Label>
+              <Input
+                id="p-base-url"
+                className="font-mono"
+                placeholder={basePlaceholder}
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+              />
+            </div>
+          )}
 
           {format === "bedrock-gateway" && (
             <div className="grid gap-2">
@@ -682,7 +991,7 @@ function ProfileSheet({
             </div>
           )}
 
-          <div className="grid gap-2">
+          {format !== "claude-code" && <div className="grid gap-2">
             <Label htmlFor="p-proxy">{t("Proxy (optional)")}</Label>
             <Input
               id="p-proxy"
@@ -696,9 +1005,9 @@ function ProfileSheet({
                 "Only outbound LLM requests go through this proxy; http/https/socks5 are supported, optionally with credentials (e.g. socks5://user:pass@host:port — URL-encode the password if it contains special characters). Leave empty for no proxy (direct connection).",
               )}
             </p>
-          </div>
+          </div>}
 
-          <div className="grid gap-2">
+          {format !== "claude-code" && <div className="grid gap-2">
             <Label htmlFor="p-session-header">{t("Custom session header (optional)")}</Label>
             <Input
               id="p-session-header"
@@ -714,9 +1023,9 @@ function ProfileSheet({
                 ),
               )}
             </p>
-          </div>
+          </div>}
 
-          <div className="grid gap-2">
+          {format !== "claude-code" && <div className="grid gap-2">
             <Label htmlFor="p-user-agent">{t("Custom User-Agent (optional)")}</Label>
             <Input
               id="p-user-agent"
@@ -732,9 +1041,9 @@ function ProfileSheet({
                 ),
               )}
             </p>
-          </div>
+          </div>}
 
-          <div className="grid gap-2">
+          {!isSubscriptionFormat(format) && <div className="grid gap-2">
             <Label htmlFor="p-api-key">
               {keyLabel}
             </Label>
@@ -752,17 +1061,17 @@ function ProfileSheet({
               data-1p-ignore="true"
               data-lpignore="true"
             />
-          </div>
+          </div>}
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <div className="grid gap-2">
+            {format !== "claude-code" && <div className="grid gap-2">
               <Label htmlFor="p-rps">{t("Rate limit per second")}</Label>
               <Input id="p-rps" type="number" min={0} value={rps} onChange={(e) => setRps(e.target.value)} />
-            </div>
-            <div className="grid gap-2">
+            </div>}
+            {format !== "claude-code" && <div className="grid gap-2">
               <Label htmlFor="p-rpm">{t("Rate limit per minute")}</Label>
               <Input id="p-rpm" type="number" min={0} value={rpm} onChange={(e) => setRpm(e.target.value)} />
-            </div>
+            </div>}
             <div className="grid gap-2">
               <Label htmlFor="p-cw">{t("Context window (K)")}</Label>
               <Input
@@ -777,7 +1086,7 @@ function ProfileSheet({
             </div>
           </div>
           <p className="-mt-2 text-muted-foreground text-xs">
-            {t(
+            {format === "claude-code" ? t("Context window is in K (thousand tokens); 0 uses the 200K default.") : t(
               "Rate limits of 0 mean unlimited, shared across all agents. The context window is in K (thousand tokens); 0 = the 200K default, capped at 1000 (i.e. 1M). Setting it too high keeps compression from ever triggering.",
             )}
           </p>
@@ -839,7 +1148,7 @@ function ProfileSheet({
               </div>
               <Switch checked={poolExclude} onCheckedChange={setPoolExclude} aria-label={t("Excluded from pool")} />
             </div>
-            <div className="flex items-center justify-between gap-4 border-t pt-3">
+            {format !== "claude-code" && <div className="flex items-center justify-between gap-4 border-t pt-3">
               <div className="grid gap-0.5">
                 <Label className="text-sm">{t("Streaming output")}</Label>
                 <p className="text-muted-foreground text-xs">
@@ -849,10 +1158,10 @@ function ProfileSheet({
                 </p>
               </div>
               <Switch checked={streaming} onCheckedChange={setStreaming} aria-label={t("Streaming output")} />
-            </div>
+            </div>}
           </div>
 
-          <div className="grid gap-3 rounded-lg border p-3">
+          {!isSubscriptionFormat(format) && <div className="grid gap-3 rounded-lg border p-3">
             <div className="flex items-center justify-between gap-4">
               <div className="grid gap-0.5">
                 <Label htmlFor="p-max-tokens" className="text-sm">
@@ -896,9 +1205,9 @@ function ProfileSheet({
                 </SelectContent>
               </Select>
             </div>
-          </div>
+          </div>}
 
-          <div className="grid gap-3 rounded-lg border p-3">
+          {!isSubscriptionFormat(format) && <div className="grid gap-3 rounded-lg border p-3">
             <div className="flex items-center justify-between gap-4">
               <div className="grid gap-0.5">
                 <Label className="text-sm">{t("Thinking switch · thinking.type")}</Label>
@@ -943,9 +1252,9 @@ function ProfileSheet({
                 </SelectContent>
               </Select>
             </div>
-          </div>
+          </div>}
 
-          <ProfileRetryFields value={retry} onChange={setRetry} />
+          {!isSubscriptionFormat(format) && <ProfileRetryFields value={retry} onChange={setRetry} />}
         </div>
 
         <div className="flex gap-2 border-t px-4 py-3">
@@ -969,6 +1278,10 @@ function ProfileSheet({
 export default function LLMPage() {
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
+  const [loginStates, setLoginStates] = React.useState<Record<SubscriptionFormat, LoginState>>({
+    "chatgpt-plan": "unknown",
+    "claude-code": "unknown",
+  });
   const [poolOpen, setPoolOpen] = React.useState(false);
   // The drawer's open flag and its content are stored separately: editing stays put on close, otherwise during the closing animation the title would flash
   // from "Edit X" to "New". editing = null means create.
@@ -987,18 +1300,36 @@ export default function LLMPage() {
     }
   }, []);
 
+  const loadLogins = React.useCallback(async () => {
+    const [chatgpt, claude] = await Promise.allSettled([api.chatgptLoginStatus(), api.claudeCodeLoginStatus()]);
+    setLoginStates({
+      "chatgpt-plan": chatgpt.status === "fulfilled" ? chatgpt.value.state : "unknown",
+      "claude-code": claude.status === "fulfilled" ? claude.value.state : "unknown",
+    });
+  }, []);
+
   const load = React.useCallback(async () => {
     try {
       setProfiles(await api.llmProfiles());
     } catch {
       /* ignore */
     }
-    await loadPool();
-  }, [loadPool]);
+    await Promise.all([loadPool(), loadLogins()]);
+  }, [loadPool, loadLogins]);
 
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("chatgpt");
+    if (!result) return;
+    if (result === "connected") toast.success(t("ChatGPT connected"));
+    if (result === "error") toast.error(t("ChatGPT sign-in failed"));
+    url.searchParams.delete("chatgpt");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, []);
 
   // The health badge on each card reads pool state by profile id.
   const health = React.useMemo(() => {
@@ -1068,7 +1399,7 @@ export default function LLMPage() {
         <TabsContent value="profiles" className="mt-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {profiles.map((p) => {
-              const h = healthOf(p, health.get(p.id));
+              const h = healthOf(p, health.get(p.id), isSubscriptionFormat(p.format) ? loginStates[p.format] : undefined);
               return (
                 // biome-ignore lint/a11y/useSemanticElements: the card contains its own action buttons; a native <button> would nest buttons (invalid HTML)
                 <Card
@@ -1174,7 +1505,7 @@ export default function LLMPage() {
         </TabsContent>
       </Tabs>
 
-      <ProfileSheet profile={editing} open={editOpen} onOpenChange={setEditOpen} onSaved={() => void load()} />
+      <ProfileSheet profile={editing} open={editOpen} onOpenChange={setEditOpen} onSaved={() => void load()} onAuthChanged={() => void loadLogins()} />
       <PoolSheet open={poolOpen} onOpenChange={setPoolOpen} pool={pool} onReload={loadPool} />
     </div>
   );

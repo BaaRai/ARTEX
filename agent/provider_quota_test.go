@@ -25,6 +25,9 @@ func TestIsQuotaExhaustedMessage(t *testing.T) {
 		`billing_not_active`,
 		`credit balance is too low`,
 		`insufficient funds, please top up`,
+		`status 429: subscription_sharing_usage_limit_exceeded`,
+		`claude_subscription_usage_limit_exceeded`,
+		`rate_limit: claude_subscription_usage_limit_exceeded`,
 	}
 	for _, message := range positive {
 		if !IsQuotaExhaustedMessage(message) {
@@ -40,6 +43,8 @@ func TestIsQuotaExhaustedMessage(t *testing.T) {
 		`RESOURCE_EXHAUSTED: TPM quota exceeded`,
 		`tokens per minute quota exceeded`,
 		`rate_limit_exceeded: requests per second`,
+		`status 429: subscription_sharing_usage_unavailable`,
+		`status 429: subscription_sharing_user_not_eligible`,
 		`status 401: invalid api key`,
 		`status 401: insufficient_quota`,
 		`HTTP 403: billing_hard_limit_reached`,

@@ -2159,6 +2159,31 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	p.APIKey = body.APIKey
 	p.CustomHeaders = body.CustomHeaders
 	p.ClearCustomHeaders = body.ClearCustomHeaders
+	if p.Format == "chatgpt-plan" || p.Format == "claude-code" {
+		if strings.TrimSpace(p.APIKey) != "" || strings.TrimSpace(p.BaseURL) != "" {
+			writeErr(w, 400, "subscription profiles use local sign-in and do not accept an API key or base URL")
+			return
+		}
+		p.MaxTokens = 0 // neither subscription adapter sends an output cap
+		p.ThinkingType = ""
+		if p.Format == "claude-code" {
+			if strings.TrimSpace(p.Proxy) != "" {
+				writeErr(w, 400, "Claude Code uses the CLI's network settings; this profile cannot set a proxy")
+				return
+			}
+			p.SessionHeaderKey = ""
+			p.UserAgent = ""
+			p.RatePerSecond, p.RatePerMinute = 0, 0
+			p.ReasoningEffort = strings.ToLower(strings.TrimSpace(p.ReasoningEffort))
+			switch p.ReasoningEffort {
+			case "", "low", "medium", "high", "xhigh", "max":
+			default:
+				writeErr(w, 400, "unsupported Claude Code effort; choose default, low, medium, high, xhigh, or max")
+				return
+			}
+			p.Retry = db.RetryOverride{}
+		}
+	}
 	if p.Format == "bedrock-gateway" {
 		if _, err := agent.ParseBedrockGatewayHeaders(p.CustomHeaders); err != nil {
 			writeErr(w, 400, err.Error())
@@ -2187,6 +2212,9 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		p.ClearCustomHeaders = true
 	}
 	p.Streaming = body.Streaming == nil || *body.Streaming
+	if p.Format == "claude-code" {
+		p.Streaming = true // the CLI adapter returns buffered output to ARTEX
+	}
 	// The list returns the proxy masked: the placeholder sent back keeps the
 	// stored proxy and is never stored itself.
 	if isMaskedSecret(p.Proxy) {
@@ -2677,7 +2705,7 @@ func (g *modelURLGuard) validateURL(ctx context.Context, rawURL, role string) (*
 }
 
 // pgListModels fetches available models from the provider's API endpoint.
-// Supports OpenAI-format (GET /models), Anthropic-format (GET /v1/models) and
+// Supports ChatGPT subscription (its signed-in catalog), OpenAI-format (GET /models), Anthropic-format (GET /v1/models) and
 // Ollama (keyless OpenAI-compatible GET /v1/models on the local server); for
 // Anthropic-compatible third parties (e.g. DeepSeek) whose model list lives only on
 // the OpenAI path, it falls back to the OpenAI endpoint at the stripped root.
@@ -2695,6 +2723,48 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Provider) == "bedrock-gateway" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "enter the Bedrock model ID manually; this gateway has no model-list endpoint"})
+		return
+	}
+	if req.Provider == "chatgpt-plan" {
+		if s.chatgptStore == nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "ChatGPT sign-in is not configured"})
+			return
+		}
+		catalog, err := s.chatgptStore.ListModels(r.Context())
+		if err != nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "could not load ChatGPT models; check sign-in and retry"})
+			return
+		}
+		models := make([]string, 0, len(catalog))
+		labels := make(map[string]string, len(catalog))
+		for _, item := range catalog {
+			models = append(models, item.Slug)
+			if item.DisplayName != "" {
+				labels[item.Slug] = item.DisplayName
+			}
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "models": models, "model_labels": labels})
+		return
+	}
+	if req.Provider == "claude-code" {
+		catalog, err := agent.ClaudeCodeListModels(r.Context())
+		if err != nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "could not read Claude Code model suggestions; check sign-in or enter a model ID manually"})
+			return
+		}
+		models := make([]string, 0, len(catalog))
+		labels := make(map[string]string, len(catalog))
+		notes := make(map[string]string, len(catalog))
+		for _, item := range catalog {
+			models = append(models, item.ID)
+			if item.Label != "" {
+				labels[item.ID] = item.Label
+			}
+			if item.Note != "" {
+				notes[item.ID] = item.Note
+			}
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "models": models, "model_labels": labels, "model_notes": notes})
 		return
 	}
 	// Resolve API key: form input > profile stored key. The stored key is only
