@@ -1827,8 +1827,7 @@ FROM activity WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT $3`, s.expID, 
 // row 1). ok is false when no recorded activity carries any of them. The match
 // is literal and case-sensitive: evidence has to quote the recorded output, not
 // paraphrase it. Callers pass only substantive lines, so a command name alone
-// cannot tie a claim to an activity. The activity's timestamp bounds the search
-// for a proxy capture of the same bytes.
+// cannot tie a claim to an activity.
 func (s *ExplorationStore) ActivityContainingEvidence(nodeID int64, lines []string) (id int64, createdAt time.Time, ok bool, err error) {
 	if nodeID <= 0 || len(lines) == 0 {
 		return 0, time.Time{}, false, nil
@@ -1848,6 +1847,22 @@ ORDER BY id DESC LIMIT 1`, s.expID, nodeID, lines).Scan(&id, &createdAt)
 		return 0, time.Time{}, false, err
 	}
 	return id, createdAt, true, nil
+}
+
+// OperatorActivityContainingQuote matches the full quote in a human turn on
+// this intent. A worker can also emit kind=user when it asks for help.
+func (s *ExplorationStore) OperatorActivityContainingQuote(nodeID int64, quote string) (id int64, err error) {
+	if nodeID <= 0 || quote == "" {
+		return 0, nil
+	}
+	err = s.db.QueryRow(`SELECT id FROM activity
+WHERE exploration_id=$1 AND node_id=$2 AND worker='user' AND kind='user'
+  AND (strpos(summary,$3)>0 OR strpos(detail,$3)>0)
+ORDER BY id DESC LIMIT 1`, s.expID, nodeID, quote).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, err
 }
 
 // ActivityListForTerminalIntent is the inherited, incremental-read boundary.

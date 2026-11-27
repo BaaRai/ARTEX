@@ -70,7 +70,6 @@ type Worker struct {
 	workDir     string
 	proxyAddr   string
 	proxyCACert string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
-	factTraffic FactTrafficLookup // proxy captures for fact provenance (nil = activity-only)
 	webSearch   WebSearchOpts     // web_search tool backend selection (off by default)
 	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
 	window      int               // context window in tokens (for compaction)
@@ -210,9 +209,8 @@ func (w *Worker) compactionWindow() int {
 // that MITM proxy. Empty addr disables the hint.
 func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = addr, caCert }
 
-// SetFactTraffic wires the proxy capture store used to classify recorded facts
-// (#124 row 1). nil keeps the activity-only classification.
-func (w *Worker) SetFactTraffic(l FactTrafficLookup) { w.factTraffic = l }
+// Deprecated: shared proxy captures cannot establish the source of a task fact.
+func (w *Worker) SetFactTraffic(FactTrafficLookup) {}
 
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
@@ -536,7 +534,6 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
 	tsx.SetTriageClient(w.triage)
-	tsx.SetFactTraffic(w.factTraffic)
 	tsx.SetTaskID(taskID)
 	coverageEnabled := coverageOn(as, taskID)
 	tsx.SetCoverageEnabled(coverageEnabled)
