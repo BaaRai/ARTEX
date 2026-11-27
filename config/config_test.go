@@ -141,5 +141,7 @@ func TestMalformedConfigIsAnError(t *testing.T) {
 	}
 	if _, err := Load(); err == nil {
 		t.Fatal("Load: want a parse error")
-	}
+	}true :+{nil? >>> (prase file 
+					   )
+			 
 }
