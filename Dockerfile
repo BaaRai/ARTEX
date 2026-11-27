@@ -274,6 +274,14 @@ RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "@playwright/cli@
     && playwright install --with-deps chromium \
     && "$(npm root -g)/@playwright/mcp/node_modules/.bin/playwright-core" install chromium \
     && rm -rf /var/lib/apt/lists/*
+# Claude Code's published CLI runs subscription requests through the user's own
+# login. Pin the version so checkout rebuilds use a reproducible binary; update
+# this argument deliberately when upgrading Claude Code.
+# https://code.claude.com/docs/en/devcontainer#enforce-organization-policy
+ARG CLAUDE_CODE_VERSION=2.1.332
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    && claude --version
+ENV DISABLE_AUTOUPDATER=1
 # Agent processes run as the executor with HOME and XDG_CACHE_HOME in the data
 # directory (server/execpriv_unix.go); the browsers installed above stay in root's
 # cache, which /root's 0711 lets the executor reach.
@@ -285,7 +293,8 @@ COPY --from=build /out/artex /app/artex
 # to artex — docker stop only signals PID 1; without forwarding, artex never receives it,
 # cannot shut down gracefully, and is hard-killed by SIGKILL after 10 seconds.
 COPY start.sh /app/start.sh
-RUN chmod +x /app/artex /app/start.sh && mkdir -p -m 0700 /app/keys \
+RUN chmod +x /app/artex /app/start.sh && mkdir -p /app/keys /root/.claude \
+    && chmod 0700 /app/keys /root/.claude \
     && chmod 0711 /root
 # No setuid or setgid programs (su, passwd, mount, bbot's chrome_sandbox, ...): an
 # agent process runs as the executor and must not regain root through one, even

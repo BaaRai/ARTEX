@@ -4,8 +4,9 @@ ARTEX can use the unmodified Claude Code CLI as a local provider with the
 operator's own `claude.ai` subscription login. Claude Code owns sign-in and
 credential storage; ARTEX does not read Claude credential files or tokens.
 
-1. Install a current Claude Code CLI (version 2.1.248 or newer) on the same
-   machine and under the same OS account that runs ARTEX.
+1. For a local ARTEX binary, install a current Claude Code CLI (version
+   2.1.248 or newer) for the OS account that runs ARTEX. The checkout-built
+   Docker Compose image already includes the CLI.
 2. Run `claude auth login` in a terminal and choose the Claude subscription
    account. `claude auth status` should report `loggedIn: true` and
    `authMethod: "claude.ai"`. ARTEX does not accept `api_key`, `third_party`, or
@@ -17,6 +18,22 @@ credential storage; ARTEX does not read Claude credential files or tokens.
 4. Put the `claude-code` and ChatGPT plan profiles in a pool in your desired
    order. ARTEX can try the next profile when the first returns a recognized
    subscription usage-limit error before emitting a reply.
+
+For the checkout-built Docker Compose image, the published Claude Code CLI is
+installed during the image build. Sign in **inside** the `artex` container:
+
+```bash
+docker compose exec artex env -u ANTHROPIC_API_KEY claude auth login
+docker compose exec artex env -u ANTHROPIC_API_KEY claude auth status
+```
+
+If the container cannot open a browser, copy the login URL into a browser and
+paste its displayed code into the CLI prompt. The Compose service sets
+`CLAUDE_CONFIG_DIR=/root/.claude` and mounts a dedicated `claude_config` volume,
+as [Anthropic recommends for containers](https://code.claude.com/docs/en/devcontainer#persist-authentication-and-settings-across-rebuilds).
+That volume keeps the login across `docker compose up -d artex` and `./update.sh`.
+It contains reusable credentials, so protect it and back it up separately from
+ARTEX's PostgreSQL, `data/`, and `keys/` backups.
 
 The adapter runs `claude -p` with restricted tools, no MCP servers, a neutral
 temporary working directory, and no CLI session persistence. It passes ARTEX's

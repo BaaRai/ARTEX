@@ -55,6 +55,9 @@ services:
       # Exact host:port list the model-list fetch may reach on private addresses (e.g. host.docker.internal:11434 for Ollama).
       ARTEX_LLM_PRIVATE_ENDPOINTS: ${ARTEX_LLM_PRIVATE_ENDPOINTS:-}
       ARTEX_JWT_KEY_DIR: /app/keys
+      # Keep Claude Code account state in its dedicated persistent volume.
+      # https://code.claude.com/docs/en/devcontainer#persist-authentication-and-settings-across-rebuilds
+      CLAUDE_CONFIG_DIR: /root/.claude
       # Optional: key for secrets at rest; empty = keys/secret.key (generated at first start).
       ARTEX_SECRET_KEY: ${ARTEX_SECRET_KEY:-}
       ARTEX_TRUSTED_PROXIES: ${ARTEX_TRUSTED_PROXIES:-}
@@ -80,6 +83,8 @@ services:
       # JWT signing key and secret key (jwt.key, secret.key), kept out of data/, which the file manager browses.
       # Persisting it keeps users signed in across container rebuilds.
       - ./keys:/app/keys
+      # Claude Code's login and account state survive image rebuilds.
+      - claude_config:/root/.claude
       # Mount skills/ from the project root into the container (overriding the image's built-in /app/skills);
       # skill changes require no image rebuild — the container reads the host copy.
       - ./skills:/app/skills
@@ -87,3 +92,4 @@ services:
 
 volumes:
   pgdata:
+  claude_config:

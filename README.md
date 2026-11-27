@@ -512,10 +512,24 @@ subscription profile, and choose **Continue with ChatGPT**. This uses OpenAI's
 [Sign in with ChatGPT for open-source applications](https://developers.openai.com/siwc/quickstart)
 flow and saves its token under `ARTEX_JWT_KEY_DIR/chatgpt-plan.json` (or next to the
 ARTEX binary when that variable is unset). The profile model must be available
-to the signed-in account. For Claude, install the official Claude Code CLI on
-the ARTEX host, run `claude auth login` as the same OS user that runs ARTEX,
-then create a Claude Code subscription profile with a CLI-supported model such
-as `sonnet`. ARTEX invokes the unmodified CLI and does not copy its credentials.
+to the signed-in account. This ChatGPT plan provider is built into the
+checkout-built Docker image from this branch; no Codex CLI or OpenAI API key is
+needed. For a local binary,
+install the official Claude Code CLI and run `claude auth login` as the same OS
+user that runs ARTEX. For checkout-built Docker Compose, Claude Code is bundled:
+
+```bash
+docker compose exec artex env -u ANTHROPIC_API_KEY claude auth login
+docker compose exec artex env -u ANTHROPIC_API_KEY claude auth status
+```
+
+Complete the CLI's browser login and confirm `loggedIn: true` with
+`authMethod: "claude.ai"`. Then create a Claude Code subscription profile with a
+CLI-supported model such as `sonnet`. ARTEX invokes the unmodified CLI and does
+not copy its credentials. Compose keeps Claude's login in the dedicated
+`claude_config` volume across `./update.sh` rebuilds; the ChatGPT login stays
+under the existing `./keys` mount. Protect and back up the Claude volume
+separately; `scripts/backup.sh` covers the database and `data/`, not this volume.
 See [Claude Code provider details](docs/claude-code-provider.md).
 The current login store holds one ChatGPT account per ARTEX server; Claude Code
 uses the CLI's current login for that server user.
@@ -868,7 +882,10 @@ cd ARTEX
 
 The script optionally `git pull`s, then offers **① Docker update** (`docker compose build artex` →
 `docker compose up -d artex`) or **② local build update** (rebuild the frontend static assets, then
-recompile `./artex`; restart the process for it to take effect).
+recompile `./artex`; restart the process for it to take effect). The checkout-built
+Docker update retains the Claude login volume and the existing `data/`, `keys/`,
+and PostgreSQL volume. If the feature is on a separate branch, switch to that
+branch before running the script so its `git pull --ff-only` follows that branch.
 
 #### Option 2: Docker (Compose or GHCR image)
 
