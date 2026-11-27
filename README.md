@@ -508,14 +508,16 @@ runtime supports it.
 **Subscription sign-in and fallback (experimental):** The **ChatGPT subscription**
 and **Claude Code subscription** profile formats use account sign-in instead of an
 API key. For a local ARTEX server, open **System → LLM**, create a ChatGPT
-subscription profile, and choose **Continue with ChatGPT**. This uses OpenAI's
+subscription profile, and choose **Continue with ChatGPT**. Sign-in opens in a
+new browser tab while ARTEX stays open. This uses OpenAI's
 [Sign in with ChatGPT for open-source applications](https://developers.openai.com/siwc/quickstart)
 flow and saves its token under `ARTEX_JWT_KEY_DIR/chatgpt-plan.json` (or next to the
-ARTEX binary when that variable is unset). The profile model must be available
-to the signed-in account. This ChatGPT plan provider is built into the
-checkout-built Docker image from this branch; no Codex CLI or OpenAI API key is
-needed. For a local binary,
-install the official Claude Code CLI and run `claude auth login` as the same OS
+ARTEX binary when that variable is unset). **Choose model** loads that account's
+visible model catalog; choose an effort level or leave **Model default**. The
+selected model must be available to the signed-in account. This ChatGPT plan
+provider is built into the checkout-built Docker image from this branch; no
+Codex CLI or OpenAI API key is needed. For a local binary, install the official
+Claude Code CLI and run `claude auth login` as the same OS
 user that runs ARTEX. For checkout-built Docker Compose, Claude Code is bundled:
 
 ```bash
@@ -524,9 +526,11 @@ docker compose exec artex env -u ANTHROPIC_API_KEY claude auth status
 ```
 
 Complete the CLI's browser login and confirm `loggedIn: true` with
-`authMethod: "claude.ai"`. Then create a Claude Code subscription profile with a
-CLI-supported model such as `sonnet`. ARTEX invokes the unmodified CLI and does
-not copy its credentials. Compose keeps Claude's login in the dedicated
+`authMethod: "claude.ai"`. Then create a Claude Code subscription profile and
+use **Choose model** for CLI suggestions, or enter an alias such as `sonnet`.
+You can set effort for this profile; **Model default** leaves the CLI's choice
+unchanged. ARTEX invokes the unmodified CLI and does not copy its credentials.
+Compose keeps Claude's login in the dedicated
 `claude_config` volume across `./update.sh` rebuilds; the ChatGPT login stays
 under the existing `./keys` mount. Protect and back up the Claude volume
 separately; `scripts/backup.sh` covers the database and `data/`, not this volume.

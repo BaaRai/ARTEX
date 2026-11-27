@@ -1153,7 +1153,7 @@ export const api = {
     api_key: string,
     proxy = "",
     thinking_type = "",
-    reasoning_effort = "",
+    reasoning_effort?: string, // omitted = stored profile effort; explicit "" = model default
     profile_id?: number,
     streaming = true, // test with the profile's real streaming mode so "streaming works, non-streaming does not" never leaks into conversations
     session_header_key = "", // non-empty = the test request also carries this custom session header (value is a one-off session id)
@@ -1221,7 +1221,7 @@ export const api = {
   llmRetryPolicy: () => get<LLMRetryPolicy>("/llm/retry-policy"),
   saveLLMRetryPolicy: (p: LLMRetryPolicy) => post<LLMRetryPolicy>("/llm/retry-policy", p),
   fetchLLMModels: (provider: string, base_url: string, api_key: string, proxy = "", profile_id?: number) =>
-    post<{ ok: boolean; error?: string; models?: string[] }>("/llm/models", {
+    post<{ ok: boolean; error?: string; models?: string[]; model_labels?: Record<string, string>; model_notes?: Record<string, string> }>("/llm/models", {
       provider,
       base_url,
       api_key,

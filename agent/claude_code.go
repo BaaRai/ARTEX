@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/norma/llm"
 )
@@ -29,8 +30,9 @@ import (
 // strips API-key and third-party routing overrides from the child environment,
 // because those would silently bill a different account in print mode.
 type claudeCodeProvider struct {
-	model string
-	run   claudeCodeRun
+	model  string
+	effort string
+	run    claudeCodeRun
 }
 
 type claudeCodeRun func(context.Context, []string, string) ([]byte, error)
@@ -41,24 +43,150 @@ const (
 	claudeCodeSchema      = `{"type":"object","properties":{"kind":{"type":"string","enum":["text","tool"]},"text":{"type":"string"},"tool_name":{"type":"string"},"tool_input":{"type":"object"}},"required":["kind"],"additionalProperties":false}`
 )
 
-var claudeCodeModelPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+var claudeCodeModelPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._:-]{0,127}$`)
 
 // NewClaudeCodeProvider builds a provider that uses the current user's Claude
 // Code subscription login. Run `claude auth login` in a terminal first. The
 // model can be a Claude Code alias (sonnet, opus, haiku) or a full model ID.
-func NewClaudeCodeProvider(model string) (llm.Provider, error) {
+// Effort is empty for the CLI default, or low, medium, high, xhigh, or max.
+func NewClaudeCodeProvider(model, effort string) (llm.Provider, error) {
 	model = strings.TrimSpace(model)
+	effort = strings.ToLower(strings.TrimSpace(effort))
 	if model == "" {
 		model = "sonnet"
 	}
-	if !claudeCodeModelPattern.MatchString(model) {
+	if !validClaudeCodeModel(model) {
 		return nil, fmt.Errorf("claude-code: invalid model name")
+	}
+	switch effort {
+	case "", "low", "medium", "high", "xhigh", "max":
+	default:
+		return nil, fmt.Errorf("claude-code: invalid effort level")
 	}
 	path, err := claudeCodePath()
 	if err != nil {
 		return nil, err
 	}
-	return &claudeCodeProvider{model: model, run: claudeCodeCommand(path)}, nil
+	return &claudeCodeProvider{model: model, effort: effort, run: claudeCodeCommand(path)}, nil
+}
+
+func validClaudeCodeModel(model string) bool {
+	if claudeCodeModelPattern.MatchString(model) || model == "sonnet[1m]" || model == "opus[1m]" {
+		return true
+	}
+	base, ok := strings.CutSuffix(model, "[1m]")
+	return ok && strings.HasPrefix(base, "claude-") && claudeCodeModelPattern.MatchString(base)
+}
+
+// ClaudeCodeModel is one suggestion returned by the current account's Claude
+// Code model picker. The private initialize handshake may change between CLI
+// versions, so callers should keep manual model entry available.
+type ClaudeCodeModel struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Note  string `json:"note,omitempty"`
+}
+
+// ClaudeCodeListModels asks the unmodified CLI for its model picker using an
+// initialize control request and no user message. This is a best-effort,
+// zero-inference probe of a version-sensitive CLI protocol, not a guarantee
+// that every returned model can be used by this account.
+func ClaudeCodeListModels(ctx context.Context) ([]ClaudeCodeModel, error) {
+	path, err := claudeCodePath()
+	if err != nil {
+		return nil, err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	return claudeCodeListModels(probeCtx, claudeCodeCommand(path))
+}
+
+func claudeCodeListModels(ctx context.Context, run claudeCodeRun) ([]ClaudeCodeModel, error) {
+	loggedIn, err := claudeCodeLoginStatus(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if !loggedIn {
+		return nil, fmt.Errorf("claude-code: sign in to your subscription with claude auth login")
+	}
+	args := []string{
+		"-p", "--restricted", "--model", "sonnet",
+		"--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+		"--tools", "", "--setting-sources", "", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+		"--disallowedTools", "mcp__*", "--disable-slash-commands",
+		"--no-session-persistence", "--no-chrome",
+	}
+	const handshake = "{\"type\":\"control_request\",\"request_id\":\"artex-model-picker\",\"request\":{\"subtype\":\"initialize\"}}\n"
+	out, runErr := run(ctx, args, handshake)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	for _, line := range bytes.Split(out, []byte{'\n'}) {
+		var response struct {
+			Type     string `json:"type"`
+			Response struct {
+				Subtype  string `json:"subtype"`
+				Response struct {
+					Models []struct {
+						Value         string `json:"value"`
+						ResolvedModel string `json:"resolvedModel"`
+						DisplayName   string `json:"displayName"`
+						Description   string `json:"description"`
+					} `json:"models"`
+				} `json:"response"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(line, &response) != nil || response.Type != "control_response" || response.Response.Subtype != "success" {
+			continue
+		}
+		seen := make(map[string]bool)
+		rows := response.Response.Response.Models
+		models := make([]ClaudeCodeModel, 0, len(rows))
+		for _, row := range rows {
+			id := strings.TrimSpace(row.ResolvedModel)
+			if id == "" && strings.HasPrefix(row.Value, "claude-") {
+				id = strings.TrimSpace(row.Value)
+			}
+			if !validClaudeCodeModel(id) || seen[id] {
+				continue
+			}
+			seen[id] = true
+			label := claudeCodePickerText(row.DisplayName, 100)
+			if label == "" {
+				label = claudeCodePickerText(strings.Split(row.Description, "·")[0], 100)
+			}
+			if label == "" {
+				label = id
+			}
+			note := claudeCodePickerText(row.Description, 200)
+			if strings.Contains(id, "claude-fable") && !strings.Contains(strings.ToLower(note), "usage credit") {
+				note = strings.TrimSpace(note + " · May use paid usage credits on some plans")
+			}
+			models = append(models, ClaudeCodeModel{ID: id, Label: label, Note: note})
+		}
+		if len(models) > 0 {
+			return models, nil
+		}
+		return nil, fmt.Errorf("claude-code: model picker returned no usable models")
+	}
+	if runErr != nil {
+		return nil, fmt.Errorf("claude-code: model picker failed: %w", runErr)
+	}
+	return nil, fmt.Errorf("claude-code: model picker returned no response")
+}
+
+func claudeCodePickerText(s string, maxRunes int) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(s))
+	runes := []rune(s)
+	if len(runes) > maxRunes {
+		runes = runes[:maxRunes]
+	}
+	return strings.TrimSpace(string(runes))
 }
 
 // ClaudeCodeLoginStatus asks the CLI for its authentication method, returning
@@ -129,8 +257,11 @@ func (p *claudeCodeProvider) Complete(ctx context.Context, req llm.CompletionReq
 		"--max-turns", "2",
 		"--output-format", "json", "--json-schema", claudeCodeSchema,
 		"--system-prompt-file", systemFile, "--model", p.model,
-		"Use the JSON conversation and available ARTEX tools from stdin; return one structured action.",
 	}
+	if p.effort != "" {
+		args = append(args, "--effort", p.effort)
+	}
+	args = append(args, "Use the JSON conversation and available ARTEX tools from stdin; return one structured action.")
 	out, runErr := p.run(ctx, args, string(input))
 	if runErr != nil {
 		if isClaudeSubscriptionLimit(string(out)) {
@@ -277,6 +408,7 @@ var claudeCodeUnsafeEnv = map[string]bool{
 	"CLAUDE_CODE_USE_BEDROCK":                true, "CLAUDE_CODE_USE_FOUNDRY": true,
 	"CLAUDE_CODE_USE_MANTLE": true, "CLAUDE_CODE_USE_VERTEX": true,
 	"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST": true,
+	"CLAUDE_CODE_EFFORT_LEVEL":             true,
 }
 
 func claudeCodeEnv(env []string) []string {

@@ -2769,5 +2769,22 @@
   "Use a Claude subscription account, then click Recheck. ARTEX does not read your Claude credentials.": "Bir Claude abonelik hesabıyla oturum açın, ardından Yeniden kontrol et'e tıklayın. ARTEX, Claude kimlik bilgilerinizi okumaz.",
   "Context window is in K (thousand tokens); 0 uses the 200K default.": "Bağlam penceresi K (bin token) cinsindendir; 0, varsayılan 200K değerini kullanır.",
   "ChatGPT connected": "ChatGPT bağlandı",
-  "ChatGPT sign-in failed": "ChatGPT oturum açma başarısız"
+  "ChatGPT sign-in failed": "ChatGPT oturum açma başarısız",
+  "Model default": "Model varsayılanı",
+  "Could not load Claude models. Showing common aliases; availability depends on your account.": "Claude modelleri yüklenemedi. Yaygın takma adlar gösteriliyor; kullanılabilirlik hesabınıza bağlıdır.",
+  "Choose a signed-in account model": "Oturum açılan hesaptan bir model seçin",
+  "Choose model": "Model seç",
+  "Common Claude aliases. Test connection sends a request and may use paid credits.": "Yaygın Claude takma adları. Bağlantıyı test et bir istek gönderir ve ücretli kredileri kullanabilir.",
+  "Claude Code model suggestions. Test connection sends a request and may use paid credits.": "Claude Code model önerileri. Bağlantıyı test et bir istek gönderir ve ücretli kredileri kullanabilir.",
+  "Refresh model list": "Model listesini yenile",
+  "Reasoning effort": "Düşünme yoğunluğu",
+  "Model default omits the effort override. Other levels depend on the model; use Test connection to verify your choice.": "Model varsayılanı yoğunluk geçersiz kılmasını göndermez. Diğer düzeyler modele bağlıdır; seçiminizi Bağlantıyı test et ile doğrulayın.",
+  "Model default leaves effort to Claude Code. Available levels depend on the model and account; use Test connection to verify your choice.": "Model varsayılanı yoğunluk ayarını Claude Code'a bırakır. Kullanılabilir düzeyler modele ve hesaba bağlıdır; seçiminizi Bağlantıyı test et ile doğrulayın.",
+  "From your ARTEX checkout on the host:": "Ana makinedeki ARTEX çalışma kopyanızdan:",
+  "Then check the login:": "Ardından oturum durumunu kontrol edin:",
+  "Use a Claude subscription account, then click Recheck. If you run the ARTEX binary directly, run": "Bir Claude abonelik hesabıyla oturum açın, ardından Yeniden kontrol et'e tıklayın. ARTEX ikili dosyasını doğrudan çalıştırıyorsanız",
+  "as the same OS user that runs ARTEX.": "komutunu ARTEX'i çalıştıran aynı işletim sistemi kullanıcısı olarak çalıştırın.",
+  "Browser blocked the sign-in tab. Allow pop-ups for ARTEX and try again.": "Tarayıcı oturum açma sekmesini engelledi. ARTEX için açılır pencerelere izin verip yeniden deneyin.",
+  "Cancel sign-in": "Oturum açmayı iptal et",
+  "ChatGPT sign-in opens in a new tab; ARTEX stays open here. ARTEX stores the login outside model profiles.": "ChatGPT oturum açma işlemi yeni bir sekmede açılır; ARTEX burada açık kalır. ARTEX, oturum bilgilerini model profillerinin dışında saklar."
 }

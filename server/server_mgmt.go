@@ -2174,7 +2174,13 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 			p.SessionHeaderKey = ""
 			p.UserAgent = ""
 			p.RatePerSecond, p.RatePerMinute = 0, 0
-			p.ReasoningEffort = ""
+			p.ReasoningEffort = strings.ToLower(strings.TrimSpace(p.ReasoningEffort))
+			switch p.ReasoningEffort {
+			case "", "low", "medium", "high", "xhigh", "max":
+			default:
+				writeErr(w, 400, "unsupported Claude Code effort; choose default, low, medium, high, xhigh, or max")
+				return
+			}
 			p.Retry = db.RetryOverride{}
 		}
 	}
@@ -2699,7 +2705,7 @@ func (g *modelURLGuard) validateURL(ctx context.Context, rawURL, role string) (*
 }
 
 // pgListModels fetches available models from the provider's API endpoint.
-// Supports OpenAI-format (GET /models), Anthropic-format (GET /v1/models) and
+// Supports ChatGPT subscription (its signed-in catalog), OpenAI-format (GET /models), Anthropic-format (GET /v1/models) and
 // Ollama (keyless OpenAI-compatible GET /v1/models on the local server); for
 // Anthropic-compatible third parties (e.g. DeepSeek) whose model list lives only on
 // the OpenAI path, it falls back to the OpenAI endpoint at the stripped root.
@@ -2719,8 +2725,46 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "enter the Bedrock model ID manually; this gateway has no model-list endpoint"})
 		return
 	}
-	if req.Provider == "chatgpt-plan" || req.Provider == "claude-code" {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "enter a subscription model ID manually"})
+	if req.Provider == "chatgpt-plan" {
+		if s.chatgptStore == nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "ChatGPT sign-in is not configured"})
+			return
+		}
+		catalog, err := s.chatgptStore.ListModels(r.Context())
+		if err != nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "could not load ChatGPT models; check sign-in and retry"})
+			return
+		}
+		models := make([]string, 0, len(catalog))
+		labels := make(map[string]string, len(catalog))
+		for _, item := range catalog {
+			models = append(models, item.Slug)
+			if item.DisplayName != "" {
+				labels[item.Slug] = item.DisplayName
+			}
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "models": models, "model_labels": labels})
+		return
+	}
+	if req.Provider == "claude-code" {
+		catalog, err := agent.ClaudeCodeListModels(r.Context())
+		if err != nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "could not read Claude Code model suggestions; check sign-in or enter a model ID manually"})
+			return
+		}
+		models := make([]string, 0, len(catalog))
+		labels := make(map[string]string, len(catalog))
+		notes := make(map[string]string, len(catalog))
+		for _, item := range catalog {
+			models = append(models, item.ID)
+			if item.Label != "" {
+				labels[item.ID] = item.Label
+			}
+			if item.Note != "" {
+				notes[item.ID] = item.Note
+			}
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "models": models, "model_labels": labels, "model_notes": notes})
 		return
 	}
 	// Resolve API key: form input > profile stored key. The stored key is only

@@ -85,11 +85,11 @@ func TestSubscriptionProfileSaveRejectsEndpointCredentialsAndClearsOldKey(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = m.pg.Exec(`DELETE FROM llm_profiles WHERE id=$1`, id) })
-	save := func(format, key, baseURL, proxy string) int {
+	save := func(format, key, baseURL, proxy, effort string) int {
 		t.Helper()
 		body, err := json.Marshal(map[string]any{
 			"id": id, "name": name, "format": format, "model": "test-model",
-			"api_key": key, "base_url": baseURL, "proxy": proxy,
+			"api_key": key, "base_url": baseURL, "proxy": proxy, "reasoning_effort": effort,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -98,24 +98,34 @@ func TestSubscriptionProfileSaveRejectsEndpointCredentialsAndClearsOldKey(t *tes
 		s.pgSaveProfile(rec, httptest.NewRequest(http.MethodPost, "/api/llm/profiles", bytes.NewReader(body)))
 		return rec.Code
 	}
-	if got := save("chatgpt-plan", "synthetic-new-key", "", ""); got != http.StatusBadRequest {
+	if got := save("chatgpt-plan", "synthetic-new-key", "", "", ""); got != http.StatusBadRequest {
 		t.Fatalf("ChatGPT profile accepted API key: HTTP %d", got)
 	}
-	if got := save("chatgpt-plan", "", "https://example.invalid", ""); got != http.StatusBadRequest {
+	if got := save("chatgpt-plan", "", "https://example.invalid", "", ""); got != http.StatusBadRequest {
 		t.Fatalf("ChatGPT profile accepted base URL: HTTP %d", got)
 	}
-	if got := save("claude-code", "", "", "http://proxy.example.invalid"); got != http.StatusBadRequest {
+	if got := save("claude-code", "", "", "http://proxy.example.invalid", ""); got != http.StatusBadRequest {
 		t.Fatalf("Claude Code profile accepted proxy: HTTP %d", got)
 	}
 	profile, err := m.pg.ProfileByID(id)
 	if err != nil || profile.APIKey != "synthetic-old-key" || profile.Format != "openai" {
 		t.Fatalf("rejected saves changed original profile: %v, %+v", err, profile)
 	}
-	if got := save("chatgpt-plan", "", "", ""); got != http.StatusOK {
+	if got := save("chatgpt-plan", "", "", "", ""); got != http.StatusOK {
 		t.Fatalf("keyless ChatGPT profile save returned HTTP %d", got)
 	}
 	profile, err = m.pg.ProfileByID(id)
 	if err != nil || profile.APIKey != "" || profile.Format != "chatgpt-plan" {
 		t.Fatalf("subscription save retained an API key: %v, %+v", err, profile)
+	}
+	if got := save("claude-code", "", "", "", "high"); got != http.StatusOK {
+		t.Fatalf("Claude Code effort save returned HTTP %d", got)
+	}
+	profile, err = m.pg.ProfileByID(id)
+	if err != nil || profile.Format != "claude-code" || profile.ReasoningEffort != "high" {
+		t.Fatalf("Claude Code effort was not saved: %v, %+v", err, profile)
+	}
+	if got := save("claude-code", "", "", "", "invalid"); got != http.StatusBadRequest {
+		t.Fatalf("unsupported Claude Code effort returned HTTP %d", got)
 	}
 }

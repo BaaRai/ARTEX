@@ -428,7 +428,7 @@ func (c Config) NewProvider() (llm.Provider, error) {
 			}
 			return NewChatGPTPlanProvider(c, c.ChatGPTStore)
 		}
-		return NewClaudeCodeProvider(c.Model)
+		return NewClaudeCodeProvider(c.Model, c.ReasoningEffort)
 	}
 	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey, c.UserAgent)
 	if err != nil {

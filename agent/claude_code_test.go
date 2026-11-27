@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -159,10 +160,140 @@ func TestClaudeCodeScrubsAuthenticationOverrides(t *testing.T) {
 	got := claudeCodeEnv([]string{
 		"PATH=C:\\bin", "ANTHROPIC_API_KEY=secret", "claude_code_simple=1",
 		"ANTHROPIC_BASE_URL=https://gateway.example", "CLAUDE_CODE_USE_BEDROCK=1",
+		"CLAUDE_CODE_EFFORT_LEVEL=max",
 		"ARTEX_TEST=kept",
 	})
 	if len(got) != 2 || got[0] != "PATH=C:\\bin" || got[1] != "ARTEX_TEST=kept" {
 		t.Fatalf("unexpected child env: %v", got)
+	}
+}
+
+func TestClaudeCodeEffortFromConfig(t *testing.T) {
+	t.Setenv("ARTEX_CLAUDE_CODE_BIN", os.Args[0])
+	for _, tc := range []struct {
+		effort string
+		want   bool
+	}{
+		{"", false},
+		{"low", true},
+		{"medium", true},
+		{"high", true},
+		{"xhigh", true},
+		{"max", true},
+	} {
+		t.Run(tc.effort, func(t *testing.T) {
+			provider, err := (Config{Format: FormatClaudeCode, Model: "sonnet", ReasoningEffort: tc.effort}).NewProvider()
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, ok := provider.(*claudeCodeProvider)
+			if !ok {
+				t.Fatalf("provider=%T", provider)
+			}
+			if p.effort != tc.effort {
+				t.Fatalf("effort=%q; want %q", p.effort, tc.effort)
+			}
+			p.run = func(_ context.Context, args []string, _ string) ([]byte, error) {
+				if len(args) > 1 && args[0] == "auth" {
+					return []byte(`{"loggedIn":true,"authMethod":"claude.ai"}`), nil
+				}
+				found := false
+				for i, arg := range args {
+					if arg == "--effort" {
+						found = true
+						if i+1 >= len(args) || args[i+1] != tc.effort {
+							t.Errorf("effort args = %v", args)
+						}
+					}
+				}
+				if found != tc.want {
+					t.Errorf("effort flag present = %v; want %v", found, tc.want)
+				}
+				return []byte(`{"is_error":false,"structured_output":{"kind":"text","text":"OK"}}`), nil
+			}
+			if _, _, _, err := p.Complete(t.Context(), llm.CompletionRequest{}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestClaudeCodeModelAndEffortValidation(t *testing.T) {
+	t.Setenv("ARTEX_CLAUDE_CODE_BIN", os.Args[0])
+	for _, model := range []string{"sonnet", "opus[1m]", "sonnet[1m]", "claude-sonnet-5-5", "claude-opus-4-8[1m]"} {
+		if _, err := NewClaudeCodeProvider(model, "high"); err != nil {
+			t.Fatalf("valid model %q rejected: %v", model, err)
+		}
+	}
+	for _, model := range []string{"sonnet[2m]", "opus[bad]", "--model"} {
+		if _, err := NewClaudeCodeProvider(model, "high"); err == nil {
+			t.Fatalf("invalid model %q accepted", model)
+		}
+	}
+	for _, effort := range []string{"ultracode", "auto", "extreme", "high --tools Bash"} {
+		if _, err := NewClaudeCodeProvider("sonnet", effort); err == nil {
+			t.Fatalf("invalid effort %q accepted", effort)
+		}
+	}
+}
+
+func TestClaudeCodeListModelsInitializeOnly(t *testing.T) {
+	var handshakeArgs []string
+	var handshakeInput string
+	run := func(_ context.Context, args []string, input string) ([]byte, error) {
+		if len(args) > 1 && args[0] == "auth" {
+			return []byte(`{"loggedIn":true,"authMethod":"claude.ai"}`), nil
+		}
+		handshakeArgs, handshakeInput = args, input
+		return []byte("{\"type\":\"system\",\"subtype\":\"init\"}\n" +
+			`{"type":"control_response","response":{"subtype":"success","response":{"models":[{"value":"default","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet 5.5","description":"Sonnet 5.5 · Daily coding"},{"value":"opus","resolvedModel":"claude-opus-4-8[1m]","displayName":"Opus 4.8 (1M context)","description":"Opus 4.8 · Complex tasks"},{"value":"malicious","resolvedModel":"--api-key=secret","displayName":"Unsafe"}]}}}` + "\n"), nil
+	}
+	models, err := claudeCodeListModels(t.Context(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0].ID != "claude-sonnet-5-5" || models[0].Label != "Sonnet 5.5" || models[1].ID != "claude-opus-4-8[1m]" {
+		t.Fatalf("models=%+v", models)
+	}
+	if handshakeInput != "{\"type\":\"control_request\",\"request_id\":\"artex-model-picker\",\"request\":{\"subtype\":\"initialize\"}}\n" {
+		t.Fatalf("unexpected handshake input: %q", handshakeInput)
+	}
+	for _, want := range []string{"-p", "--input-format", "stream-json", "--output-format", "--tools", "--setting-sources", "--strict-mcp-config", "--no-session-persistence"} {
+		if !containsString(handshakeArgs, want) {
+			t.Errorf("missing %q in %v", want, handshakeArgs)
+		}
+	}
+	if containsString(handshakeArgs, "--json-schema") {
+		t.Errorf("model picker must not send a model request: %v", handshakeArgs)
+	}
+}
+
+func TestClaudeCodeListModelsFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		out  string
+	}{
+		{"missing response", `{"type":"system","subtype":"init"}`},
+		{"empty models", `{"type":"control_response","response":{"subtype":"success","response":{"models":[]}}}`},
+		{"error with models", `{"type":"control_response","response":{"subtype":"error","response":{"models":[{"resolvedModel":"claude-sonnet-5-5"}]}}}`},
+		{"invalid JSON", `not json`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			models, err := claudeCodeListModels(t.Context(), func(_ context.Context, args []string, _ string) ([]byte, error) {
+				if len(args) > 1 && args[0] == "auth" {
+					return []byte(`{"loggedIn":true,"authMethod":"claude.ai"}`), nil
+				}
+				return []byte(tc.out), nil
+			})
+			if err == nil || len(models) != 0 {
+				t.Fatalf("models=%+v err=%v", models, err)
+			}
+		})
+	}
+	if models, err := claudeCodeListModels(t.Context(), func(context.Context, []string, string) ([]byte, error) {
+		return []byte(`{"loggedIn":false,"authMethod":"none"}`), nil
+	}); err == nil || len(models) != 0 {
+		t.Fatalf("logged-out result models=%+v err=%v", models, err)
 	}
 }
 

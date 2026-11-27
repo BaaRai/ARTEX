@@ -5,16 +5,17 @@ operator's own `claude.ai` subscription login. Claude Code owns sign-in and
 credential storage; ARTEX does not read Claude credential files or tokens.
 
 1. For a local ARTEX binary, install a current Claude Code CLI (version
-   2.1.248 or newer) for the OS account that runs ARTEX. The checkout-built
-   Docker Compose image already includes the CLI.
+   2.1.332 or newer recommended for the model picker) for the OS account that
+   runs ARTEX. The checkout-built Docker Compose image already includes the CLI.
 2. Run `claude auth login` in a terminal and choose the Claude subscription
    account. `claude auth status` should report `loggedIn: true` and
    `authMethod: "claude.ai"`. ARTEX does not accept `api_key`, `third_party`, or
    `oauth_token` for this profile.
-3. Add a `claude-code` LLM profile in ARTEX. The model can be a CLI alias such
-   as `sonnet` or `opus`, or a full Claude model ID. No API key or base URL is
-   needed. If `claude` is not on ARTEX's `PATH`, set `ARTEX_CLAUDE_CODE_BIN` to
-   the executable path before starting ARTEX.
+3. Add a `claude-code` LLM profile in ARTEX. Open **Choose model** to read the
+   CLI's signed-in model suggestions, or enter a CLI alias such as `sonnet` or
+   `opus` or a full model ID. Choose an effort level or leave **Model default**.
+   No API key or base URL is needed. If `claude` is not on ARTEX's `PATH`, set
+   `ARTEX_CLAUDE_CODE_BIN` to the executable path before starting ARTEX.
 4. Put the `claude-code` and ChatGPT plan profiles in a pool in your desired
    order. ARTEX can try the next profile when the first returns a recognized
    subscription usage-limit error before emitting a reply.
@@ -23,9 +24,13 @@ For the checkout-built Docker Compose image, the published Claude Code CLI is
 installed during the image build. Sign in **inside** the `artex` container:
 
 ```bash
-docker compose exec artex env -u ANTHROPIC_API_KEY claude auth login
-docker compose exec artex env -u ANTHROPIC_API_KEY claude auth status
+sudo docker compose exec artex env -u ANTHROPIC_API_KEY claude auth login
+sudo docker compose exec artex env -u ANTHROPIC_API_KEY claude auth status
 ```
+
+Run these from the ARTEX checkout on the host. Omit `sudo` if your user can
+access Docker directly. The LLM sign-in panel has copyable versions of both
+commands.
 
 If the container cannot open a browser, copy the login URL into a browser and
 paste its displayed code into the CLI prompt. The Compose service sets
@@ -42,6 +47,12 @@ either a reply or a request for one ARTEX tool. ARTEX executes any requested
 tool and calls the provider again with the result. The adapter removes
 inherited API-key and third-party provider environment overrides from the
 Claude child process so they cannot silently supersede the subscription login.
+It passes the selected effort via the CLI's `--effort` flag. The model picker
+uses the CLI's `initialize` handshake without sending a model request, as
+[Hermes does](https://github.com/NousResearch/hermes-official-plugins/blob/main/claude-subscription-directsdk/directsdk_setup.py).
+This is an internal CLI protocol and can change between CLI versions. If the
+probe fails, ARTEX offers alias suggestions and still lets you enter a model
+ID manually; **Test connection** verifies the selected model and effort.
 
 ## Limits
 
@@ -51,8 +62,9 @@ Claude child process so they cannot silently supersede the subscription login.
 - The CLI finishes each action before ARTEX receives it. ARTEX's stream events
   are therefore buffered, and there is one tool request per CLI invocation.
 - Claude Code's own prompt/session handling may differ from ARTEX's native API
-  providers. The adapter does not honor ARTEX HTTP proxy, max-token, thinking,
-  reasoning-effort, or request-rate settings.
+  providers. The adapter does not honor ARTEX HTTP proxy, max-token, thinking
+  switch, or request-rate settings. Available effort levels depend on the
+  selected Claude model.
 - Subscription usage and limits are governed by Anthropic. The adapter
   recognizes explicit session, weekly, or usage-limit errors for profile
   fallback; transient rate limits remain ordinary provider errors. If paid

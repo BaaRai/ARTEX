@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import {
+  ChevronDownIcon,
   Loader2Icon,
   PlugZapIcon,
   PlusIcon,
@@ -18,6 +19,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { CopyButton } from "@/components/copy-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -77,6 +79,9 @@ const MODEL_PLACEHOLDERS: Partial<Record<ProfileFormat, string>> = {
   "chatgpt-plan": "gpt-6.1-sol",
   "claude-code": "sonnet",
 };
+const CLAUDE_MODEL_SUGGESTIONS = ["sonnet", "opus", "haiku"];
+const CLAUDE_DOCKER_LOGIN_COMMAND = "sudo docker compose exec artex env -u ANTHROPIC_API_KEY claude auth login";
+const CLAUDE_DOCKER_STATUS_COMMAND = "sudo docker compose exec artex env -u ANTHROPIC_API_KEY claude auth status";
 const LOGIN_LABELS: Record<LoginState, string> = {
   connected: t("Connected on this ARTEX server"),
   disconnected: t("Sign-in required"),
@@ -91,6 +96,7 @@ const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: "xhigh", label: "xhigh" },
   { value: "max", label: "max" },
 ];
+const SUBSCRIPTION_EFFORT_LEVELS = [{ value: NONE, label: t("Model default") }, ...EFFORT_LEVELS.slice(1)];
 
 function cooldownText(secs: number) {
   if (secs <= 0) return "";
@@ -384,14 +390,21 @@ function ProfileSheet({
   const [testing, setTesting] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [models, setModels] = React.useState<string[]>([]);
+  const [modelLabels, setModelLabels] = React.useState<Record<string, string>>({});
+  const [modelNotes, setModelNotes] = React.useState<Record<string, string>>({});
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [modelsOpen, setModelsOpen] = React.useState(false);
   const [modelQuery, setModelQuery] = React.useState(""); // filter text for the loaded model list; reset on open/close
+  const modelRequest = React.useRef(0);
+  const chatgptAuthTab = React.useRef<Window | null>(null);
+  const authChangedRef = React.useRef(onAuthChanged);
+  React.useEffect(() => { authChangedRef.current = onAuthChanged; }, [onAuthChanged]);
 
   // Every time it opens, the form is re-filled from the passed-in profile (reset to defaults when creating). Closing and reopening
   // the drawer is a clean start, leaving no leftovers from the previous profile.
   React.useEffect(() => {
     if (!open) return;
+    modelRequest.current += 1;
     setName(profile?.name ?? "");
     setFormat(
       profile?.format === "openai" || profile?.format === "openai-responses" || profile?.format === "ollama" || profile?.format === "bedrock-gateway" || profile?.format === "chatgpt-plan" || profile?.format === "claude-code"
@@ -425,6 +438,9 @@ function ProfileSheet({
     setApiKey("");
     setKeyHint(profile?.api_key_hint ?? "");
     setModels([]);
+    setModelLabels({});
+    setModelNotes({});
+    setLoadingModels(false);
     setModelsOpen(false);
     setModelQuery("");
   }, [open, profile]);
@@ -434,35 +450,126 @@ function ProfileSheet({
     let current = true;
     const status = format === "chatgpt-plan" ? api.chatgptLoginStatus() : api.claudeCodeLoginStatus();
     void status.then((result) => {
-      if (current) setLoginState(result.state);
+      if (current) {
+        setLoginState(result.state);
+        if (format === "chatgpt-plan" && result.state === "connected") {
+          chatgptAuthTab.current = null;
+          setLoginBusy(false);
+        }
+        if (result.state !== "connected") {
+          modelRequest.current += 1;
+          setModels([]);
+          setModelLabels({});
+          setModelNotes({});
+          setLoadingModels(false);
+          setModelsOpen(false);
+        }
+      }
     }).catch(() => {
-      if (current) setLoginState("unknown");
+      if (current) {
+        setLoginState("unknown");
+        modelRequest.current += 1;
+        setModels([]);
+        setModelLabels({});
+        setModelNotes({});
+        setLoadingModels(false);
+        setModelsOpen(false);
+      }
     });
     return () => { current = false; };
   }, [open, format]);
 
   async function refreshLogin() {
     if (!isSubscriptionFormat(format)) return;
+    modelRequest.current += 1;
+    setLoginState("unknown");
+    setModels([]);
+    setModelLabels({});
+    setModelNotes({});
+    setLoadingModels(false);
+    setModelsOpen(false);
+    setModelQuery("");
+    let refreshedState: LoginState = "unknown";
     try {
       const result = format === "chatgpt-plan" ? await api.chatgptLoginStatus() : await api.claudeCodeLoginStatus();
+      refreshedState = result.state;
       setLoginState(result.state);
     } catch {
       setLoginState("unknown");
+    }
+    if (format === "chatgpt-plan" && (refreshedState === "connected" || !chatgptAuthTab.current)) {
+      chatgptAuthTab.current = null;
+      setLoginBusy(false);
     }
     onAuthChanged();
   }
 
   async function beginChatGPTLogin() {
-    if (loginBusy) return;
+    if (loginBusy || chatgptAuthTab.current) return;
+    const authTab = window.open("about:blank", "_blank");
+    if (!authTab) {
+      toast.error(t("Browser blocked the sign-in tab. Allow pop-ups for ARTEX and try again."));
+      return;
+    }
+    authTab.opener = null;
+    chatgptAuthTab.current = authTab;
     setLoginBusy(true);
     try {
       const { authorization_url: url } = await api.chatgptLogin();
-      window.location.assign(url);
+      if (chatgptAuthTab.current !== authTab) return;
+      authTab.location.replace(url);
     } catch (e) {
+      if (chatgptAuthTab.current !== authTab) return;
+      authTab.close();
+      chatgptAuthTab.current = null;
       toast.error(t("ChatGPT sign-in failed: {error}", { error: (e as Error).message }));
       setLoginBusy(false);
     }
   }
+
+  function cancelChatGPTLogin() {
+    chatgptAuthTab.current?.close();
+    chatgptAuthTab.current = null;
+    setLoginBusy(false);
+  }
+
+  React.useEffect(() => {
+    if (!open || format !== "chatgpt-plan") return;
+    let active = true;
+    let checking = false;
+    const recheckAfterReturn = async () => {
+      if (!active || checking || document.visibilityState !== "visible" || (loginBusy && !chatgptAuthTab.current)) return;
+      checking = true;
+      try {
+        const result = await api.chatgptLoginStatus();
+        if (!active) return;
+        if (result.state !== loginState) {
+          modelRequest.current += 1;
+          setModels([]);
+          setModelLabels({});
+          setModelNotes({});
+          setModelsOpen(false);
+          setLoginState(result.state);
+          authChangedRef.current();
+        }
+        if (result.state === "connected") {
+          chatgptAuthTab.current = null;
+          setLoginBusy(false);
+        }
+      } catch {
+        if (active) setLoginState("unknown");
+      } finally {
+        checking = false;
+      }
+    };
+    window.addEventListener("focus", recheckAfterReturn);
+    document.addEventListener("visibilitychange", recheckAfterReturn);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", recheckAfterReturn);
+      document.removeEventListener("visibilitychange", recheckAfterReturn);
+    };
+  }, [open, format, loginBusy, loginState]);
 
   async function disconnectChatGPT() {
     if (loginBusy) return;
@@ -482,30 +589,46 @@ function ProfileSheet({
 
   // Case-insensitive substring filter, so a provider prefix ("deepseek/") or a
   // fragment ("flash") is enough to narrow a 400-entry list.
+  const availableModels = format === "claude-code" && models.length === 0 && !loadingModels ? CLAUDE_MODEL_SUGGESTIONS : models;
   const filteredModels = React.useMemo(() => {
     const q = modelQuery.trim().toLowerCase();
-    if (!q) return models;
-    return models.filter((m) => m.toLowerCase().includes(q));
-  }, [models, modelQuery]);
+    if (!q) return availableModels;
+    return availableModels.filter((m) => m.toLowerCase().includes(q) || modelLabels[m]?.toLowerCase().includes(q));
+  }, [availableModels, modelLabels, modelQuery]);
 
   async function loadModels() {
-    if (loadingModels) return;
+    if (loadingModels || (isSubscriptionFormat(format) && loginState !== "connected")) return;
+    const requestID = ++modelRequest.current;
     setLoadingModels(true);
     setModels([]);
+    setModelLabels({});
+    setModelNotes({});
     setModelQuery("");
     try {
       const r = await api.fetchLLMModels(format, baseUrl, apiKey, proxy, profileId);
+      if (requestID !== modelRequest.current) return;
       if (r.ok && r.models && r.models.length > 0) {
         setModels(r.models);
+        setModelLabels((r as typeof r & { model_labels?: Record<string, string> }).model_labels ?? {});
+        setModelNotes((r as typeof r & { model_notes?: Record<string, string> }).model_notes ?? {});
         setModelsOpen(true);
         toast.success(t("Loaded {count} models", { count: r.models.length }));
+      } else if (format === "claude-code") {
+        setModelsOpen(true);
+        toast.warning(t("Could not load Claude models. Showing common aliases; availability depends on your account."));
       } else {
         toast.error(t("Failed to load models: {error}", { error: r.error ?? t("no models returned") }));
       }
     } catch (e) {
-      toast.error(t("Error loading models: {error}", { error: (e as Error).message }));
+      if (requestID !== modelRequest.current) return;
+      if (format === "claude-code") {
+        setModelsOpen(true);
+        toast.warning(t("Could not load Claude models. Showing common aliases; availability depends on your account."));
+      } else {
+        toast.error(t("Error loading models: {error}", { error: (e as Error).message }));
+      }
     } finally {
-      setLoadingModels(false);
+      if (requestID === modelRequest.current) setLoadingModels(false);
     }
   }
 
@@ -568,7 +691,7 @@ function ProfileSheet({
         price_cache_read_per_m: Math.max(0, Number(prices.cacheRead) || 0),
         price_cache_write_per_m: Math.max(0, Number(prices.cacheWrite) || 0),
         thinking_type: isSubscriptionFormat(format) ? "" : toStore(thinkingType),
-        reasoning_effort: format === "claude-code" ? "" : toStore(effort),
+        reasoning_effort: toStore(effort),
         priority: Number(priority) || 0,
         pool_exclude: poolExclude,
         streaming,
@@ -650,6 +773,13 @@ function ProfileSheet({
                 const next = v as ProfileFormat;
                 setFormat(next);
                 setLoginState("unknown");
+                modelRequest.current += 1;
+                setModels([]);
+                setModelLabels({});
+                setModelNotes({});
+                setLoadingModels(false);
+                setModelsOpen(false);
+                setModelQuery("");
                 if (next === "chatgpt-plan") setModel("gpt-6.1-sol");
                 if (next === "claude-code") setModel("sonnet");
               }}>
@@ -693,22 +823,26 @@ function ProfileSheet({
                   <Button
                     type="button"
                     variant="outline"
-                    size="icon"
+                    size={isSubscriptionFormat(format) ? "sm" : "icon"}
                     className="shrink-0"
-                    disabled={loadingModels || format === "bedrock-gateway" || isSubscriptionFormat(format)}
-                    onClick={loadModels}
-                    title={t("Load available models from the API")}
+                    disabled={loadingModels || format === "bedrock-gateway" || (isSubscriptionFormat(format) && loginState !== "connected")}
+                    onClick={() => {
+                      if (!isSubscriptionFormat(format) || models.length === 0) void loadModels();
+                    }}
+                    title={isSubscriptionFormat(format) ? t("Choose a signed-in account model") : t("Load available models from the API")}
                   >
-                    {loadingModels ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
+                    {loadingModels && <Loader2Icon className="animate-spin" />}
+                    {!loadingModels && isSubscriptionFormat(format) && <>{t("Choose model")} <ChevronDownIcon /></>}
+                    {!loadingModels && !isSubscriptionFormat(format) && <RefreshCwIcon />}
                   </Button>
                 </PopoverTrigger>
-                {models.length > 0 && (
+                {availableModels.length > 0 && (
                   <PopoverContent className="w-80 gap-0 p-0" align="end">
                     <div className="border-b p-1">
                       <Input
                         autoFocus
                         className="h-8 border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
-                        placeholder={t("Search {count} models…", { count: models.length })}
+                        placeholder={t("Search {count} models…", { count: availableModels.length })}
                         value={modelQuery}
                         onChange={(e) => setModelQuery(e.target.value)}
                         spellCheck={false}
@@ -725,22 +859,70 @@ function ProfileSheet({
                           <button
                             key={m}
                             type="button"
-                            className="w-full shrink-0 rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-accent hover:text-accent-foreground"
+                            className="w-full shrink-0 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
                             onClick={() => {
                               setModel(m);
                               setModelsOpen(false);
                             }}
                           >
-                            {m}
+                            {modelLabels[m] && modelLabels[m] !== m ? (
+                              <>
+                                <span className="block font-medium">{modelLabels[m]}</span>
+                                <span className="block font-mono text-muted-foreground">{m}</span>
+                              </>
+                            ) : <span className="font-mono">{m}</span>}
+                            {modelNotes[m] && <span className="block text-muted-foreground">{modelNotes[m]}</span>}
                           </button>
                         ))
                       )}
                     </div>
+                    {format === "claude-code" && (
+                      <p className="border-t px-3 py-2 text-muted-foreground text-xs">
+                        {models.length === 0
+                          ? t("Common Claude aliases. Test connection sends a request and may use paid credits.")
+                          : t("Claude Code model suggestions. Test connection sends a request and may use paid credits.")}
+                      </p>
+                    )}
                   </PopoverContent>
                 )}
               </Popover>
+              {isSubscriptionFormat(format) && models.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  disabled={loadingModels || loginState !== "connected"}
+                  onClick={() => void loadModels()}
+                  title={t("Refresh model list")}
+                  aria-label={t("Refresh model list")}
+                >
+                  <RefreshCwIcon />
+                </Button>
+              )}
             </div>
           </div>
+
+          {isSubscriptionFormat(format) && (
+            <div className="grid gap-2">
+              <Label htmlFor="p-subscription-effort">{t("Reasoning effort")}</Label>
+              <Select value={effort} onValueChange={setEffort}>
+                <SelectTrigger id="p-subscription-effort" className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUBSCRIPTION_EFFORT_LEVELS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                {format === "chatgpt-plan"
+                  ? t("Model default omits the effort override. Other levels depend on the model; use Test connection to verify your choice.")
+                  : t("Model default leaves effort to Claude Code. Available levels depend on the model and account; use Test connection to verify your choice.")}
+              </p>
+            </div>
+          )}
 
           {isSubscriptionFormat(format) && (
             <div className="grid gap-2 rounded-lg border p-3">
@@ -760,13 +942,29 @@ function ProfileSheet({
                   ) : (
                     <Button type="button" variant="outline" size="sm" disabled={loginBusy} onClick={() => void disconnectChatGPT()}>{t("Disconnect")}</Button>
                   )}
-                  <p className="text-muted-foreground text-xs">{t("The browser opens OpenAI sign-in. ARTEX stores the resulting login outside model profiles.")}</p>
+                  {loginState !== "connected" && loginBusy && chatgptAuthTab.current && (
+                    <Button type="button" variant="outline" size="sm" onClick={cancelChatGPTLogin}>{t("Cancel sign-in")}</Button>
+                  )}
+                  <p className="text-muted-foreground text-xs">{t("ChatGPT sign-in opens in a new tab; ARTEX stays open here. ARTEX stores the login outside model profiles.")}</p>
                 </div>
               ) : (
-                <p className="text-muted-foreground text-xs">
-                  {t("Run on the ARTEX host:")} <code className="rounded bg-muted px-1 py-0.5">claude auth login</code>
-                  {" "}{t("Use a Claude subscription account, then click Recheck. ARTEX does not read your Claude credentials.")}
-                </p>
+                <div className="grid gap-2 text-xs">
+                  <p className="text-muted-foreground">{t("From your ARTEX checkout on the host:")}</p>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded bg-muted px-2 py-1.5 font-mono">{CLAUDE_DOCKER_LOGIN_COMMAND}</code>
+                    <CopyButton text={CLAUDE_DOCKER_LOGIN_COMMAND} />
+                  </div>
+                  <p className="text-muted-foreground">{t("Then check the login:")}</p>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded bg-muted px-2 py-1.5 font-mono">{CLAUDE_DOCKER_STATUS_COMMAND}</code>
+                    <CopyButton text={CLAUDE_DOCKER_STATUS_COMMAND} />
+                  </div>
+                  <p className="text-muted-foreground">
+                    {t("Use a Claude subscription account, then click Recheck. If you run the ARTEX binary directly, run")}
+                    {" "}<code className="rounded bg-muted px-1 py-0.5">claude auth login</code>{" "}
+                    {t("as the same OS user that runs ARTEX.")}
+                  </p>
+                </div>
               )}
             </div>
           )}
@@ -1009,8 +1207,8 @@ function ProfileSheet({
             </div>
           </div>}
 
-          {format !== "claude-code" && <div className="grid gap-3 rounded-lg border p-3">
-            {format !== "chatgpt-plan" && <div className="flex items-center justify-between gap-4">
+          {!isSubscriptionFormat(format) && <div className="grid gap-3 rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-4">
               <div className="grid gap-0.5">
                 <Label className="text-sm">{t("Thinking switch · thinking.type")}</Label>
                 <p className="text-muted-foreground text-xs">
@@ -1031,7 +1229,7 @@ function ProfileSheet({
                   ))}
                 </SelectContent>
               </Select>
-            </div>}
+            </div>
             <div className="flex items-center justify-between gap-4 border-t pt-3">
               <div className="grid gap-0.5">
                 <Label className="text-sm">{t("Thinking effort · reasoning_effort")}</Label>

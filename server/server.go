@@ -1597,18 +1597,18 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 // testLLM makes a real minimal completion to verify the config works.
 func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider         string `json:"provider"`
-		Model            string `json:"model"`
-		BaseURL          string `json:"base_url"`
-		Proxy            string `json:"proxy"`
-		APIKey           string `json:"api_key"`
-		ThinkingType     string `json:"thinking_type"`
-		ReasoningEffort  string `json:"reasoning_effort"`
-		ProfileID        *int64 `json:"profile_id"`         // passed when testing a stored profile: if api_key is empty, its stored key is used
-		Streaming        *bool  `json:"streaming"`          // omitted = streaming, the same defaults as when saving a profile
-		SessionHeaderKey string `json:"session_header_key"` // non-empty = the test also sends this custom session header, with a one-off random session id as the value
-		UserAgent        string `json:"user_agent"`         // non-empty = the test overrides the User-Agent header with this value (mirrors production)
-		CustomHeaders    string `json:"custom_headers"`
+		Provider         string  `json:"provider"`
+		Model            string  `json:"model"`
+		BaseURL          string  `json:"base_url"`
+		Proxy            string  `json:"proxy"`
+		APIKey           string  `json:"api_key"`
+		ThinkingType     string  `json:"thinking_type"`
+		ReasoningEffort  *string `json:"reasoning_effort"`   // nil = use the stored profile; explicit "" = provider default
+		ProfileID        *int64  `json:"profile_id"`         // passed when testing a stored profile: if api_key is empty, its stored key is used
+		Streaming        *bool   `json:"streaming"`          // omitted = streaming, the same defaults as when saving a profile
+		SessionHeaderKey string  `json:"session_header_key"` // non-empty = the test also sends this custom session header, with a one-off random session id as the value
+		UserAgent        string  `json:"user_agent"`         // non-empty = the test overrides the User-Agent header with this value (mirrors production)
+		CustomHeaders    string  `json:"custom_headers"`
 		// Which request key carries the output cap (openai format only): "" = max_tokens,
 		// "max_completion_tokens" = the newer key. Omitted (nil) = the stored profile's choice.
 		MaxTokensField *string `json:"max_tokens_field"`
@@ -1656,8 +1656,9 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(req.ThinkingType) == "" {
 			req.ThinkingType = stored.ThinkingType
 		}
-		if strings.TrimSpace(req.ReasoningEffort) == "" {
-			req.ReasoningEffort = stored.ReasoningEffort
+		if req.ReasoningEffort == nil {
+			effort := stored.ReasoningEffort
+			req.ReasoningEffort = &effort
 		}
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
@@ -1665,7 +1666,9 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ThinkingType = req.ThinkingType
-	cfg.ReasoningEffort = req.ReasoningEffort
+	if req.ReasoningEffort != nil {
+		cfg.ReasoningEffort = *req.ReasoningEffort
+	}
 	// Likewise, the streaming mode follows that profile's choice: endpoints supporting only one of the two channels must fail
 	// here already, instead of discovering mid-conversation that "the profile that passed the test cannot run at all".
 	if req.Streaming != nil {
