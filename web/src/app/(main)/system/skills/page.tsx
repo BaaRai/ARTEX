@@ -1078,12 +1078,26 @@ export default function SkillsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
-                  <Label className="text-muted-foreground text-xs">license</Label>
-                  <Input placeholder={t("MIT / Proprietary")} value={newLicense} onChange={(e) => setNewLicense(e.target.value)} />
+                  <Label htmlFor="sk-license" className="text-muted-foreground text-xs">
+                    license
+                  </Label>
+                  <Input
+                    id="sk-license"
+                    placeholder={t("MIT / Proprietary")}
+                    value={newLicense}
+                    onChange={(e) => setNewLicense(e.target.value)}
+                  />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label className="text-muted-foreground text-xs">compatibility</Label>
-                  <Input placeholder={t("Requires sqlmap, python3")} value={newCompat} onChange={(e) => setNewCompat(e.target.value)} />
+                  <Label htmlFor="sk-compatibility" className="text-muted-foreground text-xs">
+                    compatibility
+                  </Label>
+                  <Input
+                    id="sk-compatibility"
+                    placeholder={t("Requires sqlmap, python3")}
+                    value={newCompat}
+                    onChange={(e) => setNewCompat(e.target.value)}
+                  />
                 </div>
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-1.5">
