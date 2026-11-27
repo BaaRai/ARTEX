@@ -93,8 +93,10 @@ func retryableWorkerModelError(reason harness.TerminalReason, err error) bool {
 // (re)installed at runtime (LLM configured from the UI); the loops always run
 // but idle until an LLM is set.
 type Engine struct {
-	m        *Manager
-	debounce time.Duration
+	statefulGuardOnce sync.Once
+	statefulGuard     *intercept.StatefulTargetGuard
+	m                 *Manager
+	debounce          time.Duration
 
 	bc *Broadcaster // live activity pub/sub (SSE)
 
@@ -1239,6 +1241,11 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	label := fmt.Sprintf("%s · #%d", name, iid)
 	workCtx = intercept.WithTaskContext(workCtx, t.ID, label, taskEmit)
 	workCtx = intercept.WithTargetScope(workCtx, t.targetScope(intercept.DefaultTargetWaitBound))
+	if sg := e.statefulGuardForTask(); sg != nil {
+		workCtx = intercept.WithStatefulGuard(workCtx, sg)
+		workCtx = intercept.WithStatefulActor(workCtx, t.ID, iid)
+		defer sg.ReleaseIntent(t.ID, iid)
+	}
 	// Run budget (off by default): meter this run's calls; its effective budget is
 	// min(intent budget, task remaining above the wrap-up reserve).
 	workCtx, meter := e.budgetIntent(workCtx, t.ID)
@@ -1504,4 +1511,14 @@ func (e *Engine) claimNext(t *Task, name string) (*db.Node, string) {
 		}
 	}
 	return nil, ""
+}
+
+func (e *Engine) statefulGuardForTask() *intercept.StatefulTargetGuard {
+	if e == nil {
+		return nil
+	}
+	e.statefulGuardOnce.Do(func() {
+		e.statefulGuard = intercept.NewStatefulTargetGuard()
+	})
+	return e.statefulGuard
 }

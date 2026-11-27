@@ -453,6 +453,9 @@ func (s *Server) runCommandTool(ctx context.Context, key string, execRaw json.Ra
 	if res := intercept.GateRenderedCommand(ctx, key, cmd, renderTemplate(spec.Command, params, identity)); res.Code != "" {
 		return actool.Errorf(guard.TargetBlockMessage(res)), nil
 	}
+	if err := intercept.CheckStatefulTool(ctx, key, nil, cmd, ""); err != nil {
+		return actool.Errorf(err.Error()), nil
+	}
 	// Reuse the low-level run Bash also uses (via the Bash CoreTool.Call): it
 	// automatically inherits the safety floor/timeout/proxy env/output overflow. The tool is a peer of Bash sharing that low level, not routed through the Bash tool for the model to call.
 	bashIn, _ := json.Marshal(map[string]any{"command": cmd})
@@ -461,7 +464,11 @@ func (s *Server) runCommandTool(ctx context.Context, key string, execRaw json.Ra
 		ctx, cancel = context.WithTimeout(ctx, timeoutOr(spec.TimeoutMs, 120000))
 		defer cancel()
 	}
-	return actool.NewBash().Call(ctx, bashIn, tc)
+	res, err := actool.NewBash().Call(ctx, bashIn, tc)
+	if err == nil && !res.IsError {
+		intercept.RecordStatefulReadOnly(ctx, key, nil, cmd, "")
+	}
+	return res, err
 }
 
 // ---------- script (Python only): temp file + stdin JSON + env ----------
@@ -484,10 +491,15 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 		}
 		sessionEnv = tc.Env
 	}
+	rawParams, _ := json.Marshal(params)
+	if err := intercept.CheckStatefulTool(ctx, key, rawParams, spec.Code, ""); err != nil {
+		return actool.Errorf(err.Error()), nil
+	}
 	body, err := execPython(ctx, interp, key, spec.Code, params, workDir, sessionEnv, timeoutOr(spec.TimeoutMs, 120000), s.execPriv)
 	if err != nil {
 		return actool.Errorf(err.Error()), nil
 	}
+	intercept.RecordStatefulReadOnly(ctx, key, rawParams, spec.Code, "")
 	return actool.Text(actool.Capture(tc, body)), nil
 }
 
@@ -565,6 +577,9 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	if res := intercept.GateRenderedURL(ctx, key, rawURL); res.Code != "" {
 		return actool.Errorf(guard.TargetBlockMessage(res)), nil
 	}
+	if err := intercept.CheckStatefulTool(ctx, key, nil, rawURL, method); err != nil {
+		return actool.Errorf(err.Error()), nil
+	}
 	var bodyReader io.Reader
 	if spec.Body != "" {
 		bodyReader = strings.NewReader(renderTemplate(spec.Body, params, identity))
@@ -597,6 +612,7 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 		return actool.Errorf("request failed: " + err.Error()), nil
 	}
 	defer resp.Body.Close()
+	intercept.RecordStatefulReadOnly(ctx, key, nil, rawURL, method)
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	out := map[string]any{"status": resp.StatusCode, "body": string(respBody)}
 	b, _ := json.Marshal(out)
