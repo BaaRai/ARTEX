@@ -836,6 +836,14 @@ Daily cron example (03:20, operator crontab):
 > in its own transaction. Restarting the new binary is the upgrade. Back up `./data`, `keys/` and
 > the database before upgrading.
 
+> **On the [Docker Desktop overlay](#docker-desktop-on-windows-and-macos) (Windows/macOS)**, `data`,
+> `keys` and `skills` are named volumes rather than host directories. `data` and `keys` carry across
+> upgrades the same way, but the `skills` volume is seeded from the image only when it is first
+> created, so a newer image's updated built-in skills do not reach an existing volume. After
+> upgrading, either refresh it from the checkout with `docker compose -f docker-compose.yml -f
+> docker-compose.desktop.yml cp ./skills/. artex:/app/skills`, or remove the volume (e.g.
+> `docker volume rm artex_skills`) and let the next start re-seed it from the new image.
+
 **Update banner (opt-in, off by default)**: start ARTEX with `ARTEX_UPDATE_CHECK=1` to ask the
 public GitHub releases API for the latest tag, at most once per 24 hours (cached in memory; a
 failed check is not retried within that window). When the release is newer, the web UI shows a
