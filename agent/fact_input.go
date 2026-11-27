@@ -34,7 +34,11 @@ func factItemSchema() map[string]any {
 	}, "summary")
 	summary := schema["properties"].(map[string]any)["summary"].(map[string]any)
 	summary["minLength"] = 1
-	summary["pattern"] = "[^" + factWhitespace + "]"
+	// Anchored, because Ollama's grammar converter refuses a pattern without ^
+	// and $ (#595): optional whitespace, one non-whitespace character, then
+	// anything. "Anything" is spelled as either class, not as "." (which stops
+	// at line ends) or [\s\S] (an escape the converter does not take).
+	summary["pattern"] = "^[" + factWhitespace + "]*[^" + factWhitespace + "]([" + factWhitespace + "]|[^" + factWhitespace + "])*$"
 	schema["additionalProperties"] = false
 	return schema
 }

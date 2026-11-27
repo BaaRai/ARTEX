@@ -165,7 +165,10 @@ func TestRecordFactStrictFields(t *testing.T) {
 func TestRecordFactSchemaMatchesStrings(t *testing.T) {
 	props := factItemSchema()["properties"].(map[string]any)
 	summary := regexp.MustCompile(props["summary"].(map[string]any)["pattern"].(string))
-	for _, value := range []string{"", " ", "\t\r\n", "\u00a0\u0085", "\u2003\u3000", "conclusion", "  observed  "} {
+	for _, value := range []string{
+		"", " ", "\t\r\n", "\u00a0\u0085", "\u2003\u3000", "conclusion", "  observed  ",
+		"x", " x", "x ", "line one\nline two", "\n\nport 443 open\r\n", "a\u2028b", "\u3000\u2003\u65e5\u3000",
+	} {
 		if got, want := summary.MatchString(value), strings.TrimSpace(value) != ""; got != want {
 			t.Errorf("summary %q: schema=%v runtime=%v", value, got, want)
 		}
@@ -184,6 +187,36 @@ func TestRecordFactSchemaMatchesStrings(t *testing.T) {
 		if err := actool.ValidateInput(recordFactSchema(), json.RawMessage(input)); err != nil {
 			t.Errorf("numeric-string compatibility rejected: %v", err)
 		}
+	}
+}
+
+// Ollama turns a schema into a grammar and refuses the whole request when a
+// pattern is not anchored with ^ and $ (#595), so every published pattern is.
+func TestRecordFactSchemaPatternsAreAnchored(t *testing.T) {
+	var walk func(path string, v any)
+	found := 0
+	walk = func(path string, v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			for k, child := range v {
+				if p, ok := child.(string); ok && k == "pattern" {
+					found++
+					if !strings.HasPrefix(p, "^") || !strings.HasSuffix(p, "$") {
+						t.Errorf("%s.pattern is not anchored: %q", path, p)
+					}
+					continue
+				}
+				walk(path+"."+k, child)
+			}
+		case []any:
+			for i, child := range v {
+				walk(path+"["+strconv.Itoa(i)+"]", child)
+			}
+		}
+	}
+	walk("record_fact", recordFactSchema())
+	if found == 0 {
+		t.Fatal("no pattern found in the record_fact schema")
 	}
 }
 
