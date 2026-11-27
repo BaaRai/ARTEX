@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"strings"
 )
 
@@ -66,6 +67,58 @@ func (s *ExplorationStore) FindingsSharingAssets(assetIDs []int64, excludeTask i
 		n.SourceTaskID = taskID
 		n.Inherited = true
 		out = append(out, &n)
+	}
+	return out, rows.Err()
+}
+
+// FindingDedupMeta carries the finding metadata needed by deterministic
+// fingerprint deduplication (#473) without requiring any schema migration.
+type FindingDedupMeta struct {
+	AssetIDs []int64
+	Status   string
+}
+
+// FindingDedupMetadata returns asset_ids and status keyed by finding id.
+func (s *ExplorationStore) FindingDedupMetadata(findingIDs []int64) (map[int64]FindingDedupMeta, error) {
+	out := make(map[int64]FindingDedupMeta, len(findingIDs))
+	if len(findingIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, 0, len(findingIDs))
+	args := make([]any, 0, len(findingIDs))
+	seen := make(map[int64]struct{}, len(findingIDs))
+	for _, id := range findingIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		args = append(args, id)
+		placeholders = append(placeholders, "$"+itoa(int64(len(args))))
+	}
+	if len(args) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT id, COALESCE(asset_ids, '[]'::jsonb), COALESCE(status, 'pending') FROM findings WHERE id IN (`+strings.Join(placeholders, ",")+`)`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var rawAssets []byte
+		var status string
+		if err := rows.Scan(&id, &rawAssets, &status); err != nil {
+			return nil, err
+		}
+		var aids []int64
+		_ = json.Unmarshal(rawAssets, &aids)
+		out[id] = FindingDedupMeta{AssetIDs: aids, Status: status}
 	}
 	return out, rows.Err()
 }
