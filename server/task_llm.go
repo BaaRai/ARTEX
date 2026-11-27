@@ -393,9 +393,12 @@ func completeTaskLLM(ctx context.Context, taskID string, req llm.CompletionReque
 			resetLLMFailStreak(taskID, selection.profileID)
 			return msg, sr, total, nil
 		}
+		if selection.profileID != 0 && llmpool.IsContentPolicyRejection(callErr) {
+			resetLLMFailStreak(taskID, selection.profileID)
+		}
 		// Non-quota failures on a chain profile escalate after a consecutive
 		// streak (#99): same advance path as quota exhaust, truthful reason.
-		if selection.profileID != 0 && !isQuotaExhaustedError(callErr) && ctx.Err() == nil {
+		if selection.profileID != 0 && !isQuotaExhaustedError(callErr) && !llmpool.IsContentPolicyRejection(callErr) && ctx.Err() == nil {
 			if noteLLMCallFailure(taskID, selection.profileID) {
 				cause := fmt.Errorf("profile #%d failed %d consecutive calls (last: %w)", selection.profileID, llmFailStreakThreshold, callErr)
 				transition, markErr := hooks.exhaust(selection, cause)
@@ -535,11 +538,14 @@ func streamTaskLLM(ctx context.Context, taskID string, req llm.CompletionRequest
 				}
 				return
 			}
+			if selection.profileID != 0 && llmpool.IsContentPolicyRejection(streamErr) {
+				resetLLMFailStreak(taskID, selection.profileID)
+			}
 			// Non-quota failures on a chain profile escalate after a consecutive
 			// streak (#99), mirroring completeTaskLLM. Escalation only applies to
 			// uncommitted streams: once events reached the caller, replaying on a
 			// new profile could duplicate delivered output, so the error surfaces.
-			if selection.profileID != 0 && !committed && !isQuotaExhaustedError(streamErr) && ctx.Err() == nil {
+			if selection.profileID != 0 && !committed && !isQuotaExhaustedError(streamErr) && !llmpool.IsContentPolicyRejection(streamErr) && ctx.Err() == nil {
 				if noteLLMCallFailure(taskID, selection.profileID) {
 					cause := fmt.Errorf("profile #%d failed %d consecutive calls (last: %w)", selection.profileID, llmFailStreakThreshold, streamErr)
 					transition, markErr := hooks.exhaust(selection, cause)
@@ -646,6 +652,24 @@ func sameProviderRetryPolicy(r agent.RetryConfig) (retries int, backoff func(int
 	return retries, backoff
 }
 
+// isNonRetryableClaudeCodeExit matches only categories emitted by ARTEX's
+// Claude CLI adapter. Replaying an identical request cannot fix known configuration exits; unknown exits do not establish a transient fault.
+func isNonRetryableClaudeCodeExit(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "claude-code:") {
+		return false
+	}
+	for _, category := range []string{"auth", "model", "context", "max-turns", "unknown"} {
+		if strings.Contains(message, "(category: "+category+")") {
+			return true
+		}
+	}
+	return false
+}
+
 // isRetryableStreamError decides whether a "pre-commit stream failure" is worth replaying on the same provider.
 // Transient transport breaks / provider overload / rate limiting recover on their own and are safe to retry; these three are not:
 //   - quota exhausted: left to profile failover, don't burn retries here in vain
@@ -655,7 +679,7 @@ func isRetryableStreamError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if isQuotaExhaustedError(err) {
+	if isQuotaExhaustedError(err) || llmpool.IsContentPolicyRejection(err) || isNonRetryableClaudeCodeExit(err) {
 		return false
 	}
 	s := strings.ToLower(err.Error())

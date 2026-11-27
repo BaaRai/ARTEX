@@ -170,6 +170,7 @@ func (r *Registry) Trip(id int64, errMsg string, hard bool) (tripped bool) {
 // Pool applies:
 //
 //   - a completed call (err == nil) clears the state with Pass;
+//   - a content-policy refusal clears prior transient failures: the provider responded;
 //   - a failure that does not trigger failover (context cancellation, a
 //     deterministic 4xx) is ignored on a stream, and clears the state on an
 //     atomic call, matching Complete's non-failover path;
@@ -185,6 +186,10 @@ func (r *Registry) RecordCall(ctx context.Context, id int64, stream, committed b
 		return false, ""
 	}
 	if err == nil {
+		r.Pass(id)
+		return false, ""
+	}
+	if IsContentPolicyRejection(err) {
 		r.Pass(id)
 		return false, ""
 	}

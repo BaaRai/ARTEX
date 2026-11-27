@@ -43,6 +43,20 @@ const RankActive = int(^uint(0)>>1) - 1
 // ErrExhausted is returned when every member of the chain failed.
 var ErrExhausted = errors.New("LLM failover: all profiles unavailable")
 
+const contentPolicyRejection = "this content was flagged for possible cybersecurity risk"
+
+var claudeCodePolicyExit = regexp.MustCompile("(?i)claude-code: CLI run failed: Claude Code (?:exited: exit status [0-9]+|command failed) [(]category: policy[)]")
+
+// IsContentPolicyRejection identifies the provider's specific, deterministic
+// content-policy refusal. Retrying on another profile must not bypass it.
+func IsContentPolicyRejection(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(strings.ToLower(message), contentPolicyRejection) || claudeCodePolicyExit.MatchString(message)
+}
+
 // Pool is an llm.Provider that fails over across an ordered chain of members.
 // It is safe for concurrent use: members are immutable after construction and
 // all mutable state lives in the shared Registry.
@@ -88,6 +102,9 @@ func (p *Pool) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[
 			emitted := false
 			var failed error
 			for ev, err := range m.Prov.Stream(ctx, req) {
+				if IsContentPolicyRejection(err) {
+					p.health.Pass(m.ID)
+				}
 				if err != nil && !emitted && shouldFailover(ctx, err) {
 					failed = err
 					break // safe window: nothing reached the caller yet
@@ -232,7 +249,7 @@ func shouldFailover(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if IsContentPolicyRejection(err) || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 	switch code := statusOf(err); {

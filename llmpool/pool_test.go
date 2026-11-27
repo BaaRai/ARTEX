@@ -382,3 +382,111 @@ func TestTrimErrKeepsValidUTF8(t *testing.T) {
 		t.Fatalf("trimErr = %q (%d bytes), want at most 300 bytes plus …", got, len(got))
 	}
 }
+
+func TestContentPolicyRejectionDoesNotUseBackupOrTripBreaker(t *testing.T) {
+	for _, mode := range []string{"stream", "complete"} {
+		t.Run(mode, func(t *testing.T) {
+			rejected := &fakeProv{name: "primary", errs: []error{errors.New("codex: This content was flagged for possible cybersecurity risk")}}
+			backup := okProv("backup", "backup reply")
+			reg := NewRegistry(nil, nil)
+			pool := New([]*Member{member(1, "primary", 10, rejected), member(2, "backup", 5, backup)}, reg)
+			var err error
+			if mode == "stream" {
+				_, err = drain(pool.Stream(context.Background(), llm.CompletionRequest{}))
+			} else {
+				_, _, _, err = pool.Complete(context.Background(), llm.CompletionRequest{})
+			}
+			if err == nil || !strings.Contains(err.Error(), "This content was flagged for possible cybersecurity risk") {
+				t.Fatalf("policy rejection was not preserved: %v", err)
+			}
+			if rejected.calls != 1 || backup.calls != 0 {
+				t.Fatalf("provider calls: rejected=%d backup=%d, want 1/0", rejected.calls, backup.calls)
+			}
+			if state := reg.Get(1); state.Fails != 0 || state.Trips != 0 || state.Open() {
+				t.Fatalf("policy rejection tripped provider breaker: %+v", state)
+			}
+		})
+	}
+}
+
+func TestClaudePolicyTagStopsPoolWithoutBreakerTrip(t *testing.T) {
+	for _, mode := range []string{"stream", "complete"} {
+		t.Run(mode, func(t *testing.T) {
+			refusal := errors.New("claude-code: CLI run failed: Claude Code exited: exit status 1 (category: policy)")
+			rejected := &fakeProv{name: "claude", errs: []error{refusal}}
+			backup := okProv("backup", "backup reply")
+			reg := NewRegistry(nil, nil)
+			pool := New([]*Member{member(1, "claude", 10, rejected), member(2, "backup", 5, backup)}, reg)
+			var err error
+			if mode == "stream" {
+				_, err = drain(pool.Stream(context.Background(), llm.CompletionRequest{}))
+			} else {
+				_, _, _, err = pool.Complete(context.Background(), llm.CompletionRequest{})
+			}
+			if !errors.Is(err, refusal) {
+				t.Fatalf("policy rejection was not preserved: %v", err)
+			}
+			if rejected.calls != 1 || backup.calls != 0 {
+				t.Fatalf("provider calls: rejected=%d backup=%d, want 1/0", rejected.calls, backup.calls)
+			}
+			if state := reg.Get(1); state.Fails != 0 || state.Trips != 0 || state.Open() {
+				t.Fatalf("policy rejection tripped provider breaker: %+v", state)
+			}
+		})
+	}
+}
+
+func TestClaudePolicyTagRequiresAdapterExit(t *testing.T) {
+	valid := fmt.Errorf("worker: %w", errors.New("claude-code: CLI run failed: Claude Code exited: exit status 1 (category: policy)"))
+	if !IsContentPolicyRejection(valid) {
+		t.Fatalf("wrapped Claude adapter policy tag was not recognized: %v", valid)
+	}
+	for _, message := range []string{
+		"provider said (category: policy)",
+		"claude-code: model text mentions (category: policy)",
+		"claude-code: CLI run failed: Claude Code exited: exit status 1 (category: network)",
+	} {
+		if IsContentPolicyRejection(errors.New(message)) {
+			t.Fatalf("unrelated error classified as policy rejection: %q", message)
+		}
+	}
+}
+
+func TestPolicyRejectionClearsPriorPoolFailureStreak(t *testing.T) {
+	networkErr := errors.New("connection reset by peer")
+	policyErr := errors.New("claude-code: CLI run failed: Claude Code exited: exit status 1 (category: policy)")
+	primary := &fakeProv{name: "primary", errs: []error{networkErr, networkErr, policyErr, networkErr}}
+	backup := okProv("backup", "fallback")
+	reg := NewRegistry(nil, nil)
+	pool := New([]*Member{member(1, "primary", 10, primary), member(2, "backup", 5, backup)}, reg)
+	for attempt := range 4 {
+		_, err := drain(pool.Stream(context.Background(), llm.CompletionRequest{}))
+		if attempt == 2 {
+			if !errors.Is(err, policyErr) {
+				t.Fatalf("policy attempt returned %v, want policy refusal", err)
+			}
+		} else if err != nil {
+			t.Fatalf("attempt %d: %v", attempt, err)
+		}
+	}
+	if state := reg.Get(1); state.Fails != 1 || state.Trips != 0 || state.Open() {
+		t.Fatalf("breaker state after network, network, policy, network = %+v, want one failure", state)
+	}
+	if primary.calls != 4 || backup.calls != 3 {
+		t.Fatalf("primary calls=%d backup calls=%d, want 4/3", primary.calls, backup.calls)
+	}
+}
+
+func TestPolicyRejectionClearsPriorDirectProviderFailureStreak(t *testing.T) {
+	reg := NewRegistry(nil, nil)
+	ctx := context.Background()
+	networkErr := errors.New("connection reset by peer")
+	for range 2 {
+		reg.RecordCall(ctx, 1, true, false, networkErr)
+	}
+	reg.RecordCall(ctx, 1, true, false, errors.New("This content was flagged for possible cybersecurity risk"))
+	reg.RecordCall(ctx, 1, true, false, networkErr)
+	if state := reg.Get(1); state.Fails != 1 || state.Trips != 0 || state.Open() {
+		t.Fatalf("direct provider breaker state = %+v, want one failure", state)
+	}
+}
