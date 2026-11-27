@@ -74,6 +74,12 @@ func TestWrapupMarginTriggersOnceAndStopsDispatch(t *testing.T) {
 	if !running.Exhausted() || !BudgetWrapupBlocks("Bash") || BudgetWrapupBlocks("record_fact") {
 		t.Fatal("after the wrap-up a running worker must be held to its write-back tools")
 	}
+	// Regression: the file-ingest tools persist a completed scan's assets and must
+	// survive the wrap-up. Omitting ingest_scan_output stranded recon results — a
+	// finished nmap scan landed 0 assets because the one tool to ingest it was blocked.
+	if BudgetWrapupBlocks("ingest_scan_output") || BudgetWrapupBlocks("ingest_bbot") {
+		t.Fatal("budget wrap-up must allow the file-ingest write-back tools")
+	}
 	block := plannerBudgetBlock(WithBudgetRound(context.Background(), BudgetRound{Line: st.Line(), WrapUp: true}))
 	if strings.Count(block, plannerBudgetWrapup) != 1 || !strings.Contains(block, "[Task budget] remaining: tokens 20000 of 100000") {
 		t.Fatalf("wrap-up block:\n%s", block)

@@ -225,10 +225,28 @@ func (m *IntentMeter) Finish() {
 	m.l.workerSpent = Spend{m.l.workerSpent.Tokens + m.spent.Tokens, m.l.workerSpent.Turns + m.spent.Turns}
 }
 
+// budgetWrapupWriteback is the set of worker tools still allowed once the budget
+// is exhausted: the persistence tools, so the run writes back what it found and
+// stops. It must include the file-ingest tools (ingest_scan_output, ingest_bbot):
+// they insert assets from a scan file the probe already wrote — they launch no
+// new probe and (ingest_scan_output) parse server-side without feeding raw output
+// to the model, so they cost ~0 tokens. Omitting them stranded recon results: a
+// worker told to "write back what you identified" would call ingest_scan_output
+// and be blocked, landing 0 assets despite a completed scan.
+var budgetWrapupWriteback = map[string]bool{
+	"record_fact":           true,
+	"insert_assets":         true,
+	"report_finding":        true,
+	"update_finding_report": true,
+	"record_coverage":       true,
+	"ingest_scan_output":    true,
+	"ingest_bbot":           true,
+}
+
 // BudgetWrapupBlocks reports whether a worker tool is refused once its budget is
 // exhausted: all but the write-back tools, so the run records facts and stops.
 func BudgetWrapupBlocks(tool string) bool {
-	return tool != "record_fact" && tool != "insert_assets" && tool != "report_finding" && tool != "update_finding_report" && tool != "record_coverage"
+	return !budgetWrapupWriteback[tool]
 }
 
 // WorkerBudgetWrapup is returned in place of a refused tool call.
