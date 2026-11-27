@@ -1345,6 +1345,21 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		log.Printf("[worker %s] task %s intent #%d claim lost to another worker, result discarded", name, t.ID, intent.ID)
 		return true
 	}
+	if errors.Is(err, agent.ErrPollLoopDetected) || errors.Is(workCause, agent.ErrPollLoopDetected) {
+		if perr := t.Store.SettleIntentClaim(intent.ID, token, "paused"); perr != nil {
+			log.Printf("[worker %s] task %s intent #%d failed to pause after poll loop: %v", name, t.ID, intent.ID, perr)
+		}
+		nid := intent.ID
+		e.emitActivity(t, db.Activity{
+			NodeID:  &nid,
+			Worker:  name,
+			Kind:    "text",
+			IsError: true,
+			Summary: "Polling loop stopped: call ask_operator to request a fresh instance / new base URL from the operator",
+		})
+		e.touch(t.ID)
+		return true
+	}
 	// if a pause cancelled this run mid-flight, return the intent to the frontier
 	// so it is re-claimed on resume — the worker will resume the prior LLM
 	// conversation from its transcript instead of restarting from scratch.

@@ -35,6 +35,9 @@ func captureRun(ctx context.Context, opts agentcore.Options, input string, emit 
 // multiple prompts on the SAME conversation (e.g. a settlement round that reuses
 // the worker's accumulated context after the main run hit max_turns).
 func captureRunSession(ctx context.Context, s *agentcore.Session, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
+	ctx, cancelPoll := context.WithCancelCause(ctx)
+	defer cancelPoll(nil)
+	pollDet := newPollLoopDetector()
 	ctx, auditTrace := intercept.WithTrace(ctx, input, approvalHistory(s.Messages()))
 	defer auditTrace.Finish()
 	// Observe each model call's stop reason, so a provider refusal is reported as
@@ -101,6 +104,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			in := string(ev.ToolUse.Input)
 			lastTool.start(ev.ToolUse.ID, ev.ToolUse.Name, in)
 			auditTrace.Start(ev.ToolUse.ID, ev.ToolUse.Name, ev.ToolUse.Input)
+			pollDet.onToolUse(ev.ToolUse.ID, ev.ToolUse.Name, in)
 			rec(db.Activity{Kind: "tool_use", Tool: ev.ToolUse.Name, ToolUseID: ev.ToolUse.ID,
 				Summary: ev.ToolUse.Name + " " + firstLine(in, 200), Detail: in})
 		case harness.KindToolResult:
@@ -113,6 +117,12 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			auditTrace.Complete(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError)
 			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
 				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out})
+			if pollDet.onToolResult(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError) {
+				msg := ErrPollLoopDetected.Error()
+				rec(db.Activity{Kind: "result", IsError: true, Summary: firstLine(msg, 400), Detail: msg})
+				cancelPoll(ErrPollLoopDetected)
+				return finalText, reason, ErrPollLoopDetected
+			}
 		case harness.KindText:
 			addDelta("text", ev.Text)
 		case harness.KindThinking:
