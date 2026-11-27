@@ -12,10 +12,29 @@ import (
 // (for example, bash -c "bash -c ...") are re-parsed and walked.
 const argvMaxNestedPayloads = 3
 
-// argvMaxWrapperCandidates bounds option-disambiguation branching (for example
-// repeated ambiguous optional-value flags like xargs -l) so pathological input
-// cannot cause exponential work.
+// argvMaxWrapperCandidates bounds how many wrapped-command interpretations
+// option disambiguation yields per wrapper (for example repeated ambiguous
+// optional-value flags like xargs -l). It counts results, not work: the walks
+// visit each start index once and argvMatch checks each call once.
 const argvMaxWrapperCandidates = 8
+
+// argvMatch is one argvCompoundMatches evaluation: the rule, and the calls
+// already checked. Unknown wrapper options are tried as taking no value and
+// as taking one, and nested wrappers yield overlapping suffixes, so the same
+// call is reached along many paths; checking each once keeps the work
+// polynomial in the length of the command instead of exponential.
+type argvMatch struct {
+	rule    []string
+	checked map[argvCallKey]bool
+}
+
+// argvCallKey identifies a call's argv by its first word and length. Every
+// argv checked within one evaluation is a sub-slice of a parsed call's words,
+// so this names the same words however the call was reached.
+type argvCallKey struct {
+	first *callWord
+	n     int
+}
 
 // callWord is one argument word of a *syntax.CallExpr for deny/ask matching.
 // Literal is true when the word contains no runtime expansion; Value holds the
@@ -48,10 +67,11 @@ func argvCompoundMatches(tokens []string, toolName string, input []byte) bool {
 	if strings.TrimSpace(in.Command) == "" {
 		return false
 	}
-	return bashCommandMatchesArgv(tokens, in.Command, 0)
+	m := &argvMatch{rule: tokens, checked: map[argvCallKey]bool{}}
+	return bashCommandMatchesArgv(m, in.Command, 0)
 }
 
-func bashCommandMatchesArgv(rule []string, command string, depth int) bool {
+func bashCommandMatchesArgv(m *argvMatch, command string, depth int) bool {
 	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(command), "")
 	if err != nil {
 		return false
@@ -69,7 +89,7 @@ func bashCommandMatchesArgv(rule []string, command string, depth int) bool {
 		for i, w := range call.Args {
 			words[i] = callWordOf(w)
 		}
-		if callMatchesArgv(rule, words, depth) {
+		if callMatchesArgv(m, words, depth) {
 			matched = true
 			return false
 		}
@@ -81,11 +101,19 @@ func bashCommandMatchesArgv(rule []string, command string, depth int) bool {
 // callMatchesArgv checks a single call's argv against rule, stripping known
 // wrappers repeatedly and recursing into nested Bash payloads up to
 // argvMaxNestedPayloads deep.
-func callMatchesArgv(rule []string, argv []callWord, depth int) bool {
+func callMatchesArgv(m *argvMatch, argv []callWord, depth int) bool {
 	if len(argv) == 0 {
 		return false
 	}
-	if argvMatchesRulePrefix(rule, argv) {
+	// A call checked before did not match, or the evaluation would have
+	// stopped there. Recursion only reaches strictly shorter argvs, so a call
+	// still being checked is never reached again.
+	key := argvCallKey{&argv[0], len(argv)}
+	if m.checked[key] {
+		return false
+	}
+	m.checked[key] = true
+	if argvMatchesRulePrefix(m.rule, argv) {
 		return true
 	}
 	if !argv[0].Literal || argv[0].Value == "" {
@@ -103,7 +131,7 @@ func callMatchesArgv(rule []string, argv []callWord, depth int) bool {
 		if !ok {
 			return false
 		}
-		return bashCommandMatchesArgv(rule, payload, depth+1)
+		return bashCommandMatchesArgv(m, payload, depth+1)
 
 	case isShellWrapper(prog):
 		if depth >= argvMaxNestedPayloads {
@@ -113,24 +141,24 @@ func callMatchesArgv(rule []string, argv []callWord, depth int) bool {
 		if !ok {
 			return false
 		}
-		return bashCommandMatchesArgv(rule, payload, depth+1)
+		return bashCommandMatchesArgv(m, payload, depth+1)
 
 	case prog == "env":
-		return envMatchesArgv(rule, rest, depth)
+		return envMatchesArgv(m, rest, depth)
 
 	case prog == "find":
-		return findExecMatches(rule, rest, depth)
+		return findExecMatches(m, rest, depth)
 
 	case prog == "flock":
-		return flockMatchesArgv(rule, rest, depth)
+		return flockMatchesArgv(m, rest, depth)
 
 	case prog == "parallel":
-		return parallelMatchesArgv(rule, rest, depth)
+		return parallelMatchesArgv(m, rest, depth)
 	}
 
 	for _, next := range stripOneWrapperCandidates(prog, rest) {
 		if len(next) > 0 && len(next) < len(argv) {
-			if callMatchesArgv(rule, next, depth) {
+			if callMatchesArgv(m, next, depth) {
 				return true
 			}
 		}
@@ -441,30 +469,36 @@ func evalPayload(args []callWord) (string, bool) {
 // value is re-parsed as a Bash line at depth+1), NAME=VALUE assignments, and
 // any trailing wrapped command. Unknown options are over-approximated (tried
 // as 0-arg and, when applicable, 1-arg) up to argvMaxWrapperCandidates.
-func envMatchesArgv(rule []string, args []callWord, depth int) bool {
+func envMatchesArgv(m *argvMatch, args []callWord, depth int) bool {
 	spec := wrapperSpecs["env"]
 	checkSplitString := func(val string) bool {
 		if depth >= argvMaxNestedPayloads || strings.TrimSpace(val) == "" {
 			return false
 		}
-		if bashCommandMatchesArgv(rule, val, depth+1) {
+		if bashCommandMatchesArgv(m, val, depth+1) {
 			return true
 		}
 		// If the split-string payload starts with env options (e.g. -i or -u),
 		// also evaluate it as an env invocation.
 		if strings.HasPrefix(strings.TrimSpace(val), "-") {
-			return bashCommandMatchesArgv(rule, "env "+val, depth+1)
+			return bashCommandMatchesArgv(m, "env "+val, depth+1)
 		}
 		return false
 	}
 
 	candidates := 0
 	seenIdx := map[int]bool{}
+	// visited holds the start indexes already walked. Each unknown option
+	// walks on from both i+1 and i+2, so without it n unknown options make
+	// on the order of Fib(n) walks; a walk from a visited index reaches only
+	// candidates already checked.
+	visited := map[int]bool{}
 	var walk func(i int) bool
 	walk = func(i int) bool {
-		if candidates >= argvMaxWrapperCandidates {
+		if candidates >= argvMaxWrapperCandidates || visited[i] {
 			return false
 		}
+		visited[i] = true
 		for i < len(args) {
 			if !args[i].Literal {
 				if args[i].AssignLike {
@@ -590,7 +624,7 @@ func envMatchesArgv(rule []string, args []callWord, depth int) bool {
 		}
 		seenIdx[i] = true
 		candidates++
-		return callMatchesArgv(rule, args[i:], depth)
+		return callMatchesArgv(m, args[i:], depth)
 	}
 	return walk(0)
 }
@@ -598,7 +632,7 @@ func envMatchesArgv(rule []string, args []callWord, depth int) bool {
 // findExecMatches walks every -exec, -execdir, -ok, and -okdir clause inside a
 // find invocation (terminated by literal ";" or "+") and runs callMatchesArgv
 // on each wrapped command.
-func findExecMatches(rule []string, args []callWord, depth int) bool {
+func findExecMatches(m *argvMatch, args []callWord, depth int) bool {
 	for i := 0; i < len(args); i++ {
 		if !args[i].Literal {
 			continue
@@ -616,7 +650,7 @@ func findExecMatches(rule []string, args []callWord, depth int) bool {
 				end++
 			}
 			if terminated && end > start {
-				if callMatchesArgv(rule, args[start:end], depth) {
+				if callMatchesArgv(m, args[start:end], depth) {
 					return true
 				}
 				i = end
@@ -628,7 +662,7 @@ func findExecMatches(rule []string, args []callWord, depth int) bool {
 
 // flockMatchesArgv handles both "flock [opts] <file> <cmd...>" and
 // "flock [opts] <file> -c <cmd-string>" / "flock [opts] -c <cmd-string> <file>".
-func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
+func flockMatchesArgv(m *argvMatch, args []callWord, depth int) bool {
 	spec := wrapperSpecs["flock"]
 	i := 0
 	for i < len(args) {
@@ -648,7 +682,7 @@ func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
 			if eq := strings.IndexByte(name, '='); eq >= 0 {
 				flagName, val := name[:eq], name[eq+1:]
 				if flagName == "command" {
-					if depth < argvMaxNestedPayloads && bashCommandMatchesArgv(rule, val, depth+1) {
+					if depth < argvMaxNestedPayloads && bashCommandMatchesArgv(m, val, depth+1) {
 						return true
 					}
 					i++
@@ -664,7 +698,7 @@ func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
 				if i+1 >= len(args) {
 					return false
 				}
-				if depth < argvMaxNestedPayloads && args[i+1].Literal && bashCommandMatchesArgv(rule, args[i+1].Value, depth+1) {
+				if depth < argvMaxNestedPayloads && args[i+1].Literal && bashCommandMatchesArgv(m, args[i+1].Value, depth+1) {
 					return true
 				}
 				i += 2
@@ -691,7 +725,7 @@ func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
 			switch {
 			case ch == 'c':
 				if j+1 < len(flags) {
-					if depth < argvMaxNestedPayloads && bashCommandMatchesArgv(rule, flags[j+1:], depth+1) {
+					if depth < argvMaxNestedPayloads && bashCommandMatchesArgv(m, flags[j+1:], depth+1) {
 						return true
 					}
 					j = len(flags)
@@ -699,7 +733,7 @@ func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
 					if i+1 >= len(args) {
 						return false
 					}
-					if depth < argvMaxNestedPayloads && args[i+1].Literal && bashCommandMatchesArgv(rule, args[i+1].Value, depth+1) {
+					if depth < argvMaxNestedPayloads && args[i+1].Literal && bashCommandMatchesArgv(m, args[i+1].Value, depth+1) {
 						return true
 					}
 					consumedNext = true
@@ -739,24 +773,24 @@ func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
 		tok := args[i].Value
 		if tok == "-c" || tok == "--command" {
 			if i+1 < len(args) && args[i+1].Literal && depth < argvMaxNestedPayloads {
-				return bashCommandMatchesArgv(rule, args[i+1].Value, depth+1)
+				return bashCommandMatchesArgv(m, args[i+1].Value, depth+1)
 			}
 			return false
 		}
 		if strings.HasPrefix(tok, "--command=") {
 			if depth < argvMaxNestedPayloads {
-				return bashCommandMatchesArgv(rule, strings.TrimPrefix(tok, "--command="), depth+1)
+				return bashCommandMatchesArgv(m, strings.TrimPrefix(tok, "--command="), depth+1)
 			}
 			return false
 		}
 		if strings.HasPrefix(tok, "-c") && len(tok) > 2 {
 			if depth < argvMaxNestedPayloads {
-				return bashCommandMatchesArgv(rule, tok[2:], depth+1)
+				return bashCommandMatchesArgv(m, tok[2:], depth+1)
 			}
 			return false
 		}
 	}
-	return callMatchesArgv(rule, args[i:], depth)
+	return callMatchesArgv(m, args[i:], depth)
 }
 
 // parallelMatchesArgv strips parallel's leading options, stops before GNU
@@ -770,7 +804,7 @@ func flockMatchesArgv(rule []string, args []callWord, depth int) bool {
 //
 // Note: "parallel -a FILE" / "--arg-file FILE" and "parallel :::: FILE" read
 // command lines from a file that the matcher does not read.
-func parallelMatchesArgv(rule []string, args []callWord, depth int) bool {
+func parallelMatchesArgv(m *argvMatch, args []callWord, depth int) bool {
 	isParallelSep := func(w callWord) bool {
 		return w.Literal && (w.Value == ":::" || w.Value == ":::+" || w.Value == "::::" || w.Value == "::::+")
 	}
@@ -792,18 +826,18 @@ func parallelMatchesArgv(rule []string, args []callWord, depth int) bool {
 					if isParallelSep(arg) {
 						break
 					}
-					if arg.Literal && bashCommandMatchesArgv(rule, arg.Value, depth+1) {
+					if arg.Literal && bashCommandMatchesArgv(m, arg.Value, depth+1) {
 						return true
 					}
 				}
 			}
 			continue
 		}
-		if callMatchesArgv(rule, cmd, depth) {
+		if callMatchesArgv(m, cmd, depth) {
 			return true
 		}
 		if len(cmd) == 1 && cmd[0].Literal && depth < argvMaxNestedPayloads {
-			if bashCommandMatchesArgv(rule, cmd[0].Value, depth+1) {
+			if bashCommandMatchesArgv(m, cmd[0].Value, depth+1) {
 				return true
 			}
 		}
@@ -983,11 +1017,14 @@ func stripOneWrapperCandidates(prog string, args []callWord) [][]callWord {
 	}
 	var out [][]callWord
 	seenIdx := map[int]bool{}
+	// visited holds the start indexes already walked; see envMatchesArgv.
+	visited := map[int]bool{}
 	var walk func(i int)
 	walk = func(i int) {
-		if len(out) >= argvMaxWrapperCandidates {
+		if len(out) >= argvMaxWrapperCandidates || visited[i] {
 			return
 		}
+		visited[i] = true
 		for i < len(args) {
 			if !args[i].Literal {
 				if spec.skipAssigns && args[i].AssignLike {
