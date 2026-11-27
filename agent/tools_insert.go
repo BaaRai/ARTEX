@@ -696,6 +696,10 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// Task credentials (#3): reuse user-declared test accounts, record
 		// self-registered ones so they are not forgotten.
 		t.saveTaskCredential(), t.listTaskCredentials(),
+		// Ghidra static analysis (optional sidecar; ARTEX_GHIDRA_URL). The tools
+		// report "not configured" instead of failing when the service is absent.
+		t.ghidraStatus(), t.ghidraAnalyze(), t.ghidraJob(), t.ghidraFunctions(),
+		t.ghidraDecompile(), t.ghidraStrings(), t.ghidraAttackSurface(),
 		// Cross-work review: a worker can also reuse other works' observations to avoid
 		// duplicate work.
 		// search_all_worker_traces: no need to know an intent_id first — fish out matching
