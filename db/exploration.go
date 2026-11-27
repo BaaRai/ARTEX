@@ -2360,3 +2360,9 @@ func (s *ExplorationStore) ActivityByIDsForTerminalIntents(ids []int64) ([]Activ
 func (s *ExplorationStore) AddStandaloneFinding(taskID, nodeID int64, vulnclass, name, severity, summary, evidence, worker string, assetIDs []int64) (int64, error) {
 	return s.db.AddFinding(taskID, nodeID, vulnclass, name, severity, summary, evidence, worker, assetIDs)
 }
+
+// UpdateNodePayload updates a node's JSON payload and bumps content_version.
+func (s *ExplorationStore) UpdateNodePayload(id int64, raw json.RawMessage) error {
+	_, err := s.db.Exec(`UPDATE exploration_nodes SET payload=$1, content_version=content_version+1 WHERE id=$2 AND exploration_id=$3`, string(raw), id, s.expID)
+	return err
+}

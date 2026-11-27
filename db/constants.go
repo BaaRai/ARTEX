@@ -38,3 +38,11 @@ const (
 	RelProves      = "proves"
 	RelCovers      = "covers" // digest --covers--> member (cold-digest-spec §1); source of truth for "which digest folds node X"
 )
+
+// FactSubtypeHypothesis tags kind=fact nodes that represent planner hypotheses
+// without altering ck_node_kind (zero schema migration).
+const FactSubtypeHypothesis = "hypothesis"
+
+// FactSubtypeCapability tags kind=fact nodes that represent capabilities (#613)
+// without altering ck_node_kind (zero schema migration).
+const FactSubtypeCapability = "capability"
