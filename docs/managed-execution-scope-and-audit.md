@@ -2,8 +2,11 @@
 
 Status: **proposed; not implemented by this document**.
 
+Revised 2026-11-27: select an ARTEX-owned Go/bubblewrap Linux backend.
+Implementation and runtime qualification remain follow-up work.
+
 Tracking: [access audit #553](https://github.com/BaaRai/ARTEX/issues/553) and
-[sandbox-runtime backend #554](https://github.com/BaaRai/ARTEX/issues/554).
+[Go/bubblewrap backend #554](https://github.com/BaaRai/ARTEX/issues/554).
 This is PR 1 of the proposed sequence. It changes no runtime behavior or defaults.
 
 ## Problem and success criteria
@@ -25,6 +28,8 @@ Success means:
 - A URL/time-window investigation explains observation, attribution and gaps.
 - Full-body recording is optional; required metadata is independent of it.
 - Remote second-hop actions have separate review and evidence semantics.
+- Deceptive target content cannot grant permissions or be promoted directly into
+  verified findings; execution and investigation have enforceable budgets.
 - Unsupported coverage and reduced isolation are visible, never silently promoted
   to an enforcement guarantee.
 
@@ -43,6 +48,13 @@ This proposal extends existing controls rather than replacing them:
 Related discussions: #421, #423, #347, #422 and #440. Revalidate integration points
 against the current main branch before each implementation PR.
 
+A focused integration review on 2026-11-27 checked packaging, startup isolation
+and budgets at [`e5c7bfc`](https://github.com/BaaRai/ARTEX/tree/e5c7bfcbdd893db26c08f0b004e0169b4ab6ca85).
+This supplements the earlier full behavior baseline. Current main already has
+task/intent token and turn budgets in `agent/budget.go` and `server/engine_budget.go`.
+Extend these and the existing task clock; do not create competing accounting.
+New gateway/OS limits and evidence events must integrate with their lifecycle.
+
 ## Trust boundaries
 
 ```text
@@ -52,7 +64,7 @@ tool arguments -> deterministic rules + semantic judge + approval
                |
 ARTEX execution manager (trusted session/provenance)
                |
-unprivileged tool + children inside srt
+unprivileged tool + children inside the Go/bwrap Linux backend
                |
 authenticated ARTEX egress gateway
   policy -> rate control -> final dial -> metadata / optional payload evidence
@@ -60,13 +72,29 @@ authenticated ARTEX egress gateway
           authorized target A
                |
        remote action A -> B
-       [outside the local srt boundary]
+       [outside the local execution boundary]
 ```
 
 The native Go HTTP path must use the same policy/gateway contract even though it
 does not run inside a child-process sandbox. Control-plane traffic is separate.
 The gateway and audit writer are trusted services; children cannot modify their
 configuration, credentials, event store or policy revision.
+
+### What is inside a worker's sandbox
+
+The sandbox boundary is the worker's tool execution environment, not its entire
+logical agent loop. Model calls, scheduling, judge/approval and audit stay in the
+trusted control plane. Managed shell/custom tools and local MCP process trees run
+inside their assigned execution boundary. Native HTTP uses the policy gateway;
+file tools must use an isolated executor or an explicitly constrained file service.
+Inventory every process, file and network entry point so wrapping Bash does not
+leave an alternative host-level path. Unsupported paths fail a strict profile.
+
+Prefer separate workspaces and execution sessions for each worker run. A persistent
+runner versus invocation-local processes is a lifecycle/performance decision for
+the implementation; this ADR does not claim one permanent sandbox per worker.
+Wrapping a process does not isolate an individual goroutine inside the ARTEX server.
+Cross-run credentials, writable files and IPC must not defeat task separation.
 
 ### SSRF, RCE and lateral movement
 
@@ -91,6 +119,42 @@ identified. Local observation, authorized callback/target logs, and inference mu
 remain distinct evidence classes. A response from A alone proves neither access
 to B nor the absence of it.
 
+### Deception resilience and counter-exploitation (anti-honeypot)
+
+The intended benefits are reduced local damage from hostile target content,
+traceable evidence when an agent is misled, and bounded wasted effort. A sandbox
+does not automatically recognize honeypots, hide source IP/request fingerprints,
+or stop a permitted target from recording requests.
+
+| Scenario | Proposed control | Remaining limit |
+| --- | --- | --- |
+| Hostile content induces a secret read or unauthorized callback | Explicit filesystem policy, protected host secrets and deterministic egress | Tool-readable data can still leave through an allowed endpoint |
+| Downloaded content attacks a browser/parser/tool | Untrusted artifact handling, applicable code/tool approval, isolated process tree | No guarantee against kernel/runtime compromise; no implicit safe-to-execute verdict |
+| A service fabricates a finding or misleading success response | Evidence provenance, corroboration, contradictions and judge/operator review | A model assessment is not proof of deception or a vulnerability |
+| Crawl/output/download traps consume resources | Task/run budgets enforced by gateway, supervisor and scheduler | Limits and overshoot must be measured; bwrap alone is not a quota manager |
+| An unusual but legitimate service looks suspicious | Record evidence and uncertainty; allow an auditable operator disposition | Suspicion alone must not produce a confirmed honeypot label |
+
+Treat target instructions as untrusted inputs. The sandbox can block a resulting
+disallowed action, but does not prevent the model seeing or believing malicious
+content. Preserve existing prompt-injection controls and tool/action review.
+
+Use existing evidence before requesting new verification. Corroboration must have
+known provenance and remain within authorized scope, approvals and budgets. A
+target-supplied credential or suspected honeytoken is not automatically used or
+validated against another service. A denial, error or unusual response is not by
+itself proof of a honeypot. Do not add stealth/evasion or out-of-scope probes as a
+response to suspicion.
+
+Hard policy/budget limits stop affected execution and further scheduling.
+Evidence-based suspicion can pause a run for operator review under a documented
+policy; ordinary failures remain ordinary failures. Preserve available evidence,
+usage and the stop reason before cleanup where possible, without delaying the
+enforcement action. Resumption requires authorized disposition and, when needed,
+an approved policy/budget revision. A model cannot raise its own limits.
+
+These controls are planned capabilities. They do not extend local containment to
+remote SSRF/RCE second hops or guarantee that deceptive content is detected.
+
 ## Proposed policy contract
 
 Use a versioned server-owned policy with at least:
@@ -107,6 +171,7 @@ Use a versioned server-owned policy with at least:
 | indirect-action grants | Approved remote actions/secondary scope where expressible |
 | provenance | Operator/approval reference, creation and expiration, revocation state |
 | required capabilities | What the selected runner/gateway must demonstrably enforce |
+| budgets and stop policy | Task/run resource limits, aggregation, enforcement owner and authorized resumption |
 
 Policy rules:
 
@@ -139,6 +204,23 @@ grants. LLM provider and server database credentials remain outside the tool
 sandbox. An infrastructure grant must not become general testing authorization
 or unrestricted CONNECT access.
 
+### Resource budgets and enforcement ownership
+
+| Budget | Enforcement owner |
+| --- | --- |
+| Requests, network bytes, connection/redirect limits | Managed egress gateway, including persistent streams |
+| Process count, CPU/memory, wall-clock, output/download/workspace size | Runner supervisor with supported OS accounting/limits and I/O controls |
+| Model tokens/cost, tool steps and overall investigation time | Trusted ARTEX scheduler/control plane |
+
+Account for children and aggregate simultaneous workers at task level; per-process
+limits alone may not bound a whole task. Configure documented thresholds, bounded
+overshoot and actions. A strict profile must not advertise a required quota it
+cannot enforce. Cancellation/stop closes execution sessions, terminates children
+and prevents new scheduling rather than simply returning a warning to the model.
+Persist budget configuration, observed usage, enforcement authority, stop reason
+and authorized resumption as audit events. bubblewrap is not assumed to supply these
+limits; capability tests determine which supervisor/OS mechanisms are required.
+
 ## Runner and gateway contracts
 
 A managed runner receives executable/argv, working directory, filtered environment,
@@ -164,29 +246,139 @@ If containment, policy lookup or required audit durability fails, enforce mode
 does not start new work. Never retry unsandboxed automatically. Cancellation and
 revocation terminate the whole managed process tree and close its sessions.
 
-### sandbox-runtime integration choice
+### Selected Linux backend: ARTEX-owned Go/bubblewrap adapter
 
-Evaluate [srt source at `0bbebed`](https://github.com/anthropics/sandbox-runtime/tree/0bbebed0aa9a8e628dc4df8bc30293550a1988eb).
-It is a research preview; a source review is not proof of release compatibility.
-Select and pin a tested release/artifact and digest, including its Node/runtime
-requirements.
+Implement a narrowly scoped Go supervisor invoking a supported external `bwrap`
+binary. Do not fork bubblewrap, reimplement kernel isolation, or add a Node/SRT or
+Fence dependency for this backend. Existing Node-dependent tools remain unaffected.
+The detailed [backend plan](bubblewrap-backend-plan.md) defines responsibilities,
+qualification gates and the incremental PRs.
 
-Preferred topology for the initial spike: srt contains the process tree and routes
-it only to an authenticated ARTEX HTTP/SOCKS gateway, using its external-proxy
-configuration. ARTEX retains policy, pacing, evidence and existing TLS capture
-ownership. External-proxy mode delegates filtering to that proxy; this topology
-must be tested, not inferred from a successful `curl` through `HTTP_PROXY`.
+The choice follows ARTEX's need for one policy authority, task-bound provenance,
+explicit failure behavior and complete cancellation. It is not based only on
+language alignment or the presence/absence of Node on one host. A higher-level
+runtime can save compatibility work, but still needs adaptation to those contracts.
+ARTEX accepts responsibility for this adapter's security regressions and supported
+Linux matrix; a thin adapter is not automatically a secure sandbox.
 
-Current source also offers domain/port rules, `strictAllowlist`, resolved-address
-restrictions, and request-filter/TLS termination hooks. These are useful alternative
-integration points, not a reason to duplicate policy authorities or TLS interception.
-The source documents that resolved-address checks do not apply when a parent/MITM
-proxy resolves the target. Final-hop policy must therefore be explicit.
+The Go supervisor constructs structured argv and an explicit environment, validates
+trusted executable/mount paths, prepares private workspaces and resource domains,
+and owns the full process/bridge lifecycle. Preserve existing privilege dropping;
+do not expose controller credentials, unintended file descriptors, host home/root
+trees or broad IPC sockets. Read-only access to a secret still discloses it.
+Test path/symlink races and cross-task access, not only path normalization.
 
-References:
-[configuration](https://github.com/anthropics/sandbox-runtime/blob/0bbebed0aa9a8e628dc4df8bc30293550a1988eb/src/sandbox/sandbox-config.ts),
-[request filter](https://github.com/anthropics/sandbox-runtime/blob/0bbebed0aa9a8e628dc4df8bc30293550a1988eb/src/sandbox/request-filter.ts),
-[HTTP proxy](https://github.com/anthropics/sandbox-runtime/blob/0bbebed0aa9a8e628dc4df8bc30293550a1988eb/src/sandbox/http-proxy.ts).
+The managed Linux profile requires separate network and PID namespaces. A protected
+task-private bridge exposes only the authenticated ARTEX gateway. All permitted
+target traffic also goes through that gateway; it owns destination policy, final
+dial, pacing, metadata and optional TLS capture. Environment proxy variables alone
+do not enforce containment. Missing namespaces or required resource mechanisms
+reject the strict profile; never silently remove isolation to make a tool work.
+
+Resource enforcement must cover descendants before untrusted code runs. Validate
+cgroup v2 delegation or another demonstrated host mechanism plus output/storage
+limits; launching and moving a process into limits afterwards leaves a race.
+Cancellation/revocation stops the process tree and existing streams, including
+CONNECT tunnels. Killing only the direct child or closing only a proxy listener
+does not establish whole-task cleanup. Record bounded cleanup and quota overshoot.
+
+### Dependency acceptance and maintenance
+
+The [review of PR #555](https://github.com/BaaRai/ARTEX/pull/555#issuecomment-7193053269)
+raised the proposed Node-based research-preview dependency. The selected Linux
+plan no longer introduces that dependency. Design acceptance still does not qualify
+the new backend: implementation PRs need supported bwrap/kernel/distro/container
+combinations, reproducible package/artifact provenance, capability tests,
+license/SBOM review, measured overhead, diagnostic behavior and named maintenance
+and rollback ownership before merge.
+
+Bubblewrap's [v0.13.1 security model](https://github.com/containers/bubblewrap/blob/v0.13.1/README.md#sandbox-security)
+assigns policy and argument-selection responsibility to its caller. This is a
+documentation reference, not a chosen minimum runtime version. Track upstream and
+distro security fixes, qualify updates and reject incompatible versions/capabilities.
+No task-time installation or automatic fallback to unsandboxed execution is allowed.
+Independent audit/search work does not require an installed execution backend.
+
+### Upstream distribution and migration contract
+
+This targets all upstream ARTEX distributions. At the focused baseline, the
+[Docker runtime](https://github.com/BaaRai/ARTEX/blob/e5c7bfcbdd893db26c08f0b004e0169b4ab6ca85/Dockerfile)
+installs Node 22.23.4, while [Go ZIPs](https://github.com/BaaRai/ARTEX/blob/e5c7bfcbdd893db26c08f0b004e0169b4ab6ca85/build.sh)
+embed the static UI without Node. Neither fact changes the selected backend's
+dependency contract. Do not remove dependencies required by existing tools.
+
+- Preserve Linux amd64/arm64, macOS amd64/arm64 and Windows amd64 release builds
+  and both Linux container architectures. A build target is not a sandbox guarantee.
+- Begin with an explicitly selected optional Go/bwrap backend. Preserve existing
+  startup safety checks; existing degraded operation is not strict containment.
+- Provide installation/preflight diagnostics in PR 4 and complete Linux packaging
+  and host qualification in PR 6. Pin supported packages/artifacts and protect
+  binaries/helpers/config from task writes and task-controlled PATH.
+- Version any bridge/helper protocol and capabilities, including cancellation,
+  exit and error semantics. Test missing/old bwrap, unavailable user/network
+  namespaces, absent resource delegation, helper crashes, upgrades and rollback.
+- Retain container `no-new-privileges`, execution identities and credential
+  boundaries. Do not require blanket privileged containers or relax existing host
+  protections to obtain passing results.
+- Include shipped components in SBOM/provenance and assign update ownership.
+  PR 10 consolidates releases; basic installation is not deferred until then.
+  Rollback stops incompatible managed tasks and retains audit history/migrations.
+
+No deployment-specific address, path or credential becomes an upstream default.
+Clean-platform tests, not one deployed host, determine support claims.
+
+### Alternatives retained for future profiles
+
+The [runtime ecosystem evaluation](sandbox-runtime-evaluation.md) records SRT,
+Fence/other Go wrappers, MXC, gVisor, OCI/VM runtimes and execution platforms as
+alternatives. They are not dependencies of the selected Linux backend. A future
+adapter needs the same Runner/gateway/qualification contract; stronger hostile-code
+profiles can evaluate gVisor or VMs separately. Keep the implementation narrow;
+reconsider a full runtime if arbitrary-tool compatibility dominates maintenance.
+Go-based does not imply native Windows support or zero runtime dependencies.
+
+### Portability contract: Linux, Windows and macOS
+
+Preserve ARTEX's application portability independently of runner availability.
+Keep public policy, audit and runner APIs free of unconditional Linux imports,
+syscalls and shell assumptions. Use platform adapters/build constraints or a
+versioned helper protocol. Optional runtime installation must not become a
+requirement for unrelated management/audit operations, subject to existing server
+security startup checks; this is not permission to bypass an isolation self-test.
+
+| Environment | Planned execution path | Support claim required |
+| --- | --- | --- |
+| Linux native | ARTEX-owned Go/bwrap backend; stronger profiles evaluated separately | Pinned backend, effective containment, task separation and tool tests |
+| Windows native | Separately select a native adapter, with MXC among evaluated options | Actual OS build, ACL/token/process-tree/network and tool tests; no Linux-equivalence claim from API compatibility |
+| Windows host with Linux VM/WSL2 | Explicit Linux executor profile | Linux guest tools only; host mounts, interoperability, networking and quotas independently tested |
+| Windows controller with remote Linux executor | Explicit authenticated runner connection | Policy/session binding, workspace transfer, audit delivery, revocation and outage tests |
+| macOS | Keep the portable contract; test a separate backend before support claims | No assumption that Linux/Windows tests establish macOS enforcement |
+
+SRT v0.0.83 packages Windows x64/ARM64 helpers but labels Windows alpha. Its
+documented native Windows network residuals and shared-machine limitations mean
+that successful initialization alone cannot qualify it for strict adversarial
+execution. Reject a profile when required guarantees are not met; a warning or
+working HTTP proxy is insufficient. SRT's experimental MXC integration needs its
+own capability tests. A Linux guest on Windows does not run native Windows tools.
+
+At the focused upstream baseline, `server/isolation_other.go` reports unsupported
+non-Unix isolation; startup in `cmd/artex/main.go` exposes degraded operation where
+applicable. A Windows ZIP does not establish strict Windows isolation. New adapters
+must integrate with that startup/isolation state, not create a conflicting status.
+
+Before dispatch, report backend/version, host and guest OS/architecture, effective
+capabilities, required privileges and limitations. If none qualifies, reject the
+strict execution with an actionable reason; never automatically run it on the
+host. Explicit remote dispatch is a different deployment profile, not a hidden
+fallback. Report local versus remote evidence accordingly.
+
+CI must preserve all five release builds and run portable contract tests on the
+supported operating systems. macOS containment needs real-host acceptance before
+it is advertised. Native Windows acceptance additionally needs a real Windows
+runner: PowerShell/cmd and native executables, path quoting/Unicode, ACL and reparse
+point handling, child cleanup/cancellation, environment/credential isolation,
+proxy/TLS behavior, task separation, revocation, resources and backend absence.
+Cross-compilation and mocked tests alone cannot establish runtime containment.
 
 ## Audit event contract
 
@@ -204,7 +396,9 @@ retention. Use idempotent event IDs and distinct attempt IDs.
 | Destination | host, actual IP/port when known, protocol, method and URL when visible |
 | Observation | stage, local/upstream outcome origin, error, timing and known bytes |
 | Evidence | capture/archive references, source kind and integrity metadata |
-| Coverage | visibility level, sensor/backend version and related gap references |
+| Coverage | visibility level, backend/version, host/guest platform and capability manifest, related gap references |
+| Assessment | referenced observations/artifacts, rule/model/operator source and version, rationale, contradictions and disposition |
+| Resource control | budget revision, measured usage, limit/stop reason, enforcement owner and authorized resume reference |
 
 Observation stages distinguish declared intent, policy decision, connect attempt,
 connection established, request forwarded, response headers observed, stream
@@ -225,6 +419,14 @@ references when capture rules intentionally mutate traffic.
 Retries and redirects use new attempt IDs. Historic capture imports preserve the
 source timestamp and add ingestion time/provenance. Transcript matches are
 investigation candidates, not retroactively created network events.
+
+Deception assessments are separate events referencing observations, not edits that
+turn a target claim into a verified fact. Record uncertainty and later corrections;
+the underlying observed request remains unchanged. Artifact references and hashes
+identify evidence without requiring unsafe preview or execution. Suspected secrets
+and honeytokens follow the same redaction/access policy as other sensitive evidence.
+Retain stop/pause/resume history through archive and restart; do not fabricate
+fine-grained OS violation details when the sensor reports only an execution error.
 
 ### Storage and failure semantics
 
@@ -260,13 +462,21 @@ remote/unmanaged execution, recorder outage or archived-only evidence. “No mat
 observed access” is appropriate when evidence is incomplete; “never accessed” is
 not. A shared login does not support named-human attribution.
 
+For suspected deception, show target claims, actual observations, corroboration,
+contradictions, judge/operator assessments and resource-limit events separately.
+Link a proposed action to its inducing content when correlation is available; mark
+unknown/ambiguous correlation rather than inferring causation. Operators can record
+a false-positive disposition or authorize a revised budget/policy without erasing
+the original evidence. Investigation UI actions must not silently execute artifacts,
+test discovered credentials or initiate further probes.
+
 ## Compatibility and cost
 
 | Surface | Initial treatment / acceptance boundary |
 | --- | --- |
 | Linux shell and children | Managed only after containment and bypass-resistance tests |
 | Local MCP | Task/run-owned sessions first; concurrent tool-call provenance tested |
-| Native Go HTTP | Policy and audit instrumentation required independently of srt |
+| Native Go HTTP | Policy and audit instrumentation required independently of the process sandbox |
 | HTTP and redirected HTTP | Per-request policy and attempt chain |
 | HTTPS with capture | Explicit trust/inspection profile; preserve existing capture behavior |
 | Pinned TLS or mTLS | Opaque or unsupported profile; no invented URL/path visibility |
@@ -274,7 +484,9 @@ not. A shared login does not support named-human attribution.
 | UDP, ICMP, raw SYN, QUIC | Separate capability/runner work; strict unsupported profiles fail |
 | Remote MCP, VM, container, Android | Separate enrollment and evidence; local wrapping is insufficient |
 | Parent proxy | Final-hop address enforcement must be demonstrated |
-| Windows/macOS hosts and nested containers | Future/conditional support; publish tests before claiming parity |
+| Native Windows | Dedicated backend milestone and real-host tests; alpha/degraded capabilities never satisfy strict requirements implicitly |
+| Windows with Linux VM/WSL2, remote executors and nested containers | Explicit profiles with independent tests; distinguish host OS from guest/tool OS |
+| macOS | Preserve portability and publish separate tests before claiming parity |
 
 TLS interception changes trust and may affect signed or intentionally unusual
 requests. Preserve raw targets and expose ambiguous parsing. Do not normalize test
@@ -288,29 +500,56 @@ only: one million 1 KB metadata records is approximately 1 GB before indexes and
 replication; 50 KB bodies per request add approximately 50 GB. Retention defaults
 must follow measured workload and operator needs.
 
+Deception-resilience controls also cost review time, accounting overhead and
+evidence storage. Measure false positives on benign controls, lost useful work,
+stop latency and budget overshoot. Stronger isolation for high-risk artifact
+execution is a separate runner profile; this proposal makes no VM-level isolation
+claim for a shared-kernel sandbox.
+
 ## Delivery sequence and exit gates
 
-| PR | Focus | Dependencies | Acceptance |
+| PR | Deliverable | Dependencies | Exit criterion |
 | --- | --- | --- | --- |
-| 1 | This ADR, contracts and support boundaries | None | Reviewable design; no runtime behavior change |
-| 2 | Audit metadata/provenance, durable ingestion and health/coverage | 1 | Denied/failed/forwarded events, capture-off, restart, duplicate and spool-full tests |
-| 3 | Policy adapter at managed egress/final dial | 1, 2 | Domain/port/IP, DNS, redirect, upstream proxy, revocation and deny precedence tests |
-| 4 | Pinned srt Linux runner, shell/custom commands and scoped local MCP | 3 | Direct sockets/children/proxy-env changes cannot bypass; cancellation and task isolation |
-| 5 | Search API/UI, timeline, retention, archive lookup and export | 2 plus producers | URL/time investigation with correct attribution, authorization and gap reporting |
-| 6 | Indirect-action scope review and evidence correlation | 1, 2 | Known secondary destinations checked; uncertain actions reviewed; remote evidence labeled |
-| 7 | Packaging, diagnostics, compatibility and rollout benchmarks | 3–6 | Reproducible support matrix, migration and rollback procedure |
+| 1 | ADR, portable Runner/policy/audit contracts and support boundaries | — | Design review only; no new runtime dependency or default |
+| 2 | Durable lightweight audit, provenance, coverage and assessment/budget events | 1 | Capture-off, restart, duplicate, archive and spool-full tests; assessments cannot rewrite observations |
+| 3 | Authoritative gateway policy and network budgets | 1, 2 | Final-dial IP/host/port, DNS, redirects, deny precedence, revocation and aggregate budgets |
+| 4 | Go/bwrap supervisor: explicit offline profile, filesystem/process isolation, lifecycle and installation preflight | 1, 2 and shared Runner contract | Required namespaces, argv/env/fd handling, child cleanup, cross-task isolation, missing-bwrap diagnostics; no network-capable strict claim |
+| 5 | Task-private bridge to the ARTEX gateway and network lifecycle | 3, 4 | Removed proxy env/direct sockets cannot bypass policy; trusted attribution; existing tunnels close on cancel/revoke; gateway/bridge failure stops affected work |
+| 6 | Linux resource enforcement, tool/host qualification and reproducible packaging | 4, 5 | Pre-exec resource-domain entry, descendant/task-wide limits, supported amd64/arm64 host/container matrix and diagnostics; enables only tested opt-in strict profiles |
+| 7 | URL/time search, investigation timeline, retention/archive/export | 2 plus producer integration | Correct attribution, redaction, coverage and distinction between mentions, suspicion and observations |
+| 8 | Indirect-action review, evidence corroboration and pause/review/resume | 1, 2; 3–6 for end-to-end stop | Secondary scope checked; remote evidence labeled; fake success stays unverified; resumption cannot override a hard limit |
+| 9 | Separate Windows backend and explicit Linux guest/remote profiles | 3, shared Runner contract, backend acceptance | Real native Windows tests where claimed; host/guest tools distinguished; preserve macOS builds and require separate native macOS qualification |
+| 10 | Release/SBOM consolidation, compatibility fixtures and rollout benchmarks | 2–8 for Linux; 9 for additional platform claims | Measured overhead, storage, false positives, stop latency and overshoot; upgrade/migration/rollback; no unsupported cross-platform claim |
 
-Implement focused PRs in order; PR 5 and PR 6 may proceed after their dependencies.
-Keep within the repository's limit of seven open PRs per contributor. Code PRs
-must describe actual validation and avoid claiming coverage from unit mocks alone.
+The former single Linux runtime change is split into PRs 4–6. PR 4 qualifies only
+its explicit offline development profile; it does not establish network-capable
+strict execution. Only profiles passing the combined gateway, lifecycle, resource
+and platform gates may be enabled opt-in after PR 6. PR 7 can proceed when producers
+exist, and a native Windows milestone does not block a qualified Linux release.
+
+Ten planned PRs are not ten simultaneous submissions. Keep within the repository's
+limit of seven open PRs per contributor and deliver focused changes incrementally.
+Code PRs describe actual validation, including real runtime tests rather than mocks
+or cross-compilation alone. A promised security property failing is a test failure;
+unsupported environments are diagnosed separately, never converted into a pass.
 
 Use synthetic targets and authoritative test DNS. Cover allowed/denied domain and
 port, CIDR/IPv6, changed DNS, disallowed redirects, hostname/IP mismatch, invalid
 provenance, simultaneous tasks, child processes, removed proxy environment, native
 HTTP, parent proxies, TLS pinning/mTLS, opaque protocols, unavailable namespaces,
-gateway failure, full spool, cancellation and revocation. A mock A-to-B server-side
-request must demonstrate the remote trust boundary without operational exploit
-payloads. Preserve existing capture/rewrite/archive/noise-governor regressions.
+gateway/bridge failures, full spool, supervisor restart, cancellation and revocation
+of already established tunnels. Test filesystem races, descriptor leaks, pre-exec
+resource limits, descendant cleanup and aggregate quota exhaustion. A mock A-to-B
+server-side request demonstrates the remote trust boundary without operational
+exploit payloads. Preserve capture/rewrite/archive/noise-governor regressions.
+
+Deception-resilience fixtures use synthetic services, inert artifacts and fake
+credentials: content inducing a denied file read or destination; a fabricated
+success claim; bounded crawl/output/download/resource traps; cross-workspace
+attempts by two workers; and benign unusual responses. Assert actual enforcement,
+aggregate budgets, stop latency/overshoot and auditable review/resumption, without
+automatic confirmed-honeypot classification. PR 10 consolidates evidence for
+protections implemented earlier; it does not defer those protections to release.
 
 ## Rollout and open decisions
 
@@ -325,8 +564,10 @@ delete audit history.
 
 Resolve during implementation reviews:
 
-- Is the external ARTEX proxy topology supported by the selected released srt
-  artifact, and does it preserve authentication and final-dial enforcement?
+- Which protected bridge/helper topology and supported bwrap versions satisfy
+  task authentication, forced egress, cleanup and deployment requirements?
+- Which cgroup/delegation and storage mechanisms enforce required limits before
+  untrusted execution across the declared host/container support matrix?
 - Which execution surfaces can satisfy per-run and per-tool-call attribution
   without unacceptable MCP startup overhead?
 - Which scope syntax/migration and URL ambiguity semantics should be exposed?
@@ -334,3 +575,7 @@ Resolve during implementation reviews:
 - Which TLS/non-HTTP profiles are initially supported, and which require a
   separate executor?
 - What retention and performance targets follow from benchmark measurements?
+- Which Windows backend and OS builds meet strict-mode requirements, and which
+  operations must use explicitly selected Linux-guest/remote profiles?
+- Which aggregate budgets and suspicion-to-pause policy preserve useful work
+  while containing deceptive workloads?
