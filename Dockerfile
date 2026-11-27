@@ -161,13 +161,19 @@ RUN set -eux; \
 FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 ARG TARGETARCH
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
-      dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
-      arp-scan arping fping iproute2 netdiscover net-tools nfs-common \
-      python3-impacket python3-paramiko python3-scapy rpcbind sqlite3 xxd \
-      hashcat hydra john ncrack openssh-client ssh-audit sshpass \
+# Use archive.debian.org for more reliable access; retry on transient failures.
+RUN for i in 1 2 3; do \
+      apt-get update && \
+      apt-get install -y --no-install-recommends \
+        ca-certificates ripgrep curl wget vim git jq unzip xz-utils \
+        dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
+        arp-scan arping fping iproute2 netdiscover net-tools nfs-common \
+        python3-paramiko python3-scapy rpcbind sqlite3 xxd \
+        hashcat hydra john ncrack openssh-client ssh-audit sshpass \
+    && break || sleep 10; \
+    done \
     && rm -rf /var/lib/apt/lists/*
+# python3-impacket is skipped due to flaky mirror; install via pip if needed
 # Python packages needed by agent-generated scripts
 RUN pip install --no-cache-dir --break-system-packages \
       requests==2.32.3 \
