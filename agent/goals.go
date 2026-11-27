@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
@@ -72,10 +74,30 @@ type GoalSpec struct {
 	VulnClass string `json:"vulnclass,omitempty"`
 }
 
+// ErrGoalDecompositionContract reports that the Goal Decomposer did not submit
+// at least one non-empty goal through a structured set_goals tool call even
+// after the single strict retry.
+var ErrGoalDecompositionContract = errors.New("goal decomposition did not produce a structured set_goals tool call")
+
+// ErrGoalDecompositionEmptyInput reports that goal decomposition was invoked
+// with an empty task goal.
+var ErrGoalDecompositionEmptyInput = errors.New("goal decomposition requires a non-empty task goal")
+
+// ErrGoalDecompositionNoProvider reports that goal decomposition cannot run
+// because no LLM provider is configured. Callers distinguish this from a
+// structured tool-call contract failure (ErrGoalDecompositionContract).
+var ErrGoalDecompositionNoProvider = errors.New("goal decomposition failed: no LLM provider configured")
+
+// goalsStrictRetryPrompt is sent once when the initial goal decomposition run
+// finishes without persisting any non-empty goal via a structured set_goals
+// tool call (e.g. the model emitted set_goals in plain text instead).
+const goalsStrictRetryPrompt = "You did not submit any goals through a structured tool call. Do not write set_goals or JSON as plain text. Invoke the structured set_goals tool now with at least one non-empty goal."
+
 // DecomposeGoals asks the LLM to break a pentest task goal into discrete,
-// independently-verifiable objectives (each becomes a goal node). Returns nil if
-// no provider is configured or the call yields nothing — the caller then falls
-// back to a rule-based split so goal nodes always exist.
+// independently-verifiable objectives (each becomes a goal node). It enforces
+// the structured set_goals tool-call contract: if no non-empty goal is
+// submitted on the first pass, it retries once with a stricter instruction and
+// then returns an explicit error instead of materializing empty goals.
 //
 // prov is supplied by the caller (rather than built here from a Config) so goal
 // decomposition rides the SAME provider instance as the rest of the engine — it
@@ -94,12 +116,8 @@ type GoalSpec struct {
 //
 // ts is the task's exploration store: set_goals writes the decomposed goal nodes
 // straight into it (the same managed tool the main agent uses to add goals at
-// runtime). The returned specs are read back from the store so callers can emit
-// per-goal activity and detect the "LLM produced nothing" case for their fallback.
-func DecomposeGoals(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, emit func(db.Activity)) []GoalSpec {
-	if prov == nil {
-		return nil
-	}
+// runtime).
+func DecomposeGoals(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, emit func(db.Activity)) ([]GoalSpec, error) {
 	return DecomposeGoalsWithProvider(ctx, prov, dataDir, goalText, desc, as, ts, taskID, false, 0, emit)
 }
 
@@ -107,9 +125,16 @@ func DecomposeGoals(ctx context.Context, prov llm.Provider, dataDir, goalText, d
 // ordered provider chain. It preserves the same tools and write behavior while
 // letting the caller own provider selection/failover. maxTokens is the profile's
 // per-reply output cap (0 = send none).
-func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, nonStreaming bool, maxTokens int, emit func(db.Activity)) []GoalSpec {
+func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, nonStreaming bool, maxTokens int, emit func(db.Activity)) ([]GoalSpec, error) {
 	if prov == nil {
-		return nil
+		return nil, ErrGoalDecompositionNoProvider
+	}
+	if ts == nil {
+		return nil, errors.New("goal decomposition failed: exploration store is not initialized")
+	}
+	trimmedGoal := strings.TrimSpace(goalText)
+	if trimmedGoal == "" {
+		return nil, ErrGoalDecompositionEmptyInput
 	}
 	// Goal decomposition is a one-shot call: it does not attach a transcript store, so
 	// agentcore does not put a session id on the ctx (it only does when there is a
@@ -120,8 +145,10 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 	// explicitly: decomposition requests of the same exploration share it (good for
 	// cache hits), the naming does not collide with planner/worker, and
 	// llmrec.parseSession can attribute it correctly.
-	if ts != nil {
-		ctx = transcript.WithSessionID(ctx, fmt.Sprintf("exp%d-goals", ts.ID()))
+	ctx = transcript.WithSessionID(ctx, fmt.Sprintf("exp%d-goals", ts.ID()))
+	beforeIDs, err := existingGoalIDs(ts)
+	if err != nil {
+		return nil, fmt.Errorf("goal decomposition failed to read existing goals: %w", err)
 	}
 	// worker="goals" tags the goal nodes' provenance; ts/taskID let set_goals link
 	// each goal under the task root. This is the catalog's real set_goals tool, so a
@@ -142,19 +169,19 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 		tools = append(tools, tsx.addTaskScope())
 		sys += goalsScopeTail
 	}
-	userMsg := "Task goal:\n" + goalText
+	userMsg := "Task goal:\n" + trimmedGoal
 	if d := strings.TrimSpace(desc); d != "" {
 		userMsg += "\n\nTask description (background information, may include target scope / flag count / engagement notes; for reference only — do not invent anything it does not mention):\n" + d
 	}
-	// Use captureRun so every LLM step is emitted as an activity record (visible in
-	// the plan tab under the round-0 marker). Falls back gracefully when emit is nil.
+	// Use captureRunSession on one session so a single strict retry keeps any
+	// prior tool results (constraints/scope) and shows the model its prior output.
 	captureEmit := func(r db.Activity) {
 		if emit != nil {
 			r.Worker = "planner"
 			emit(r)
 		}
 	}
-	captureRun(ctx, agentcore.Options{
+	session := agentcore.NewSession(agentcore.Options{
 		Provider:               prov,
 		SystemPrompt:           []string{sys},
 		Tools:                  tools,
@@ -164,23 +191,77 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 		MaxTurns:     8,
 		NonStreaming: nonStreaming, // when this profile selects non-streaming, use Provider.Complete
 		MaxTokens:    maxTokens,    // 0 = send no cap, the server's default decides
-	}, userMsg, captureEmit)
-	// set_goals persisted the goals directly; read them back so the caller sees what
-	// was written (empty slice ⇒ the LLM produced nothing ⇒ caller falls back).
-	if ts == nil {
-		return nil
+	})
+	defer session.Close()
+
+	finalText, _, runErr := captureRunSession(ctx, session, userMsg, captureEmit)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
-	nodes, _ := ts.ListByKind(db.KindGoal, 10000)
+	if runErr != nil {
+		return nil, fmt.Errorf("goal decomposition failed: %w", runErr)
+	}
+	out, err := readNewGoals(ts, beforeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("goal decomposition failed to read persisted goals: %w", err)
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+
+	// No valid structured set_goals call succeeded on the first pass: allow
+	// exactly one strict retry before failing explicitly.
+	log.Printf("[goals] task %d: goal decomposer produced no structured set_goals tool call; retrying once with stricter instruction", taskID)
+	finalText, _, runErr = captureRunSession(ctx, session, goalsStrictRetryPrompt, captureEmit)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if runErr != nil {
+		return nil, fmt.Errorf("goal decomposition retry failed: %w", runErr)
+	}
+	out, err = readNewGoals(ts, beforeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("goal decomposition failed to read persisted goals after retry: %w", err)
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+	if strings.TrimSpace(finalText) != "" {
+		return nil, fmt.Errorf("%w after retry (model returned plain text instead of a structured tool call)", ErrGoalDecompositionContract)
+	}
+	return nil, fmt.Errorf("%w after retry", ErrGoalDecompositionContract)
+}
+
+func existingGoalIDs(ts *db.ExplorationStore) (map[int64]struct{}, error) {
+	nodes, err := ts.ListByKind(db.KindGoal, 10000)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[int64]struct{}, len(nodes))
+	for _, n := range nodes {
+		ids[n.ID] = struct{}{}
+	}
+	return ids, nil
+}
+
+func readNewGoals(ts *db.ExplorationStore, before map[int64]struct{}) ([]GoalSpec, error) {
+	nodes, err := ts.ListByKind(db.KindGoal, 10000)
+	if err != nil {
+		return nil, err
+	}
 	var out []GoalSpec
 	for _, n := range nodes {
+		if _, existed := before[n.ID]; existed {
+			continue
+		}
 		var p struct {
 			Text      string `json:"text"`
 			VulnClass string `json:"vulnclass"`
 		}
 		_ = json.Unmarshal(n.Payload, &p)
-		if strings.TrimSpace(p.Text) != "" {
-			out = append(out, GoalSpec{Text: p.Text, VulnClass: p.VulnClass})
+		if text := strings.TrimSpace(p.Text); text != "" {
+			out = append(out, GoalSpec{Text: text, VulnClass: strings.TrimSpace(p.VulnClass)})
 		}
 	}
-	return out
+	return out, nil
 }

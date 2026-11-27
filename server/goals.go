@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -46,10 +47,26 @@ func (s *Server) startTaskEngine(t *Task) {
 	}
 	s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
 		Summary: "round 0 goal decomposition"})
-	goals := s.createGoals(ctx, t, func(r db.Activity) {
+	goals, err := s.createGoals(ctx, t, func(r db.Activity) {
 		s.engine.emitActivity(t, r)
 	})
 	if ctx.Err() != nil || s.engine.IsDeleting(t.ID) {
+		return
+	}
+	if err != nil {
+		log.Printf("[goals] task %s goal decomposition failed: %v", t.ID, err)
+		s.engine.emitActivity(t, db.Activity{
+			Worker:  "planner",
+			Kind:    "result",
+			IsError: true,
+			Summary: "Goal decomposition failed: " + err.Error(),
+			Detail:  err.Error(),
+		})
+		if won, ferr := s.m.SetTaskStatusGuarded(t.ID, "failed", ""); ferr != nil {
+			log.Printf("[goals] task %s failed to persist failed status: %v", t.ID, ferr)
+		} else if won {
+			go s.reconcileConcurrency()
+		}
 		return
 	}
 	for _, g := range goals {
@@ -365,22 +382,21 @@ func (s *Server) reviveTask(t *Task) {
 	}
 }
 
-// createGoals materializes the goal node(s) under the task root (rel objective).
-// Decomposition is done ENTIRELY by the LLM (the project requires an LLM). There is
-// no rule-based fallback splitter — it only ever produced garbage (shredded URLs,
-// meaningless 2-way splits). If the LLM yields nothing (an error), the raw task goal
-// is used verbatim as a single goal so the task still has something to judge against.
-// Returns the seeded specs so callers can emit activity records for them.
+// createGoals materializes the goal node(s) under the task root (rel objective)
+// through the LLM Goal Decomposer's structured set_goals tool call. It returns an
+// explicit error if the task has no goal or if the decomposer fails to submit at
+// least one non-empty goal via a structured tool call (including after its single
+// strict retry) — empty goals or raw fallbacks are never materialized.
 // emit, when non-nil, is forwarded to DecomposeGoals so LLM steps are visible in the UI.
-func (s *Server) createGoals(ctx context.Context, t *Task, emit func(db.Activity)) []goalSpec {
+func (s *Server) createGoals(ctx context.Context, t *Task, emit func(db.Activity)) ([]goalSpec, error) {
 	if t == nil {
-		return nil
+		return nil, fmt.Errorf("task is nil")
+	}
+	if strings.TrimSpace(t.Goal) == "" {
+		return nil, fmt.Errorf("task %s has empty goal", t.ID)
 	}
 	// Use the SAME LLM the task runs on (its pinned profile, else the active profile),
-	// NOT agent.FromEnv() — the LLM is configured via the UI (DB profile), not env vars,
-	// so FromEnv returned empty and every task silently fell back to the crude rule
-	// splitter (which shredded URLs / made meaningless 2-way splits).
-	var specs []goalSpec
+	// NOT agent.FromEnv() — the LLM is configured via the UI (DB profile), not env vars.
 	var as *db.AssetStore
 	if s.m != nil {
 		as = s.m.Assets()
@@ -388,26 +404,36 @@ func (s *Server) createGoals(ctx context.Context, t *Task, emit func(db.Activity
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	s.engine.BeginLLMCall(t.ID)
 	goalRuntime := s.agentsForTask(t).runtime
-	decomposed := agent.DecomposeGoalsWithProvider(ctx, goalRuntime, s.m.dir, t.Goal, t.Description, as, t.Store, taskID, goalRuntime.nonStreaming(), goalRuntime.maxTokens(), emit)
+	decomposed, err := agent.DecomposeGoalsWithProvider(ctx, goalRuntime, s.m.dir, t.Goal, t.Description, as, t.Store, taskID, goalRuntime.nonStreaming(), goalRuntime.maxTokens(), emit)
 	s.engine.EndLLMCall(t.ID)
-	for _, g := range decomposed {
-		if strings.TrimSpace(g.Text) != "" {
-			specs = append(specs, goalSpec{Text: g.Text, VulnClass: g.VulnClass})
-		}
-	}
-	if len(specs) == 0 {
-		// No decomposed goals (LLM error / no provider): use the raw task goal verbatim
-		// as a single goal so the task still has something to judge against. This is the
-		// only path that writes here — decomposed goals are already persisted by the tool.
-		if g := strings.TrimSpace(t.Goal); g != "" {
-			log.Printf("[goals] task %s: LLM goal decomposition produced nothing, falling back to the raw goal as a single goal", t.ID)
+	if err != nil {
+		if errors.Is(err, agent.ErrGoalDecompositionNoProvider) {
+			// No LLM provider is configured yet: preserve the pre-existing fallback
+			// so the task gets a single raw goal node linked to its origin fact and
+			// stays alive until an LLM is configured. Structured contract failures
+			// from an actual model remain strict and fail the task.
+			g := strings.TrimSpace(t.Goal)
+			log.Printf("[goals] task %s: no LLM provider configured, seeding raw goal as a single goal", t.ID)
 			origin, _ := t.Store.OriginFactID()
-			id, _ := t.Store.AddNode(db.KindGoal, map[string]any{"text": g}, 0, "open", "system", nil)
+			id, addErr := t.Store.AddNode(db.KindGoal, map[string]any{"text": g}, 0, "open", "system", nil)
+			if addErr != nil {
+				return nil, fmt.Errorf("seed raw goal: %w", addErr)
+			}
 			if origin > 0 && id > 0 {
 				_ = t.Store.Link(origin, db.RelSpawns, id) // goal descends from the task root (origin fact)
 			}
-			specs = []goalSpec{{Text: g}}
+			return []goalSpec{{Text: g}}, nil
+		}
+		return nil, err
+	}
+	var specs []goalSpec
+	for _, g := range decomposed {
+		if text := strings.TrimSpace(g.Text); text != "" {
+			specs = append(specs, goalSpec{Text: text, VulnClass: strings.TrimSpace(g.VulnClass)})
 		}
 	}
-	return specs
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("goal decomposition produced no valid goals")
+	}
+	return specs, nil
 }

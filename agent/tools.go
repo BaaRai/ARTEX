@@ -501,7 +501,12 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	for _, g := range goals {
 		var p map[string]any
 		_ = json.Unmarshal(g.Payload, &p)
-		gsum = append(gsum, map[string]any{"id": g.ID, "state": g.State, "text": p["text"]})
+		text, _ := p["text"].(string)
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		gsum = append(gsum, map[string]any{"id": g.ID, "state": g.State, "text": text})
 	}
 	out["goals"] = gsum
 	// hints: strategic hints attached to the graph by the human/main agent via
@@ -681,7 +686,16 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// the original task (root) so the planner always has it, not just the
 	// decomposed goals.
 	if description, goal, err := t.ts.Root(); err == nil {
-		out["task"] = map[string]any{"description": description, "goal": goal}
+		task := map[string]any{}
+		if d := strings.TrimSpace(description); d != "" {
+			task["description"] = d
+		}
+		if g := strings.TrimSpace(goal); g != "" {
+			task["goal"] = g
+		}
+		if len(task) > 0 {
+			out["task"] = task
+		}
 	}
 	// Direct source tasks are a live, read-only blackboard view. Keep their
 	// summaries in a separate field so their intents never enter this task's
