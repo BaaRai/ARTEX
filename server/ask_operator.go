@@ -70,6 +70,15 @@ func (s *Server) toolAskOperator() actool.CoreTool {
 				return actool.Errorf("Error: " + err.Error()), nil
 			}
 			text := "OPERATOR INPUT REQUESTED: " + q + " (this intent is pausing; reply here to resume it with your answer)"
+			if s.browser != nil {
+				// The question releases the CAPTCHA block of this run's browser tools, and
+				// a run that was driving the shared browser points the operator at it.
+				holder, _ := browserRunHolder(ri, "worker")
+				if s.browser.UsedRecentlyBy(holder) {
+					text += " — the page is open in the shared browser: Function → Browser, Take over, then Hand back when done"
+				}
+				s.browser.NoteAsk(holder)
+			}
 			act := askOperatorActivity(text, att, targetDerivedHosts(q, goalTargets(t.Goal)))
 			node := ri.IntentID
 			act.NodeID = &node

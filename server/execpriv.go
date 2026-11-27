@@ -88,6 +88,13 @@ func logExecOnce(format string, args ...any) {
 // execIDString renders an executor id for the environment and the shim arguments.
 func execIDString(id uint32) string { return strconv.FormatUint(uint64(id), 10) }
 
+// WithSharedBrowser turns the shared browser on or off (sharedbrowser.go). Off
+// keeps the previous behavior: each agent run's browser MCP launches its own
+// private headless browser.
+func WithSharedBrowser(on bool) Option {
+	return func(s *Server) { s.sharedBrowserOn = on }
+}
+
 // WithExecPrivilege sets the identity agent processes run under. The binary passes the
 // result of ResolveExecPrivilege; tests and other callers keep the zero value.
 func WithExecPrivilege(p ExecPrivilege) Option {

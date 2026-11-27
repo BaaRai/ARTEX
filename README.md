@@ -235,6 +235,14 @@ worker remains confined to the intent it claimed.
   - Press **Stop** when done. Everything stays in your local traffic store.
 
   </details>
+- **Shared browser you can take over** (Function → Browser): every agent run's browser MCP drives one
+  persistent Chromium that you watch live. At a CAPTCHA, an email/SMS code, 2FA or a login, the agent
+  calls `ask_operator` instead of guessing; press **Take over**, finish it in the view, then **Hand back**
+  and the agent continues in the same tab with the same cookies. Browser tools wait while you hold control,
+  and acting tools are refused while a human check is on screen. The profile persists in
+  `<data>/browser-profile`, and the launch drops automation tells (`navigator.webdriver`, `HeadlessChrome`),
+  so challenges appear less often. Turn it off with `-shared-browser=false` (`ARTEX_SHARED_BROWSER=false`).
+  You can also press **Start browser** and sign in before a task runs.
 - **Verified findings**: findings carry a POE level, a verification status and a note; a finding is
   `verified` only when a bound proof/response and verbatim evidence quotes support it. Gzip/deflate
   bodies are decoded before the quote check. The findings table supports bulk status updates, and

@@ -121,6 +121,9 @@ import type {
   UsageStats,
   WorkspaceFile,
   WorkspaceListing,
+  SharedBrowserAction,
+  SharedBrowserInput,
+  SharedBrowserStatus,
 } from "@/lib/types";
 
 // Combined file data per attachment upload; matches maxChatUpload in server/chatupload.go.
@@ -377,6 +380,12 @@ export const api = {
   deleteTask: (id: string, options: DeleteTaskOptions) => del<DeleteTaskResult>(`/tasks/${id}`, options),
   controlTask: (id: string, action: "pause" | "resume") =>
     post<{ id: string; paused: boolean; queued: boolean; status: string }>(`/tasks/${id}/control`, { action }),
+  // ---- shared browser (Function → Browser) ----
+  browserStatus: () => get<SharedBrowserStatus>("/browser/status").then((s) => ({ ...s, tabs: arr(s.tabs) })),
+  browserStart: () => post<SharedBrowserStatus>("/browser/start"),
+  browserControl: (action: SharedBrowserAction, target?: string) =>
+    post<SharedBrowserStatus>("/browser/control", { action, target: target ?? "" }),
+  browserInput: (events: SharedBrowserInput[]) => post<void>("/browser/input", { events }),
   controlTasksBatch: (taskIds: string[], action: "pause" | "resume") =>
     post<{ items: BatchControlItem[] }>("/tasks/control/batch", { task_ids: taskIds, action }),
   taskArchives: (input?: { page?: number; size?: number; q?: string; state?: string }) => {
