@@ -649,6 +649,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		if _, isHyp := isHypothesisNode(n); isHyp {
 			continue
 		}
+		if _, isCap := isCapabilityNode(n); isCap {
+			continue
+		}
 		if hidden(n.ID) {
 			continue // folded into a digest and still cold — see cold_digests
 		}
@@ -703,6 +706,17 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// Direct source tasks are a live, read-only blackboard view. Keep their
 	// summaries in a separate field so their intents never enter this task's
 	// frontier or get mistaken for locally claimable work.
+	if heldCap, reqCap, closedCap := t.capabilityOverview(); len(heldCap) > 0 || len(reqCap) > 0 || len(closedCap) > 0 {
+		if len(heldCap) > 0 {
+			out["capabilities_held"] = heldCap
+		}
+		if len(reqCap) > 0 {
+			out["capabilities_required"] = reqCap
+		}
+		if len(closedCap) > 0 {
+			out["capabilities_closed"] = closedCap
+		}
+	}
 	if openHyp, closedHyp := t.hypothesisOverview(); len(openHyp) > 0 || len(closedHyp) > 0 {
 		if len(openHyp) > 0 {
 			out["open_hypotheses"] = openHyp
@@ -1325,6 +1339,8 @@ type intentItem struct {
 	HypothesisID json.RawMessage   `json:"hypothesis_id"`
 	NewEvidence  string            `json:"new_evidence"`
 	ReopenReason string            `json:"reopen_reason"`
+	Gains        []json.RawMessage `json:"gains"`
+	Consumes     []json.RawMessage `json:"consumes"`
 }
 
 // addOneIntent creates one intent node, links its upstream lineage, and returns the id.
@@ -1338,6 +1354,10 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 		return 0, fmt.Errorf("summary must not be empty")
 	}
 	if err := t.checkClosedHypothesis(it); err != nil {
+		return 0, err
+	}
+	capWarn, err := t.checkIntentCapabilities(it)
+	if err != nil {
 		return 0, err
 	}
 	// Validate anchors first (before creating the node, so a bad anchor leaves no orphan intent).
@@ -1376,6 +1396,15 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 	if len(anchors) > 0 {
 		payload["asset_ids"] = anchors
 	}
+	if len(it.Gains) > 0 {
+		payload["gains"] = it.Gains
+	}
+	if len(it.Consumes) > 0 {
+		payload["consumes"] = it.Consumes
+	}
+	if capWarn != "" {
+		payload["capability_shadow_warning"] = capWarn
+	}
 	id, err := t.ts.AddIntent(payload, priority, anchors, "planner")
 	if err != nil {
 		return 0, err
@@ -1408,6 +1437,8 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 			"hypothesis_id": idp("optional: hypothesis node id this intent tests"),
 			"new_evidence":  str("required when reopening a closed hypothesis"),
 			"reopen_reason": str("required when reopening a closed hypothesis"),
+			"gains":         map[string]any{"type": "array", "description": "capabilities this intent aims to acquire (capability ids or {verb,object} objects)", "items": map[string]any{}},
+			"consumes":      map[string]any{"type": "array", "description": "capabilities this intent depends on (capability ids or {verb,object} objects)", "items": map[string]any{}},
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
@@ -1503,6 +1534,9 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 			// A fact proves a goal only when it was seen directly (#124, F5): an inferred
 			// conclusion, or one without a confidence, is refused and the goal stays open.
 			// The confidence is declared by the agent that recorded the fact.
+			if cp, isCap := isCapabilityNode(evidenceNode); isCap && !cp.Verified {
+				return actool.Errorf(fmt.Sprintf("prove_goal refused: capability #%d is unverified (requires a proving finding, fact, or traffic reference)", ev)), nil
+			}
 			if evidenceNode.Kind == db.KindFact {
 				var fp map[string]any
 				_ = json.Unmarshal(evidenceNode.Payload, &fp)
@@ -2677,7 +2711,7 @@ func (t *ToolSet) PlannerTools() []actool.CoreTool {
 		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(), t.knowledgeLookup(),
 		// cold-digest §6.1: restore folded cold nodes (digest body → members → detail).
 		t.expandDigest(),
-		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.listGoals(), t.upsertHypothesis(), t.addIntent(), t.proveGoal(), t.goalMet(),
+		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.listGoals(), t.upsertHypothesis(), t.recordCapability(), t.addIntent(), t.proveGoal(), t.goalMet(),
 		t.killWorkTool(), t.steerWorkTool(),
 		// report_finding: if the planner itself has confirmed a finding during
 		// situational assessment, it can register it directly (same tool as the worker's).
