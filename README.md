@@ -516,7 +516,7 @@ needed. Create a profile with format **OpenAI**, set **Base URL** to the gateway
 root, paste the key, then click the **↻** button next to *Model* to load the provider's
 catalog (`GET /v1/models`) and pick a model; models the provider adds later appear on the
 next refresh. For example, [NotHoly](https://notholy.com) (offensive-security models) uses
-base URL `https://api.notholy.com/v1` with an API key from its console.
+base URL `https://api.notholy.com/v1` with an API key from its console. The [NVIDIA NIM](https://integrate.api.nvidia.com) API uses base URL `https://integrate.api.nvidia.com/v1` with an API key from the NVIDIA console; the UI includes a preset for this endpoint.
 
 **Bedrock gateway**: select **Bedrock gateway** in System → LLM for a gateway that
 exposes the Bedrock `InvokeModel` and `InvokeModelWithResponseStream` paths and accepts
