@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/chatgptplan"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
@@ -38,6 +39,9 @@ type Config struct {
 	BaseURL string
 	APIKey  string
 	Model   string
+	// ChatGPTStore is the server's shared credential store. Sharing one instance
+	// keeps rotating refresh tokens serialized across all profile providers.
+	ChatGPTStore *chatgptplan.Store
 	// Proxy routes all LLM requests through the given proxy URL (http/https/socks5,
 	// optionally with user:pass@ credentials). Empty means direct — it does NOT
 	// fall back to the standard *_PROXY environment variables.
@@ -145,6 +149,8 @@ const (
 // OpenAI's public endpoint).
 const FormatOllama llm.Format = "ollama"
 const FormatBedrockGateway llm.Format = "bedrock-gateway"
+const FormatChatGPTPlan llm.Format = "chatgpt-plan"
+const FormatClaudeCode llm.Format = "claude-code"
 
 // DefaultOllamaBaseURL is the base of Ollama's OpenAI-compatible endpoint the
 // provider appends /chat/completions to. Must never end up empty: with an
@@ -175,8 +181,10 @@ func normalizeOllamaBaseURL(raw string) string {
 }
 
 // NeedsAPIKey reports whether this provider format requires an API key to be
-// usable. Ollama (local server) is keyless; every cloud format needs one.
-func (c Config) NeedsAPIKey() bool { return c.Format != FormatOllama }
+// usable. Local Ollama and subscription-backed formats are keyless.
+func (c Config) NeedsAPIKey() bool {
+	return c.Format != FormatOllama && c.Format != FormatChatGPTPlan && c.Format != FormatClaudeCode
+}
 
 // CompactionWindow returns the model context window in TOKENS for compaction
 // thresholds, resolved from the user-configured size (ContextWindowK). 0/unset →
@@ -284,6 +292,22 @@ func FromEnv() (Config, bool) {
 		if c.BaseURL == "" || c.Model == "" {
 			return Config{}, false
 		}
+	case "chatgpt-plan":
+		c.Format = FormatChatGPTPlan
+		if c.BaseURL != "" {
+			return Config{}, false
+		}
+		if c.Model == "" {
+			c.Model = "gpt-6.1-sol"
+		}
+	case "claude-code":
+		c.Format = FormatClaudeCode
+		if c.BaseURL != "" {
+			return Config{}, false
+		}
+		if c.Model == "" {
+			c.Model = "sonnet"
+		}
 	default:
 		c.Format = llm.FormatAnthropic
 		c.APIKey = anthKey
@@ -339,6 +363,16 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		c.Format = FormatBedrockGateway
 		// No public-provider defaults: an absent URL, model or token fails closed.
 		c.BaseURL = strings.TrimRight(strings.TrimSuffix(strings.TrimSuffix(c.BaseURL, "/invoke-with-response-stream"), "/invoke"), "/")
+	case "chatgpt-plan":
+		c.Format = FormatChatGPTPlan
+		if c.Model == "" {
+			c.Model = "gpt-6.1-sol"
+		}
+	case "claude-code":
+		c.Format = FormatClaudeCode
+		if c.Model == "" {
+			c.Model = "sonnet"
+		}
 	default:
 		c.Format = llm.FormatAnthropic
 		// provider appends "/v1/messages".
@@ -372,6 +406,10 @@ func (c Config) Provider() string {
 		return "ollama"
 	case FormatBedrockGateway:
 		return "bedrock-gateway"
+	case FormatChatGPTPlan:
+		return "chatgpt-plan"
+	case FormatClaudeCode:
+		return "claude-code"
 	}
 	return "anthropic"
 }
@@ -380,6 +418,18 @@ func (c Config) Provider() string {
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
 func (c Config) NewProvider() (llm.Provider, error) {
+	if c.Format == FormatChatGPTPlan || c.Format == FormatClaudeCode {
+		if strings.TrimSpace(c.APIKey) != "" || strings.TrimSpace(c.BaseURL) != "" {
+			return nil, fmt.Errorf("%s: subscription profiles do not accept an API key or base URL", c.Provider())
+		}
+		if c.Format == FormatChatGPTPlan {
+			if c.ChatGPTStore == nil {
+				return nil, fmt.Errorf("chatgpt-plan: credential store is not configured")
+			}
+			return NewChatGPTPlanProvider(c, c.ChatGPTStore)
+		}
+		return NewClaudeCodeProvider(c.Model)
+	}
 	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey, c.UserAgent)
 	if err != nil {
 		return nil, err
@@ -452,6 +502,13 @@ func IsQuotaExhaustedMessage(message string) bool {
 	// even when a gateway happens to echo a quota-looking phrase in the body.
 	if nonFailoverHTTPStatus.MatchString(message) {
 		return false
+	}
+	// Subscription adapters preserve these explicit plan-limit codes. Claude's
+	// native error may also say "rate_limit", so recognize the normalized code
+	// before rejecting ordinary per-minute rate limits below.
+	if strings.Contains(message, "subscription_sharing_usage_limit_exceeded") ||
+		strings.Contains(message, "claude_subscription_usage_limit_exceeded") {
+		return true
 	}
 	// Provider APIs frequently describe an ordinary rate limit as "quota
 	// exceeded", especially Google-style responses containing a quota metric.

@@ -27,6 +27,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/archivestore"
+	"github.com/Autumn-27/artex/chatgptplan"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
@@ -51,8 +52,10 @@ type Server struct {
 	engine *Engine
 	ctx    context.Context
 
-	skillDir string // root directory for skill subdirectories
-	jwtKey   []byte // HS256 signing key loaded from / generated into keyDir/jwt.key
+	skillDir     string             // root directory for skill subdirectories
+	jwtKey       []byte             // HS256 signing key loaded from / generated into keyDir/jwt.key
+	listenAddr   string             // configured HTTP listener; used only to choose the fixed loopback OAuth callback port
+	chatgptStore *chatgptplan.Store // subscription login state, kept outside the profile database
 
 	scrubSecrets bool // drop ARTEX_PG_DSN and the API keys from the environment once read (binary only)
 
@@ -205,6 +208,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		provByProfile:  map[int64]*provEntry{},
 		taskAgents:     map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
 		loginLimit: newLoginLimiter(time.Now), pwdLimit: newLoginLimiter(time.Now)}
+	s.chatgptStore = chatgptplan.NewStore(filepath.Join(keyDir, "chatgpt-plan.json"))
 	s.llmHealth, s.llmHealthSync = newLLMHealthRegistry(ctx, m.pg)
 	for _, o := range opts {
 		o(s)
@@ -306,6 +310,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			log.Printf("[engine] LLM configured from DB: %s / %s", cfg.Provider(), cfg.Model)
 		}
 	} else if cfg, ok := agent.FromEnv(); ok {
+		cfg.ChatGPTStore = s.chatgptStore
 		if err := s.applyLLM(cfg); err != nil {
 			log.Printf("[engine] env provider init failed — engine idle: %v", err)
 		} else {
@@ -431,6 +436,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 		return agent.Config{}, false
 	}
 	cfg := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+	cfg.ChatGPTStore = s.chatgptStore
 	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
 	cfg.ContextWindowK = p.ContextWindowK
 	cfg.ThinkingType = p.ThinkingType
@@ -617,6 +623,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 		return agent.Config{}, false
 	}
 	cfg := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+	cfg.ChatGPTStore = s.chatgptStore
 	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
 	cfg.ContextWindowK = p.ContextWindowK
 	cfg.ThinkingType = p.ThinkingType
@@ -1045,6 +1052,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm/pool", s.pgLLMPoolStatus)
 	mux.HandleFunc("POST /api/llm/pool/reset", s.pgLLMPoolReset)
 	mux.HandleFunc("POST /api/llm/models", s.pgListModels)
+	mux.HandleFunc("GET /api/llm/chatgpt/status", s.pgChatGPTStatus)
+	mux.HandleFunc("POST /api/llm/chatgpt/login", s.pgChatGPTLogin)
+	mux.HandleFunc("POST /api/llm/chatgpt/logout", s.pgChatGPTLogout)
+	mux.HandleFunc("GET /api/llm/claude/status", s.pgClaudeCodeStatus)
 
 	// interception rule management
 	mux.HandleFunc("GET /api/intercept/rules", s.interceptListRules)
@@ -1101,6 +1112,9 @@ func (s *Server) Handler() http.Handler {
 	api := cors(s.requireAuth(mux))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
+	// OAuth redirects reach this exact loopback path without an ARTEX session.
+	// The store validates the one-time state and PKCE verifier before exchanging.
+	root.HandleFunc("GET /auth/callback", s.chatgptCallback)
 	webui := s.webuiHandler()
 	root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Document-only headers; the shared ones come from securityHeaders.
@@ -1530,6 +1544,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		s.cfgMu.Unlock()
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	cfg.ChatGPTStore = s.chatgptStore
 	cfg.RatePerSecond, cfg.RatePerMinute = req.RatePerSecond, req.RatePerMinute
 	cfg.ThinkingType = req.ThinkingType
 	cfg.ReasoningEffort = req.ReasoningEffort
@@ -1646,6 +1661,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	cfg.ChatGPTStore = s.chatgptStore
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ThinkingType = req.ThinkingType

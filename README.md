@@ -502,8 +502,47 @@ runtime supports it.
 **LLM**: `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`), or configure it in the UI's
 "LLM Configuration" page, which can also add a local Ollama server as a keyless provider (format
 "Ollama", default base URL `http://127.0.0.1:11434/v1`). Optional:
-`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama | bedrock-gateway`), `ARTEX_LLM_MODEL`,
+`ARTEX_LLM_PROVIDER` (`anthropic | openai | openai-responses | ollama | bedrock-gateway | chatgpt-plan | claude-code`), `ARTEX_LLM_MODEL`,
 `ARTEX_LLM_BASE_URL`, `ARTEX_LLM_PROXY`.
+
+**Subscription sign-in and fallback (experimental):** The **ChatGPT subscription**
+and **Claude Code subscription** profile formats use account sign-in instead of an
+API key. For a local ARTEX server, open **System → LLM**, create a ChatGPT
+subscription profile, and choose **Continue with ChatGPT**. This uses OpenAI's
+[Sign in with ChatGPT for open-source applications](https://developers.openai.com/siwc/quickstart)
+flow and saves its token under `ARTEX_JWT_KEY_DIR/chatgpt-plan.json` (or next to the
+ARTEX binary when that variable is unset). The profile model must be available
+to the signed-in account. For Claude, install the official Claude Code CLI on
+the ARTEX host, run `claude auth login` as the same OS user that runs ARTEX,
+then create a Claude Code subscription profile with a CLI-supported model such
+as `sonnet`. ARTEX invokes the unmodified CLI and does not copy its credentials.
+See [Claude Code provider details](docs/claude-code-provider.md).
+The current login store holds one ChatGPT account per ARTEX server; Claude Code
+uses the CLI's current login for that server user.
+
+To use one subscription after the other reaches a recognized usage cap, create
+both profiles, set the preferred one **active**, keep the other **included in
+pool**, and enable **Pool settings → Enable pool**. The active profile is first;
+other profiles follow priority. If an Agent or task pins a profile, enable
+**Also fall back when a pinned config fails** or give the task an explicit
+**LLM config chain** containing both profiles. A successful sign-in is separate
+from connection testing; run **Test connection** for each profile before a
+long task. No live subscription inference is exercised by the automated tests.
+Claude Code may continue using paid extra usage after its included allowance;
+review that setting in your Anthropic plan if you expect the fallback to start
+at the included usage cap.
+
+ChatGPT's OAuth callback is fixed to `http://127.0.0.1:<ARTEX-port>/auth/callback`.
+The web sign-in button therefore requires a browser on the ARTEX host with the
+server listening on a reachable local port. For a container on that machine,
+publish the ARTEX port to host loopback and listen on `0.0.0.0` inside the
+container. A remote server needs a secure loopback callback path; this UI does
+not set up remote sign-in. On Windows, the stored ChatGPT credentials are bound
+to the OS user by DPAPI, so copying `chatgpt-plan.json` to another user or host
+will not transfer the login. Claude Code must be installed and signed in under
+the identity that runs ARTEX on the target host/container. See OpenAI's
+[self-hosted VM guidance](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms)
+when planning a remote deployment.
 
 **Base URL gotcha**: for the Anthropic format, enter the host **without** `/v1` (for example
 `https://api.anthropic.com`); ARTEX appends `/v1/messages`. OpenAI-format providers append

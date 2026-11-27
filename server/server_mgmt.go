@@ -2159,6 +2159,25 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	p.APIKey = body.APIKey
 	p.CustomHeaders = body.CustomHeaders
 	p.ClearCustomHeaders = body.ClearCustomHeaders
+	if p.Format == "chatgpt-plan" || p.Format == "claude-code" {
+		if strings.TrimSpace(p.APIKey) != "" || strings.TrimSpace(p.BaseURL) != "" {
+			writeErr(w, 400, "subscription profiles use local sign-in and do not accept an API key or base URL")
+			return
+		}
+		p.MaxTokens = 0 // neither subscription adapter sends an output cap
+		p.ThinkingType = ""
+		if p.Format == "claude-code" {
+			if strings.TrimSpace(p.Proxy) != "" {
+				writeErr(w, 400, "Claude Code uses the CLI's network settings; this profile cannot set a proxy")
+				return
+			}
+			p.SessionHeaderKey = ""
+			p.UserAgent = ""
+			p.RatePerSecond, p.RatePerMinute = 0, 0
+			p.ReasoningEffort = ""
+			p.Retry = db.RetryOverride{}
+		}
+	}
 	if p.Format == "bedrock-gateway" {
 		if _, err := agent.ParseBedrockGatewayHeaders(p.CustomHeaders); err != nil {
 			writeErr(w, 400, err.Error())
@@ -2187,6 +2206,9 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		p.ClearCustomHeaders = true
 	}
 	p.Streaming = body.Streaming == nil || *body.Streaming
+	if p.Format == "claude-code" {
+		p.Streaming = true // the CLI adapter returns buffered output to ARTEX
+	}
 	// The list returns the proxy masked: the placeholder sent back keeps the
 	// stored proxy and is never stored itself.
 	if isMaskedSecret(p.Proxy) {
@@ -2695,6 +2717,10 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Provider) == "bedrock-gateway" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "enter the Bedrock model ID manually; this gateway has no model-list endpoint"})
+		return
+	}
+	if req.Provider == "chatgpt-plan" || req.Provider == "claude-code" {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "enter a subscription model ID manually"})
 		return
 	}
 	// Resolve API key: form input > profile stored key. The stored key is only

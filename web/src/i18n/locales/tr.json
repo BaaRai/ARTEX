@@ -2752,5 +2752,22 @@
   "Only for a self-hosted Bot API server or a relay. Changing it requires entering the token again.": "Yalnızca kendi barındırdığınız bir Bot API sunucusu veya aktarıcı için. Değiştirirseniz token'ı yeniden girmeniz gerekir.",
   "The bot uses long polling, so ARTEX opens no inbound port. Messages it sends contain summaries and links, never evidence bodies or credentials.": "Bot uzun yoklama kullanır, bu yüzden ARTEX gelen bağlantılar için port açmaz. Gönderdiği mesajlar yalnızca özet ve bağlantı içerir; asla kanıt gövdesi veya kimlik bilgisi içermez.",
   "The bot is off. Enter a token and switch it on.": "Bot kapalı. Bir token girin ve botu açın.",
-  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "Henüz hiçbir sohbete izin verilmedi: bot her sohbeti reddeder ve sohbet kimliğini yanıtında bildirir. Kullanmaya başlamak için sohbet kimliğinizi buraya ekleyin."
+  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "Henüz hiçbir sohbete izin verilmedi: bot her sohbeti reddeder ve sohbet kimliğini yanıtında bildirir. Kullanmaya başlamak için sohbet kimliğinizi buraya ekleyin.",
+  "Connected on this ARTEX server": "Bu ARTEX sunucusunda bağlı",
+  "Sign-in required": "Oturum açmanız gerekiyor",
+  "Login status unknown": "Oturum durumu bilinmiyor",
+  "Only {count} usable profile(s) right now, so the pool has no effect — at least 2 profiles with API keys, local Ollama, or subscription sign-in and pool participation are required.": "Şu anda yalnızca {count} kullanılabilir profil var; havuzun etkili olması için API anahtarı, yerel Ollama veya abonelik oturumuyla kullanılabilen ve havuza katılan en az 2 profil gerekir.",
+  "ChatGPT sign-in failed: {error}": "ChatGPT oturum açma başarısız: {error}",
+  "ChatGPT sign-out failed: {error}": "ChatGPT oturum kapatma başarısız: {error}",
+  "ChatGPT sign-in": "ChatGPT oturum açma",
+  "Claude Code sign-in": "Claude Code oturum açma",
+  "Recheck": "Yeniden kontrol et",
+  "Continue with ChatGPT": "ChatGPT ile devam et",
+  "Disconnect": "Bağlantıyı kes",
+  "The browser opens OpenAI sign-in. ARTEX stores the resulting login outside model profiles.": "Tarayıcı OpenAI oturum açma sayfasını açar. ARTEX, oturum bilgilerini model profillerinin dışında saklar.",
+  "Run on the ARTEX host:": "ARTEX ana makinesinde çalıştırın:",
+  "Use a Claude subscription account, then click Recheck. ARTEX does not read your Claude credentials.": "Bir Claude abonelik hesabıyla oturum açın, ardından Yeniden kontrol et'e tıklayın. ARTEX, Claude kimlik bilgilerinizi okumaz.",
+  "Context window is in K (thousand tokens); 0 uses the 200K default.": "Bağlam penceresi K (bin token) cinsindendir; 0, varsayılan 200K değerini kullanır.",
+  "ChatGPT connected": "ChatGPT bağlandı",
+  "ChatGPT sign-in failed": "ChatGPT oturum açma başarısız"
 }

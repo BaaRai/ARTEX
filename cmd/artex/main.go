@@ -213,7 +213,7 @@ func run() int {
 	}
 	defer mgr.Close()
 
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation))
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation), server.WithListenAddress(*addr))
 	// ReadTimeout bounds how long the request headers and body may take to arrive.
 	// It does not limit how long a handler runs, so an event stream stays open.
 	// WriteTimeout is left unset: a write deadline would cut that stream.

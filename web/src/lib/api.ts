@@ -1178,6 +1178,10 @@ export const api = {
       max_tokens_field,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
+  chatgptLoginStatus: () => get<{ state: "connected" | "disconnected" | "unknown" }>("/llm/chatgpt/status"),
+  chatgptLogin: () => post<{ authorization_url: string }>("/llm/chatgpt/login", {}),
+  chatgptLogout: () => post<{ ok: boolean; warning?: string }>("/llm/chatgpt/logout", {}),
+  claudeCodeLoginStatus: () => get<{ state: "connected" | "disconnected" | "unknown" }>("/llm/claude/status"),
   saveLLMProfile: (p: {
     id?: number; // omit/0 = create; set = update that profile
     name: string;

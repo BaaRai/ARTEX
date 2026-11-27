@@ -119,6 +119,8 @@ func TestIsQuotaExhaustedError(t *testing.T) {
 		`HTTP status 402 Payment Required`,
 		`insufficient balance, please top up`,
 		`credit balance is too low`,
+		`status 429: subscription_sharing_usage_limit_exceeded`,
+		`rate_limit: claude_subscription_usage_limit_exceeded`,
 	}
 	for _, message := range positive {
 		if !isQuotaExhaustedError(errors.New(message)) {
@@ -128,6 +130,7 @@ func TestIsQuotaExhaustedError(t *testing.T) {
 
 	negative := []string{
 		`HTTP status 429: rate limit exceeded`,
+		`HTTP status 429: subscription_sharing_usage_unavailable`,
 		`RESOURCE_EXHAUSTED: rate limit exceeded`,
 		`HTTP status 429: quota exceeded for quota metric GenerateRequestsPerMinutePerProjectPerBaseModel`,
 		`RESOURCE_EXHAUSTED: TPM quota exceeded`,
