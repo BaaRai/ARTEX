@@ -4,7 +4,7 @@
 set -e
 
 echo "=== Testing Ghidra real API ==="
-curl -s http://ghidra:9090/v1/health
+curl -s http://ghidra:9090/healthz
 echo
 curl -s http://ghidra:9090/v1/version
 echo

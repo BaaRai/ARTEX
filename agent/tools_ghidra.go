@@ -62,9 +62,6 @@ func (t *ToolSet) ghidraStatus() actool.CoreTool {
 				return ghidraUnavailable(err)
 			}
 			out := map[string]any{"url": c.BaseURL(), "health": json.RawMessage(health)}
-			if version, err := c.Version(ctx); err == nil {
-				out["version"] = json.RawMessage(version)
-			}
 			if caps, err := c.Capabilities(ctx); err == nil {
 				out["capabilities"] = json.RawMessage(caps)
 			}

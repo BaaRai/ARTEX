@@ -113,22 +113,22 @@ func trimMessage(b []byte) string {
 	return s
 }
 
-// Health calls GET /v1/health.
+// Health calls GET /healthz.
 func (c *Client) Health(ctx context.Context) (json.RawMessage, error) {
-	return c.do(ctx, http.MethodGet, "/v1/health", nil, nil, "")
+	return c.do(ctx, http.MethodGet, "/healthz", nil, nil, "")
 }
 
-// Version calls GET /v1/version.
-func (c *Client) Version(ctx context.Context) (json.RawMessage, error) {
-	return c.do(ctx, http.MethodGet, "/v1/version", nil, nil, "")
+// Ready calls GET /readyz.
+func (c *Client) Ready(ctx context.Context) (json.RawMessage, error) {
+	return c.do(ctx, http.MethodGet, "/readyz", nil, nil, "")
 }
 
-// Capabilities calls GET /v1/capabilities so the agent can feature-detect.
+// Capabilities calls GET /api/capabilities so the agent can feature-detect.
 func (c *Client) Capabilities(ctx context.Context) (json.RawMessage, error) {
-	return c.do(ctx, http.MethodGet, "/v1/capabilities", nil, nil, "")
+	return c.do(ctx, http.MethodGet, "/api/capabilities", nil, nil, "")
 }
 
-// Upload streams a binary as multipart/form-data to POST /v1/jobs and returns
+// Upload streams a binary as multipart/form-data to POST /upload and returns
 // the job descriptor. The caller owns the reader and the context deadline.
 func (c *Client) Upload(ctx context.Context, filename string, r io.Reader) (json.RawMessage, error) {
 	if !c.Configured() {
@@ -150,7 +150,7 @@ func (c *Client) Upload(ctx context.Context, filename string, r io.Reader) (json
 		pw.CloseWithError(err)
 	}()
 	defer pr.Close()
-	raw, err := c.do(ctx, http.MethodPost, "/v1/jobs", nil, pr, mw.FormDataContentType())
+	raw, err := c.do(ctx, http.MethodPost, "/upload", nil, pr, mw.FormDataContentType())
 	if err != nil {
 		return nil, err
 	}
@@ -176,40 +176,48 @@ func normalizeUpload(raw json.RawMessage) (json.RawMessage, error) {
 	return raw, nil
 }
 
-// Job calls GET /v1/jobs/{id}.
+// Job calls GET /status/{id}.
 func (c *Client) Job(ctx context.Context, id string) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
 		return nil, err
 	}
-	return c.do(ctx, http.MethodGet, "/v1/jobs/"+url.PathEscape(id), nil, nil, "")
+	return c.do(ctx, http.MethodGet, "/status/"+url.PathEscape(id), nil, nil, "")
 }
 
-// Jobs calls GET /v1/jobs.
+// Jobs calls GET /jobs.
 func (c *Client) Jobs(ctx context.Context, limit int) (json.RawMessage, error) {
 	q := url.Values{}
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))
 	}
-	return c.do(ctx, http.MethodGet, "/v1/jobs", q, nil, "")
+	return c.do(ctx, http.MethodGet, "/jobs", q, nil, "")
 }
 
-// Cancel calls POST /v1/jobs/{id}/cancel.
+// Cancel calls POST /api/jobs/{id}/cancel.
 func (c *Client) Cancel(ctx context.Context, id string) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
 		return nil, err
 	}
-	return c.do(ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(id)+"/cancel", nil, bytes.NewReader(nil), "application/json")
+	return c.do(ctx, http.MethodPost, "/api/jobs/"+url.PathEscape(id)+"/cancel", nil, bytes.NewReader(nil), "application/json")
 }
 
-// Summary calls GET /v1/results/{id}/summary.
+// Delete calls DELETE /api/jobs/{id}.
+func (c *Client) Delete(ctx context.Context, id string) (json.RawMessage, error) {
+	if err := validID(id); err != nil {
+		return nil, err
+	}
+	return c.do(ctx, http.MethodDelete, "/api/jobs/"+url.PathEscape(id), nil, nil, "")
+}
+
+// Summary calls GET /api/jobs/{id}/summary.
 func (c *Client) Summary(ctx context.Context, id string) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
 		return nil, err
 	}
-	return c.do(ctx, http.MethodGet, "/v1/results/"+url.PathEscape(id)+"/summary", nil, nil, "")
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/summary", nil, nil, "")
 }
 
-// Functions calls GET /v1/results/{id}/functions with an optional name search.
+// Functions calls GET /api/jobs/{id}/functions with an optional name search.
 func (c *Client) Functions(ctx context.Context, id, search string, offset, limit int) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
 		return nil, err
@@ -218,10 +226,10 @@ func (c *Client) Functions(ctx context.Context, id, search string, offset, limit
 	if strings.TrimSpace(search) != "" {
 		q.Set("q", search)
 	}
-	return c.do(ctx, http.MethodGet, "/v1/results/"+url.PathEscape(id)+"/functions", q, nil, "")
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/functions", q, nil, "")
 }
 
-// Decompile calls GET /v1/results/{id}/function/{addr}/decompile.
+// Decompile calls GET /api/jobs/{id}/decompile?addr={addr}.
 func (c *Client) Decompile(ctx context.Context, id, addr string) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
 		return nil, err
@@ -229,10 +237,12 @@ func (c *Client) Decompile(ctx context.Context, id, addr string) (json.RawMessag
 	if strings.TrimSpace(addr) == "" {
 		return nil, errors.New("addr is required")
 	}
-	return c.do(ctx, http.MethodGet, "/v1/results/"+url.PathEscape(id)+"/function/"+url.PathEscape(addr)+"/decompile", nil, nil, "")
+	q := url.Values{}
+	q.Set("addr", addr)
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/decompile", q, nil, "")
 }
 
-// Xrefs calls GET /v1/results/{id}/xrefs/{addr}.
+// Xrefs calls GET /api/jobs/{id}/xrefs?addr={addr}.
 func (c *Client) Xrefs(ctx context.Context, id, addr string) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
 		return nil, err
@@ -240,10 +250,12 @@ func (c *Client) Xrefs(ctx context.Context, id, addr string) (json.RawMessage, e
 	if strings.TrimSpace(addr) == "" {
 		return nil, errors.New("addr is required")
 	}
-	return c.do(ctx, http.MethodGet, "/v1/results/"+url.PathEscape(id)+"/xrefs/"+url.PathEscape(addr), nil, nil, "")
+	q := url.Values{}
+	q.Set("addr", addr)
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/xrefs", q, nil, "")
 }
 
-// Strings calls GET /v1/results/{id}/strings.
+// Strings calls GET /api/jobs/{id}/strings.
 func (c *Client) Strings(ctx context.Context, id string, minLength, offset, limit int) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
 		return nil, err
@@ -252,18 +264,18 @@ func (c *Client) Strings(ctx context.Context, id string, minLength, offset, limi
 	if minLength > 0 {
 		q.Set("min_length", strconv.Itoa(minLength))
 	}
-	return c.do(ctx, http.MethodGet, "/v1/results/"+url.PathEscape(id)+"/strings", q, nil, "")
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/strings", q, nil, "")
 }
 
-// Imports calls GET /v1/results/{id}/imports.
+// Imports calls GET /api/jobs/{id}/imports.
 func (c *Client) Imports(ctx context.Context, id string, offset, limit int) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
 		return nil, err
 	}
-	return c.do(ctx, http.MethodGet, "/v1/results/"+url.PathEscape(id)+"/imports", pageQuery(offset, limit), nil, "")
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/imports", pageQuery(offset, limit), nil, "")
 }
 
-// SecurityFunctions calls GET /v1/results/{id}/security/functions, the
+// SecurityFunctions calls GET /api/jobs/{id}/security/functions, the
 // deterministic attack-surface ranking. It is a review prior, not a verdict.
 func (c *Client) SecurityFunctions(ctx context.Context, id, band, category, search string, minScore, offset, limit int) (json.RawMessage, error) {
 	if err := validID(id); err != nil {
@@ -282,7 +294,74 @@ func (c *Client) SecurityFunctions(ctx context.Context, id, band, category, sear
 	if minScore > 0 {
 		q.Set("min_score", strconv.Itoa(minScore))
 	}
-	return c.do(ctx, http.MethodGet, "/v1/results/"+url.PathEscape(id)+"/security/functions", q, nil, "")
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/security/functions", q, nil, "")
+}
+
+// Callgraph calls GET /api/jobs/{id}/callgraph.
+func (c *Client) Callgraph(ctx context.Context, id, addr string, depth, limit int) (json.RawMessage, error) {
+	if err := validID(id); err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	if strings.TrimSpace(addr) != "" {
+		q.Set("addr", addr)
+	}
+	if depth > 0 {
+		q.Set("depth", strconv.Itoa(depth))
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/callgraph", q, nil, "")
+}
+
+// Types calls GET /api/jobs/{id}/types.
+func (c *Client) Types(ctx context.Context, id string, offset, limit int) (json.RawMessage, error) {
+	if err := validID(id); err != nil {
+		return nil, err
+	}
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/types", pageQuery(offset, limit), nil, "")
+}
+
+// Globals calls GET /api/jobs/{id}/globals.
+func (c *Client) Globals(ctx context.Context, id string, offset, limit int) (json.RawMessage, error) {
+	if err := validID(id); err != nil {
+		return nil, err
+	}
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/globals", pageQuery(offset, limit), nil, "")
+}
+
+// Hexdump calls GET /api/jobs/{id}/hexdump/{start}?length={length}.
+func (c *Client) Hexdump(ctx context.Context, id string, start int64, length int) (json.RawMessage, error) {
+	if err := validID(id); err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	if length > 0 {
+		q.Set("length", strconv.Itoa(length))
+	}
+	return c.do(ctx, http.MethodGet, "/api/jobs/"+url.PathEscape(id)+"/hexdump/"+strconv.FormatInt(start, 10), q, nil, "")
+}
+
+// Query calls POST /api/jobs/{id}/query for substring/regex search.
+func (c *Client) Query(ctx context.Context, id, query string, regex bool) (json.RawMessage, error) {
+	if err := validID(id); err != nil {
+		return nil, err
+	}
+	body := map[string]any{"query": query}
+	if regex {
+		body["regex"] = true
+	}
+	b, _ := json.Marshal(body)
+	return c.do(ctx, http.MethodPost, "/api/jobs/"+url.PathEscape(id)+"/query", nil, bytes.NewReader(b), "application/json")
+}
+
+// Rescore calls POST /api/jobs/{id}/rescore to rebuild the security index.
+func (c *Client) Rescore(ctx context.Context, id string) (json.RawMessage, error) {
+	if err := validID(id); err != nil {
+		return nil, err
+	}
+	return c.do(ctx, http.MethodPost, "/api/jobs/"+url.PathEscape(id)+"/rescore", nil, bytes.NewReader(nil), "application/json")
 }
 
 func pageQuery(offset, limit int) url.Values {

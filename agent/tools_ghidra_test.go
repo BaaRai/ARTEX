@@ -52,7 +52,7 @@ func TestGhidraAnalyze_UploadsFileFromWorkingDir(t *testing.T) {
 	var uploaded string
 	var gotName string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/jobs" {
+		if r.URL.Path != "/upload" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		file, header, err := r.FormFile("file")
@@ -173,11 +173,9 @@ func TestGhidraTools_ClipOversizedResult(t *testing.T) {
 func TestGhidraStatus_ReportsEndpointAndHealth(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/health":
+		case "/healthz":
 			_, _ = io.WriteString(w, `{"status":"ok"}`)
-		case "/v1/version":
-			_, _ = io.WriteString(w, `{"version":"1.2.1"}`)
-		case "/v1/capabilities":
+		case "/api/capabilities":
 			_, _ = io.WriteString(w, `{"decompile":true}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -187,7 +185,7 @@ func TestGhidraStatus_ReportsEndpointAndHealth(t *testing.T) {
 	t.Setenv("ARTEX_GHIDRA_URL", srv.URL)
 
 	out := callGuardTool(t, ghidraToolSet(t).ghidraStatus(), `{}`).Flatten()
-	for _, want := range []string{srv.URL, `"status":"ok"`, `"version":"1.2.1"`, `"decompile":true`} {
+	for _, want := range []string{srv.URL, `"status":"ok"`, `"decompile":true`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status output lacks %q: %s", want, out)
 		}

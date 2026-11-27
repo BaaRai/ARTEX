@@ -35,7 +35,7 @@ func TestClient_CallWithoutURLReturnsErrNotConfigured(t *testing.T) {
 
 func TestClient_SendsBearerTokenAndDecodesJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/health" {
+		if r.URL.Path != "/healthz" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
@@ -59,7 +59,7 @@ func TestClient_SendsBearerTokenAndDecodesJSON(t *testing.T) {
 
 func TestClient_UploadPostsMultipartFile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+		if r.Method != http.MethodPost || r.URL.Path != "/upload" {
 			t.Errorf("%s %s", r.Method, r.URL.Path)
 		}
 		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "multipart/form-data") {
@@ -136,11 +136,11 @@ func TestClient_PathsAndQuery(t *testing.T) {
 	_, _ = c.SecurityFunctions(ctx, "job-1", "high", "memory", "copy", 70, 0, 25)
 
 	want := []string{
-		"/v1/jobs/job-1",
-		"/v1/results/job-1/functions?limit=50&offset=20&q=main",
-		"/v1/results/job-1/function/0x401000/decompile",
-		"/v1/results/job-1/strings?limit=10&min_length=6",
-		"/v1/results/job-1/security/functions?band=high&category=memory&limit=25&min_score=70&q=copy",
+		"/status/job-1",
+		"/api/jobs/job-1/functions?limit=50&offset=20&q=main",
+		"/api/jobs/job-1/decompile?addr=0x401000",
+		"/api/jobs/job-1/strings?limit=10&min_length=6",
+		"/api/jobs/job-1/security/functions?band=high&category=memory&limit=25&min_score=70&q=copy",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("requests = %v", got)
