@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -227,6 +228,12 @@ func HintTrafficSchema() map[string]any {
 	return map[string]any{"type": "array", "description": "Optional: verified traffic references corresponding to the specific vulnerability in this hint, order preserved; after handoff, report_finding can carry these references via evidence_hint_id.", "items": obj(map[string]any{"traffic_id": str("real traffic ID"), "role": str("baseline / proof / verification / supporting"), "note": str("which conclusion this traffic supports")}, "traffic_id")}
 }
 
+// errEvidenceHintNotFound marks an evidence_hint_id that does not resolve to a
+// local hint node of the current task (e.g. stale/deleted ID, inherited hint, or
+// non-hint node ID). report_finding degrades cleanly instead of discarding the
+// finding (#550).
+var errEvidenceHintNotFound = errors.New("evidence_hint_id is not a local hint node")
+
 func (t *ToolSet) findingRefsFromHint(hintID int64, explicit []db.TrafficRef) ([]db.TrafficRef, error) {
 	if hintID <= 0 {
 		return db.NormalizeTrafficRefs(explicit)
@@ -236,7 +243,7 @@ func (t *ToolSet) findingRefsFromHint(hintID int64, explicit []db.TrafficRef) ([
 		return nil, err
 	}
 	if n == nil || n.Kind != db.KindHint {
-		return nil, fmt.Errorf("evidence_hint_id=%d must be a hint node of this task (inherited hints cannot be bound directly)", hintID)
+		return nil, fmt.Errorf("%w: evidence_hint_id=%d must be a hint node of this task (inherited hints cannot be bound directly)", errEvidenceHintNotFound, hintID)
 	}
 	var payload struct {
 		Refs []db.TrafficRef `json:"traffic_refs"`

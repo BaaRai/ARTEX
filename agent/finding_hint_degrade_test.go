@@ -107,3 +107,115 @@ func TestReportFindingNonHintNodeDegradesToExplicitRefs(t *testing.T) {
 		t.Fatalf("explicit proof ref did not survive: %+v", rec.got)
 	}
 }
+
+// Regression for #550: absent, null, empty, zero, or negative evidence_hint_id
+// must succeed even when no explicit traffic_refs are supplied (the default
+// workflow where the report agent binds traffic afterward).
+func TestReportFindingAbsentOrZeroHintIDWithoutTrafficRefs(t *testing.T) {
+	prev := FindingTrafficBindingEnabled()
+	t.Cleanup(func() { SetFindingTrafficBindingEnabled(prev) })
+	SetFindingTrafficBindingEnabled(func() bool { return true })
+
+	d := testDB(t)
+	defer d.Close()
+	task, err := d.CreateTask("absent hint id", "fixture", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = d.DeleteFindingsByTask(task.ID)
+		_ = d.DeleteTask(task.ID)
+	}()
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"omitted", `{"vulnclass":"SQLI","severity":"high","summary":"omitted hint","evidence":"UNION rows"}`},
+		{"zero", `{"vulnclass":"SQLI","severity":"high","summary":"zero hint","evidence":"UNION rows","evidence_hint_id":0}`},
+		{"null", `{"vulnclass":"SQLI","severity":"high","summary":"null hint","evidence":"UNION rows","evidence_hint_id":null}`},
+		{"empty_string", `{"vulnclass":"SQLI","severity":"high","summary":"empty hint","evidence":"UNION rows","evidence_hint_id":""}`},
+		{"negative", `{"vulnclass":"SQLI","severity":"high","summary":"negative hint","evidence":"UNION rows","evidence_hint_id":-5}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := NewToolSet(nil, "")
+			ts.ts, ts.taskID = d.Exploration(task.ExplorationID), task.ID
+			rec := &capturingRecorder{}
+			ts.SetFindingRecorder(rec)
+
+			res, err := ts.addFinding().Call(t.Context(), json.RawMessage(tc.body), nil)
+			if err != nil {
+				t.Fatalf("report_finding returned error: %v", err)
+			}
+			if got := res.Flatten(); !strings.HasPrefix(got, "finding recorded: ") {
+				t.Fatalf("%s rejected: %q", tc.name, got)
+			}
+			if len(rec.got) != 0 {
+				t.Fatalf("%s unexpectedly bound refs: %+v", tc.name, rec.got)
+			}
+		})
+	}
+}
+
+// Regression for #550: a stale/deleted or non-hint evidence_hint_id passed
+// without explicit traffic_refs must degrade cleanly (record the finding as
+// not_bound with an explanatory evidence_note) instead of discarding it.
+func TestReportFindingStaleOrNonHintIDWithoutTrafficRefsDegradesCleanly(t *testing.T) {
+	prev := FindingTrafficBindingEnabled()
+	t.Cleanup(func() { SetFindingTrafficBindingEnabled(prev) })
+	SetFindingTrafficBindingEnabled(func() bool { return true })
+
+	d := testDB(t)
+	defer d.Close()
+	task, err := d.CreateTask("stale hint id", "fixture", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = d.DeleteFindingsByTask(task.ID)
+		_ = d.DeleteTask(task.ID)
+	}()
+	exp := d.Exploration(task.ExplorationID)
+	factID, err := exp.AddNode(db.KindFact, map[string]any{"summary": "not a hint"}, 0, "confirmed", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		hintID int64
+	}{
+		{"stale_nonexistent", 999999},
+		{"non_hint_fact_node", factID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &capturingRecorder{}
+			ts := NewToolSet(nil, "")
+			ts.ts, ts.taskID = exp, task.ID
+			ts.SetFindingRecorder(rec)
+
+			body, _ := json.Marshal(map[string]any{
+				"vulnclass":        "XSS",
+				"severity":         "medium",
+				"summary":          "stale hint finding",
+				"evidence":         "reflected payload",
+				"evidence_hint_id": tc.hintID,
+			})
+			res, err := ts.addFinding().Call(t.Context(), json.RawMessage(body), nil)
+			if err != nil {
+				t.Fatalf("report_finding returned error: %v", err)
+			}
+			got := res.Flatten()
+			if !strings.HasPrefix(got, "finding recorded: ") {
+				t.Fatalf("stale/non-hint evidence_hint_id discarded finding: %q", got)
+			}
+			if !strings.Contains(got, "Ignored stale or non-local evidence_hint_id=") {
+				t.Fatalf("expected explanatory evidence_note, got: %q", got)
+			}
+			if len(rec.got) != 0 {
+				t.Fatalf("expected 0 refs on degraded stale hint, got %+v", rec.got)
+			}
+		})
+	}
+}
