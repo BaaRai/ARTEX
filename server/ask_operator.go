@@ -76,7 +76,7 @@ func (s *Server) toolAskOperator() actool.CoreTool {
 			s.engine.emitActivity(t, act)
 			// The control call runs on a detached context: pausing may cancel the
 			// run's context, and the pause bookkeeping itself must complete.
-			if _, err := s.applyIntentControl(context.Background(), t, ri.IntentID, "pause", firstLine(q, 120), ""); err != nil {
+			if _, err := s.applyIntentControl(context.Background(), t, ri.IntentID, "pause_handoff", firstLine(q, 120), ""); err != nil {
 				return actool.Errorf("Error: question delivered but pausing the intent failed: " + err.Error()), nil
 			}
 			return actool.Text("Question delivered to the operator. This intent is pausing now: finish your current step, record everything you already know as facts, and stop. The operator's reply will resume this run and arrive as your next input."), nil

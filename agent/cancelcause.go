@@ -51,6 +51,8 @@ var (
 		"This Worker's claim on the intent expired (no heartbeat reached the database within the claim TTL) and another Worker took the intent over, so its heartbeat was rejected. This run was cancelled and its result is discarded; the intent now belongs to the new claimer")
 	AbortWorkFinished = cause("work_finished", "Worker finished normally, context freed",
 		"The Worker finished normally, and the engine released its context resources in detachWork. This is not an interruption; if it appears in an interruption message, the cancel and finish events raced")
+	AbortOperatorHandoff = cause("operator_handoff", "Intent paused for operator input",
+		"The intent paused and handed off to the operator; waiting for the operator's reply to resume")
 	AbortPausedRaceGuard = cause("paused_race_guard", "Refused a new run while task is paused",
 		"While the task is paused, the engine refuses to issue a new execution context, preventing a race between claim and pause from letting a Worker keep starting; already-claimed intents return to frontier")
 

@@ -19,6 +19,7 @@ var (
 	bashSleepRe      = regexp.MustCompile(`(?i)(?:^|[;&|\s])sleep\s+[0-9]+`)
 	bashOnlySleepRe  = regexp.MustCompile(`(?i)^\s*(?:sleep\s+[0-9]+(?:\s*[;&|]+\s*)?)+\s*$`)
 	bashMutateHintRe = regexp.MustCompile(`(?i)(?:^|\s)(?:-X|--request)\s*=*\s*["']?(?:POST|PUT|PATCH|DELETE)\b|(?:-d|--data|--data-raw|--data-binary|-F|--form)(?:\s|=)`)
+	untrustedFenceRe = regexp.MustCompile(`(?m)^<<<(?:END_)?UNTRUSTED_OUTPUT [^\r\n]+>>>>\r?\n?`)
 )
 
 type pollLoopDetector struct {
@@ -87,7 +88,8 @@ func (d *pollLoopDetector) onToolResult(toolUseID, output string, isError bool) 
 	if !ok || isError {
 		return false
 	}
-	h := sha256.Sum256([]byte(strings.TrimSpace(output)))
+	normOut := strings.TrimSpace(untrustedFenceRe.ReplaceAllString(output, ""))
+	h := sha256.Sum256([]byte(normOut))
 	respHash := hex.EncodeToString(h[:])
 	if sig == d.lastSig && respHash == d.lastRespHash {
 		if d.sawSleep {
