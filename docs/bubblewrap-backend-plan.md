@@ -106,7 +106,7 @@ cancel/revoke the task, and assert that both stop within the published bound.
   and tests. Unsupported strict requests fail with an actionable reason. Never
   grant host networking or broad sockets just to make an unsupported tool work.
 - Preserve Linux/macOS/Windows controller builds. bwrap is a Linux backend, not a
-  native Windows/macOS implementation. Native Windows is a separate milestone;
+  native Windows/macOS implementation. Native Windows is deferred beyond this first release;
   macOS requires its own qualified adapter before claims of local containment.
   Explicit Linux guest/remote profiles identify both host and guest and their
   credential, mount, evidence and revocation boundaries.
@@ -114,32 +114,61 @@ cancel/revoke the task, and assert that both stop within the published bound.
   execution can use a separately evaluated VM/gVisor profile. Deception resilience
   means containment, evidence and budgets, not honeypot detection or anonymity.
 
-## Incremental PR plan
+## Four-PR delivery plan
 
-The sequence contains ten planned focused PRs, not ten simultaneous submissions.
-PR 1 is the existing design PR #555. Runtime work is split into three changes so
-that process/filesystem, gateway transport, and resource/qualification behavior
-can be reviewed separately. All later numbers are planning slots, not GitHub PR IDs.
+Use **four PRs total, including the existing design PR #555**: three subsequent
+implementation PRs, each delivering an independently useful capability. The former
+ten work items become implementation/review checklists or explicitly deferred
+scope, not ten separate review and release gates. Later numbers below are planning
+slots, not GitHub PR IDs.
 
 | PR | Deliverable | Dependencies | Exit criterion |
 | --- | --- | --- | --- |
-| 1 | ADR, portable Runner/policy/audit contracts and support boundaries | — | Design review only; no new runtime dependency or default |
-| 2 | Durable lightweight audit, provenance, coverage and assessment/budget events | 1 | Capture-off, restart, duplicate, archive and spool-full tests; assessments cannot rewrite observations |
-| 3 | Authoritative gateway policy and network budgets | 1, 2 | Final-dial IP/host/port, DNS, redirects, deny precedence, revocation and aggregate budgets |
-| 4 | Go/bwrap supervisor: explicit offline profile, filesystem/process isolation, lifecycle and installation preflight | 1, 2 and shared Runner contract | Required namespaces, argv/env/fd handling, child cleanup, cross-task isolation, missing-bwrap diagnostics; no network-capable strict claim |
-| 5 | Task-private bridge to the ARTEX gateway and network lifecycle | 3, 4 | Removed proxy env/direct sockets cannot bypass policy; trusted attribution; existing tunnels close on cancel/revoke; gateway/bridge failure stops affected work |
-| 6 | Linux resource enforcement, tool/host qualification and reproducible packaging | 4, 5 | Pre-exec resource-domain entry, descendant/task-wide limits, supported amd64/arm64 host/container matrix and diagnostics; enables only tested opt-in strict profiles |
-| 7 | URL/time search, investigation timeline, retention/archive/export | 2 plus producer integration | Correct attribution, redaction, coverage and distinction between mentions, suspicion and observations |
-| 8 | Indirect-action review, evidence corroboration and pause/review/resume | 1, 2; 3–6 for end-to-end stop | Secondary scope checked; remote evidence labeled; fake success stays unverified; resumption cannot override a hard limit |
-| 9 | Separate Windows backend and explicit Linux guest/remote profiles | 3, shared Runner contract, backend acceptance | Real native Windows tests where claimed; host/guest tools distinguished; preserve macOS builds and require separate native macOS qualification |
-| 10 | Release/SBOM consolidation, compatibility fixtures and rollout benchmarks | 2–8 for Linux; 9 for additional platform claims | Measured overhead, storage, false positives, stop latency and overshoot; upgrade/migration/rollback; no unsupported cross-platform claim |
+| 1 | Existing design PR #555: scope, policy/audit/Runner contracts and support boundaries | — | Agree the bounded first release; documentation only, no new runtime dependency or default |
+| 2 | Searchable access audit end to end: trusted access/content provenance, existing producers, URL/time API and minimal inert evidence UI | 1 | Trace a synthetic URL to its task/tool and outcome with body capture off; truthful gaps, redaction, restart/spool-full, retention/archive references and query limits |
+| 3 | Authoritative gateway and action authorization: scope, network budgets, existing judge/approval and untrusted-content boundaries | 1, 2 | Final-dial/DNS/redirect/revocation and deny precedence; trusted sessions and secondary-target checks; remote-content framing/summary propagation and independent action-authorization regressions; coverage limited to enrolled paths |
+| 4 | Complete opt-in Go/bwrap Linux backend: process/filesystem isolation, private gateway bridge, resource enforcement, packaging and qualification | 2, 3 | No direct-egress bypass; pre-exec descendant/task limits; complete process/tunnel cleanup; supported amd64/arm64 host/container tests, install/absence diagnostics, basic overhead/security fixtures and rollback; unsupported profiles fail closed |
 
-PR 4 ships diagnostic/install support with its implementation. PR 6 completes the
-Linux support matrix rather than postponing packaging until PR 10. Shared package
-changes preserve all five existing release build targets throughout. Search can
-proceed once producers exist; a native Windows milestone does not block the
-qualified Linux release. The repository's limit of seven open PRs per contributor
-still applies; deliver and review incrementally.
+PR 4 can use a reviewable commit series within one PR: supervisor/filesystem,
+private network transport, then resources/packaging/acceptance. These are internal
+checkpoints, not additional PR dependencies or partially qualified releases.
+Keep it limited to declared Linux tools and environments; do not add native
+Windows/macOS or arbitrary-protocol support just to reduce the headline PR count.
+
+### First-release scope and explicit follow-ups
+
+The first release is a usable Linux audit-and-enforcement path, not the entire
+sandbox ecosystem roadmap. PR 2 provides immediate investigation value on existing
+managed producers, without waiting for bwrap. PR 3 enforces enrolled transports;
+it must not claim confinement of arbitrary host processes before PR 4. PR 4 is
+enabled opt-in only after its combined isolation, gateway, cleanup, resource and
+platform acceptance passes.
+
+Keep all five controller release builds and preserve existing security startup
+checks. Native Windows/macOS sandbox implementations and new managed Linux-guest/
+remote-executor deployments are follow-ups, not hidden subprojects in PR 4. Until
+qualified, those strict local profiles report unsupported; no host fallback.
+Raw/UDP/ICMP/QUIC, general browser/nested-container compatibility and stronger
+VM/gVisor profiles are also outside the initial declared tool matrix.
+
+First-release deception resilience consists of containment, trusted evidence links,
+budget stops and reuse of existing judge/operator approvals. Known secondary
+destinations receive deterministic scope checks; uncertain indirect actions still
+require existing review/denial, and hard denies cannot be overridden. New automated
+deception classifiers, generalized evidence-corroboration engines, rich investigation
+workflows and suspicion-triggered pause/resume automation are follow-ups. No
+honeypot-detection, anonymity or remote-second-hop containment claim is introduced.
+
+Remote-content prompt-injection defense is explicitly in the first release:
+trusted provenance in PR 2, existing input-boundary/action-authorization integration
+in PR 3, and hard execution containment in PR 4. It is distinct from deferred
+automatic deception classification. See the ADR for ingestion, summary/memory and
+synthetic-fixture requirements.
+
+Tests, deployment diagnostics, dependency provenance/SBOM updates, basic overhead
+measurements and rollback belong to the PR that introduces the behavior. There is
+no separate packaging or benchmark PR. Advanced cross-platform/fleet benchmarks
+and richer analytics can follow; required security tests cannot be deferred.
 
 ## Required regression evidence and ownership
 
@@ -161,3 +190,15 @@ rollback stops incompatible managed tasks and preserves audit history.
 This document records the implementation direction and its costs. No runtime
 implementation, performance result, Windows security qualification or production
 rollout is claimed by the design PR.
+
+## Pre-submission verification gate
+
+Run relevant checks in an isolated checkout on the designated Linux verification
+host before committing/submitting each revision. Record the tested base plus exact
+working-tree content, environment, commands, outcomes and skips. A documentation
+revision uses document/link/plan checks and any relevant existing regressions;
+that is not a sandbox implementation test. Implementation PRs require actual
+functional and isolation acceptance before submission. A failed or unavailable
+required check blocks submission; CI and one-host success do not replace the wider
+supported OS/architecture/container qualification. Keep production deployments and
+their configuration untouched by the verification checkout.

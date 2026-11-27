@@ -115,9 +115,12 @@ task attribution, policy and lifecycle, not language alignment alone.
 
 ARTEX owns launch/mount policy, gateway transport, complete cleanup, resource
 enforcement, packaging and the supported Linux matrix. Keep that scope explicit;
-small code size is not proof of security. The implementation plan splits offline
-isolation, protected network transport and resource/platform qualification into
-three separately reviewable PRs. No candidate has completed ARTEX runtime acceptance.
+small code size is not proof of security. The first release uses four PRs total:
+existing design, usable audit/search, authoritative gateway, and one complete
+Linux backend. Supervisor, bridge and resource qualification are reviewable commits
+inside that backend PR, not additional PRs. Native Windows/macOS, new managed
+guest/remote profiles and advanced automated investigation remain follow-ups.
+No candidate has completed ARTEX runtime acceptance.
 
 SRT and Go wrappers remain references or future adapter options. Evaluate native
 Windows options independently and consider gVisor or VM profiles when a stronger
