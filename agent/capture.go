@@ -35,6 +35,9 @@ func captureRun(ctx context.Context, opts agentcore.Options, input string, emit 
 // multiple prompts on the SAME conversation (e.g. a settlement round that reuses
 // the worker's accumulated context after the main run hit max_turns).
 func captureRunSession(ctx context.Context, s *agentcore.Session, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
+	ctx, cancelPoll := context.WithCancelCause(ctx)
+	defer cancelPoll(nil)
+	pollDet := newPollLoopDetector()
 	ctx, auditTrace := intercept.WithTrace(ctx, input, approvalHistory(s.Messages()))
 	defer auditTrace.Finish()
 	// Observe each model call's stop reason, so a provider refusal is reported as
@@ -85,7 +88,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			flush()
 			if ctx.Err() != nil { // engine/user cancellation, not a provider failure
 				sum, detail := terminalText(ctx, &harness.Terminal{Reason: reason, Err: ctx.Err()}, lastTool)
-				rec(activityWithUsage(db.Activity{Kind: "result", Summary: firstLine(sum, 400), Detail: detail}, lastUsage))
+				rec(activityWithUsage(db.Activity{Kind: "result", IsError: false, Summary: firstLine(sum, 400), Detail: detail}, lastUsage))
 				return finalText, reason, ctx.Err()
 			}
 			rec(activityWithUsage(db.Activity{Kind: "result", IsError: true, Summary: "execution error: " + err.Error(), Detail: err.Error()}, lastUsage))
@@ -101,6 +104,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			in := string(ev.ToolUse.Input)
 			lastTool.start(ev.ToolUse.ID, ev.ToolUse.Name, in)
 			auditTrace.Start(ev.ToolUse.ID, ev.ToolUse.Name, ev.ToolUse.Input)
+			pollDet.onToolUse(ev.ToolUse.ID, ev.ToolUse.Name, in)
 			rec(db.Activity{Kind: "tool_use", Tool: ev.ToolUse.Name, ToolUseID: ev.ToolUse.ID,
 				Summary: ev.ToolUse.Name + " " + firstLine(in, 200), Detail: in})
 		case harness.KindToolResult:
@@ -113,6 +117,10 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			auditTrace.Complete(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError)
 			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
 				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out})
+			if pollDet.onToolResult(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError) {
+				cancelPoll(ErrPollLoopDetected)
+				return finalText, reason, ErrPollLoopDetected
+			}
 		case harness.KindText:
 			addDelta("text", ev.Text)
 		case harness.KindThinking:
@@ -148,7 +156,9 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 					sum, detail = terminalText(ctx, ev.Terminal, lastTool)
 				}
 				u := ev.Terminal.Usage // cumulative token usage for this session
-				rec(db.Activity{Kind: "result", IsError: ev.Terminal.Err != nil,
+				code, _, _, hasAbort := AbortReason(ctx)
+				isErr := ev.Terminal.Err != nil && !(hasAbort && code == "operator_handoff")
+				rec(db.Activity{Kind: "result", IsError: isErr,
 					Summary: firstLine(sum, 400), Detail: detail,
 					InputTokens: &u.InputTokens, OutputTokens: &u.OutputTokens,
 					CacheReadTokens: &u.CacheReadTokens, CacheWriteTokens: &u.CacheWriteTokens})
