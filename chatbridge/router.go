@@ -21,6 +21,16 @@ const MaxUpdateAge = 2 * time.Minute
 // maxRefusedChats bounds the memory of chats that were already refused once.
 const maxRefusedChats = 1024
 
+// Access is who may use a bridge.
+type Access struct {
+	// Chats are the allowed chat ids. Only these chats are served.
+	Chats []string
+	// Users are the allowed sender ids inside a shared (group) chat. A group
+	// is served only for these senders, so joining an allowed group grants
+	// nothing by itself. A private chat is its own user and needs no entry.
+	Users []string
+}
+
 // Request is one authorized message handed to a command.
 type Request struct {
 	Kind     string // transport kind
@@ -49,8 +59,8 @@ type Decision int
 const (
 	DecisionIgnored Decision = iota // no text, a bot sender, or a command for another bot
 	DecisionStale                   // older than MaxUpdateAge
-	DecisionRefused                 // unknown chat, refusal sent
-	DecisionMuted                   // unknown chat, already refused once
+	DecisionRefused                 // unknown chat or group sender, refusal sent
+	DecisionMuted                   // unknown chat or group sender, already refused once
 	DecisionHandled                 // allowed chat, a command or text handler ran
 )
 
@@ -88,9 +98,9 @@ type Router struct {
 	refused map[string]bool
 }
 
-// Route decides what to do with an update from an allowed or unknown chat and
-// returns the reply to send (possibly empty).
-func (r *Router) Route(ctx context.Context, kind string, allowed []string, u Update) (Decision, string) {
+// Route decides what to do with an update and returns the reply to send
+// (possibly empty).
+func (r *Router) Route(ctx context.Context, kind string, acc Access, u Update) (Decision, string) {
 	if u.FromBot || strings.TrimSpace(u.Text) == "" {
 		return DecisionIgnored, ""
 	}
@@ -101,8 +111,16 @@ func (r *Router) Route(ctx context.Context, kind string, allowed []string, u Upd
 	if !u.Date.IsZero() && now().Sub(u.Date) > MaxUpdateAge {
 		return DecisionStale, ""
 	}
-	if !contains(allowed, u.ChatID) {
-		return r.refuse(u.ChatID)
+	if !contains(acc.Chats, u.ChatID) {
+		return r.refuse(u.ChatID, "This chat is not allowed to use this ARTEX bot. If it is yours, add chat ID "+u.ChatID+" to the allowlist in ARTEX (System → Chat bot).")
+	}
+	if u.ChatType != ChatTypePrivate && (u.UserID == "" || !contains(acc.Users, u.UserID)) {
+		// The chat is allowed but it is shared: serve only listed senders.
+		// Anonymous group admins and channel posts carry no user to check.
+		if u.UserID == "" {
+			return DecisionIgnored, ""
+		}
+		return r.refuse(u.ChatID+"/"+u.UserID, "You are not allowed to use this ARTEX bot in this group. If you should be, add user ID "+u.UserID+" to the allowed users in ARTEX (System → Chat bot).")
 	}
 
 	name, args, forOther := parseCommand(u.Text, r.BotUserName)
@@ -127,17 +145,18 @@ func (r *Router) Route(ctx context.Context, kind string, allowed []string, u Upd
 	return DecisionHandled, fmt.Sprintf("Unknown command /%s. Send /help to see the commands.", name)
 }
 
-// refuse answers an unknown chat once per process and then stays silent, so a
-// stranger who found the bot cannot use it to make it talk. The chat id is in
-// the refusal so the operator can add it to the allowlist when the chat is
-// their own; it is the chat's own identifier and reveals nothing else.
-func (r *Router) refuse(chatID string) (Decision, string) {
+// refuse answers an unknown chat, or an unknown sender in an allowed group,
+// once and then stays silent, so a stranger who found the bot cannot use it to
+// make it talk. The refusal names the id to allowlist, so the operator can add
+// it when the chat or account is their own; it is the asker's own identifier
+// and reveals nothing else. key is the chat id, or chat/user for a sender.
+func (r *Router) refuse(key, text string) (Decision, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.refused == nil {
 		r.refused = map[string]bool{}
 	}
-	if r.refused[chatID] {
+	if r.refused[key] {
 		return DecisionMuted, ""
 	}
 	if len(r.refused) >= maxRefusedChats {
@@ -147,8 +166,8 @@ func (r *Router) refuse(chatID string) (Decision, string) {
 		// refused before the reset can get one more refusal.
 		clear(r.refused)
 	}
-	r.refused[chatID] = true
-	return DecisionRefused, "This chat is not allowed to use this ARTEX bot. If it is yours, add chat ID " + chatID + " to the allowlist in ARTEX (System → Chat bot)."
+	r.refused[key] = true
+	return DecisionRefused, text
 }
 
 // KeepRefusals carries the refusal memory of a previous router over, so

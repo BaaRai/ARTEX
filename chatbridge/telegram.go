@@ -81,6 +81,16 @@ func (telegramTransport) Validate(cfg map[string]any) error {
 	return nil
 }
 
+// User ids are positive integers.
+var telegramUserIDRe = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
+
+func (telegramTransport) ValidateUserID(id string) error {
+	if !telegramUserIDRe.MatchString(id) {
+		return errors.New("a Telegram user id is a positive number, for example 123456789 (send /whoami to the bot to see yours)")
+	}
+	return nil
+}
+
 func (telegramTransport) ValidateChatID(id string) error {
 	if !telegramChatIDRe.MatchString(id) {
 		return errors.New("a Telegram chat id is a number, for example 123456789 or -1001234567890")

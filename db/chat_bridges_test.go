@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -75,5 +76,63 @@ func TestChatBridgeSaveSealedAndOffset(t *testing.T) {
 	b3, err := d.SaveChatBridge(ctx, &ChatBridge{Kind: kind, Config: json.RawMessage(`{"bot_token":"987654321:AAother-bot-token-value"}`)}, true)
 	if err != nil || b3.PollOffset != 0 || b3.ConfigVersion != 3 {
 		t.Fatalf("reset save = %+v, %v", b3, err)
+	}
+}
+
+func TestChatBridgeAllowedUsersAndChatTask(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	ctx := context.Background()
+	const kind = "t-bridge-users"
+	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM chat_bridges WHERE kind=$1`, kind) })
+
+	b, err := d.SaveChatBridge(ctx, &ChatBridge{Kind: kind, AllowedChats: []string{"-1001"}, AllowedUsers: []string{"7", "8"}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(b.AllowedUsers, ",") != "7,8" {
+		t.Fatalf("allowed_users = %v", b.AllowedUsers)
+	}
+	b, err = d.SaveChatBridge(ctx, &ChatBridge{Kind: kind, AllowedChats: []string{"-1001"}}, false)
+	if err != nil || b.AllowedUsers == nil || len(b.AllowedUsers) != 0 {
+		t.Fatalf("cleared allowed_users = %#v, %v", b.AllowedUsers, err)
+	}
+
+	// No selection yet.
+	if id, err := d.ChatBridgeTask(ctx, kind, "-1001"); err != nil || id != "" {
+		t.Fatalf("no selection = %q, %v", id, err)
+	}
+	t1, err := d.CreateTask("chat bridge selection one", "", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, err := d.CreateTask("chat bridge selection two", "", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(t1.ID); _ = d.DeleteTask(t2.ID) })
+
+	if err := d.SetChatBridgeTask(ctx, kind, "-1001", t1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetChatBridgeTask(ctx, kind, "-1001", t2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := d.ChatBridgeTask(ctx, kind, "-1001"); err != nil || id != strconv.FormatInt(t2.ID, 10) {
+		t.Fatalf("selection = %q, %v; want %d", id, err, t2.ID)
+	}
+	// A task that does not exist cannot be selected.
+	if err := d.SetChatBridgeTask(ctx, kind, "100", 1<<60); err == nil {
+		t.Fatal("selecting a missing task must fail")
+	}
+	// Deleting the task clears the selection.
+	if err := d.DeleteTask(t2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := d.ChatBridgeTask(ctx, kind, "-1001"); err != nil || id != "" {
+		t.Fatalf("selection after task delete = %q, %v", id, err)
 	}
 }
