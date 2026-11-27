@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -67,4 +69,53 @@ func (s *Server) RetargetTask(ctx context.Context, taskID, oldHost, newBaseURL s
 	t.Notify()
 	log.Printf("[retarget] task %s retargeted %s -> %s (stale_intents=%d)", taskID, res.OldHost, res.NewHost, staleCount)
 	return res, staleCount, nil
+}
+
+// retargetTaskHandler handles POST /api/tasks/{id}/retarget with JSON body
+// {"old_host":"...","new_base_url":"https://..."}.
+func (s *Server) retargetTaskHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := s.m.Task(id); !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	var req struct {
+		OldHost    string `json:"old_host"`
+		NewBaseURL string `json:"new_base_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	oldHost := strings.TrimSpace(req.OldHost)
+	newBaseURL := strings.TrimSpace(req.NewBaseURL)
+	if oldHost == "" || newBaseURL == "" {
+		writeErr(w, 400, "old_host and new_base_url are required")
+		return
+	}
+	u, err := url.Parse(newBaseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		writeErr(w, 400, "new_base_url must be a valid http or https URL")
+		return
+	}
+	if s.engine != nil {
+		if !s.engine.beginTaskOperation(id) {
+			writeErr(w, 409, "task is being deleted")
+			return
+		}
+		defer s.engine.decInflight(id)
+	}
+	res, staleCount, err := s.RetargetTask(r.Context(), id, oldHost, newBaseURL)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"task_id":       id,
+		"old_host":      res.OldHost,
+		"new_host":      res.NewHost,
+		"updated_goal":  res.UpdatedGoal,
+		"stale_intents": staleCount,
+		"retargeted":    res,
+	})
 }
