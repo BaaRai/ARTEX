@@ -12,6 +12,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -710,6 +711,12 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 			if len(attempts) > 0 && attempts[len(attempts)-1].Status >= 400 {
 				return lat, "", fmt.Errorf("Bedrock gateway returned HTTP %d", attempts[len(attempts)-1].Status)
 			}
+			// Only adapter-generated errors are shown; transport errors may carry
+			// gateway-supplied text.
+			var gwErr *bedrockGatewayError
+			if errors.As(err, &gwErr) {
+				return lat, "", gwErr
+			}
 			return lat, "", fmt.Errorf("Bedrock gateway connection failed")
 		}
 		return lat, "", err
@@ -727,9 +734,30 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 	// the discrepancy this check eliminates. No visible body = fail.
 	reply = strings.TrimSpace(reply)
 	if reply == "" {
-		return lat, "", fmt.Errorf("the model returned no content (the request went through, but no text was returned)")
+		return lat, "", emptyReplyError(probe)
 	}
 	return lat, reply, nil
+}
+
+// emptyReplyError explains a completed call whose visible text was empty.
+// Reasoning-only replies and a length stop are named so a thinking model that
+// exhausted its budget is not reported as a transport failure.
+func emptyReplyError(p *connTestProvider) error {
+	reason := strings.TrimSpace(p.stopReason)
+	if p.sawThinking {
+		switch reason {
+		case "max_tokens", "length":
+			return fmt.Errorf("the model returned reasoning and no visible content (finish_reason=%q); the token budget was consumed before it wrote a reply", reason)
+		case "":
+			return fmt.Errorf("the model returned reasoning and no visible content")
+		default:
+			return fmt.Errorf("the model returned reasoning and no visible content (finish_reason=%q)", reason)
+		}
+	}
+	if reason != "" {
+		return fmt.Errorf("the model returned no content (finish_reason=%q)", reason)
+	}
+	return fmt.Errorf("the model returned no content (the request went through, but no text was returned)")
 }
 
 // connTestProvider observes the raw provider response during TestConnection so
@@ -737,6 +765,7 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 type connTestProvider struct {
 	inner       llm.Provider
 	sawToolCall bool
+	sawThinking bool
 	stopReason  string
 }
 
@@ -746,6 +775,9 @@ func (p *connTestProvider) Stream(ctx context.Context, req llm.CompletionRequest
 			if err == nil {
 				if ev.Type == llm.SEToolUseStart {
 					p.sawToolCall = true
+				}
+				if ev.Type == llm.SEThinkingDelta && ev.Text != "" {
+					p.sawThinking = true
 				}
 				if ev.StopReason != "" {
 					p.stopReason = ev.StopReason
@@ -763,6 +795,12 @@ func (p *connTestProvider) Complete(ctx context.Context, req llm.CompletionReque
 	if err == nil {
 		if len(msg.ToolUses()) > 0 {
 			p.sawToolCall = true
+		}
+		for _, b := range msg.Content {
+			if b.Type == llm.BlockThinking && b.Thinking != "" {
+				p.sawThinking = true
+				break
+			}
 		}
 		if stopReason != "" {
 			p.stopReason = stopReason
