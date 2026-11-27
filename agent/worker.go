@@ -538,6 +538,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	tsx.SetTriageClient(w.triage)
 	tsx.SetFactTraffic(w.factTraffic)
 	tsx.SetTaskID(taskID)
+	tsx.SetStatefulGuard(intercept.StatefulGuardFromContext(ctx))
 	coverageEnabled := coverageOn(as, taskID)
 	tsx.SetCoverageEnabled(coverageEnabled)
 	if as != nil {

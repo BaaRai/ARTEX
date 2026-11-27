@@ -926,6 +926,9 @@ func (e *Engine) plannerGateContext(ctx context.Context, t *Task, wait time.Dura
 		e.emitActivity(t, a)
 	}
 	ctx = intercept.WithTaskContext(ctx, t.ID, "planner", emit)
+	if sg := e.statefulGuardForTask(); sg != nil {
+		ctx = intercept.WithStatefulGuard(ctx, sg)
+	}
 	return intercept.WithTargetScope(ctx, t.targetScope(wait))
 }
 
@@ -1532,7 +1535,7 @@ func (e *Engine) claimNext(t *Task, name string) (*db.Node, string) {
 }
 
 func (e *Engine) statefulGuardForTask() *intercept.StatefulTargetGuard {
-	if e == nil {
+	if e == nil || !intercept.StatefulGuardEnabled() {
 		return nil
 	}
 	e.statefulGuardOnce.Do(func() {

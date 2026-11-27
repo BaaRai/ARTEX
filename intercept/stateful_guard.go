@@ -4,29 +4,137 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
+	"os"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+const (
+	// StatefulGuardEnv controls whether the per-(task, host) stateful target
+	// guard is active ("on" by default; "off"/"false"/"0"/"no" disables it).
+	StatefulGuardEnv = "ARTEX_STATEFUL_GUARD"
+	// StatefulLeaseTTLEnv sets the heartbeat inactivity TTL in integer seconds
+	// before a held mutation lease becomes stale and reclaimable (default 600).
+	StatefulLeaseTTLEnv = "ARTEX_STATEFUL_LEASE_TTL_S"
+	// DefaultStatefulLeaseTTL is the safety-net inactivity window without a
+	// tool heartbeat before another intent may take over a stale lease.
+	DefaultStatefulLeaseTTL = 600 * time.Second
+)
+
+// StatefulGuardEnabled reports whether the stateful target guard is enabled
+// (default on; disabled only by ARTEX_STATEFUL_GUARD=off|false|0|no).
+func StatefulGuardEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(StatefulGuardEnv))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+// StatefulLeaseTTL returns the mutation-lease heartbeat TTL configured via
+// ARTEX_STATEFUL_LEASE_TTL_S (integer seconds), defaulting to 600s.
+func StatefulLeaseTTL() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(StatefulLeaseTTLEnv))
+	if raw == "" {
+		return DefaultStatefulLeaseTTL
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil || secs <= 0 {
+		return DefaultStatefulLeaseTTL
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// LeaseStatus describes an active (or stale) per-host mutation lease.
+type LeaseStatus struct {
+	Host                    string    `json:"host"`
+	HolderIntentID          int64     `json:"holder_intent_id"`
+	AcquiredAt              time.Time `json:"acquired_at"`
+	AgeSeconds              int64     `json:"age_seconds"`
+	LastHeartbeat           time.Time `json:"last_heartbeat"`
+	LastHeartbeatAgeSeconds int64     `json:"last_heartbeat_age_seconds"`
+	TTLSeconds              int64     `json:"ttl_seconds"`
+	Stale                   bool      `json:"stale"`
+}
+
+type mutationLease struct {
+	intentID   int64
+	acquiredAt time.Time
+	lastBeat   time.Time
+}
 
 // StatefulTargetGuard enforces two per-(task, host) safety invariants on
 // stateful targets, completely independent of the MITM traffic store:
 //  1. Pre-mutation baseline gate: any mutating HTTP call is refused until at
 //     least one read-only GET/HEAD call to that task+host has completed.
 //  2. Mutation lease: only one intent per task may hold the mutation lease for
-//     a given host at a time; read-only calls remain parallel.
+//     a given host at a time (scoped to the intent run, kept alive by tool
+//     heartbeats up to ARTEX_STATEFUL_LEASE_TTL_S); read-only calls remain parallel.
 type StatefulTargetGuard struct {
 	mu        sync.Mutex
-	leases    map[string]int64 // taskID+"\x00"+host -> holding intentID
-	baselines map[string]bool  // taskID+"\x00"+host -> true once read-only GET completed
+	leases    map[string]mutationLease // taskID+"\x00"+host -> lease entry
+	baselines map[string]bool          // taskID+"\x00"+host -> true once read-only GET completed
+	now       func() time.Time
+	ttl       time.Duration
 }
 
 func NewStatefulTargetGuard() *StatefulTargetGuard {
 	return &StatefulTargetGuard{
-		leases:    map[string]int64{},
+		leases:    map[string]mutationLease{},
 		baselines: map[string]bool{},
+		now:       time.Now,
 	}
+}
+
+// SetClock overrides the clock used for lease timestamps and staleness checks (tests).
+func (g *StatefulTargetGuard) SetClock(fn func() time.Time) {
+	if g == nil || fn == nil {
+		return
+	}
+	g.mu.Lock()
+	g.now = fn
+	g.mu.Unlock()
+}
+
+// SetTTL overrides the lease heartbeat TTL on this guard instance (0 = read env).
+func (g *StatefulTargetGuard) SetTTL(d time.Duration) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.ttl = d
+	g.mu.Unlock()
+}
+
+func (g *StatefulTargetGuard) clockNow() time.Time {
+	if g.now != nil {
+		return g.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (g *StatefulTargetGuard) effectiveTTL() time.Duration {
+	if g != nil && g.ttl > 0 {
+		return g.ttl
+	}
+	return StatefulLeaseTTL()
+}
+
+// EffectiveTTL returns the heartbeat TTL currently applied by this guard.
+func (g *StatefulTargetGuard) EffectiveTTL() time.Duration {
+	if g == nil {
+		return StatefulLeaseTTL()
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.effectiveTTL()
 }
 
 type statefulGuardKey struct{}
@@ -59,10 +167,35 @@ func StatefulActorFromContext(ctx context.Context) (StatefulActor, bool) {
 	return a, ok && a.TaskID != ""
 }
 
-func canonicalGuardKey(taskID, host string) string {
+func canonicalHost(host string) string {
 	h := strings.ToLower(strings.TrimSpace(host))
-	h = strings.TrimSuffix(h, ".")
-	return taskID + "\x00" + h
+	return strings.TrimSuffix(h, ".")
+}
+
+func canonicalGuardKey(taskID, host string) string {
+	return taskID + "\x00" + canonicalHost(host)
+}
+
+func nonNegDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+func buildLeaseStatus(host string, entry mutationLease, now time.Time, ttl time.Duration) LeaseStatus {
+	heldAge := nonNegDuration(now.Sub(entry.acquiredAt))
+	beatAge := nonNegDuration(now.Sub(entry.lastBeat))
+	return LeaseStatus{
+		Host:                    canonicalHost(host),
+		HolderIntentID:          entry.intentID,
+		AcquiredAt:              entry.acquiredAt.UTC(),
+		AgeSeconds:              int64(heldAge / time.Second),
+		LastHeartbeat:           entry.lastBeat.UTC(),
+		LastHeartbeatAgeSeconds: int64(beatAge / time.Second),
+		TTLSeconds:              int64(ttl / time.Second),
+		Stale:                   beatAge >= ttl,
+	}
 }
 
 // RecordBaseline records that a read-only baseline request succeeded for host
@@ -90,19 +223,115 @@ func (g *StatefulTargetGuard) HasBaseline(taskID, host string) bool {
 
 // AcquireMutationLease acquires the per-(taskID, host) mutation lease for
 // intentID (re-entrant for the same intentID). Returns false and the holding
-// intentID if another intent currently holds the lease.
+// intentID if another non-stale intent currently holds the lease.
 func (g *StatefulTargetGuard) AcquireMutationLease(taskID, host string, intentID int64) (bool, int64) {
+	ok, status := g.AcquireMutationLeaseStatus(taskID, host, intentID)
+	return ok, status.HolderIntentID
+}
+
+// AcquireMutationLeaseStatus behaves like AcquireMutationLease and also returns
+// the full LeaseStatus for diagnostics and conflict reporting.
+func (g *StatefulTargetGuard) AcquireMutationLeaseStatus(taskID, host string, intentID int64) (bool, LeaseStatus) {
 	if g == nil || taskID == "" || strings.TrimSpace(host) == "" || intentID <= 0 {
-		return true, 0
+		return true, LeaseStatus{}
 	}
-	key := canonicalGuardKey(taskID, host)
+	chost := canonicalHost(host)
+	key := taskID + "\x00" + chost
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if holder, ok := g.leases[key]; ok && holder != 0 && holder != intentID {
-		return false, holder
+	now := g.clockNow()
+	ttl := g.effectiveTTL()
+
+	if entry, ok := g.leases[key]; ok && entry.intentID != 0 {
+		if entry.intentID == intentID {
+			entry.lastBeat = now
+			g.leases[key] = entry
+			return true, buildLeaseStatus(chost, entry, now, ttl)
+		}
+		beatAge := nonNegDuration(now.Sub(entry.lastBeat))
+		if beatAge < ttl {
+			return false, buildLeaseStatus(chost, entry, now, ttl)
+		}
+		heldAge := nonNegDuration(now.Sub(entry.acquiredAt))
+		slog.Warn("[stateful-guard] taking over stale mutation lease",
+			"task_id", taskID,
+			"host", chost,
+			"old_holder_intent_id", entry.intentID,
+			"new_holder_intent_id", intentID,
+			"held_age_s", int64(heldAge/time.Second),
+			"last_heartbeat_age_s", int64(beatAge/time.Second),
+			"ttl_s", int64(ttl/time.Second),
+		)
 	}
-	g.leases[key] = intentID
-	return true, intentID
+
+	entry := mutationLease{
+		intentID:   intentID,
+		acquiredAt: now,
+		lastBeat:   now,
+	}
+	g.leases[key] = entry
+	return true, buildLeaseStatus(chost, entry, now, ttl)
+}
+
+// Heartbeat refreshes lastBeat on all active mutation leases currently held by
+// (taskID, intentID). Does nothing for hosts held by a different intent.
+func (g *StatefulTargetGuard) Heartbeat(taskID string, intentID int64) {
+	if g == nil || taskID == "" || intentID <= 0 {
+		return
+	}
+	prefix := taskID + "\x00"
+	g.mu.Lock()
+	now := g.clockNow()
+	for k, entry := range g.leases {
+		if strings.HasPrefix(k, prefix) && entry.intentID == intentID {
+			entry.lastBeat = now
+			g.leases[k] = entry
+		}
+	}
+	g.mu.Unlock()
+}
+
+// TouchStatefulHeartbeat refreshes the lease heartbeat for the actor on ctx if
+// both guard and actor are present and the stateful guard is enabled.
+func TouchStatefulHeartbeat(ctx context.Context) {
+	if !StatefulGuardEnabled() {
+		return
+	}
+	g := StatefulGuardFromContext(ctx)
+	actor, ok := StatefulActorFromContext(ctx)
+	if g == nil || !ok {
+		return
+	}
+	g.Heartbeat(actor.TaskID, actor.IntentID)
+}
+
+// LeaseStatuses returns sorted lease status entries for taskID (optionally
+// filtered to a single canonical host when hostFilter is non-empty).
+func (g *StatefulTargetGuard) LeaseStatuses(taskID, hostFilter string) []LeaseStatus {
+	if g == nil || taskID == "" {
+		return []LeaseStatus{}
+	}
+	prefix := taskID + "\x00"
+	filter := canonicalHost(hostFilter)
+	g.mu.Lock()
+	now := g.clockNow()
+	ttl := g.effectiveTTL()
+	out := make([]LeaseStatus, 0, len(g.leases))
+	for k, entry := range g.leases {
+		if !strings.HasPrefix(k, prefix) || entry.intentID <= 0 {
+			continue
+		}
+		host := strings.TrimPrefix(k, prefix)
+		if filter != "" && host != filter {
+			continue
+		}
+		out = append(out, buildLeaseStatus(host, entry, now, ttl))
+	}
+	g.mu.Unlock()
+	slices.SortFunc(out, func(a, b LeaseStatus) int {
+		return strings.Compare(a.Host, b.Host)
+	})
+	return out
 }
 
 // ReleaseIntent releases all mutation leases held by (taskID, intentID).
@@ -112,8 +341,8 @@ func (g *StatefulTargetGuard) ReleaseIntent(taskID string, intentID int64) {
 	}
 	prefix := taskID + "\x00"
 	g.mu.Lock()
-	for k, holder := range g.leases {
-		if strings.HasPrefix(k, prefix) && holder == intentID {
+	for k, entry := range g.leases {
+		if strings.HasPrefix(k, prefix) && entry.intentID == intentID {
 			delete(g.leases, k)
 		}
 	}
@@ -142,7 +371,7 @@ func isMutatingHTTPMethod(method string) bool {
 func ClassifyHTTPAction(toolName string, input json.RawMessage, renderedText string, explicitMethod string) (hosts []string, mutating bool) {
 	seen := map[string]bool{}
 	addHost := func(h string) {
-		h = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(h), "."))
+		h = canonicalHost(h)
 		if h == "" || seen[h] {
 			return
 		}
@@ -195,11 +424,15 @@ func ClassifyHTTPAction(toolName string, input json.RawMessage, renderedText str
 // CheckStatefulTool enforces the pre-mutation baseline gate and per-(task, host)
 // mutation lease using the StatefulTargetGuard and StatefulActor on ctx.
 func CheckStatefulTool(ctx context.Context, toolName string, input json.RawMessage, renderedText string, explicitMethod string) error {
+	if !StatefulGuardEnabled() {
+		return nil
+	}
 	g := StatefulGuardFromContext(ctx)
 	actor, ok := StatefulActorFromContext(ctx)
 	if g == nil || !ok {
 		return nil
 	}
+	g.Heartbeat(actor.TaskID, actor.IntentID)
 	hosts, mutating := ClassifyHTTPAction(toolName, input, renderedText, explicitMethod)
 	if len(hosts) == 0 || !mutating {
 		return nil
@@ -210,21 +443,29 @@ func CheckStatefulTool(ctx context.Context, toolName string, input json.RawMessa
 		}
 	}
 	for _, h := range hosts {
-		if acquired, holder := g.AcquireMutationLease(actor.TaskID, h, actor.IntentID); !acquired {
-			return fmt.Errorf("mutation lease for host %s is held by intent #%d; retry after it finishes", h, holder)
+		if acquired, st := g.AcquireMutationLeaseStatus(actor.TaskID, h, actor.IntentID); !acquired {
+			return fmt.Errorf(
+				"mutation lease for host %s is held by intent #%d (held %ds, last heartbeat %ds ago, ttl %ds); "+
+					"do read-only work, wait for it to finish (check lease_status for live progress), or ask the planner to kill intent #%d if it is stale",
+				h, st.HolderIntentID, st.AgeSeconds, st.LastHeartbeatAgeSeconds, st.TTLSeconds, st.HolderIntentID,
+			)
 		}
 	}
 	return nil
 }
 
 // RecordStatefulReadOnly records a baseline snapshot for each host touched by a
-// completed non-mutating HTTP call.
+// completed non-mutating HTTP call, and refreshes the holder's heartbeat.
 func RecordStatefulReadOnly(ctx context.Context, toolName string, input json.RawMessage, renderedText string, explicitMethod string) {
+	if !StatefulGuardEnabled() {
+		return
+	}
 	g := StatefulGuardFromContext(ctx)
 	actor, ok := StatefulActorFromContext(ctx)
 	if g == nil || !ok {
 		return
 	}
+	g.Heartbeat(actor.TaskID, actor.IntentID)
 	hosts, mutating := ClassifyHTTPAction(toolName, input, renderedText, explicitMethod)
 	if mutating || len(hosts) == 0 {
 		return

@@ -709,6 +709,8 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// knowledge_lookup: cite a stable ATT&CK/WSTG/CWE id when reporting a
 		// finding or a fact, or look up a test while executing an intent.
 		t.knowledgeLookup(),
+		// lease_status: check live per-host mutation leases before hitting lease conflicts.
+		t.leaseStatus(),
 		// The following tools are still [not given] to workers, reserved for
 		// planner/main (reading context, cross-work retrospection are planning duties; a
 		// worker only executes and writes back its single intent):

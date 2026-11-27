@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/intercept"
 	acperm "github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -153,6 +154,7 @@ type ToolSet struct {
 	cs                  *db.CompanyStore // company store (optional)
 	ts                  *db.ExplorationStore
 	factTraffic         FactTrafficLookup // proxy capture store for fact classification; nil = activity-only
+	statefulGuard       *intercept.StatefulTargetGuard
 	worker              string
 	taskID              int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
 	// coverageDisabled mirrors tasks.coverage_enabled=false. Stored inverted so the
@@ -276,6 +278,17 @@ func (t *ToolSet) SetFactTraffic(l FactTrafficLookup) { t.factTraffic = l }
 // SetTaskID sets the PG task id on this ToolSet so that report_finding can
 // dual-write to the standalone findings table (which survives task deletion).
 func (t *ToolSet) SetTaskID(id int64) { t.taskID = id }
+
+// SetStatefulGuard wires the per-engine stateful target guard so graph_overview
+// and lease_status can inspect live per-host mutation leases for this task.
+func (t *ToolSet) SetStatefulGuard(g *intercept.StatefulTargetGuard) { t.statefulGuard = g }
+
+func (t *ToolSet) statefulLeaseOverview() []intercept.LeaseStatus {
+	if !intercept.StatefulGuardEnabled() || t.statefulGuard == nil || t.taskID <= 0 {
+		return nil
+	}
+	return t.statefulGuard.LeaseStatuses(strconv.FormatInt(t.taskID, 10), "")
+}
 
 // SetCoverageEnabled records whether this task has the asset-coverage feature on
 // (default enabled). Passing false makes graphOverviewData omit the coverage block
@@ -767,6 +780,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// program alias) plus accounts recorded by earlier runs. Surfaced every round so
 	// authenticated testing reuses them instead of re-registering, and so accounts
 	// this run registers get saved back (see save_task_credential).
+	if leases := t.statefulLeaseOverview(); len(leases) > 0 {
+		out["mutation_leases"] = leases
+	}
 	if creds := t.taskCredentialOverview(); creds != nil {
 		out["task_credentials"] = creds
 		out["task_credentials_note"] = "test accounts for this task; use the matching entry for authenticated testing instead of registering a new account; entries with an empty password mean you must register that account first (strong unique password) and record it via save_task_credential; ALWAYS record accounts you register via save_task_credential"
@@ -1427,7 +1443,8 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 
 func (t *ToolSet) addIntent() actool.CoreTool {
 	return t.writeExpTool("add_intent", "Generate [exploration directions] into the frontier and link them into the exploration graph. An intent is an open exploration direction, not a fixed type — describe freely in one summary sentence what to explore/verify/exploit.\n"+
-		"★Batch preferred: put multiple new directions filtered in one round into the intents array in a single submission (saves round trips vs. one call per item). Returns an ids array, same length and order as intents (failed items get id=0, details in errors). For a single intent, omit intents and pass the top-level summary.",
+		"★Batch preferred: put multiple new directions filtered in one round into the intents array in a single submission (saves round trips vs. one call per item). Returns an ids array, same length and order as intents (failed items get id=0, details in errors). For a single intent, omit intents and pass the top-level summary.\n"+
+		"Stateful targets: check mutation_leases / lease_status before dispatching a competing mutating intent on an already-leased host (prefer read-only work, wait, or kill_work if stale).",
 		obj(map[string]any{
 			"intents":       map[string]any{"type": "array", "description": "[Prefer this] array of exploration directions to add, processed in order. Each element has the same fields as the top-level ones below (summary/asset_ids/parent_ids/priority). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
 			"summary":       str("[single] one sentence describing this exploration direction: what to do + why. Just write the direction clearly; asset ids are not required."),
@@ -2708,7 +2725,7 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 // PlannerTools is the read + intent-generation + goal-judgement tool set.
 func (t *ToolSet) PlannerTools() []actool.CoreTool {
 	return []actool.CoreTool{
-		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(), t.knowledgeLookup(),
+		t.graphOverview(), t.leaseStatus(), t.listFindings(), t.listFacts(), t.nodeDetail(), t.knowledgeLookup(),
 		// cold-digest §6.1: restore folded cold nodes (digest body → members → detail).
 		t.expandDigest(),
 		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.listGoals(), t.upsertHypothesis(), t.recordCapability(), t.addIntent(), t.proveGoal(), t.goalMet(),
@@ -2734,4 +2751,48 @@ func (t *ToolSet) PlannerTools() []actool.CoreTool {
 		// (by type + paginated), and decide on supplementary testing yourself.
 		t.listUntestedAssets(),
 	}
+}
+
+// leaseStatus reports the live per-host mutation leases held within this task
+// (holder intent, acquired time, age, last heartbeat, and staleness against
+// ARTEX_STATEFUL_LEASE_TTL_S). Read-only; shared by planner and workers.
+func (t *ToolSet) leaseStatus() actool.CoreTool {
+	return readTool("lease_status",
+		"Inspect live per-host mutation leases for stateful targets in this task. Shows, per host, the holder intent id, acquired_at, age_seconds, last_heartbeat, last_heartbeat_age_seconds, ttl_seconds, and stale status. Read-only: if another intent holds the lease on a host you need to mutate, do read-only work, wait for it to finish, or ask the planner to kill_work the holder if stale.",
+		obj(map[string]any{
+			"host": str("optional hostname to filter to (omit to list all active host leases in this task)"),
+		}),
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				Host string `json:"host"`
+			}
+			if len(in) > 0 {
+				_ = json.Unmarshal(in, &a)
+			}
+			sg := t.statefulGuard
+			if sg == nil {
+				sg = intercept.StatefulGuardFromContext(ctx)
+			}
+			taskID := ""
+			if t.taskID > 0 {
+				taskID = strconv.FormatInt(t.taskID, 10)
+			}
+			if actor, ok := intercept.StatefulActorFromContext(ctx); ok && actor.TaskID != "" {
+				taskID = actor.TaskID
+			}
+			enabled := intercept.StatefulGuardEnabled()
+			ttl := intercept.StatefulLeaseTTL()
+			if sg != nil {
+				ttl = sg.EffectiveTTL()
+			}
+			leases := []intercept.LeaseStatus{}
+			if enabled && sg != nil && taskID != "" {
+				leases = sg.LeaseStatuses(taskID, a.Host)
+			}
+			return jsonResult(map[string]any{
+				"enabled":     enabled,
+				"ttl_seconds": int64(ttl / time.Second),
+				"leases":      leases,
+			})
+		})
 }

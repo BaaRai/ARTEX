@@ -99,6 +99,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			if ev.ToolUse == nil {
 				continue
 			}
+			intercept.TouchStatefulHeartbeat(ctx)
 			flush()
 			toolNames[ev.ToolUse.ID] = ev.ToolUse.Name
 			in := string(ev.ToolUse.Input)
@@ -111,6 +112,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			if ev.ToolResult == nil {
 				continue
 			}
+			intercept.TouchStatefulHeartbeat(ctx)
 			flush()
 			out := blocksText(ev.ToolResult.Content)
 			lastTool.done(ev.ToolResult.ToolUseID)
