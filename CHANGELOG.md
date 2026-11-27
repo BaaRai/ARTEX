@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **Tampering-hook tests run in CI**: the `web` job now runs `npm run test:tamper-hooks`. The suite existed as a script but no workflow called it, so a regression in the tampering-hook editor's payload and validation handling could merge without failing a check.
 - **Preinstalled Python packages for agent scripts**: `requests`, `beautifulsoup4`, `lxml`, `urllib3`, `pyyaml`, `jinja2`, `colorama` and `tqdm` are preinstalled in the runtime image with pinned versions so agent-generated scripts run without runtime pip downloads.
 
 - **Pentest knowledge pack**: the planner and the workers can call a read-only `knowledge_lookup` tool to resolve a MITRE ATT&CK technique, an OWASP WSTG test or a CWE weakness by id or keyword, and cite the id in findings and facts. The pack is generated from the official sources by `scripts/knowledge/build.py`, with the source URL, license, retrieval date and source SHA-256 recorded, keeps its own licenses in `knowledge/NOTICE` and `knowledge/licenses`, and is embedded in the binary, so no network is needed at runtime. Descriptions are capped and each entry carries the canonical URL (#521).
