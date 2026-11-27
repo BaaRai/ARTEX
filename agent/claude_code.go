@@ -40,6 +40,7 @@ type claudeCodeRun func(context.Context, []string, string) ([]byte, error)
 const (
 	claudeCodeInputLimit  = 10_000_000 // Claude Code's documented stdin cap.
 	claudeCodeOutputLimit = 16_000_000
+	claudeCodeMaxTurns    = "8" // Leave room for structured-output validation retries while bounding usage.
 	claudeCodeSchema      = `{"type":"object","properties":{"kind":{"type":"string","enum":["text","tool"]},"text":{"type":"string"},"tool_name":{"type":"string"},"tool_input":{"type":"object"}},"required":["kind"],"additionalProperties":false}`
 )
 
@@ -254,7 +255,7 @@ func (p *claudeCodeProvider) Complete(ctx context.Context, req llm.CompletionReq
 	args := []string{
 		"-p", "--restricted", "--tools", "", "--strict-mcp-config",
 		"--disallowedTools", "mcp__*", "--no-chrome", "--no-session-persistence",
-		"--max-turns", "2",
+		"--max-turns", claudeCodeMaxTurns,
 		"--output-format", "json", "--json-schema", claudeCodeSchema,
 		"--system-prompt-file", systemFile, "--model", p.model,
 	}

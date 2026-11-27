@@ -42,6 +42,11 @@ func TestClaudeCodeToolRoundTrip(t *testing.T) {
 			t.Errorf("CLI args missing %q: %v", want, inferenceArgs)
 		}
 	}
+	for i, arg := range inferenceArgs {
+		if arg == "--max-turns" && (i+1 >= len(inferenceArgs) || inferenceArgs[i+1] != "8") {
+			t.Errorf("want eight-turn structured-output budget; args: %v", inferenceArgs)
+		}
+	}
 	if len(inferenceArgs) == 0 || !strings.Contains(inferenceArgs[len(inferenceArgs)-1], "stdin") {
 		t.Fatalf("CLI invocation must include an explicit stdin prompt: %v", inferenceArgs)
 	}
