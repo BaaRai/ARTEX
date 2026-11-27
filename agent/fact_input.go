@@ -34,7 +34,10 @@ func factItemSchema() map[string]any {
 	}, "summary")
 	summary := schema["properties"].(map[string]any)["summary"].(map[string]any)
 	summary["minLength"] = 1
-	summary["pattern"] = "[^" + factWhitespace + "]"
+	// Ollama and llama.cpp reject unanchored patterns, and "." stops at line
+	// ends there, so spell out "contains a non-whitespace character" with
+	// anchors and character classes only.
+	summary["pattern"] = "^[" + factWhitespace + "]*[^" + factWhitespace + "]([" + factWhitespace + "]|[^" + factWhitespace + "])*$"
 	schema["additionalProperties"] = false
 	return schema
 }
