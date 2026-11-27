@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -689,8 +690,9 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 	// budget to emit OK cleanly (finish=stop).
 	// EscalateMaxTokens stays false: don't raise the cap and retry on truncation, to
 	// avoid burning tokens in a resume loop.
+	probe := &connTestProvider{inner: prov}
 	reply, err := agentcore.Run(ctx, agentcore.Options{
-		Provider:       prov,
+		Provider:       probe,
 		SystemPrompt:   []string{"You are a connection test. Just output the two characters OK — no thinking, no explanation, nothing else."},
 		Tools:          []actool.CoreTool{}, // not nil: nil means the SDK's unconfined file and shell tools
 		PermissionMode: acperm.ModeBypass,
@@ -712,6 +714,12 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 		}
 		return lat, "", err
 	}
+	// Reject tool-call replies (#526): the connection test asks for plain text
+	// with no tools; a model answering with a tool call or tool_calls/tool_use
+	// finish reason must not be reported as Connected even if it also emitted text.
+	if probe.sawToolCall || isToolCallStopReason(probe.stopReason) {
+		return lat, "", fmt.Errorf("the model returned a tool call instead of a text reply (finish_reason=%q)", probe.stopReason)
+	}
 	// err==nil is not enough: requests that go through while the model emits nothing
 	// at all really happen (thinking burned the whole budget, the body got swallowed
 	// by a safety policy, a compatibility layer dropped the content). Such a config
@@ -722,4 +730,52 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 		return lat, "", fmt.Errorf("the model returned no content (the request went through, but no text was returned)")
 	}
 	return lat, reply, nil
+}
+
+// connTestProvider observes the raw provider response during TestConnection so
+// tool-call replies and tool_calls/tool_use stop reasons are rejected (#526).
+type connTestProvider struct {
+	inner       llm.Provider
+	sawToolCall bool
+	stopReason  string
+}
+
+func (p *connTestProvider) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+	return func(yield func(llm.StreamEvent, error) bool) {
+		for ev, err := range p.inner.Stream(ctx, req) {
+			if err == nil {
+				if ev.Type == llm.SEToolUseStart {
+					p.sawToolCall = true
+				}
+				if ev.StopReason != "" {
+					p.stopReason = ev.StopReason
+				}
+			}
+			if !yield(ev, err) {
+				return
+			}
+		}
+	}
+}
+
+func (p *connTestProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	msg, stopReason, usage, err := p.inner.Complete(ctx, req)
+	if err == nil {
+		if len(msg.ToolUses()) > 0 {
+			p.sawToolCall = true
+		}
+		if stopReason != "" {
+			p.stopReason = stopReason
+		}
+	}
+	return msg, stopReason, usage, err
+}
+
+func isToolCallStopReason(stopReason string) bool {
+	switch strings.ToLower(strings.TrimSpace(stopReason)) {
+	case "tool_use", "tool_calls":
+		return true
+	default:
+		return false
+	}
 }
