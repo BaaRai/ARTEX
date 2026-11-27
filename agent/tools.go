@@ -1638,6 +1638,20 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		// retry hits the same check and is suppressed again.
 		if a.ForceRegister {
 			slog.Info("[triage] override: force_register set, registering without duplicate check", "candidate", a.Name)
+		} else if dup, ok := t.fingerprintDuplicate(input); ok {
+			res := map[string]any{
+				"duplicate_of_finding_id":      dup.FindingID,
+				"duplicate_of_finding_node_id": dup.NodeID,
+				"dedup_source":                 "fingerprint",
+				"fingerprint":                  dup.Fingerprint,
+				"evidence_status":              "duplicate_not_registered",
+				"note": fmt.Sprintf("Deterministic fingerprint (%s) matched already registered finding_id %d (exploration node %d), so no new finding was created. "+
+					"To extend that finding with new evidence, call update_finding_report with finding_id=%d (it addresses the NODE id, not the findings-table id). "+
+					"If the new evidence is in fact a distinct defect (different endpoint, parameter or root cause), call report_finding again with force_register=true.",
+					dup.Fingerprint, dup.FindingID, dup.NodeID, dup.NodeID),
+			}
+			raw, _ := json.Marshal(res)
+			return actool.Text(fmt.Sprintf("finding matched existing finding_id %d (node %d, fingerprint %s) — not registered again\n%s", dup.FindingID, dup.NodeID, dup.Fingerprint, raw)), nil
 		} else if ans, ok := t.triageDuplicate(ctx, input); ok && triageDuplicateHit(ans) {
 			res := map[string]any{
 				"duplicate_of_finding_id":      ans.DuplicateOf,
