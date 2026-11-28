@@ -1364,6 +1364,7 @@ type intentItem struct {
 	ReopenReason string            `json:"reopen_reason"`
 	Gains        []json.RawMessage `json:"gains"`
 	Consumes     []json.RawMessage `json:"consumes"`
+	WaitForLease bool              `json:"wait_for_lease,omitempty"`
 }
 
 // addOneIntent creates one intent node, links its upstream lineage, and returns the id.
@@ -1377,6 +1378,9 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 		return 0, fmt.Errorf("summary must not be empty")
 	}
 	if err := t.checkClosedHypothesis(it); err != nil {
+		return 0, err
+	}
+	if err := t.checkActiveLeaseForNewIntent(it); err != nil {
 		return 0, err
 	}
 	gateWarn, err := t.checkGateConstantIntent(it)
@@ -1429,6 +1433,9 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 	if len(it.Consumes) > 0 {
 		payload["consumes"] = it.Consumes
 	}
+	if it.WaitForLease {
+		payload["wait_for_lease"] = true
+	}
 	if capWarn != "" {
 		payload["capability_shadow_warning"] = capWarn
 	}
@@ -1460,16 +1467,17 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 		"★Batch preferred: put multiple new directions filtered in one round into the intents array in a single submission (saves round trips vs. one call per item). Returns an ids array, same length and order as intents (failed items get id=0, details in errors). For a single intent, omit intents and pass the top-level summary.\n"+
 		"Stateful targets: check mutation_leases / lease_status before dispatching a competing mutating intent on an already-leased host (prefer read-only work, wait, or kill_work if stale).",
 		obj(map[string]any{
-			"intents":       map[string]any{"type": "array", "description": "[Prefer this] array of exploration directions to add, processed in order. Each element has the same fields as the top-level ones below (summary/asset_ids/parent_ids/priority). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
-			"summary":       str("[single] one sentence describing this exploration direction: what to do + why. Just write the direction clearly; asset ids are not required."),
-			"asset_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "the [target asset ids] this direction tests/attacks (**pass whenever possible**, 0/1/many; these are asset ids from list_assets, not exploration node ids): which assets (sites/endpoints/parameters/hosts etc.) this direction targets. Whenever the direction revolves around concrete assets, be sure to pass them — it is the structured marker of 'which targets this exploration hits', used for coverage dedup and linking the intent into the asset lineage. Leave empty only for pure global recon with truly no concrete target assets."},
-			"parent_ids":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "upstream anchor ids (optional, 0/1/many): which [confirmed fact/finding] nodes this direction is synthesized from. **Only existing fact/finding node ids may be passed — not intents/goals/hints** — an intent must anchor on confirmed knowledge, finding-driven rather than planned out of thin air. Pass several when multiple facts jointly produce one new intent; leave empty for a top-level brand-new recon direction (it is automatically attached to the task's origin fact)."},
-			"priority":      intp("priority 0-10, default 5"),
-			"hypothesis_id": idp("optional: hypothesis node id this intent tests"),
-			"new_evidence":  str("required when reopening a closed hypothesis"),
-			"reopen_reason": str("required when reopening a closed hypothesis"),
-			"gains":         map[string]any{"type": "array", "description": "capabilities this intent aims to acquire (capability ids or {verb,object} objects)", "items": map[string]any{}},
-			"consumes":      map[string]any{"type": "array", "description": "capabilities this intent depends on (capability ids or {verb,object} objects)", "items": map[string]any{}},
+			"intents":        map[string]any{"type": "array", "description": "[Prefer this] array of exploration directions to add, processed in order. Each element has the same fields as the top-level ones below (summary/asset_ids/parent_ids/priority). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
+			"summary":        str("[single] one sentence describing this exploration direction: what to do + why. Just write the direction clearly; asset ids are not required."),
+			"asset_ids":      map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "the [target asset ids] this direction tests/attacks (**pass whenever possible**, 0/1/many; these are asset ids from list_assets, not exploration node ids): which assets (sites/endpoints/parameters/hosts etc.) this direction targets. Whenever the direction revolves around concrete assets, be sure to pass them — it is the structured marker of 'which targets this exploration hits', used for coverage dedup and linking the intent into the asset lineage. Leave empty only for pure global recon with truly no concrete target assets."},
+			"parent_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "upstream anchor ids (optional, 0/1/many): which [confirmed fact/finding] nodes this direction is synthesized from. **Only existing fact/finding node ids may be passed — not intents/goals/hints** — an intent must anchor on confirmed knowledge, finding-driven rather than planned out of thin air. Pass several when multiple facts jointly produce one new intent; leave empty for a top-level brand-new recon direction (it is automatically attached to the task's origin fact)."},
+			"priority":       intp("priority 0-10, default 5"),
+			"hypothesis_id":  idp("optional: hypothesis node id this intent tests"),
+			"new_evidence":   str("required when reopening a closed hypothesis"),
+			"reopen_reason":  str("required when reopening a closed hypothesis"),
+			"gains":          map[string]any{"type": "array", "description": "capabilities this intent aims to acquire (capability ids or {verb,object} objects)", "items": map[string]any{}},
+			"consumes":       map[string]any{"type": "array", "description": "capabilities this intent depends on (capability ids or {verb,object} objects)", "items": map[string]any{}},
+			"wait_for_lease": map[string]any{"type": "boolean", "description": "set true when queuing a mutating intent intentionally onto a host with an active mutation lease so the worker calls wait_for_lease first"},
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {

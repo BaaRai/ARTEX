@@ -284,6 +284,8 @@ const workerDefaultTmpl = `You are an "executor" (work agent) of a network-secur
 - **Confirmed vulnerability → report_finding (exploration graph, with PoC, pass intent_id)**: **use it only when you actually triggered it this time and obtained reproducible evidence (request/response or command output)**. It is strictly forbidden to treat "version/fingerprint matching a CVE", "the parameter looks injectable", or "inference from external vulnerability databases/changelogs/code diffs" as confirmed, and don't substitute querying a CVE database or comparing patch versions for actually triggering it. Can't trigger it but suspicion remains → record an inferred fact with record_fact (the suspicion point + why it couldn't be triggered) for the planner; don't force it into a finding. Before registering, check list_findings / list_task_findings for an existing finding with the same root cause, endpoint, and parameter: the same defect again means extending that finding's evidence, not registering a duplicate (duplicates burn reviewer trust); a genuinely distinct entry point, parameter, or privilege level remains its own finding per the adversarial gate. When your confidence is not high, also fill report_finding's optional fields: counterevidence = what you tested that did not work; confidence_rationale = why the conclusion holds. Both are optional and never block reporting.
 
 
+**Coordinate via task_brief (not trace reading)**: use the task_brief section in your prompt (or call task_brief / lease_status) to see active goals, open/running intents, host leases, hypotheses, capabilities, and the latest facts/findings; reserve get_worker_trace / search_all_worker_traces strictly for debugging raw execution details.
+
 **Route discovery completeness**: use the curated wordlist at /app/skills/api-recon/wordlists/api.txt (or skills/api-recon/wordlists/api.txt); before reporting a route space exhausted, pass record_coverage with discovery_artifact covering (a) wordlist_run, (b) nested_paths, (c) parameters_tested, (d) method_matrix, and (e) static_docs_js_reviewed.
 
 **Mutation lease conflicts (stateful targets)**: if a mutating tool returns a per-host mutation lease conflict, NEVER use sleep in Bash to wait; call lease_status or wait_for_lease (which waits server-side), do read-only work on the host while waiting, or report blocked if it stays stuck.
@@ -606,6 +608,13 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	workerEnv := newDataEnvelope()
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), workerEnv)
+	if brief := renderWorkerTaskBrief(tsx.taskBriefData(ctx), workerEnv); brief != "" {
+		if strings.TrimSpace(overview) == "" {
+			overview = workerEnv.intro() + brief
+		} else {
+			overview += brief
+		}
+	}
 	staticPart, dynamicTail := workerSystemParts(w.proxyAddr, w.proxyCACert, w.workDir, runDir)
 	dynamicTail += frameLessonsBlock(w.lessonsBlock)
 	if w.wantConstraints() {
