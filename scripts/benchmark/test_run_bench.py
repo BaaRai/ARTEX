@@ -247,7 +247,7 @@ class JudgeTests(unittest.TestCase):
                 findings = [{**f, "summary": "fixture", "report": "fixture"} for f in self.findings]
                 argv = ["run_bench.py", "--subject-model", "subject", "--corpus-url", "http://fixture.test"]
                 env = {"ARTEX_TOKEN": "fixture", "JUDGE_BASE_URL": "http://judge.test",
-                       "JUDGE_MODEL": "judge", "JUDGE_API_KEY": "fixture"}
+                       "JUDGE_MODEL": run_bench.PINNED_JUDGE_MODEL, "JUDGE_API_KEY": "fixture"}
                 with mock.patch.object(run_bench.sys, "argv", argv), \
                         mock.patch.dict(run_bench.os.environ, env, clear=True), \
                         mock.patch.object(run_bench.pathlib.Path, "read_text", return_value=json.dumps({"findings": self.gt})), \
@@ -343,6 +343,139 @@ class AdversarialScoringTests(unittest.TestCase):
         self.assertEqual(scores["precision"], 1.0)
         self.assertEqual(scores["reused_matches_dropped"], 0)
         self.assertEqual(scores["unproven_detections_excluded"], 0)
+
+
+
+class BenchV2R2AndR5Tests(unittest.TestCase):
+    """Tests for bench-v2 R2 (in-window capture-store traffic_ref) and R5
+    (pinned judge model/prompt, GT SHA-256 hash, Wilson 95% intervals)."""
+
+    def setUp(self):
+        self.gt_doc = {
+            "corpus": "juice-shop",
+            "version": "v1",
+            "findings": [
+                {"id": "JS-1", "title": "SQLi login", "cwe": "CWE-89", "classes": ["SQLi"],
+                 "components": ["/rest/user/login"], "mechanism_keywords": ["sql"], "proof_hint": "PoC"},
+                {"id": "JS-2", "title": "Basket IDOR", "cwe": "CWE-639", "classes": ["IDOR"],
+                 "components": ["/rest/basket"], "mechanism_keywords": ["idor"], "proof_hint": "PoC"},
+            ],
+        }
+        self.window_start = 1700000000.0
+        self.window_end = 1700003600.0
+
+    def test_r2_requires_present_and_in_window_traffic_ref(self):
+        findings = [
+            {"id": 1, "name": "Valid in-window SQLi", "traffic_refs": ["ex-ok"]},
+            {"id": 2, "name": "Missing traffic ref", "traffic_refs": []},
+            {"id": 3, "name": "Unknown capture id", "traffic_refs": ["ex-missing"]},
+            {"id": 4, "name": "Stale capture before window", "traffic_refs": ["ex-old"]},
+            {"id": 5, "name": "Future capture after window", "traffic_refs": ["ex-future"]},
+            {"id": 6, "name": "Capture missing timestamp", "traffic_refs": ["ex-nots"]},
+        ]
+        store = {
+            "ex-ok": {"id": "ex-ok", "ts": 1700001200},
+            "ex-old": {"id": "ex-old", "ts": 1699999000},
+            "ex-future": {"id": "ex-future", "ts": 1700009000},
+            "ex-nots": {"id": "ex-nots"},
+        }
+        tv = run_bench.verify_finding_traffic_refs(findings, store.get, self.window_start, self.window_end)
+        self.assertEqual(tv["verified_keys"], {(int, 1)})
+        self.assertEqual(tv["rejected"][2], "missing_traffic_ref")
+        self.assertEqual(tv["rejected"][3], "traffic_ref_not_in_capture_store")
+        self.assertEqual(tv["rejected"][4], "traffic_ref_outside_run_window")
+        self.assertEqual(tv["rejected"][5], "traffic_ref_outside_run_window")
+        self.assertEqual(tv["rejected"][6], "traffic_ref_missing_timestamp")
+
+        # Verdict matching finding 1 (in-window) counts; verdict matching finding 4 (outside window) is excluded.
+        verdicts = [
+            verdict("JS-1", detected=True, matched_id=1),
+            verdict("JS-2", detected=True, matched_id=4),
+        ]
+        scores = run_bench.tally(self.gt_doc["findings"], verdicts, findings, [], traffic_verification=tv)
+        self.assertTrue(scores["traffic_verification_enabled"])
+        self.assertEqual(scores["detected"], 1)
+        self.assertEqual(scores["unverified_traffic_excluded"], 1)
+        self.assertEqual(scores["detection_rate"], 0.5)
+        self.assertEqual(scores["precision"], round(1 / 6, 4))
+        self.assertEqual(len(scores["detection_rate_wilson95"]), 2)
+        self.assertEqual(len(scores["precision_wilson95"]), 2)
+
+    def test_r2_parses_iso8601_and_millisecond_timestamps(self):
+        findings = [
+            {"id": "f-iso", "name": "ISO ts", "traffic_refs": [{"traffic_id": "ex-iso"}]},
+            {"id": "f-ms", "name": "MS ts", "traffic_refs": [{"exchange_id": "ex-ms"}]},
+        ]
+        # 1700001200 == 2023-11-14T22:33:20Z
+        store = {
+            "ex-iso": {"id": "ex-iso", "started_at": "2023-11-14T22:33:20Z"},
+            "ex-ms": {"id": "ex-ms", "ts": 1700001200000},
+        }
+        tv = run_bench.verify_finding_traffic_refs(findings, store.get, self.window_start, self.window_end)
+        self.assertEqual(tv["verified_keys"], {(str, "f-iso"), (str, "f-ms")})
+
+    def test_r5_pinned_judge_model_and_prompt_hash(self):
+        self.assertEqual(run_bench.METHOD_VERSION, "bench-v2")
+        self.assertEqual(len(run_bench.JUDGE_PROMPT_SHA256), 64)
+        # Pinned judge passes when different from subject.
+        ok_args = types.SimpleNamespace(
+            judge_model=run_bench.PINNED_JUDGE_MODEL,
+            subject_model="glm-5.3",
+            allow_custom_judge_model=False,
+            allow_self_judge=False,
+        )
+        run_bench.validate_judge_contract(ok_args)
+        # Unpinned judge model is refused unless --allow-custom-judge-model is set.
+        bad_args = types.SimpleNamespace(
+            judge_model="other-model",
+            subject_model="glm-5.3",
+            allow_custom_judge_model=False,
+            allow_self_judge=False,
+        )
+        with self.assertRaisesRegex(SystemExit, "bench-v2 R5 fixes judge model"):
+            run_bench.validate_judge_contract(bad_args)
+        bad_args.allow_custom_judge_model = True
+        run_bench.validate_judge_contract(bad_args)
+        # Self-judge is still refused even with pinned model.
+        self_args = types.SimpleNamespace(
+            judge_model=run_bench.PINNED_JUDGE_MODEL,
+            subject_model=run_bench.PINNED_JUDGE_MODEL,
+            allow_custom_judge_model=False,
+            allow_self_judge=False,
+        )
+        with self.assertRaisesRegex(SystemExit, "judge model equals subject model"):
+            run_bench.validate_judge_contract(self_args)
+
+    def test_r5_ground_truth_hash_and_report_stamping_with_wilson_intervals(self):
+        h1 = run_bench.ground_truth_hash(self.gt_doc)
+        reordered = {"findings": self.gt_doc["findings"], "version": "v1", "corpus": "juice-shop"}
+        self.assertEqual(h1, run_bench.ground_truth_hash(reordered))
+        mutated = copy.deepcopy(self.gt_doc)
+        mutated["findings"][0]["title"] = "Changed"
+        self.assertNotEqual(h1, run_bench.ground_truth_hash(mutated))
+
+        findings = [{"id": 1, "name": "SQLi", "traffic_refs": ["ex-1"]}]
+        verdicts = [verdict("JS-1", detected=True, matched_id=1), verdict("JS-2", detected=False)]
+        res = run_bench.tally(self.gt_doc["findings"], verdicts, findings, [])
+        self.assertEqual(res["detection_rate_wilson95"], [round(x, 4) for x in run_bench.wilson(0.5, 2)])
+        self.assertEqual(res["precision_wilson95"], [round(x, 4) for x in run_bench.wilson(1.0, 1)])
+
+        args = types.SimpleNamespace(
+            gt_version="v1", gt_hash=h1, subject_model="glm-5.3",
+            judge_model=run_bench.PINNED_JUDGE_MODEL, llm_profiles="",
+        )
+        with tempfile.TemporaryDirectory() as td:
+            out_dir = pathlib.Path(td)
+            run_bench.write_report(out_dir, "juice-shop", args, {"id": 99}, "done", findings, verdicts, res)
+            data = json.loads((out_dir / "results.json").read_text())
+            md = (out_dir / "report.md").read_text()
+            self.assertEqual(data["method_version"], "bench-v2")
+            self.assertEqual(data["ground_truth_sha256"], h1)
+            self.assertTrue(data["judge_model_pinned"])
+            self.assertEqual(data["judge_prompt_sha256"], run_bench.JUDGE_PROMPT_SHA256)
+            self.assertIn("precision_wilson95", data["result"])
+            self.assertIn(h1, md)
+            self.assertIn("Wilson 95%", md)
 
 
 if __name__ == "__main__":
