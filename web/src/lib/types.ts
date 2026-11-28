@@ -951,6 +951,11 @@ export interface TrafficResp {
 
 // Full raw request/response of one exchange (lazy-loaded on row select).
 export interface TrafficDetail {
+  // Which exchange these bodies belong to, and when it was captured (Unix
+  // seconds). The benchmark's R2 check uses them to prove a finding references a
+  // capture from the run window.
+  id?: string;
+  ts?: number;
   req: string;
   resp: string;
   // WebSocket/SSE exchanges carry their messages separately (trafficStream);

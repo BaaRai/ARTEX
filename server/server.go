@@ -3808,7 +3808,16 @@ func (s *Server) getTrafficExchange(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("[traffic] stream info for %s: %v", id, err)
 	}
-	writeJSON(w, 200, map[string]any{"req": req, "resp": resp, "stream_count": count, "stream_kind": kind})
+	// The bodies alone do not say which exchange they belong to or when it was
+	// captured; the benchmark's R2 check needs both to credit a finding that
+	// references this exchange.
+	out := map[string]any{"req": req, "resp": resp, "stream_count": count, "stream_kind": kind}
+	if meta, merr := tr.Meta(id); merr == nil {
+		out["id"], out["ts"] = meta.ID, meta.TS
+	} else {
+		log.Printf("[traffic] metadata for %s: %v", id, merr)
+	}
+	writeJSON(w, 200, out)
 }
 
 // getTrafficStream returns one page of a WebSocket/SSE exchange's messages in
