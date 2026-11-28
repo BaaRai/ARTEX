@@ -502,7 +502,7 @@ export default function TrafficPage() {
           <TabsTrigger value="hooks">{t("Hooks")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="audit" className="min-h-0 flex-1 overflow-auto"><AccessAuditPanel /></TabsContent>
+        <TabsContent value="audit" className="mt-0 flex min-h-0 flex-1 flex-col"><AccessAuditPanel /></TabsContent>
 
         <TabsContent value="hooks" className="mt-0 flex min-h-0 flex-1 flex-col gap-4">
           <TamperHooksPanel recentExchanges={exchanges} />

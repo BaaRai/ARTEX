@@ -2804,5 +2804,12 @@
   "From (local time)": "Başlangıç (yerel saat)",
   "before": "before",
   "Audit coverage is partial across all companies. No match does not prove no access. Direct shell/MCP traffic, opaque tunnels and remote SSRF/RCE hops are not covered. Query parameters, credentials, headers and bodies are not stored; URL paths may still be sensitive.": "Denetim tüm şirketlerde kısmi kapsama sahiptir. Eşleşme olmaması erişim olmadığını kanıtlamaz. Doğrudan kabuk/MCP trafiği, opak tüneller ve uzak SSRF/RCE atlamaları kapsam dışıdır. Sorgu parametreleri, kimlik bilgileri, başlıklar ve gövdeler saklanmaz; URL yolları yine de hassas olabilir.",
-  "Access audit": "Erişim denetimi"
+  "Access audit": "Erişim denetimi",
+  "Choose a valid start and end time.": "Geçerli bir başlangıç ve bitiş zamanı seçin.",
+  "{count} observations": "{count} gözlem",
+  "Partial coverage": "Kısmi kapsam",
+  "Write failures: {count}": "Yazma hataları: {count}",
+  "Access audit details": "Erişim denetimi ayrıntıları",
+  "Audit coverage": "Denetim kapsamı",
+  "No match does not prove no access.": "Eşleşme bulunmaması erişim olmadığı anlamına gelmez."
 }

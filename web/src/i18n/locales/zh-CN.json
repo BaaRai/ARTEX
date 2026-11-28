@@ -2804,5 +2804,12 @@
   "From (local time)": "起始时间（本地时区）",
   "before": "before",
   "Audit coverage is partial across all companies. No match does not prove no access. Direct shell/MCP traffic, opaque tunnels and remote SSRF/RCE hops are not covered. Query parameters, credentials, headers and bodies are not stored; URL paths may still be sensitive.": "此处跨企业查询部分覆盖的审计记录。没有匹配记录不等于没有访问。直连 Shell/MCP、不可见的隧道流量及远端 SSRF/RCE 跳转不在覆盖范围内。不存储查询参数、凭据、请求头或正文；URL 路径仍可能包含敏感信息。",
-  "Access audit": "访问审计"
+  "Access audit": "访问审计",
+  "Choose a valid start and end time.": "请选择有效的起止时间。",
+  "{count} observations": "{count} 条观察记录",
+  "Partial coverage": "部分覆盖",
+  "Write failures: {count}": "写入失败：{count}",
+  "Access audit details": "访问审计详情",
+  "Audit coverage": "审计覆盖范围",
+  "No match does not prove no access.": "未匹配到记录不代表没有访问。"
 }
