@@ -3,11 +3,16 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
 )
+
+// MinDiscoveryWordlistEntries enforces a real wordlist run (at least 50 entries)
+// so a trivial 1-entry run cannot satisfy criterion (a) of DiscoveryArtifact.
+const MinDiscoveryWordlistEntries = 50
 
 // DiscoveryWordlistRun captures criterion (a): at least one curated/real
 // wordlist run (such as skills/api-recon/wordlists/api.txt).
@@ -29,8 +34,8 @@ type DiscoveryArtifact struct {
 
 func (a DiscoveryArtifact) MissingChecks() []string {
 	var missing []string
-	if strings.TrimSpace(a.WordlistRun.Wordlist) == "" || a.WordlistRun.EntriesTested <= 0 {
-		missing = append(missing, "(a) wordlist_run with non-empty wordlist (e.g. skills/api-recon/wordlists/api.txt) and entries_tested > 0")
+	if strings.TrimSpace(a.WordlistRun.Wordlist) == "" || a.WordlistRun.EntriesTested < MinDiscoveryWordlistEntries {
+		missing = append(missing, fmt.Sprintf("(a) wordlist_run with non-empty wordlist (e.g. skills/api-recon/wordlists/api.txt) and entries_tested >= %d", MinDiscoveryWordlistEntries))
 	}
 	if len(nonEmptyTrimmed(a.NestedPaths)) == 0 {
 		missing = append(missing, "(b) nested_paths under discovered routes")
@@ -68,7 +73,10 @@ func (a DiscoveryArtifact) CompactSummary() string {
 	)
 }
 
-var routeExhaustionClaimRe = regexp.MustCompile(`(?i)\b(route(?:\s+space)?\s+exhaust(?:ed|ion)?|exhaust(?:ed|ion)\s+(?:all\s+)?routes|no\s+(?:more\s+)?(?:api\s+)?routes|endpoint(?:\s+space)?\s+exhaust(?:ed|ion)?|(?:all|404)\s+(?:on\s+)?\d+\s+root\s+nouns?|wordlist\s+exhaust(?:ed|ion)?|surface\s+exhaust(?:ed|ion)?)\b`)
+var (
+	routeExhaustionClaimRe = regexp.MustCompile(`(?i)\b(route(?:\s+space)?\s+exhaust(?:ed|ion)?|exhaust(?:ed|ion)\s+(?:all\s+)?routes|no\s+(?:more\s+)?(?:api\s+)?routes|endpoint(?:\s+space)?\s+exhaust(?:ed|ion)?|(?:all|404)\s+(?:on\s+)?\d+\s+root\s+nouns?|wordlist\s+exhaust(?:ed|ion)?|surface\s+exhaust(?:ed|ion)?)\b`)
+	dottedHostTokenRe      = regexp.MustCompile(`(?i)\b([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)\b`)
+)
 
 func isRouteExhaustionClaim(text string) bool {
 	return routeExhaustionClaimRe.MatchString(text)
@@ -84,21 +92,108 @@ func isRouteDiscoveryRiskArea(riskArea string) bool {
 	}
 }
 
+func normalizeDiscoverySurfaceHost(surface string) string {
+	s := strings.TrimSpace(strings.ToLower(surface))
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		if u, err := url.Parse(s); err == nil && u.Hostname() != "" {
+			return strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+		}
+	}
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+	if host, _, ok := strings.Cut(s, ":"); ok && !strings.Contains(host, "]") {
+		s = host
+	}
+	return strings.TrimSuffix(s, ".")
+}
+
+func isLikelyNonHostFilename(tok string) bool {
+	for _, ext := range []string{
+		".txt", ".js", ".mjs", ".ts", ".json", ".yaml", ".yml", ".xml",
+		".html", ".htm", ".css", ".png", ".jpg", ".svg", ".go", ".py",
+		".sh", ".md", ".csv", ".log", ".pdf",
+	} {
+		if strings.HasSuffix(tok, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func extractDiscoveryClaimHosts(text string) []string {
+	seen := map[string]bool{}
+	var hosts []string
+	add := func(h string) {
+		h = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(h), "."))
+		if h == "" || seen[h] {
+			return
+		}
+		seen[h] = true
+		hosts = append(hosts, h)
+	}
+	for _, raw := range probeURLRe.FindAllString(text, 16) {
+		if u, err := url.Parse(strings.TrimRight(raw, `.,;:'")`)); err == nil && u.Hostname() != "" {
+			add(u.Hostname())
+		}
+	}
+	for _, m := range dottedHostTokenRe.FindAllStringSubmatch(text, 16) {
+		if len(m) == 2 {
+			tok := strings.ToLower(m[1])
+			if !isLikelyNonHostFilename(tok) {
+				add(tok)
+			}
+		}
+	}
+	return hosts
+}
+
+type storedDiscoveryCoverage struct {
+	surface string
+	host    string
+	art     DiscoveryArtifact
+}
+
 func isDiscoveryCoverageNode(n *db.Node) (DiscoveryArtifact, bool) {
-	if n == nil || n.Kind != db.KindFact {
+	sc, ok := decodeDiscoveryCoverageNode(n)
+	if !ok {
 		return DiscoveryArtifact{}, false
+	}
+	return sc.art, true
+}
+
+func decodeDiscoveryCoverageNode(n *db.Node) (storedDiscoveryCoverage, bool) {
+	if n == nil || n.Kind != db.KindFact {
+		return storedDiscoveryCoverage{}, false
 	}
 	var p struct {
 		Subtype  string             `json:"subtype"`
+		Surface  string             `json:"surface"`
+		Host     string             `json:"host"`
 		Artifact *DiscoveryArtifact `json:"artifact"`
 	}
 	if json.Unmarshal(n.Payload, &p) != nil || p.Subtype != db.FactSubtypeDiscoveryCoverage || p.Artifact == nil {
-		return DiscoveryArtifact{}, false
+		return storedDiscoveryCoverage{}, false
 	}
-	return *p.Artifact, true
+	host := strings.ToLower(strings.TrimSpace(p.Host))
+	if host == "" {
+		host = normalizeDiscoverySurfaceHost(p.Surface)
+	}
+	return storedDiscoveryCoverage{
+		surface: strings.ToLower(strings.TrimSpace(p.Surface)),
+		host:    host,
+		art:     *p.Artifact,
+	}, true
 }
 
 func hasCompleteDiscoveryCoverage(ts *db.ExplorationStore) bool {
+	return hasCompleteDiscoveryCoverageForClaim(ts, "")
+}
+
+func hasCompleteDiscoveryCoverageForClaim(ts *db.ExplorationStore, claimText string) bool {
 	if ts == nil {
 		return false
 	}
@@ -106,21 +201,54 @@ func hasCompleteDiscoveryCoverage(ts *db.ExplorationStore) bool {
 	if err != nil {
 		return false
 	}
+	var complete []storedDiscoveryCoverage
 	for _, n := range nodes {
-		if art, ok := isDiscoveryCoverageNode(n); ok && len(art.MissingChecks()) == 0 {
-			return true
+		if sc, ok := decodeDiscoveryCoverageNode(n); ok && len(sc.art.MissingChecks()) == 0 {
+			complete = append(complete, sc)
 		}
 	}
-	return false
+	if len(complete) == 0 {
+		return false
+	}
+
+	claimHosts := extractDiscoveryClaimHosts(claimText)
+	if len(claimHosts) == 0 {
+		desc, goal, _ := ts.Root()
+		claimHosts = extractDiscoveryClaimHosts(desc + " " + goal)
+	}
+	if len(claimHosts) == 0 {
+		return true
+	}
+
+	claimLower := strings.ToLower(strings.TrimSpace(claimText))
+	for _, targetHost := range claimHosts {
+		var matched bool
+		for _, sc := range complete {
+			if sc.host != "" && sc.host == targetHost {
+				matched = true
+				break
+			}
+			if sc.surface != "" && (sc.surface == targetHost || strings.Contains(claimLower, sc.surface)) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func recordDiscoveryCoverageFact(ts *db.ExplorationStore, intentID int64, surface string, art DiscoveryArtifact) (int64, error) {
 	if ts == nil {
 		return 0, nil
 	}
+	host := normalizeDiscoverySurfaceHost(surface)
 	payload := map[string]any{
 		"subtype":    db.FactSubtypeDiscoveryCoverage,
 		"surface":    surface,
+		"host":       host,
 		"artifact":   art,
 		"summary":    fmt.Sprintf("Discovery quality coverage complete for %s (%s)", surface, art.CompactSummary()),
 		"source":     "tool_output",
@@ -138,8 +266,17 @@ func recordDiscoveryCoverageFact(ts *db.ExplorationStore, intentID int64, surfac
 }
 
 func missingDiscoveryCoverageError(ts *db.ExplorationStore) error {
-	if hasCompleteDiscoveryCoverage(ts) {
+	return missingDiscoveryCoverageErrorForClaim(ts, "")
+}
+
+func missingDiscoveryCoverageErrorForClaim(ts *db.ExplorationStore, claimText string) error {
+	if hasCompleteDiscoveryCoverageForClaim(ts, claimText) {
 		return nil
 	}
-	return fmt.Errorf("route space cannot be declared exhausted without a complete record_coverage discovery_artifact covering all 5 checks: (a) wordlist_run (e.g. skills/api-recon/wordlists/api.txt), (b) nested_paths under discovered routes, (c) parameters_tested, (d) method_matrix, (e) static_docs_js_reviewed; a shallow 404 on root nouns is not exhaustive")
+	hosts := extractDiscoveryClaimHosts(claimText)
+	scopeNote := ""
+	if len(hosts) > 0 {
+		scopeNote = fmt.Sprintf(" matching target host/surface %s", strings.Join(hosts, ", "))
+	}
+	return fmt.Errorf("route space cannot be declared exhausted without a complete record_coverage discovery_artifact%s covering all 5 checks: (a) wordlist_run (e.g. skills/api-recon/wordlists/api.txt, entries_tested >= %d), (b) nested_paths under discovered routes, (c) parameters_tested, (d) method_matrix, (e) static_docs_js_reviewed; a shallow 404 on root nouns is not exhaustive", scopeNote, MinDiscoveryWordlistEntries)
 }

@@ -1653,7 +1653,7 @@ func (t *ToolSet) goalMet() actool.CoreTool {
 			// goal_met ends the task only when no goal node is open (#124, F5). A task
 			// without goal nodes keeps the old behavior.
 			if isRouteExhaustionClaim(a.Reason) {
-				if gerr := missingDiscoveryCoverageError(t.ts); gerr != nil {
+				if gerr := missingDiscoveryCoverageErrorForClaim(t.ts, a.Reason); gerr != nil {
 					return actool.Errorf(gerr.Error()), nil
 				}
 			}
@@ -2086,7 +2086,8 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 			errs := map[string]string{}
 			for i, it := range items {
 				if isRouteExhaustionClaim(it.Summary + " " + it.Detail) {
-					if gerr := missingDiscoveryCoverageError(t.ts); gerr != nil {
+					claimTxt := it.Summary + " " + it.Detail + " " + it.Evidence
+					if gerr := missingDiscoveryCoverageErrorForClaim(t.ts, claimTxt); gerr != nil {
 						errs[strconv.Itoa(i)] = gerr.Error()
 						continue
 					}

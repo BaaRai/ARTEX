@@ -22,7 +22,7 @@ var (
 	htmlCanonicalLinkRe     = regexp.MustCompile(`(?is)<link[^>]+rel=["']?canonical["']?[^>]+href=["']([^"'>\s]+)["']`)
 	htmlLinkHrefRe          = regexp.MustCompile(`(?is)(?:href|src|action)=["']([^"'>\s]+)["']`)
 	rawHTTPLinkRe           = regexp.MustCompile(`(?i)https?://[^\s"'<>\\)\]]+`)
-	fingerprintCTFConsoleRe = regexp.MustCompile(`(?i)\b(ctf|capture\s+(?:the\s+)?flag|flag\s*[1-9#]|flags\b|gablewrick|bb\s+arena|console)\b`)
+	fingerprintCTFConsoleRe = regexp.MustCompile(`(?i)\b(ctf|capture\s+(?:the\s+)?flag|flag\s*[1-9#]|flags\b|gablewrick|bb\s+arena|console|control\s+plane)\b`)
 )
 
 func allowFingerprintExtraProbes(goal, desc string) bool {
@@ -239,9 +239,20 @@ func (s *Server) FingerprintTarget(ctx context.Context, t *Task, goalURL string)
 	trimmedBody := strings.TrimSpace(bodyStr)
 	isJSON := strings.Contains(strings.ToLower(ct), "json") || strings.HasPrefix(trimmedBody, "{") || strings.HasPrefix(trimmedBody, "[")
 	goalLower := strings.ToLower(t.Goal + " " + t.Description)
+	anyConsolePath := false
+	for _, exists := range probeExists {
+		if exists {
+			anyConsolePath = true
+			break
+		}
+	}
 	var warnings []string
-	if isJSON && strings.Contains(goalLower, "console") {
-		warnings = append(warnings, fmt.Sprintf("root %s returned JSON (%d) while the task goal mentions console — verify whether the web console is on another host or path", sanitizedURL, resp.StatusCode))
+	if isJSON && fingerprintCTFConsoleRe.MatchString(goalLower) {
+		if len(probeExists) > 0 && !anyConsolePath {
+			warnings = append(warnings, fmt.Sprintf("root %s returned JSON (%d) and /login, /signup, /app, /docs are all missing: possible secondary/service vhost; verify the main instance URL", sanitizedURL, resp.StatusCode))
+		} else if strings.Contains(goalLower, "console") {
+			warnings = append(warnings, fmt.Sprintf("root %s returned JSON (%d) while the task goal mentions console — verify whether the web console is on another host or path", sanitizedURL, resp.StatusCode))
+		}
 	}
 	if canonicalHost != "" {
 		warnings = append(warnings, fmt.Sprintf("page references canonical/alternate host %s (task target host is %s) — verify vhost alignment", canonicalHost, rootHost))

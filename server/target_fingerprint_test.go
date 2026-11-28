@@ -105,6 +105,23 @@ func TestTargetFingerprintFactAndWarningsTableDriven(t *testing.T) {
 			wantProbes:     map[string]bool{"/login": false, "/signup": true, "/app": true, "/docs": false},
 			wantNoCrossHit: true,
 		},
+		{
+			name: "ctf_estate_control_plane_json_root_all_probes_404_warns_secondary_vhost",
+			goal: "Capture 4 flags in order against Estate control plane on ",
+			handler: func(requested *[]string, seenCreds *bool) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					*requested = append(*requested, r.URL.Path)
+					if r.URL.Path == "/" {
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = w.Write([]byte(`{"service":"gablewrick-estate-edge","status":"ok"}`))
+						return
+					}
+					w.WriteHeader(http.StatusNotFound)
+				})
+			},
+			wantWarnings: []string{"possible secondary/service vhost; verify the main instance URL"},
+			wantProbes:   map[string]bool{"/login": false, "/signup": false, "/app": false, "/docs": false},
+		},
 	}
 
 	m, err := NewManager(t.TempDir(), "")
