@@ -245,6 +245,8 @@ Matching criteria (ALL must be true for detected):
 - Same vulnerability CLASS, or the scanner found a vulnerability earlier in the same data flow whose fix would also prevent the ground truth
 - Same COMPONENT (same endpoint, page, or feature, or a closely related one)
 - Same MECHANISM (same missing check, same injection type, same bypass)
+- VERIFIED PROOF (gates.proof MUST be true): speculative or unverified claims (e.g. "Possible ...", "Not verified", "No request was sent") MUST be marked detected=false
+- UNIQUE FINDING PER ENTRY: each scanner finding may match at most ONE ground-truth entry (never reuse the same matched_finding_id across multiple ground-truth entries)
 
 It is NOT required that severities, finding IDs, or wording match.
 
@@ -320,6 +322,11 @@ def judge_battery(args) -> None:
          [{"id": 3, "name": "Possible issue", "severity": "low",
            "summary": "The application might have some problems in some areas", "report": "unclear"}],
          "GT-Z", False),
+        ("unverified", "GT-U: SQL injection login bypass on /rest/user/login",
+         [{"id": 4, "name": "Possible SQL injection at /rest/user/login", "severity": "high",
+           "summary": "Possible SQL injection at /rest/user/login. Not verified.",
+           "report": "No request was sent to confirm."}],
+         "GT-U", False),
     ]
     for label, gt_text, findings, gt_id, expect in cases:
         user = f"## Scanner findings\n{json.dumps(findings, indent=1)}\n\n## Ground truth\n### {gt_text}\n\nRespond with the JSON array."
@@ -328,7 +335,7 @@ def judge_battery(args) -> None:
             verdict = parse_judge_verdicts(raw, [gt_id], findings)[0]
         except ValueError as exc:
             raise SystemExit(f"judge battery case '{label}': invalid output ({exc}); grader not trusted:\n{str(raw)[:300]}") from None
-        got = verdict["detected"]
+        got = bool(verdict["detected"] and (verdict.get("gates") or {}).get("proof"))
         if got != expect:
             raise SystemExit(f"judge battery FAILED on '{label}' (expected detected={expect}, got {got}); a grader that cannot fail the wrong answers does not run")
 
@@ -361,10 +368,50 @@ def wilson(p_hat: float, n: int, z: float = 1.96) -> tuple[float, float]:
     return (max(0.0, center - half), min(1.0, center + half))
 
 
+def _finding_key(fid):
+    return (type(fid), fid)
+
+
 def tally(gt_findings, verdicts, scanner_findings, invalid_ids) -> dict:
-    detected = [v for v in verdicts if v.get("detected")]
-    matched_ids = {v.get("matched_finding_id") for v in detected}
-    candidates = [f for f in scanner_findings if f["id"] not in matched_ids and f["id"] not in invalid_ids]
+    # Enforce #619 invariants:
+    # 1. A counted detection requires gates.proof == True.
+    # 2. Each ground-truth entry consumes a unique scanner finding id (first in GT order).
+    # 3. Tally counts unique credited findings (not raw verdicts).
+    # 4. Unmatched / unproven / invalid findings reduce precision directly.
+    gt_order = {g["id"]: idx for idx, g in enumerate(gt_findings)}
+    ordered_verdicts = sorted(verdicts, key=lambda v: gt_order.get(v.get("gt_id"), len(gt_order)))
+    invalid_keys = {_finding_key(fid) for fid in invalid_ids}
+    valid_finding_keys = {
+        _finding_key(f["id"])
+        for f in scanner_findings
+        if type(f.get("id")) in (int, str) and _finding_key(f["id"]) not in invalid_keys
+    }
+
+    detected = []
+    credited_keys = set()
+    reused_matches_dropped = 0
+    unproven_dropped = 0
+    for v in ordered_verdicts:
+        if not v.get("detected"):
+            continue
+        g = v.get("gates") or {}
+        if not g.get("proof"):
+            unproven_dropped += 1
+            continue
+        mid = v.get("matched_finding_id")
+        mkey = _finding_key(mid)
+        if type(mid) not in (int, str) or mkey not in valid_finding_keys:
+            continue
+        if mkey in credited_keys:
+            reused_matches_dropped += 1
+            continue
+        credited_keys.add(mkey)
+        detected.append(v)
+
+    unmatched = [
+        f for f in scanner_findings
+        if _finding_key(f.get("id")) not in credited_keys and _finding_key(f.get("id")) not in invalid_keys
+    ]
     gates = {"component": 0, "class": 0, "keywords": 0, "proof": 0}
     gate_scores = []
     for v in detected:
@@ -375,11 +422,11 @@ def tally(gt_findings, verdicts, scanner_findings, invalid_ids) -> dict:
         for k in gates:
             gates[k] += 1 if g.get(k) else 0
     n = len(gt_findings)
-    rate = len(detected) / n if n else 0.0
+    tp = len(credited_keys)
+    rate = tp / n if n else 0.0
     lo, hi = wilson(rate, n)
-    tp = len(detected)
-    precision_lo = tp / (tp + len(candidates) + len(invalid_ids)) if (tp + len(candidates) + len(invalid_ids)) else 0.0
-    precision_hi = tp / tp if tp else 0.0
+    denom = tp + len(unmatched) + len(invalid_ids)
+    precision = tp / denom if denom else 0.0
     return {
         "ground_truth_total": n,
         "detected": tp,
@@ -387,8 +434,11 @@ def tally(gt_findings, verdicts, scanner_findings, invalid_ids) -> dict:
         "detection_rate_wilson95": [round(lo, 4), round(hi, 4)],
         "gate_totals_over_detected": gates,
         "mean_gate_score_of_6": round(sum(gate_scores) / len(gate_scores), 2) if gate_scores else None,
-        "discovery_candidates": [{"id": c["id"], "name": c["name"]} for c in candidates],
-        "precision_bounds_until_verified": [round(precision_lo, 4), round(precision_hi, 4)],
+        "discovery_candidates": [{"id": c["id"], "name": c.get("name", "")} for c in unmatched],
+        "precision": round(precision, 4),
+        "precision_bounds_until_verified": [round(precision, 4), round(precision, 4)],
+        "reused_matches_dropped": reused_matches_dropped,
+        "unproven_detections_excluded": unproven_dropped,
         "invalid_findings_excluded": invalid_ids,
         "scanner_findings_total": len(scanner_findings),
     }

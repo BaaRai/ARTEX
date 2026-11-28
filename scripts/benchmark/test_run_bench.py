@@ -53,9 +53,9 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(self.llm.call_count, 3)
 
     def test_valid_verdicts_keep_order_and_scores(self):
-        # Output order need not match ground truth, and a match may earn partial gates.
+        # Output order need not match ground truth, and a proven match may earn partial non-proof gates.
         response = list(reversed(self.verdicts))
-        response[1]["gates"]["proof"] = False
+        response[1]["gates"]["keywords"] = False
         self.llm.return_value = json.dumps(response)
         result = run_bench.run_judge(self.args, self.gt, self.findings)
         self.assertEqual(result, response)
@@ -64,9 +64,11 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(scores["detected"], 1)
         self.assertEqual(scores["detection_rate"], 0.5)
         self.assertEqual(scores["gate_totals_over_detected"], {
-            "component": 1, "class": 1, "keywords": 1, "proof": 0,
+            "component": 1, "class": 1, "keywords": 0, "proof": 1,
         })
         self.assertEqual(scores["discovery_candidates"], [{"id": 2, "name": "candidate"}])
+        self.assertEqual(scores["precision"], 0.5)
+        self.assertEqual(scores["precision_bounds_until_verified"], [0.5, 0.5])
 
     def test_code_fenced_json_still_works(self):
         self.llm.return_value = "```json\n" + json.dumps(self.verdicts) + "\n```"
@@ -194,10 +196,10 @@ class JudgeTests(unittest.TestCase):
 
     def test_valid_battery_still_passes(self):
         self.llm.side_effect = [json.dumps([v]) for v in (
-            verdict("GT-X"), verdict("GT-Y", False), verdict("GT-Z", False),
+            verdict("GT-X"), verdict("GT-Y", False), verdict("GT-Z", False), verdict("GT-U", False),
         )]
         run_bench.judge_battery(self.args)
-        self.assertEqual(self.llm.call_count, 3)
+        self.assertEqual(self.llm.call_count, 4)
 
     def test_battery_rejects_string_false_instead_of_treating_it_as_true(self):
         positive = verdict("GT-X")
@@ -259,6 +261,88 @@ class JudgeTests(unittest.TestCase):
                         run_bench.main()
                 write_report.assert_not_called()
                 self.assertEqual(self.llm.call_count, 3)
+
+
+
+
+class AdversarialScoringTests(unittest.TestCase):
+    """Regression tests for issue #619 using the adversarial finding sets."""
+
+    def setUp(self):
+        self.gt8 = [
+            {"id": f"JS-{i}", "title": f"Juice Shop vuln {i}", "cwe": "CWE-89",
+             "classes": ["SQLi"], "components": ["/rest"], "mechanism_keywords": ["sql"], "proof_hint": "PoC"}
+            for i in range(1, 9)
+        ]
+
+    def test_omnibus_finding_credits_at_most_one_ground_truth(self):
+        omnibus = [{
+            "id": 1, "name": "Multiple critical vulnerabilities across the application",
+            "summary": "SQLi login bypass, admin page, basket IDOR, /ftp, feedback, stack traces, JWT, XSS.",
+            "report": "Omnibus report listing all 8 Juice Shop vulnerabilities.",
+        }]
+        # Adversarial judge credits all 8 GT entries to the single omnibus finding id=1.
+        verdicts = [verdict(g["id"], detected=True, matched_id=1) for g in self.gt8]
+        scores = run_bench.tally(self.gt8, verdicts, omnibus, [])
+        self.assertEqual(scores["detected"], 1)
+        self.assertEqual(scores["detection_rate"], round(1 / 8, 4))
+        self.assertEqual(scores["reused_matches_dropped"], 7)
+        self.assertEqual(scores["precision"], 1.0)
+
+    def test_unverified_36_findings_without_proof_gate_score_zero(self):
+        # 6 classes x 6 endpoints, all speculative / unverified ("Not verified. No request was sent to confirm.")
+        findings = [
+            {
+                "id": i,
+                "name": f"Possible class-{i % 6} at /ep-{i // 6}",
+                "summary": f"Possible class-{i % 6} at /ep-{i // 6}; Not verified.",
+                "report": "No request was sent to confirm.",
+            }
+            for i in range(1, 37)
+        ]
+        verdicts = []
+        for idx, g in enumerate(self.gt8):
+            if idx < 6:
+                v = verdict(g["id"], detected=True, matched_id=idx + 1)
+                v["gates"]["proof"] = False
+                verdicts.append(v)
+            else:
+                verdicts.append(verdict(g["id"], detected=False))
+        scores = run_bench.tally(self.gt8, verdicts, findings, [])
+        self.assertEqual(scores["detected"], 0)
+        self.assertEqual(scores["detection_rate"], 0.0)
+        self.assertEqual(scores["unproven_detections_excluded"], 6)
+        self.assertEqual(scores["precision"], 0.0)
+        self.assertEqual(scores["precision_bounds_until_verified"], [0.0, 0.0])
+        self.assertEqual(len(scores["discovery_candidates"]), 36)
+
+    def test_unmatched_findings_reduce_precision(self):
+        findings = [{"id": i, "name": f"finding-{i}"} for i in range(1, 11)]
+        verdicts = [verdict("JS-1", detected=True, matched_id=1)] + [
+            verdict(f"JS-{i}", detected=False) for i in range(2, 9)
+        ]
+        scores = run_bench.tally(self.gt8, verdicts, findings, [])
+        self.assertEqual(scores["detected"], 1)
+        self.assertEqual(scores["precision"], 0.1)
+        self.assertEqual(scores["precision_bounds_until_verified"], [0.1, 0.1])
+        self.assertEqual(len(scores["discovery_candidates"]), 9)
+
+        # Adding 26 more unmatched findings drops precision further (1/36).
+        more = findings + [{"id": i, "name": f"noise-{i}"} for i in range(11, 37)]
+        scores_more = run_bench.tally(self.gt8, verdicts, more, [])
+        self.assertEqual(scores_more["detected"], 1)
+        self.assertEqual(scores_more["precision"], round(1 / 36, 4))
+        self.assertLess(scores_more["precision"], scores["precision"])
+
+    def test_distinct_proven_findings_score_full_detection_and_precision(self):
+        findings = [{"id": i, "name": f"verified-{i}"} for i in range(1, 9)]
+        verdicts = [verdict(f"JS-{i}", detected=True, matched_id=i) for i in range(1, 9)]
+        scores = run_bench.tally(self.gt8, verdicts, findings, [])
+        self.assertEqual(scores["detected"], 8)
+        self.assertEqual(scores["detection_rate"], 1.0)
+        self.assertEqual(scores["precision"], 1.0)
+        self.assertEqual(scores["reused_matches_dropped"], 0)
+        self.assertEqual(scores["unproven_detections_excluded"], 0)
 
 
 if __name__ == "__main__":
