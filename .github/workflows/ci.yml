@@ -160,6 +160,7 @@ jobs:
       - run: npm run test:replay
       - run: npm run test:upload
       - run: npm run test:traffic-stream
+      - run: npm run test:tamper-hooks
       - run: npm run test:i18n
       - run: npm run test:bash
       - run: npm run build:static
