@@ -476,8 +476,13 @@ func (g *StatefulTargetGuard) ReleaseIntent(taskID string, intentID int64) {
 }
 
 var (
-	mutatingMethodFlagRe = regexp.MustCompile(`(?i)(?:^|\s)(?:-X|--request)\s*=*\s*["']?(POST|PUT|PATCH|DELETE)\b`)
-	mutatingBodyFlagRe   = regexp.MustCompile(`(?i)(?:^|\s)(?:-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form)(?:\s|=)`)
+	// Flags are case-sensitive: curl -x is the proxy, -f fails on HTTP errors
+	// and -D dumps headers; none of them sends a body. --method is wget's.
+	mutatingMethodFlagRe = regexp.MustCompile(`(?:^|\s)(?:-X|--request|--method)\s*=*\s*\\?["']?(?i:POST|PUT|PATCH|DELETE)\b`)
+	// A short flag takes its value attached or separate (-d@body.json, -d'{}').
+	// --json, curl -T/--upload-file and wget's --post-data/--post-file send a
+	// body too. -T is read only after curl: wget -T is a timeout.
+	mutatingBodyFlagRe   = regexp.MustCompile(`(?:^|\s)(?:-d|-F|--data[\w-]*|--json|--form[\w-]*|--upload-file|--post-data|--post-file)(?:[\s=@'"{\\]|$)|\bcurl\b[^;&|]*\s-T(?:\s|$)`)
 	mutatingScriptCallRe = regexp.MustCompile(`(?i)(?:\.(?:post|put|patch|delete)\s*\(|http\.Post|method\s*[=:]\s*["'](?:POST|PUT|PATCH|DELETE)["']|urlopen\s*\([^)]*data\s*=)`)
 	scriptURLRe          = regexp.MustCompile(`(?i)https?://[^\s"'<>\\)\]]+`)
 )

@@ -361,3 +361,52 @@ func TestLeaseStatusesSortingAndStaleFlag(t *testing.T) {
 		t.Fatalf("expected filtered z.example.test, got %+v", filtered)
 	}
 }
+
+// Read-only curl flags (-f, -D) do not make a call mutating, and the body
+// forms curl and wget accept (attached -d values, --json, -T, --post-data,
+// --method) do.
+func TestClassifyHTTPActionCommandFlags(t *testing.T) {
+	cases := []struct {
+		command  string
+		mutating bool
+	}{
+		{`curl -f https://target.lab.local/health`, false},
+		{`curl -s -D - https://target.lab.local/`, false},
+		{`wget -T 10 https://target.lab.local/`, false},
+		{`curl -X POST https://target.lab.local/api -d 'a=1'`, true},
+		{`curl --request=put https://target.lab.local/api/1`, true},
+		{`curl -d@payload.json https://target.lab.local/api/users`, true},
+		{`curl -d'{"role":"admin"}' https://target.lab.local/api/users`, true},
+		{`curl --json '{"role":"admin"}' https://target.lab.local/api/users`, true},
+		{`curl -T shell.php https://target.lab.local/upload/`, true},
+		{`curl --upload-file shell.php https://target.lab.local/upload/`, true},
+		{`curl --data-ascii a=1 https://target.lab.local/api`, true},
+		{`wget --post-data 'a=1' https://target.lab.local/api`, true},
+		{`wget --method=DELETE https://target.lab.local/api/1`, true},
+	}
+	for _, c := range cases {
+		input, _ := json.Marshal(map[string]string{"command": c.command})
+		hosts, mutating := ClassifyHTTPAction("Bash", input, "", "")
+		if len(hosts) != 1 || hosts[0] != "target.lab.local" {
+			t.Errorf("%s: hosts = %v, want [target.lab.local]", c.command, hosts)
+		}
+		if mutating != c.mutating {
+			t.Errorf("%s: mutating = %v, want %v", c.command, mutating, c.mutating)
+		}
+	}
+}
+
+// A first read-only curl -f call is not refused for a missing baseline, and it
+// records the baseline.
+func TestStatefulGuardAllowsCurlFailFlagWithoutBaseline(t *testing.T) {
+	g := NewStatefulTargetGuard()
+	ctx := WithStatefulActor(WithStatefulGuard(context.Background(), g), "task-1", 1)
+	input := json.RawMessage(`{"command":"curl -f https://target.lab.local/health"}`)
+	if err := CheckStatefulTool(ctx, "Bash", input, "", ""); err != nil {
+		t.Fatalf("read-only curl -f refused: %v", err)
+	}
+	RecordStatefulReadOnly(ctx, "Bash", input, "", "")
+	if !g.HasBaseline("task-1", "target.lab.local") {
+		t.Fatal("read-only curl -f did not record a baseline")
+	}
+}
