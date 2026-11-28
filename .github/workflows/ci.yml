@@ -32,7 +32,7 @@ jobs:
               - '!screenshots/**'
               - '!scripts/benchmark/**'
               - '!scripts/posture_check*'
-              - '!**/*.md'
+              - '!*.md'
             web:
               - 'web/**'
               - '.github/**'
