@@ -1,0 +1,38 @@
+# Optional Ghidra sidecar for static binary analysis (skills/ghidra, ghidra_* tools).
+# Enable by adding this overlay to every compose command:
+#   docker compose -f docker-compose.yml -f docker-compose.ghidra.yml up -d
+# Without this overlay the main compose file is unchanged and the ghidra_* tools
+# report that the service is not configured.
+services:
+  artex:
+    environment:
+      # Empty in .env falls back to the bundled sidecar. Point it at an external
+      # sidecar to keep this one unused (the container still starts, harmlessly).
+      ARTEX_GHIDRA_URL: ${ARTEX_GHIDRA_URL:-http://ghidra:9090}
+      ARTEX_GHIDRA_API_KEY: ${ARTEX_GHIDRA_API_KEY:-}
+    depends_on:
+      ghidra:
+        condition: service_healthy
+
+  ghidra:
+    # Pinned to the immutable digest: the tag alone can be moved by its publisher.
+    # The image is linux/amd64 only; on an arm64 host Docker Desktop runs it under
+    # emulation, which is slow but works.
+    image: biniamfd/ghidra-headless-rest:1.2.1@sha256:971591a3a8448d8ed969079b452306e806f36079c3ddd298f4a618d6e2f1442d
+    # No host port. The service has no authentication of its own, so it is
+    # reachable only from the compose network; publishing it would expose an
+    # unauthenticated binary-analysis endpoint to every process on the host.
+    volumes:
+      - ghidra-data:/data/ghidra_projects
+    environment:
+      # One analysis at a time: Ghidra already uses every core it can, and a
+      # queued job costs nothing but a poll.
+      MAX_CONCURRENT_ANALYSES: "1"
+      # Uploads larger than this are refused by the sidecar, not truncated.
+      MAX_UPLOAD_SIZE: "536870912"
+    security_opt:
+      - "no-new-privileges:true"
+    restart: unless-stopped
+
+volumes:
+  ghidra-data:

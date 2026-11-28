@@ -324,6 +324,9 @@ worker remains confined to the intent it claimed.
   for every call.
 - **MCP servers, skills, memory and a workspace**: extend the agent with remote tools and reusable
   prompt/playbook material.
+- **Optional Ghidra static analysis**: a self-hosted sidecar gives the agent `ghidra_*` tools to
+  decompile functions, extract strings and rank attack surface in native binaries; see
+  [`docs/ghidra.md`](docs/ghidra.md).
 - **Web search**: the agent's search tool uses Brave, Tavily or the opt-in Keenable backend,
   configured in **System → Settings** with the key encrypted at rest; search can also egress
   through its own proxy.
@@ -504,6 +507,21 @@ filesystem.)
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
 `/message?sessionId=...`; configure the URL as `/sse` and send `Authorization: Bearer <token>`.
+
+### Optional: Ghidra static binary analysis
+
+An optional sidecar adds Ghidra's `analyzeHeadless` behind the built-in `ghidra_*` tools and the
+`ghidra` skill: upload a binary from the run directory, poll the analysis, then decompile functions,
+list strings and rank the attack surface. Binaries are analyzed, never executed.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ghidra.yml up -d
+```
+
+The overlay starts the pinned `ghidra-headless-rest` image and points `ARTEX_GHIDRA_URL` at it
+(`http://ghidra:9090`); it publishes no host port because the service has no authentication of its
+own. Without the overlay nothing changes and the tools report that the service is not configured.
+See [`docs/ghidra.md`](docs/ghidra.md) for the tool list, resource use and troubleshooting.
 
 ### Option 3: prebuilt binaries (Releases)
 
