@@ -225,15 +225,20 @@ RUN set -eux; \
     test "$templates" -gt 10000
 
 # bbot recursive recon orchestrator (#117): blacklanternsecurity/bbot, AGPL-3.0
-# (same license as ARTEX; standalone CLI dependency, not linked code). Pinned
-# version, own venv to isolate from the image python. Module dependencies are
-# preinstalled (--install-all-deps) so scans never need pip at runtime, which
-# would fail under a program's egress allowlist.
+# (same license as ARTEX; standalone CLI dependency, not linked code). Own venv to
+# isolate it from the image python, installed from a fully hashed lock
+# (requirements-bbot.lock, 68 packages, generated for CPython 3.12). Module
+# dependencies are preinstalled (--install-all-deps) so scans never need pip at
+# runtime, which would fail under a program's egress allowlist. The lock pins the
+# base install; bbot's module extras are still resolved by --install-all-deps.
 ARG BBOT_VERSION=3.0.2
+COPY requirements-bbot.lock /tmp/requirements-bbot.lock
 # arm64: bbot's Chrome and retirejs's Node are x86-64; use native builds.
 RUN set -eux; \
     python -m venv /opt/bbot; \
-    /opt/bbot/bin/pip install --no-cache-dir "bbot==${BBOT_VERSION}"; \
+    /opt/bbot/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements-bbot.lock; \
+    /opt/bbot/bin/python -c 'import bbot, sys; assert bbot.__version__ == sys.argv[1], bbot.__version__' "$BBOT_VERSION"; \
+    rm -f /tmp/requirements-bbot.lock; \
     ln -s /opt/bbot/bin/bbot /usr/local/bin/bbot; \
     if [ "${TARGETARCH:-amd64}" = "arm64" ]; then \
       apt-get update; \
