@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -483,6 +484,40 @@ func TestQueryHostDefaultPort(t *testing.T) {
 				got = append(got, r.URL)
 			}
 			t.Errorf("query(%q) = %v, want [%s]", tc.host, got, tc.want)
+		}
+	}
+}
+
+// A URL quoted in the query string must not satisfy a port search, and the
+// recorded host keeps the client's case while the search is lowercased.
+func TestQueryHostAnchoredAndCaseInsensitive(t *testing.T) {
+	tr, _ := openTraffic(t)
+	redir := newFlow("x", "GET", "/", nil, []byte("redir"))
+	redir.Request.URL, _ = url.Parse("http://go.example.com/r?next=http://go.example.com:8443/x")
+	tr.record(redir)
+	caps := newFlow("x", "GET", "/", nil, []byte("caps"))
+	caps.Request.URL, _ = url.Parse("https://Mixed.Example.com/")
+	tr.record(caps)
+
+	for _, tc := range []struct {
+		host string
+		want []string
+	}{
+		{host: "go.example.com:8443"},
+		{host: "go.example.com:80", want: []string{"http://go.example.com/r?next=http://go.example.com:8443/x"}},
+		{host: "mixed.example.com", want: []string{"https://Mixed.Example.com/"}},
+		{host: "Mixed.Example.com:443", want: []string{"https://Mixed.Example.com/"}},
+	} {
+		rows, err := tr.query(tc.host, "", "", 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.URL)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("query(%q) = %v, want %v", tc.host, got, tc.want)
 		}
 	}
 }
