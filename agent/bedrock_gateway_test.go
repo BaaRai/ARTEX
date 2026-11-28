@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -213,6 +215,279 @@ func TestBedrockGatewayEscapesModelARN(t *testing.T) {
 	}
 	if _, _, _, err := p.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("hello")}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBedrockGatewayChatCompletionCompleteAndStream(t *testing.T) {
+	const okBody = `{"choices":[{"finish_reason":"stop","index":0,"message":{"content":"OK","reasoning":"The user asked for OK.","role":"assistant"}}],"object":"chat.completion","usage":{"completion_tokens":33,"prompt_tokens":33}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "response-stream") {
+			_, _ = w.Write([]byte(okBody))
+			return
+		}
+		_, _ = w.Write([]byte(okBody))
+	}))
+	defer server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL, "synthetic-token", "")
+	p, err := cfg.NewProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, stop, usage, err := p.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("hello")}})
+	if err != nil || msg.Text() != "OK" || stop != "end_turn" || usage.InputTokens != 33 || usage.OutputTokens != 33 {
+		t.Fatalf("complete text=%q stop=%q usage=%+v err=%v", msg.Text(), stop, usage, err)
+	}
+	var thought string
+	for _, b := range msg.Content {
+		if b.Type == llm.BlockThinking {
+			thought = b.Thinking
+		}
+	}
+	if thought != "The user asked for OK." {
+		t.Fatalf("thinking = %q", thought)
+	}
+	var streamed, thoughtStream string
+	for ev, err := range p.Stream(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("hello")}}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch ev.Type {
+		case llm.SETextDelta:
+			streamed += ev.Text
+		case llm.SEThinkingDelta:
+			thoughtStream += ev.Text
+		}
+	}
+	if streamed != "OK" || thoughtStream != "The user asked for OK." {
+		t.Fatalf("json stream text=%q thinking=%q", streamed, thoughtStream)
+	}
+}
+
+func TestBedrockGatewayChatCompletionChunkStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		enc := eventstream.NewEncoder()
+		for _, payload := range []string{
+			`{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning":"think"},"finish_reason":null}]}`,
+			`{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":null}]}`,
+			`{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"lookup","arguments":""}}]}}]}`,
+			`{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":\"x\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`,
+		} {
+			if err := enc.Encode(w, eventstream.Message{Headers: eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue("chunk")}}, Payload: []byte(payload)}); err != nil {
+				t.Error(err)
+			}
+		}
+	}))
+	defer server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL, "synthetic-token", "")
+	p, err := cfg.NewProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var streamed, thought, toolName, toolInput, stop string
+	var usage llm.Usage
+	for ev, err := range p.Stream(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("hello")}}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch ev.Type {
+		case llm.SETextDelta:
+			streamed += ev.Text
+		case llm.SEThinkingDelta:
+			thought += ev.Text
+		case llm.SEToolUseStart:
+			toolName = ev.ToolName
+		case llm.SEToolInputJSON:
+			toolInput += ev.Text
+		case llm.SEMessageDelta:
+			stop = ev.StopReason
+			usage = ev.Usage
+		}
+	}
+	if streamed != "OK" || thought != "think" || toolName != "lookup" || toolInput != `{"q":"x"}` || stop != "tool_use" || usage.InputTokens != 3 || usage.OutputTokens != 2 {
+		t.Fatalf("text=%q thinking=%q tool=%q %q stop=%q usage=%+v", streamed, thought, toolName, toolInput, stop, usage)
+	}
+}
+
+func TestBedrockGatewayChatCompletionToolCall(t *testing.T) {
+	const body = `{"object":"chat.completion","choices":[{"finish_reason":"tool_calls","message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"x\"}"}},{"id":"call_2","type":"function","function":{"name":"fetch","arguments":"{\"u\":\"y\"}"}}]}}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL, "synthetic-token", "")
+	p, err := cfg.NewProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, stop, _, err := p.Complete(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("hello")}})
+	uses := msg.ToolUses()
+	if err != nil || stop != "tool_use" || len(uses) != 2 || uses[0].Name != "lookup" || string(uses[0].Input) != `{"q":"x"}` || uses[1].Name != "fetch" || string(uses[1].Input) != `{"u":"y"}` {
+		t.Fatalf("stop=%q uses=%+v err=%v", stop, uses, err)
+	}
+	// A gateway that answers a streaming request with a plain chat.completion.
+	var names, inputs []string
+	for ev, err := range p.Stream(context.Background(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("hello")}}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch ev.Type {
+		case llm.SEToolUseStart:
+			names = append(names, ev.ToolName)
+		case llm.SEToolInputJSON:
+			inputs = append(inputs, ev.Text)
+		case llm.SEMessageDelta:
+			stop = ev.StopReason
+		}
+	}
+	if strings.Join(names, ",") != "lookup,fetch" || strings.Join(inputs, ",") != `{"q":"x"},{"u":"y"}` || stop != "tool_use" {
+		t.Fatalf("stream tools=%v inputs=%v stop=%q", names, inputs, stop)
+	}
+}
+
+func TestBedrockGatewayConnectionErrorIsRedacted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	baseURL := server.URL + "/synthetic-secret-path"
+	server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", baseURL, "synthetic-token", "")
+	cfg.Stream = false
+	cfg.Retry.ConnectAttempts = -1
+	_, _, err := TestConnection(context.Background(), cfg)
+	if err == nil || err.Error() != "Bedrock gateway connection failed" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBedrockGatewayReasoningOnlyConnectionError(t *testing.T) {
+	const body = `{"choices":[{"finish_reason":"length","message":{"content":null,"reasoning":"still thinking about the reply"}}],"object":"chat.completion"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL, "synthetic-token", "")
+	cfg.Stream = false
+	_, _, err := TestConnection(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "reasoning") || !strings.Contains(err.Error(), "max_tokens") || strings.Contains(err.Error(), "still thinking") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBedrockGatewayUnexpectedShapeIsStructural(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"secret":"synthetic-token","object":"weird"}`))
+	}))
+	defer server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL, "synthetic-token", "")
+	cfg.Stream = false
+	_, _, err := TestConnection(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "chat completion") || !strings.Contains(err.Error(), "object=weird") || strings.Contains(err.Error(), "synthetic-token") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBedrockGatewayRetriesChatCompletionRequest(t *testing.T) {
+	const okBody = `{"choices":[{"finish_reason":"stop","message":{"content":"OK","role":"assistant"}}],"object":"chat.completion"}`
+	var mu sync.Mutex
+	var bodies [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, append([]byte(nil), raw...))
+		mu.Unlock()
+		if bytes.Contains(raw, []byte("anthropic_version")) || bytes.Contains(raw, []byte("input_schema")) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":"rejected synthetic-secret"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(okBody))
+	}))
+	defer server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL, "synthetic-token", "")
+	p, err := cfg.NewProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := llm.CompletionRequest{
+		System:    []string{"sys"},
+		Messages:  []llm.Message{llm.UserText("hi")},
+		Tools:     []llm.ToolSchema{{Name: "lookup", Description: "d", InputSchema: map[string]any{"type": "object"}}},
+		MaxTokens: 100,
+	}
+	for range 2 {
+		msg, _, _, err := p.Complete(context.Background(), req)
+		if err != nil || msg.Text() != "OK" {
+			t.Fatalf("complete text=%q err=%v", msg.Text(), err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 3 {
+		t.Fatalf("calls = %d, want anthropic 400, chat retry, then a direct chat request", len(bodies))
+	}
+	if !bytes.Contains(bodies[0], []byte("input_schema")) {
+		t.Fatalf("first request was not an Anthropic tool body: %s", bodies[0])
+	}
+	for i, body := range bodies[1:] {
+		var doc struct {
+			AnthropicVersion string `json:"anthropic_version"`
+			Messages         []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Tools []struct {
+				Function struct {
+					Name       string          `json:"name"`
+					Parameters json.RawMessage `json:"parameters"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if doc.AnthropicVersion != "" || bytes.Contains(body, []byte("input_schema")) || bytes.Contains(body, []byte("synthetic-secret")) {
+			t.Fatalf("call %d was not a chat completion: %s", i+2, body)
+		}
+		var user string
+		sawSystem := false
+		for _, m := range doc.Messages {
+			if m.Role == "system" && m.Content == "sys" {
+				sawSystem = true
+			}
+			if m.Role == "user" {
+				user = m.Content
+			}
+		}
+		if !sawSystem || user != "hi" || len(doc.Tools) != 1 || doc.Tools[0].Function.Name != "lookup" || !bytes.Contains(doc.Tools[0].Function.Parameters, []byte("object")) {
+			t.Fatalf("call %d messages=%+v tools=%+v", i+2, doc.Messages, doc.Tools)
+		}
+	}
+}
+
+func TestBedrockGatewayChatRequestRejectionStaysRedacted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"rejected synthetic-secret"}`))
+	}))
+	defer server.Close()
+	cfg := ConfigFrom("bedrock-gateway", "test.model", server.URL, "synthetic-token", "")
+	p, err := cfg.NewProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = p.Complete(context.Background(), llm.CompletionRequest{
+		Messages:  []llm.Message{llm.UserText("hi")},
+		Tools:     []llm.ToolSchema{{Name: "lookup", Description: "d", InputSchema: map[string]any{"type": "object"}}},
+		MaxTokens: 32,
+	})
+	if err == nil || !strings.Contains(err.Error(), "400") || strings.Contains(err.Error(), "synthetic-secret") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

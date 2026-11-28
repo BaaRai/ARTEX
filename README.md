@@ -563,7 +563,13 @@ bearer-token authentication. Enter the gateway's base URL (for example,
 in **Bearer token**. If required, enter static headers as one `Name: Value` per line
 in **Custom gateway headers**. ARTEX adds `/model/{model}/invoke` (or
 `/invoke-with-response-stream`), sends `anthropic_version: bedrock-2023-05-31`,
-and decodes Bedrock's binary event stream. Enter the model ID manually; this
+and decodes Bedrock's binary event stream. InvokeModel may return either an
+Anthropic message or an OpenAI chat completion (`choices[].message.content`,
+with reasoning in `message.reasoning`); ARTEX adapts the chat completion into
+the same message shape, including when it arrives as `chat.completion.chunk`
+frames. If the gateway rejects the Anthropic request body with HTTP 400, ARTEX
+retries once with an OpenAI chat-completion body and keeps that format for later
+requests. Enter the model ID manually; this
 gateway format does not have a model-list operation. The token and custom header
 values are encrypted in the database and are write-only in the UI. Editing the
 gateway URL requires re-entering the token, so saved credentials cannot be sent
