@@ -327,6 +327,12 @@ worker remains confined to the intent it claimed.
 - **Web search**: the agent's search tool uses Brave, Tavily or the opt-in Keenable backend,
   configured in **System → Settings** with the key encrypted at rest; search can also egress
   through its own proxy.
+- **Optional Ghidra static analysis**: a self-hosted sidecar gives the agent `ghidra_*` tools to
+  decompile functions, extract strings and rank attack surface in native binaries; see
+  [`docs/ghidra.md`](docs/ghidra.md).
+- **Optional OpenTRAP intercepting proxy**: a self-hosted sidecar gives the agent `opentrap_*` tools
+  to configure scope, capture traffic, replay requests (Repeater) and use the Collaborator; see
+  [`docs/opentrap.md`](docs/opentrap.md).
 - **Single binary**: the Next.js UI is embedded with `go:embed`; PostgreSQL is the only external
   dependency.
 
@@ -505,6 +511,37 @@ For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in 
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
 `/message?sessionId=...`; configure the URL as `/sse` and send `Authorization: Bearer <token>`.
 
+### Optional: Ghidra static binary analysis
+
+An optional sidecar adds Ghidra's `analyzeHeadless` behind the built-in `ghidra_*` tools and the
+`ghidra` skill: upload a binary from the run directory, poll the analysis, then decompile functions,
+list strings and rank the attack surface. Binaries are analyzed, never executed.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ghidra.yml up -d
+```
+
+The overlay starts the pinned `ghidra-headless-rest` image and points `ARTEX_GHIDRA_URL` at it
+(`http://ghidra:9090`); it publishes no host port because the service has no authentication of its
+own. Without the overlay nothing changes and the tools report that the service is not configured.
+See [`docs/ghidra.md`](docs/ghidra.md) for the tool list, resource use and troubleshooting.
+
+### Optional: OpenTRAP intercepting proxy
+
+An optional sidecar adds an intercepting proxy (a Burp Suite alternative built on OWASP ZAP) behind
+the built-in `opentrap_*` tools and the `opentrap` skill: configure scope, capture traffic, replay
+requests with modifications (Repeater), and use the Collaborator for out-of-band interactions.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.opentrap.yml up -d
+```
+
+The overlay starts the `artex-opentrap-sidecar` image (built locally from `opentrap-sidecar/`) and
+points `ARTEX_OPENTRAP_URL` at it (`http://opentrap:8081`); it publishes no host port because the
+service has no authentication of its own. Without the overlay nothing changes and the tools report
+that the service is not configured. See [`docs/opentrap.md`](docs/opentrap.md) for the tool list,
+sidecar build instructions and troubleshooting.
+
 ### Option 3: prebuilt binaries (Releases)
 
 Download the zip for your platform from [Releases](https://github.com/BaaRai/ARTEX/releases). It
@@ -591,7 +628,7 @@ needed. Create a profile with format **OpenAI**, set **Base URL** to the gateway
 root, paste the key, then click the **↻** button next to *Model* to load the provider's
 catalog (`GET /v1/models`) and pick a model; models the provider adds later appear on the
 next refresh. For example, [NotHoly](https://notholy.com) (offensive-security models) uses
-base URL `https://api.notholy.com/v1` with an API key from its console.
+base URL `https://api.notholy.com/v1` with an API key from its console. The [NVIDIA NIM](https://integrate.api.nvidia.com) API uses base URL `https://integrate.api.nvidia.com/v1` with an API key from the NVIDIA console; the UI includes a preset for this endpoint.
 
 **Bedrock gateway**: select **Bedrock gateway** in System → LLM for a gateway that
 exposes the Bedrock `InvokeModel` and `InvokeModelWithResponseStream` paths and accepts
