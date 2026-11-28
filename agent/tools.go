@@ -2725,7 +2725,7 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 // PlannerTools is the read + intent-generation + goal-judgement tool set.
 func (t *ToolSet) PlannerTools() []actool.CoreTool {
 	return []actool.CoreTool{
-		t.graphOverview(), t.leaseStatus(), t.listFindings(), t.listFacts(), t.nodeDetail(), t.knowledgeLookup(),
+		t.graphOverview(), t.leaseStatus(), t.waitForLease(), t.listFindings(), t.listFacts(), t.nodeDetail(), t.knowledgeLookup(),
 		// cold-digest §6.1: restore folded cold nodes (digest body → members → detail).
 		t.expandDigest(),
 		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.listGoals(), t.upsertHypothesis(), t.recordCapability(), t.addIntent(), t.proveGoal(), t.goalMet(),
@@ -2794,5 +2794,54 @@ func (t *ToolSet) leaseStatus() actool.CoreTool {
 				"ttl_seconds": int64(ttl / time.Second),
 				"leases":      leases,
 			})
+		})
+}
+
+// waitForLease waits server-side on the per-host mutation lease inside
+// StatefulTargetGuard (no network polling) so blocked workers wait cleanly
+// instead of burning turns or sleeping in Bash.
+func (t *ToolSet) waitForLease() actool.CoreTool {
+	return readTool("wait_for_lease",
+		"Wait server-side (without Bash sleep) for a host's per-task mutation lease to become free, be released, or become stale per ARTEX_STATEFUL_LEASE_TTL_S. Default max_wait_s=120, cap 300. When a worker calls this, it acquires the lease immediately upon availability.",
+		obj(map[string]any{
+			"host":       str("target hostname whose mutation lease to wait for"),
+			"max_wait_s": intp("maximum seconds to wait (default 120, max 300)"),
+		}, "host"),
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				Host     string `json:"host"`
+				MaxWaitS int    `json:"max_wait_s"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("invalid input: " + err.Error()), nil
+			}
+			host := strings.TrimSpace(a.Host)
+			if host == "" {
+				return actool.Errorf("host is required"), nil
+			}
+			sg := t.statefulGuard
+			if sg == nil {
+				sg = intercept.StatefulGuardFromContext(ctx)
+			}
+			taskID := ""
+			if t.taskID > 0 {
+				taskID = strconv.FormatInt(t.taskID, 10)
+			}
+			var intentID int64
+			if actor, ok := intercept.StatefulActorFromContext(ctx); ok {
+				if actor.TaskID != "" {
+					taskID = actor.TaskID
+				}
+				intentID = actor.IntentID
+			}
+			maxWait := intercept.DefaultLeaseWait
+			if a.MaxWaitS > 0 {
+				maxWait = time.Duration(a.MaxWaitS) * time.Second
+				if maxWait > intercept.MaxLeaseWait {
+					maxWait = intercept.MaxLeaseWait
+				}
+			}
+			res := sg.WaitForMutationLease(ctx, taskID, host, intentID, maxWait, 250*time.Millisecond)
+			return jsonResult(res)
 		})
 }

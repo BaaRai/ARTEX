@@ -20,15 +20,26 @@ const (
 	// guard is active ("on" by default; "off"/"false"/"0"/"no" disables it).
 	StatefulGuardEnv = "ARTEX_STATEFUL_GUARD"
 	// StatefulLeaseTTLEnv sets the heartbeat inactivity TTL in integer seconds
-	// before a held mutation lease becomes stale and reclaimable (default 600).
+	// before a held mutation lease becomes stale and reclaimable (default 900).
 	StatefulLeaseTTLEnv = "ARTEX_STATEFUL_LEASE_TTL_S"
-	// DefaultStatefulLeaseTTL is the safety-net inactivity window without a
-	// tool heartbeat before another intent may take over a stale lease.
-	DefaultStatefulLeaseTTL = 600 * time.Second
+	// DefaultStatefulLeaseTTL is 900s (15m): provides a 300s safety margin over
+	// Norma's 600s maximum Bash tool timeout so a single legitimate long tool
+	// call cannot lose its lease mid-call while a pathological hang (ignoring
+	// context past 900s) still frees the host.
+	//
+	// Residual risk: if a subprocess ignores cancellation and remains in-flight
+	// past the 900s TTL, another intent may take over the lease; any subsequent
+	// mutation call from the old holder is rejected once the new holder owns it.
+	DefaultStatefulLeaseTTL    = 900 * time.Second
+	maxStatefulLeaseTTLSeconds = 86400 // 24h cap to prevent time.Duration overflow
+
+	DefaultLeaseWait = 120 * time.Second
+	MaxLeaseWait     = 300 * time.Second
 )
 
 // StatefulGuardEnabled reports whether the stateful target guard is enabled
-// (default on; disabled only by ARTEX_STATEFUL_GUARD=off|false|0|no).
+// (default on; disabled only by ARTEX_STATEFUL_GUARD=off|false|0|no,
+// case-insensitive).
 func StatefulGuardEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(StatefulGuardEnv))) {
 	case "0", "false", "off", "no":
@@ -39,14 +50,16 @@ func StatefulGuardEnabled() bool {
 }
 
 // StatefulLeaseTTL returns the mutation-lease heartbeat TTL configured via
-// ARTEX_STATEFUL_LEASE_TTL_S (integer seconds), defaulting to 600s.
+// ARTEX_STATEFUL_LEASE_TTL_S (integer seconds), defaulting to 900s.
+// Zero, negative, non-numeric, or oversized values (>86400s) fall back safely
+// to DefaultStatefulLeaseTTL without disabling the guard or overflowing.
 func StatefulLeaseTTL() time.Duration {
 	raw := strings.TrimSpace(os.Getenv(StatefulLeaseTTLEnv))
 	if raw == "" {
 		return DefaultStatefulLeaseTTL
 	}
 	secs, err := strconv.Atoi(raw)
-	if err != nil || secs <= 0 {
+	if err != nil || secs <= 0 || secs > maxStatefulLeaseTTLSeconds {
 		return DefaultStatefulLeaseTTL
 	}
 	return time.Duration(secs) * time.Second
@@ -62,6 +75,17 @@ type LeaseStatus struct {
 	LastHeartbeatAgeSeconds int64     `json:"last_heartbeat_age_seconds"`
 	TTLSeconds              int64     `json:"ttl_seconds"`
 	Stale                   bool      `json:"stale"`
+}
+
+// WaitLeaseResult is returned by WaitForMutationLease / the wait_for_lease tool.
+type WaitLeaseResult struct {
+	Acquired                bool   `json:"acquired"`
+	Host                    string `json:"host"`
+	HolderIntentID          int64  `json:"holder_intent_id"`
+	WaitedSeconds           int64  `json:"waited_s"`
+	LastHeartbeatAgeSeconds int64  `json:"last_heartbeat_age_s"`
+	TTLSeconds              int64  `json:"ttl_s"`
+	Stale                   bool   `json:"stale"`
 }
 
 type mutationLease struct {
@@ -273,6 +297,108 @@ func (g *StatefulTargetGuard) AcquireMutationLeaseStatus(taskID, host string, in
 	return true, buildLeaseStatus(chost, entry, now, ttl)
 }
 
+// WaitForMutationLease polls the internal guard (never the network) until the
+// lease for (taskID, host) is free/stale/acquired by intentID or maxWait expires.
+func (g *StatefulTargetGuard) WaitForMutationLease(ctx context.Context, taskID, host string, intentID int64, maxWait, pollInterval time.Duration) WaitLeaseResult {
+	chost := canonicalHost(host)
+	if maxWait <= 0 {
+		maxWait = DefaultLeaseWait
+	}
+	if maxWait > MaxLeaseWait {
+		maxWait = MaxLeaseWait
+	}
+	if pollInterval <= 0 {
+		pollInterval = 250 * time.Millisecond
+	}
+	if !StatefulGuardEnabled() || g == nil || taskID == "" || chost == "" {
+		ttlS := int64(StatefulLeaseTTL() / time.Second)
+		if g != nil {
+			ttlS = int64(g.EffectiveTTL() / time.Second)
+		}
+		return WaitLeaseResult{
+			Acquired:       true,
+			Host:           chost,
+			HolderIntentID: intentID,
+			TTLSeconds:     ttlS,
+		}
+	}
+
+	startWall := time.Now()
+	startClock := g.clockNowSnapshot()
+	elapsedSeconds := func() int64 {
+		wallS := int64(time.Since(startWall) / time.Second)
+		clkS := int64(nonNegDuration(g.clockNowSnapshot().Sub(startClock)) / time.Second)
+		if clkS > wallS {
+			return clkS
+		}
+		return wallS
+	}
+
+	tryOnce := func() (WaitLeaseResult, bool) {
+		if intentID > 0 {
+			ok, st := g.AcquireMutationLeaseStatus(taskID, chost, intentID)
+			return WaitLeaseResult{
+				Acquired:                ok,
+				Host:                    chost,
+				HolderIntentID:          st.HolderIntentID,
+				WaitedSeconds:           elapsedSeconds(),
+				LastHeartbeatAgeSeconds: st.LastHeartbeatAgeSeconds,
+				TTLSeconds:              st.TTLSeconds,
+				Stale:                   st.Stale,
+			}, ok
+		}
+		sts := g.LeaseStatuses(taskID, chost)
+		ttlS := int64(g.EffectiveTTL() / time.Second)
+		if len(sts) == 0 {
+			return WaitLeaseResult{
+				Acquired:      true,
+				Host:          chost,
+				WaitedSeconds: elapsedSeconds(),
+				TTLSeconds:    ttlS,
+			}, true
+		}
+		st := sts[0]
+		return WaitLeaseResult{
+			Acquired:                st.Stale,
+			Host:                    chost,
+			HolderIntentID:          st.HolderIntentID,
+			WaitedSeconds:           elapsedSeconds(),
+			LastHeartbeatAgeSeconds: st.LastHeartbeatAgeSeconds,
+			TTLSeconds:              st.TTLSeconds,
+			Stale:                   st.Stale,
+		}, st.Stale
+	}
+
+	for {
+		res, done := tryOnce()
+		if done {
+			return res
+		}
+		rem := maxWait - time.Since(startWall)
+		if rem <= 0 {
+			return res
+		}
+		step := pollInterval
+		if rem < step {
+			step = rem
+		}
+		timer := time.NewTimer(step)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			res, _ = tryOnce()
+			return res
+		case <-timer.C:
+		}
+	}
+}
+
+func (g *StatefulTargetGuard) clockNowSnapshot() time.Time {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.clockNow()
+}
+
 // Heartbeat refreshes lastBeat on all active mutation leases currently held by
 // (taskID, intentID). Does nothing for hosts held by a different intent.
 func (g *StatefulTargetGuard) Heartbeat(taskID string, intentID int64) {
@@ -446,8 +572,8 @@ func CheckStatefulTool(ctx context.Context, toolName string, input json.RawMessa
 		if acquired, st := g.AcquireMutationLeaseStatus(actor.TaskID, h, actor.IntentID); !acquired {
 			return fmt.Errorf(
 				"mutation lease for host %s is held by intent #%d (held %ds, last heartbeat %ds ago, ttl %ds); "+
-					"do read-only work, wait for it to finish (check lease_status for live progress), or ask the planner to kill intent #%d if it is stale",
-				h, st.HolderIntentID, st.AgeSeconds, st.LastHeartbeatAgeSeconds, st.TTLSeconds, st.HolderIntentID,
+					"call lease_status or wait_for_lease (never sleep in Bash), do read-only work on this host, or report blocked if it remains stuck",
+				h, st.HolderIntentID, st.AgeSeconds, st.LastHeartbeatAgeSeconds, st.TTLSeconds,
 			)
 		}
 	}
