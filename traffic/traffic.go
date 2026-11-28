@@ -1317,15 +1317,22 @@ ORDER BY ts DESC LIMIT 8`, fromTS, toTS, arg)
 // response contains line. Get returns the body as recorded, which for a
 // Content-Encoding response is the compressed bytes.
 func (t *Traffic) decodedResponseContains(id, line string) bool {
+	_, dec, ok := t.decodedResponse(id)
+	return ok && strings.Contains(string(dec), line)
+}
+
+// decodedResponse returns the stored head and the decoded body of a compressed
+// response. ok is false when the body is not one decodeBody handles.
+func (t *Traffic) decodedResponse(id string) (head string, body []byte, ok bool) {
 	_, _, respHead, respBody, err := t.loadFullExchange(id, "")
 	if err != nil {
-		return false
+		return "", nil, false
 	}
 	_, _, headers := parseStoredResponseHead(respHead)
 	h := http.Header{}
 	h.Set("Content-Encoding", findHeaderValue(headers, "Content-Encoding"))
 	dec, ok := decodeBody(h, respBody, maxIndexBody)
-	return ok && strings.Contains(string(dec), line)
+	return respHead, dec, ok
 }
 
 // ftsFilter builds the SQL condition restricting rows to those whose indexed
@@ -2683,7 +2690,14 @@ func (t *Traffic) Tools() []actool.CoreTool {
 			if rewritten {
 				head = fmt.Sprintf("=== REWRITTEN === rewrite rules %v changed this exchange in the proxy. Shown below: the request as the client sent it and the response as the target sent it, not the rewritten values.\n\n", ruleIDs)
 			}
-			return actool.Text(head + "=== REQUEST ===\n" + clip(req, 2500) + "\n\n=== RESPONSE ===\n" + clip(resp, 4000)), nil
+			respTitle := "=== RESPONSE ==="
+			if respHead, dec, ok := t.decodedResponse(a.ID); ok && !isBinaryBody("", dec) {
+				// Body search matches the decoded text, so show that text rather
+				// than the compressed bytes.
+				respTitle = "=== RESPONSE (body decoded from its Content-Encoding) ==="
+				resp = respHead + "\n" + string(dec)
+			}
+			return actool.Text(head + "=== REQUEST ===\n" + clip(req, 2500) + "\n\n" + respTitle + "\n" + clip(resp, 4000)), nil
 		},
 	})
 
