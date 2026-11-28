@@ -1,5 +1,7 @@
 "use client";
 
+import { useRecordHistory } from "@/hooks/use-record-history";
+
 import * as React from "react";
 
 import { BarChart3Icon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon, TerminalIcon } from "lucide-react";
@@ -58,7 +60,7 @@ export default function CommandsPage() {
   const [statsLoading, setStatsLoading] = React.useState(false);
 
   // Selected execution is rendered in a right-side detail sheet.
-  const [selected, setSelected] = React.useState<CommandRecord | null>(null);
+  const [selected, setSelected] = useRecordHistory<CommandRecord>("command", commands);
 
   // Debounce search input.
   React.useEffect(() => {

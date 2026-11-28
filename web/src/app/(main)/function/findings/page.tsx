@@ -1,5 +1,8 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+import { updateQuery } from "@/lib/navigation";
+
 import * as React from "react";
 
 import Link from "next/link";
@@ -146,7 +149,7 @@ export default function FindingsPage() {
   // flat and grouped lists, the asset tree and the stat cards all send `company`.
   // Undefined means all companies.
   const company = useActiveCompany();
-  const [view, setView] = React.useState<FindingView>("flat");
+  const [view, setView] = useQueryState("view", "flat", FINDING_VIEWS);
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
   const [reportState, setReportState] = React.useState<"all" | FindingReportState>("all");
@@ -236,7 +239,9 @@ export default function FindingsPage() {
           task?: unknown;
           sort?: unknown;
         };
-        if (FINDING_VIEWS.includes(parsed.view as FindingView)) setView(parsed.view as FindingView);
+        if (!new URLSearchParams(window.location.search).has("view")) {
+          updateQuery({ view: FINDING_VIEWS.includes(parsed.view as FindingView) ? String(parsed.view) : "flat" }, "replace");
+        }
         if (parsed.severity === "all" || SEVERITIES.includes(parsed.severity as Severity)) {
           setSeverity(parsed.severity as "all" | Severity);
         }
@@ -259,6 +264,7 @@ export default function FindingsPage() {
         // Ignore malformed or legacy preferences and retain the defaults.
       }
     }
+    if (!new URLSearchParams(window.location.search).has("view")) updateQuery({ view: "flat" }, "replace");
     setPreferencesHydrated(true);
   }, []);
 

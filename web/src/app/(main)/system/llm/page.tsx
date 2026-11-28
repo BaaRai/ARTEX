@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+
 import * as React from "react";
 
 import {
@@ -967,6 +969,7 @@ function ProfileSheet({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function LLMPage() {
+  const [tab, setTab] = useQueryState("tab", "profiles", ["profiles", "retry"]);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
   const [poolOpen, setPoolOpen] = React.useState(false);
@@ -1059,7 +1062,7 @@ export default function LLMPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="profiles" className="flex-1">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1">
         <TabsList>
           <TabsTrigger value="profiles">{t("Model profiles")}</TabsTrigger>
           <TabsTrigger value="retry">{t("Retry & backoff")}</TabsTrigger>

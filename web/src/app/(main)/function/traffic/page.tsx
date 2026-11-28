@@ -1,5 +1,7 @@
 "use client";
 
+import { useRecordHistory } from "@/hooks/use-record-history";
+
 import * as React from "react";
 
 import {
@@ -127,7 +129,7 @@ export default function TrafficPage() {
   const [sort, setSort] = useStoredSortPreference<SortField>(SORT_STORAGE_KEY, SORT_FIELDS, "ts", "desc");
 
   const [traffic, setTraffic] = React.useState<TrafficResp | null>(null);
-  const [selected, setSelected] = React.useState<TrafficExchange | null>(null);
+  const [selected, setSelected] = useRecordHistory<TrafficExchange>("exchange", traffic?.exchanges ?? []);
   const [detail, setDetail] = React.useState<TrafficDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailTab, setDetailTab] = React.useState("request");
