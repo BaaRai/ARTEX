@@ -35,6 +35,10 @@ const (
 	telegramTextLimit = 4000
 	// telegramBodyLimit caps a response body; 50 text updates fit well inside.
 	telegramBodyLimit = 1 << 20
+	// telegramCallbackDataLimit is the Bot API limit of a button's data.
+	telegramCallbackDataLimit = 64
+	// telegramToastLimit is the Bot API limit of a callback notice.
+	telegramToastLimit = 200
 )
 
 // telegramClient is shared by every Telegram call of the bridge. It carries
@@ -116,6 +120,23 @@ type telegramUpdate struct {
 		From *telegramUser `json:"from"`
 		Text string        `json:"text"`
 	} `json:"message"`
+	CallbackQuery *struct {
+		ID      string       `json:"id"`
+		From    telegramUser `json:"from"`
+		Data    string       `json:"data"`
+		Message *struct {
+			MessageID int64 `json:"message_id"`
+			Chat      struct {
+				ID   int64  `json:"id"`
+				Type string `json:"type"`
+			} `json:"chat"`
+		} `json:"message"`
+	} `json:"callback_query"`
+}
+
+// telegramMessage is the part of a sent message the bridge reads back.
+type telegramMessage struct {
+	MessageID int64 `json:"message_id"`
 }
 
 type telegramResponse[T any] struct {
@@ -140,7 +161,7 @@ func (t telegramTransport) Poll(ctx context.Context, cfg map[string]any, offset 
 	req := map[string]any{
 		"timeout":         int(telegramPollWindow / time.Second),
 		"limit":           telegramPollLimit,
-		"allowed_updates": []string{"message"},
+		"allowed_updates": []string{"message", "callback_query"},
 	}
 	if offset > 0 {
 		req["offset"] = offset
@@ -163,16 +184,47 @@ func (t telegramTransport) Poll(ctx context.Context, cfg map[string]any, offset 
 				u.FromBot = m.From.IsBot
 			}
 		}
-		// Updates without a message still advance the cursor; the Router
-		// ignores them because they carry no text.
+		if cq := r.CallbackQuery; cq != nil {
+			u.CallbackID, u.CallbackData = cq.ID, cq.Data
+			u.UserID, u.UserName, u.FromBot = strconv.FormatInt(cq.From.ID, 10), cq.From.UserName, cq.From.IsBot
+			// A press on a message too old for Telegram to return has no
+			// message; the press then carries no chat and is refused.
+			if m := cq.Message; m != nil {
+				u.ChatID = strconv.FormatInt(m.Chat.ID, 10)
+				u.ChatType = m.Chat.Type
+				u.MessageID = strconv.FormatInt(m.MessageID, 10)
+			}
+		}
+		// Updates without a message or a press still advance the cursor; the
+		// Router ignores them because they carry no text.
 		out = append(out, u)
 	}
 	return out, nil
 }
 
 func (t telegramTransport) Send(ctx context.Context, cfg map[string]any, chatID, text string) error {
+	_, err := t.sendMessage(ctx, cfg, chatID, text, nil)
+	return err
+}
+
+func (t telegramTransport) SendButtons(ctx context.Context, cfg map[string]any, chatID, text string, rows [][]Button) (string, error) {
+	keyboard := make([][]map[string]string, 0, len(rows))
+	for _, row := range rows {
+		line := make([]map[string]string, 0, len(row))
+		for _, b := range row {
+			if b.Data == "" || len(b.Data) > telegramCallbackDataLimit {
+				return "", fmt.Errorf("button %q: data must be 1 to %d bytes", b.Text, telegramCallbackDataLimit)
+			}
+			line = append(line, map[string]string{"text": b.Text, "callback_data": b.Data})
+		}
+		keyboard = append(keyboard, line)
+	}
+	return t.sendMessage(ctx, cfg, chatID, text, map[string]any{"inline_keyboard": keyboard})
+}
+
+func (t telegramTransport) sendMessage(ctx context.Context, cfg map[string]any, chatID, text string, markup map[string]any) (string, error) {
 	if err := t.ValidateChatID(chatID); err != nil {
-		return err
+		return "", err
 	}
 	body := map[string]any{
 		"chat_id": chatID,
@@ -181,7 +233,49 @@ func (t telegramTransport) Send(ctx context.Context, cfg map[string]any, chatID,
 		// rejected for a stray markup character or render as a link.
 		"link_preview_options": map[string]any{"is_disabled": true},
 	}
-	return t.call(ctx, cfg, "sendMessage", body, nil)
+	if markup == nil {
+		// A plain reply is never edited later: its id is not needed.
+		return "", t.call(ctx, cfg, "sendMessage", body, nil)
+	}
+	body["reply_markup"] = markup
+	var msg telegramMessage
+	if err := t.call(ctx, cfg, "sendMessage", body, &msg); err != nil {
+		return "", err
+	}
+	if msg.MessageID == 0 {
+		return "", fmt.Errorf("telegram sendMessage: no message id in the result")
+	}
+	return strconv.FormatInt(msg.MessageID, 10), nil
+}
+
+// EditText sends no reply_markup, which removes the buttons.
+func (t telegramTransport) EditText(ctx context.Context, cfg map[string]any, chatID, messageID, text string) error {
+	if err := t.ValidateChatID(chatID); err != nil {
+		return err
+	}
+	id, err := strconv.ParseInt(messageID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid message id %q", messageID)
+	}
+	body := map[string]any{
+		"chat_id":              chatID,
+		"message_id":           id,
+		"text":                 truncateUTF16(text, telegramTextLimit),
+		"link_preview_options": map[string]any{"is_disabled": true},
+	}
+	err = t.call(ctx, cfg, "editMessageText", body, nil)
+	if err != nil && strings.Contains(err.Error(), "message is not modified") {
+		return nil // the message already reads like this
+	}
+	return err
+}
+
+func (t telegramTransport) AnswerCallback(ctx context.Context, cfg map[string]any, callbackID, text string) error {
+	body := map[string]any{"callback_query_id": callbackID}
+	if text != "" {
+		body["text"] = truncateUTF16(text, telegramToastLimit)
+	}
+	return t.call(ctx, cfg, "answerCallbackQuery", body, nil)
 }
 
 // call performs one Bot API method. Every error it returns is safe to log and

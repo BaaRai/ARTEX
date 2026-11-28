@@ -102,8 +102,11 @@ func TestFindingWorkflowAutoHintToPlannerAndSetting(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.SplitN(result, "\n", 2)[1]), &recorded); err != nil {
 		t.Fatal(err)
 	}
-	if recorded.FindingID == recorded.NodeID || len(recorded.Traffic.Bindings) != 3 || notices != 1 {
-		t.Fatal("bad finding/traffic result", result)
+	// The two IDs come from separate sequences and may be equal by chance in
+	// a fresh database; what matters is that each names the right row.
+	stored, err := pg.GetFinding(recorded.FindingID)
+	if err != nil || stored == nil || stored.NodeID == nil || *stored.NodeID != recorded.NodeID || len(recorded.Traffic.Bindings) != 3 || notices != 1 {
+		t.Fatal("bad finding/traffic result", result, err)
 	}
 	for i, b := range recorded.Traffic.Bindings {
 		if b.Snapshot.SourceTrafficID != refs[i].TrafficID || b.Role != refs[i].Role || b.Note != refs[i].Note {

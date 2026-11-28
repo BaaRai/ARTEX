@@ -35,10 +35,26 @@ type Access struct {
 type Request struct {
 	Kind     string // transport kind
 	ChatID   string
+	ChatType string // ChatTypePrivate or the transport's label for a shared chat
 	UserID   string
 	UserName string
 	Command  string // lower-case command name without the slash; "" for plain text
-	Args     string // text after the command, or the whole text when Command is ""
+	Args     string // text after the command, the whole text when Command is "", or the data of a pressed button
+	// MessageID is the message carrying the pressed button, for a button
+	// press only.
+	MessageID string
+}
+
+// CallbackFunc handles a press on one of the bot's buttons.
+type CallbackFunc func(ctx context.Context, req Request) CallbackReply
+
+// CallbackReply is the answer to a button press.
+type CallbackReply struct {
+	// Toast is a short notice shown to the user who pressed ("" = none).
+	Toast string
+	// Edit, when set, replaces the text of the message with the buttons and
+	// removes them.
+	Edit string
 }
 
 // CommandFunc handles one command and returns the reply text. An empty reply
@@ -91,6 +107,9 @@ type Router struct {
 	// Text handles a message that is not a command. Nil replies with a hint to
 	// use /help.
 	Text CommandFunc
+	// Callback handles button presses. Nil answers every press with a notice
+	// that the button no longer works.
+	Callback CallbackFunc
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 
@@ -127,7 +146,7 @@ func (r *Router) Route(ctx context.Context, kind string, acc Access, u Update) (
 	if forOther {
 		return DecisionIgnored, ""
 	}
-	req := Request{Kind: kind, ChatID: u.ChatID, UserID: u.UserID, UserName: u.UserName, Command: name, Args: args}
+	req := Request{Kind: kind, ChatID: u.ChatID, ChatType: u.ChatType, UserID: u.UserID, UserName: u.UserName, Command: name, Args: args}
 	if name == "" {
 		if r.Text == nil {
 			return DecisionHandled, "Send /help to see what this bot can do."
@@ -143,6 +162,28 @@ func (r *Router) Route(ctx context.Context, kind string, acc Access, u Update) (
 		}
 	}
 	return DecisionHandled, fmt.Sprintf("Unknown command /%s. Send /help to see the commands.", name)
+}
+
+// RouteCallback applies the access rules of Route to a button press and
+// picks the handler. A refused press gets a notice for the user who pressed,
+// not a chat message, so there is nothing to remember or mute. Presses have
+// no age limit of their own: the handler decides whether a button still
+// works.
+func (r *Router) RouteCallback(ctx context.Context, kind string, acc Access, u Update) (Decision, CallbackReply) {
+	if u.FromBot || u.CallbackID == "" {
+		return DecisionIgnored, CallbackReply{}
+	}
+	if !contains(acc.Chats, u.ChatID) {
+		return DecisionRefused, CallbackReply{Toast: "This chat is not allowed to use this ARTEX bot."}
+	}
+	if u.ChatType != ChatTypePrivate && (u.UserID == "" || !contains(acc.Users, u.UserID)) {
+		return DecisionRefused, CallbackReply{Toast: "You are not allowed to use this ARTEX bot in this group. Your user ID is " + u.UserID + "."}
+	}
+	if r.Callback == nil {
+		return DecisionIgnored, CallbackReply{Toast: "This button no longer works."}
+	}
+	req := Request{Kind: kind, ChatID: u.ChatID, ChatType: u.ChatType, UserID: u.UserID, UserName: u.UserName, Args: u.CallbackData, MessageID: u.MessageID}
+	return DecisionHandled, r.Callback(ctx, req)
 }
 
 // refuse answers an unknown chat, or an unknown sender in an allowed group,

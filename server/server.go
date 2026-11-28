@@ -310,6 +310,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		s.chatBridges = newChatBridgeRunner(m.pg)
 		s.chatBridges.handlers = s.chatBridgeHandlers
 		go s.chatBridges.Run(s.ctx)
+		if m.interceptor != nil {
+			go s.runChatBridgeApprovals(s.ctx) // approval requests pushed with Allow/Block buttons
+		}
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
 	}
 	// precedence: persisted DB config > env.
