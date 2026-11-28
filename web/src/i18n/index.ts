@@ -12,8 +12,9 @@
 
 import tr from "./locales/tr.json";
 import zhCN from "./locales/zh-CN.json";
+import vi from "./locales/vi.json";
 
-export type Locale = "tr" | "en" | "zh-CN";
+export type Locale = "tr" | "en" | "zh-CN" | "vi";
 
 // Used when nothing is saved and the browser language is not one of LOCALES,
 // and for the static prerender, which has no browser.
@@ -23,6 +24,7 @@ export const LOCALES: { code: Locale; label: string }[] = [
   { code: "tr", label: "Türkçe" },
   { code: "en", label: "English" },
   { code: "zh-CN", label: "简体中文" },
+  { code: "vi", label: "Tiếng Việt" },
 ];
 
 const STORAGE_KEY = "artex.locale";
@@ -31,12 +33,14 @@ const DICTIONARIES: Record<Locale, Record<string, string>> = {
   tr: tr as Record<string, string>,
   en: {},
   "zh-CN": zhCN as Record<string, string>,
+  vi: vi as Record<string, string>,
 };
 
 const INTL_LOCALES: Record<Locale, string> = {
   tr: "tr-TR",
   en: "en-US",
   "zh-CN": "zh-CN",
+  vi: "vi-VN",
 };
 
 function detectLocale(): Locale {
