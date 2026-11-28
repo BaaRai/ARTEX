@@ -926,6 +926,9 @@ func (e *Engine) plannerGateContext(ctx context.Context, t *Task, wait time.Dura
 		e.emitActivity(t, a)
 	}
 	ctx = intercept.WithTaskContext(ctx, t.ID, "planner", emit)
+	if sg := e.statefulGuardForTask(); sg != nil {
+		ctx = intercept.WithStatefulGuard(ctx, sg)
+	}
 	return intercept.WithTargetScope(ctx, t.targetScope(wait))
 }
 
@@ -1258,6 +1261,17 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// Run budget (off by default): meter this run's calls; its effective budget is
 	// min(intent budget, task remaining above the wrap-up reserve).
 	workCtx, meter := e.budgetIntent(workCtx, t.ID)
+	if intent.Origin == "seed" {
+		var seedOnce sync.Once
+		workCtx = agent.WithSeedWriteNotify(workCtx, func() {
+			seedOnce.Do(func() {
+				t.Notify()
+			})
+		})
+		if capDur := agent.SeedIntentBudget(t.TimeoutSeconds, worker.RunTimeout()); capDur > 0 {
+			workCtx = agent.WithSeedBudgetCap(workCtx, capDur)
+		}
+	}
 	// nudges deliberately sits outside the model_error rerun loop: the idle-turn rerun
 	// cap is a per-intent total, and one rerun round must not reset it back to zero.
 	hooks := steerHooks{
@@ -1352,6 +1366,16 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// write (the fence would reject every write below).
 	if errors.Is(workCause, agent.AbortWorkClaimLost) {
 		log.Printf("[worker %s] task %s intent #%d claim lost to another worker, result discarded", name, t.ID, intent.ID)
+		return true
+	}
+	if errors.Is(err, agent.ErrSweepLoopDetected) || errors.Is(workCause, agent.ErrSweepLoopDetected) {
+		workCancel(agent.AbortOperatorHandoff)
+		e.emitSweepLoopOperatorHandoff(t, name, intent.ID)
+		if perr := t.Store.SettleIntentClaim(intent.ID, token, "paused"); perr != nil {
+			log.Printf("[worker %s] task %s intent #%d failed to pause after sweep loop: %v", name, t.ID, intent.ID, perr)
+		}
+		e.touch(t.ID)
+		t.Notify()
 		return true
 	}
 	if errors.Is(err, agent.ErrPollLoopDetected) || errors.Is(workCause, agent.ErrPollLoopDetected) {
@@ -1532,7 +1556,7 @@ func (e *Engine) claimNext(t *Task, name string) (*db.Node, string) {
 }
 
 func (e *Engine) statefulGuardForTask() *intercept.StatefulTargetGuard {
-	if e == nil {
+	if e == nil || !intercept.StatefulGuardEnabled() {
 		return nil
 	}
 	e.statefulGuardOnce.Do(func() {
@@ -1555,6 +1579,24 @@ func (e *Engine) emitPollLoopOperatorHandoff(t *Task, workerName string, intentI
 		Kind:    "result",
 		IsError: false,
 		Summary: "(paused for operator input: " + agent.AbortOperatorHandoff.Short + "; waiting for operator reply)",
+		Detail:  agent.AbortOperatorHandoff.Text,
+	})
+}
+
+func (e *Engine) emitSweepLoopOperatorHandoff(t *Task, workerName string, intentID int64) {
+	q := "Value sweep loop detected: repeated probes returned identical HTTP responses across different inputs and a gate_constant fact was recorded. Please verify target state or supply new credentials/instructions, or let the planner switch hypothesis class."
+	text := "OPERATOR INPUT REQUESTED: " + q + " (this intent is pausing; reply here to resume it with your answer)"
+	act := askOperatorActivity(text, nil, targetDerivedHosts(q, goalTargets(t.Goal)))
+	act.NodeID = &intentID
+	act.Worker = workerName
+	act.IsError = false
+	e.emitActivity(t, act)
+	e.emitActivity(t, db.Activity{
+		NodeID:  &intentID,
+		Worker:  workerName,
+		Kind:    "result",
+		IsError: false,
+		Summary: "(paused for operator input: " + agent.AbortOperatorHandoff.Short + "; gate_constant recorded — awaiting planner/operator pivot)",
 		Detail:  agent.AbortOperatorHandoff.Text,
 	})
 }

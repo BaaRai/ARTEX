@@ -73,13 +73,18 @@ func (t *ToolSet) upsertHypothesis() actool.CoreTool {
 			if status == "closed" && strings.TrimSpace(a.CloseReason) == "" {
 				return actool.Errorf("close_reason is required when closing a hypothesis"), nil
 			}
-
 			id := pid(a.ID)
+			claimContext := a.CloseReason + " " + a.Hypothesis + " " + a.Direction
 			if id > 0 {
 				n, err := t.ts.GetNode(id)
 				p, ok := isHypothesisNode(n)
 				if err != nil || !ok {
 					return actool.Errorf(fmt.Sprintf("hypothesis #%d not found", id)), nil
+				}
+				if status == "closed" && isRouteExhaustionClaim(claimContext+" "+p.Hypothesis+" "+p.Direction) {
+					if gerr := missingDiscoveryCoverageErrorForClaim(t.ts, claimContext+" "+p.Hypothesis+" "+p.Direction); gerr != nil {
+						return actool.Errorf(gerr.Error()), nil
+					}
 				}
 				if p.Status == "closed" && status == "open" {
 					if strings.TrimSpace(a.NewEvidence) == "" || strings.TrimSpace(a.ReopenReason) == "" {
@@ -103,6 +108,11 @@ func (t *ToolSet) upsertHypothesis() actool.CoreTool {
 				return jsonResult(map[string]any{"id": id, "status": status, "hypothesis": p.Hypothesis, "close_reason": p.CloseReason})
 			}
 
+			if status == "closed" && isRouteExhaustionClaim(claimContext) {
+				if gerr := missingDiscoveryCoverageErrorForClaim(t.ts, claimContext); gerr != nil {
+					return actool.Errorf(gerr.Error()), nil
+				}
+			}
 			hypText := strings.TrimSpace(a.Hypothesis)
 			if hypText == "" {
 				return actool.Errorf("hypothesis is required when creating a new hypothesis"), nil

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/intercept"
 	acperm "github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -153,6 +154,8 @@ type ToolSet struct {
 	cs                  *db.CompanyStore // company store (optional)
 	ts                  *db.ExplorationStore
 	factTraffic         FactTrafficLookup // proxy capture store for fact classification; nil = activity-only
+	statefulGuard       *intercept.StatefulTargetGuard
+	strictGateConstant  *bool
 	worker              string
 	taskID              int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
 	// coverageDisabled mirrors tasks.coverage_enabled=false. Stored inverted so the
@@ -276,6 +279,20 @@ func (t *ToolSet) SetFactTraffic(l FactTrafficLookup) { t.factTraffic = l }
 // SetTaskID sets the PG task id on this ToolSet so that report_finding can
 // dual-write to the standalone findings table (which survives task deletion).
 func (t *ToolSet) SetTaskID(id int64) { t.taskID = id }
+
+// SetStatefulGuard wires the per-engine stateful target guard so graph_overview
+// and lease_status can inspect live per-host mutation leases for this task.
+func (t *ToolSet) SetStatefulGuard(g *intercept.StatefulTargetGuard) { t.statefulGuard = g }
+
+// SetGateConstantStrict overrides per-task strict vs shadow mode for gate_constant.
+func (t *ToolSet) SetGateConstantStrict(strict bool) { t.strictGateConstant = &strict }
+
+func (t *ToolSet) statefulLeaseOverview() []intercept.LeaseStatus {
+	if !intercept.StatefulGuardEnabled() || t.statefulGuard == nil || t.taskID <= 0 {
+		return nil
+	}
+	return t.statefulGuard.LeaseStatuses(strconv.FormatInt(t.taskID, 10), "")
+}
 
 // SetCoverageEnabled records whether this task has the asset-coverage feature on
 // (default enabled). Passing false makes graphOverviewData omit the coverage block
@@ -717,6 +734,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 			out["capabilities_closed"] = closedCap
 		}
 	}
+	if gcs := t.gateConstantOverview(); len(gcs) > 0 {
+		out["gate_constants"] = gcs
+	}
 	if openHyp, closedHyp := t.hypothesisOverview(); len(openHyp) > 0 || len(closedHyp) > 0 {
 		if len(openHyp) > 0 {
 			out["open_hypotheses"] = openHyp
@@ -767,6 +787,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// program alias) plus accounts recorded by earlier runs. Surfaced every round so
 	// authenticated testing reuses them instead of re-registering, and so accounts
 	// this run registers get saved back (see save_task_credential).
+	if leases := t.statefulLeaseOverview(); len(leases) > 0 {
+		out["mutation_leases"] = leases
+	}
 	if creds := t.taskCredentialOverview(); creds != nil {
 		out["task_credentials"] = creds
 		out["task_credentials_note"] = "test accounts for this task; use the matching entry for authenticated testing instead of registering a new account; entries with an empty password mean you must register that account first (strong unique password) and record it via save_task_credential; ALWAYS record accounts you register via save_task_credential"
@@ -1341,6 +1364,7 @@ type intentItem struct {
 	ReopenReason string            `json:"reopen_reason"`
 	Gains        []json.RawMessage `json:"gains"`
 	Consumes     []json.RawMessage `json:"consumes"`
+	WaitForLease bool              `json:"wait_for_lease,omitempty"`
 }
 
 // addOneIntent creates one intent node, links its upstream lineage, and returns the id.
@@ -1354,6 +1378,13 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 		return 0, fmt.Errorf("summary must not be empty")
 	}
 	if err := t.checkClosedHypothesis(it); err != nil {
+		return 0, err
+	}
+	if err := t.checkActiveLeaseForNewIntent(it); err != nil {
+		return 0, err
+	}
+	gateWarn, err := t.checkGateConstantIntent(it)
+	if err != nil {
 		return 0, err
 	}
 	capWarn, err := t.checkIntentCapabilities(it)
@@ -1402,8 +1433,14 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 	if len(it.Consumes) > 0 {
 		payload["consumes"] = it.Consumes
 	}
+	if it.WaitForLease {
+		payload["wait_for_lease"] = true
+	}
 	if capWarn != "" {
 		payload["capability_shadow_warning"] = capWarn
+	}
+	if gateWarn != "" {
+		payload["gate_constant_shadow_warning"] = gateWarn
 	}
 	id, err := t.ts.AddIntent(payload, priority, anchors, "planner")
 	if err != nil {
@@ -1427,18 +1464,20 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 
 func (t *ToolSet) addIntent() actool.CoreTool {
 	return t.writeExpTool("add_intent", "Generate [exploration directions] into the frontier and link them into the exploration graph. An intent is an open exploration direction, not a fixed type — describe freely in one summary sentence what to explore/verify/exploit.\n"+
-		"★Batch preferred: put multiple new directions filtered in one round into the intents array in a single submission (saves round trips vs. one call per item). Returns an ids array, same length and order as intents (failed items get id=0, details in errors). For a single intent, omit intents and pass the top-level summary.",
+		"★Batch preferred: put multiple new directions filtered in one round into the intents array in a single submission (saves round trips vs. one call per item). Returns an ids array, same length and order as intents (failed items get id=0, details in errors). For a single intent, omit intents and pass the top-level summary.\n"+
+		"Stateful targets: check mutation_leases / lease_status before dispatching a competing mutating intent on an already-leased host (prefer read-only work, wait, or kill_work if stale).",
 		obj(map[string]any{
-			"intents":       map[string]any{"type": "array", "description": "[Prefer this] array of exploration directions to add, processed in order. Each element has the same fields as the top-level ones below (summary/asset_ids/parent_ids/priority). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
-			"summary":       str("[single] one sentence describing this exploration direction: what to do + why. Just write the direction clearly; asset ids are not required."),
-			"asset_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "the [target asset ids] this direction tests/attacks (**pass whenever possible**, 0/1/many; these are asset ids from list_assets, not exploration node ids): which assets (sites/endpoints/parameters/hosts etc.) this direction targets. Whenever the direction revolves around concrete assets, be sure to pass them — it is the structured marker of 'which targets this exploration hits', used for coverage dedup and linking the intent into the asset lineage. Leave empty only for pure global recon with truly no concrete target assets."},
-			"parent_ids":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "upstream anchor ids (optional, 0/1/many): which [confirmed fact/finding] nodes this direction is synthesized from. **Only existing fact/finding node ids may be passed — not intents/goals/hints** — an intent must anchor on confirmed knowledge, finding-driven rather than planned out of thin air. Pass several when multiple facts jointly produce one new intent; leave empty for a top-level brand-new recon direction (it is automatically attached to the task's origin fact)."},
-			"priority":      intp("priority 0-10, default 5"),
-			"hypothesis_id": idp("optional: hypothesis node id this intent tests"),
-			"new_evidence":  str("required when reopening a closed hypothesis"),
-			"reopen_reason": str("required when reopening a closed hypothesis"),
-			"gains":         map[string]any{"type": "array", "description": "capabilities this intent aims to acquire (capability ids or {verb,object} objects)", "items": map[string]any{}},
-			"consumes":      map[string]any{"type": "array", "description": "capabilities this intent depends on (capability ids or {verb,object} objects)", "items": map[string]any{}},
+			"intents":        map[string]any{"type": "array", "description": "[Prefer this] array of exploration directions to add, processed in order. Each element has the same fields as the top-level ones below (summary/asset_ids/parent_ids/priority). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
+			"summary":        str("[single] one sentence describing this exploration direction: what to do + why. Just write the direction clearly; asset ids are not required."),
+			"asset_ids":      map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "the [target asset ids] this direction tests/attacks (**pass whenever possible**, 0/1/many; these are asset ids from list_assets, not exploration node ids): which assets (sites/endpoints/parameters/hosts etc.) this direction targets. Whenever the direction revolves around concrete assets, be sure to pass them — it is the structured marker of 'which targets this exploration hits', used for coverage dedup and linking the intent into the asset lineage. Leave empty only for pure global recon with truly no concrete target assets."},
+			"parent_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "upstream anchor ids (optional, 0/1/many): which [confirmed fact/finding] nodes this direction is synthesized from. **Only existing fact/finding node ids may be passed — not intents/goals/hints** — an intent must anchor on confirmed knowledge, finding-driven rather than planned out of thin air. Pass several when multiple facts jointly produce one new intent; leave empty for a top-level brand-new recon direction (it is automatically attached to the task's origin fact)."},
+			"priority":       intp("priority 0-10, default 5"),
+			"hypothesis_id":  idp("optional: hypothesis node id this intent tests"),
+			"new_evidence":   str("required when reopening a closed hypothesis"),
+			"reopen_reason":  str("required when reopening a closed hypothesis"),
+			"gains":          map[string]any{"type": "array", "description": "capabilities this intent aims to acquire (capability ids or {verb,object} objects)", "items": map[string]any{}},
+			"consumes":       map[string]any{"type": "array", "description": "capabilities this intent depends on (capability ids or {verb,object} objects)", "items": map[string]any{}},
+			"wait_for_lease": map[string]any{"type": "boolean", "description": "set true when queuing a mutating intent intentionally onto a host with an active mutation lease so the worker calls wait_for_lease first"},
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
@@ -1613,6 +1652,11 @@ func (t *ToolSet) goalMet() actool.CoreTool {
 			_ = json.Unmarshal(in, &a)
 			// goal_met ends the task only when no goal node is open (#124, F5). A task
 			// without goal nodes keeps the old behavior.
+			if isRouteExhaustionClaim(a.Reason) {
+				if gerr := missingDiscoveryCoverageErrorForClaim(t.ts, a.Reason); gerr != nil {
+					return actool.Errorf(gerr.Error()), nil
+				}
+			}
 			goals, err := t.ts.ListByKind(db.KindGoal, 1000)
 			if err != nil {
 				return actool.Errorf("goal_met refused: the goals of this task could not be read (" + err.Error() + "); the task stays open"), nil
@@ -1751,7 +1795,8 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				iid = t.ownerNode
 			}
 			t.notifyFinding(iid, a.Summary)
-		} else if t.notify != nil {
+		}
+		if t.notify != nil {
 			t.notify()
 		}
 		t.writes.Findings++
@@ -2040,6 +2085,13 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 			ids := make([]int64, len(items))
 			errs := map[string]string{}
 			for i, it := range items {
+				if isRouteExhaustionClaim(it.Summary + " " + it.Detail) {
+					claimTxt := it.Summary + " " + it.Detail + " " + it.Evidence
+					if gerr := missingDiscoveryCoverageErrorForClaim(t.ts, claimTxt); gerr != nil {
+						errs[strconv.Itoa(i)] = gerr.Error()
+						continue
+					}
+				}
 				id, err := t.recordOneFact(it, defaultIntent)
 				if err != nil {
 					errs[strconv.Itoa(i)] = err.Error()
@@ -2708,7 +2760,7 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 // PlannerTools is the read + intent-generation + goal-judgement tool set.
 func (t *ToolSet) PlannerTools() []actool.CoreTool {
 	return []actool.CoreTool{
-		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(), t.knowledgeLookup(),
+		t.graphOverview(), t.leaseStatus(), t.waitForLease(), t.listFindings(), t.listFacts(), t.nodeDetail(), t.knowledgeLookup(),
 		// cold-digest §6.1: restore folded cold nodes (digest body → members → detail).
 		t.expandDigest(),
 		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.listGoals(), t.upsertHypothesis(), t.recordCapability(), t.addIntent(), t.proveGoal(), t.goalMet(),
@@ -2734,4 +2786,97 @@ func (t *ToolSet) PlannerTools() []actool.CoreTool {
 		// (by type + paginated), and decide on supplementary testing yourself.
 		t.listUntestedAssets(),
 	}
+}
+
+// leaseStatus reports the live per-host mutation leases held within this task
+// (holder intent, acquired time, age, last heartbeat, and staleness against
+// ARTEX_STATEFUL_LEASE_TTL_S). Read-only; shared by planner and workers.
+func (t *ToolSet) leaseStatus() actool.CoreTool {
+	return readTool("lease_status",
+		"Inspect live per-host mutation leases for stateful targets in this task. Shows, per host, the holder intent id, acquired_at, age_seconds, last_heartbeat, last_heartbeat_age_seconds, ttl_seconds, and stale status. Read-only: if another intent holds the lease on a host you need to mutate, do read-only work, wait for it to finish, or ask the planner to kill_work the holder if stale.",
+		obj(map[string]any{
+			"host": str("optional hostname to filter to (omit to list all active host leases in this task)"),
+		}),
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				Host string `json:"host"`
+			}
+			if len(in) > 0 {
+				_ = json.Unmarshal(in, &a)
+			}
+			sg := t.statefulGuard
+			if sg == nil {
+				sg = intercept.StatefulGuardFromContext(ctx)
+			}
+			taskID := ""
+			if t.taskID > 0 {
+				taskID = strconv.FormatInt(t.taskID, 10)
+			}
+			if actor, ok := intercept.StatefulActorFromContext(ctx); ok && actor.TaskID != "" {
+				taskID = actor.TaskID
+			}
+			enabled := intercept.StatefulGuardEnabled()
+			ttl := intercept.StatefulLeaseTTL()
+			if sg != nil {
+				ttl = sg.EffectiveTTL()
+			}
+			leases := []intercept.LeaseStatus{}
+			if enabled && sg != nil && taskID != "" {
+				leases = sg.LeaseStatuses(taskID, a.Host)
+			}
+			return jsonResult(map[string]any{
+				"enabled":     enabled,
+				"ttl_seconds": int64(ttl / time.Second),
+				"leases":      leases,
+			})
+		})
+}
+
+// waitForLease waits server-side on the per-host mutation lease inside
+// StatefulTargetGuard (no network polling) so blocked workers wait cleanly
+// instead of burning turns or sleeping in Bash.
+func (t *ToolSet) waitForLease() actool.CoreTool {
+	return readTool("wait_for_lease",
+		"Wait server-side (without Bash sleep) for a host's per-task mutation lease to become free, be released, or become stale per ARTEX_STATEFUL_LEASE_TTL_S. Default max_wait_s=120, cap 300. When a worker calls this, it acquires the lease immediately upon availability.",
+		obj(map[string]any{
+			"host":       str("target hostname whose mutation lease to wait for"),
+			"max_wait_s": intp("maximum seconds to wait (default 120, max 300)"),
+		}, "host"),
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				Host     string `json:"host"`
+				MaxWaitS int    `json:"max_wait_s"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("invalid input: " + err.Error()), nil
+			}
+			host := strings.TrimSpace(a.Host)
+			if host == "" {
+				return actool.Errorf("host is required"), nil
+			}
+			sg := t.statefulGuard
+			if sg == nil {
+				sg = intercept.StatefulGuardFromContext(ctx)
+			}
+			taskID := ""
+			if t.taskID > 0 {
+				taskID = strconv.FormatInt(t.taskID, 10)
+			}
+			var intentID int64
+			if actor, ok := intercept.StatefulActorFromContext(ctx); ok {
+				if actor.TaskID != "" {
+					taskID = actor.TaskID
+				}
+				intentID = actor.IntentID
+			}
+			maxWait := intercept.DefaultLeaseWait
+			if a.MaxWaitS > 0 {
+				maxWait = time.Duration(a.MaxWaitS) * time.Second
+				if maxWait > intercept.MaxLeaseWait {
+					maxWait = intercept.MaxLeaseWait
+				}
+			}
+			res := sg.WaitForMutationLease(ctx, taskID, host, intentID, maxWait, 250*time.Millisecond)
+			return jsonResult(res)
+		})
 }

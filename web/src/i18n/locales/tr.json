@@ -2752,5 +2752,9 @@
   "Only for a self-hosted Bot API server or a relay. Changing it requires entering the token again.": "Yalnızca kendi barındırdığınız bir Bot API sunucusu veya aktarıcı için. Değiştirirseniz token'ı yeniden girmeniz gerekir.",
   "The bot uses long polling, so ARTEX opens no inbound port. Messages it sends contain summaries and links, never evidence bodies or credentials.": "Bot uzun yoklama kullanır, bu yüzden ARTEX gelen bağlantılar için port açmaz. Gönderdiği mesajlar yalnızca özet ve bağlantı içerir; asla kanıt gövdesi veya kimlik bilgisi içermez.",
   "The bot is off. Enter a token and switch it on.": "Bot kapalı. Bir token girin ve botu açın.",
-  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "Henüz hiçbir sohbete izin verilmedi: bot her sohbeti reddeder ve sohbet kimliğini yanıtında bildirir. Kullanmaya başlamak için sohbet kimliğinizi buraya ekleyin."
+  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "Henüz hiçbir sohbete izin verilmedi: bot her sohbeti reddeder ve sohbet kimliğini yanıtında bildirir. Kullanmaya başlamak için sohbet kimliğinizi buraya ekleyin.",
+  "Task extended by +{minutes}m": "Görev süresi +{minutes} dk uzatıldı",
+  "Extend failed: {error}": "Süre uzatma başarısız: {error}",
+  "Extend task timeout by 15 minutes": "Görev zaman aşımını 15 dakika uzat",
+  "+15m": "+15dk"
 }

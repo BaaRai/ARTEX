@@ -31,6 +31,7 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 		return
 	}
 	s.seed(t, seedText)
+	s.fingerprintTaskAsync(t, seedText)
 	if seedFirstIntent {
 		s.seedFirstIntent(t)
 	}

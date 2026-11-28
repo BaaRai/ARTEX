@@ -82,6 +82,7 @@ func (g *Guard) setGate(ic *intercept.Interceptor) {
 func (g *Guard) Hooks() *hook.Registry { return g.reg }
 
 func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
+	intercept.TouchStatefulHeartbeat(ctx)
 	cmd := toolAuditCommand(ev)
 	res := g.applyIntercept(ctx, ev, cmd)
 	if g.targetOnly {
@@ -324,6 +325,7 @@ var reBlocked = regexp.MustCompile(`(?i)\b(403|forbidden|waf|blocked|rate.?limit
 // results into blocked / error / ok so the planner can change strategy instead
 // of giving up at a WAF.
 func (g *Guard) postToolUse(ctx context.Context, ev hook.Event) hook.Result {
+	intercept.TouchStatefulHeartbeat(ctx)
 	if !ev.IsError {
 		intercept.RecordStatefulReadOnly(ctx, ev.ToolName, ev.Input, "", "")
 	}

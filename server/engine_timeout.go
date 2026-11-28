@@ -156,7 +156,7 @@ func (e *Engine) clockCtx(base context.Context, t *Task, final bool) context.Con
 	if dl <= 0 && !final {
 		return base // no timeout → unchanged behavior
 	}
-	return agent.WithTaskClock(base, agent.TaskClock{DeadlineUnix: dl, Final: final})
+	return agent.WithTaskClock(base, agent.TaskClock{DeadlineUnix: dl, BudgetSeconds: t.TimeoutSeconds, Final: final})
 }
 
 // ---------- coordinator ----------
@@ -330,4 +330,16 @@ func (e *Engine) runFinalPlannerRound(ctx context.Context, t *Task, budget bool)
 		log.Printf("[deadline] task %s final judgment: goal met: %s", t.ID, reason)
 	}
 	return met
+}
+
+// ExtendTaskDeadline updates the engine's cached deadline and ensures the
+// deadline coordinator is running for this task.
+func (e *Engine) ExtendTaskDeadline(ctx context.Context, t *Task, deadlineAt int64) {
+	if e == nil || t == nil {
+		return
+	}
+	if deadlineAt > 0 {
+		e.deadline.Store(t.ID, deadlineAt)
+	}
+	e.startDeadlineCoordinator(ctx, t)
 }

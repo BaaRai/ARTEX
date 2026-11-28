@@ -22,7 +22,7 @@ var noTargetTools = toolSet(
 	"Read", "Write", "Edit", "MultiEdit", "LS", "Glob", "Grep",
 	"TodoWrite", "sleep", "TaskOutput", "TaskStop", "TaskList",
 	// exploration graph, assets, findings, goals (agent.ToolSet)
-	"graph_overview", "list_findings", "list_facts", "node_detail", "expand_digest",
+	"graph_overview", "lease_status", "wait_for_lease", "task_brief", "list_findings", "list_facts", "node_detail", "expand_digest",
 	"get_worker_output", "get_worker_trace", "search_all_worker_traces",
 	"add_hint", "add_intent", "upsert_hypothesis", "record_capability", "steer_work", "kill_work",
 	"set_goals", "set_constraints", "list_goals", "prove_goal", "goal_met",

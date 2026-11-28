@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -38,6 +39,8 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 	ctx, cancelPoll := context.WithCancelCause(ctx)
 	defer cancelPoll(nil)
 	pollDet := newPollLoopDetector()
+	gateHooks, _ := gateConstantHooksFromContext(ctx)
+	gateDet := newGateConstantDetector(gateHooks)
 	ctx, auditTrace := intercept.WithTrace(ctx, input, approvalHistory(s.Messages()))
 	defer auditTrace.Finish()
 	// Observe each model call's stop reason, so a provider refusal is reported as
@@ -99,24 +102,43 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			if ev.ToolUse == nil {
 				continue
 			}
+			intercept.TouchStatefulHeartbeat(ctx)
 			flush()
 			toolNames[ev.ToolUse.ID] = ev.ToolUse.Name
 			in := string(ev.ToolUse.Input)
 			lastTool.start(ev.ToolUse.ID, ev.ToolUse.Name, in)
 			auditTrace.Start(ev.ToolUse.ID, ev.ToolUse.Name, ev.ToolUse.Input)
 			pollDet.onToolUse(ev.ToolUse.ID, ev.ToolUse.Name, in)
+			gateDet.onToolUse(ev.ToolUse.ID, ev.ToolUse.Name, in)
 			rec(db.Activity{Kind: "tool_use", Tool: ev.ToolUse.Name, ToolUseID: ev.ToolUse.ID,
 				Summary: ev.ToolUse.Name + " " + firstLine(in, 200), Detail: in})
 		case harness.KindToolResult:
 			if ev.ToolResult == nil {
 				continue
 			}
+			intercept.TouchStatefulHeartbeat(ctx)
 			flush()
 			out := blocksText(ev.ToolResult.Content)
 			lastTool.done(ev.ToolResult.ToolUseID)
 			auditTrace.Complete(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError)
 			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
 				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out})
+			if gRecs, sweepDetected := gateDet.onToolResultMulti(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError); len(gRecs) > 0 || sweepDetected {
+				if gateHooks.RecordGateConstant != nil {
+					for _, gRec := range gRecs {
+						if fid, rerr := gateHooks.RecordGateConstant(gRec); rerr == nil && fid > 0 {
+							rec(db.Activity{
+								Kind:    "text",
+								Summary: fmt.Sprintf("Recorded gate_constant fact #%d on %s%s (HTTP %d across %d probes)", fid, gRec.Host, gRec.Path, gRec.Status, gRec.SampleCount),
+							})
+						}
+					}
+				}
+				if sweepDetected {
+					cancelPoll(ErrSweepLoopDetected)
+					return finalText, reason, ErrSweepLoopDetected
+				}
+			}
 			if pollDet.onToolResult(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError) {
 				cancelPoll(ErrPollLoopDetected)
 				return finalText, reason, ErrPollLoopDetected
