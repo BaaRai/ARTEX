@@ -1533,6 +1533,20 @@ func (t *Traffic) Page(f PageQuery, page, size int) (rows []ExchangeMeta, total 
 	return rows, total, rs.Err()
 }
 
+// Meta returns the metadata row of one exchange — its id, capture time, request
+// line, status and sizes — without the bodies. Consumers that receive the body
+// text from Get still need these fields to identify which exchange they got and
+// when it was captured.
+func (t *Traffic) Meta(id string) (ExchangeMeta, error) {
+	var m ExchangeMeta
+	err := t.db.QueryRow(`SELECT id,ts,host,method,url_template,url,status,content_type,resp_len,path,`+rewrittenExistsSQL+` FROM exchanges WHERE id=?`, id).
+		Scan(&m.ID, &m.TS, &m.Host, &m.Method, &m.URLTemplate, &m.URL, &m.Status, &m.ContentType, &m.RespLen, &m.Path, &m.Rewritten)
+	if err != nil {
+		return ExchangeMeta{}, err
+	}
+	return m, nil
+}
+
 // Get returns the full request/response text of one exchange. Bodies come from
 // the database; rows recorded before bodies moved into SQLite carry a non-empty
 // path and are read from the legacy on-disk tree instead, so history stays

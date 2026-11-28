@@ -401,6 +401,29 @@ class BenchV2R2AndR5Tests(unittest.TestCase):
         self.assertEqual(len(scores["detection_rate_wilson95"]), 2)
         self.assertEqual(len(scores["precision_wilson95"]), 2)
 
+    def test_r2_reads_real_traffic_exchange_payload(self):
+        """The verifier must work on what GET /api/traffic/exchange actually
+        returns: the raw bodies plus the exchange id and capture time. A payload
+        without them (the endpoint before it reported identity) is unusable, so
+        the producer and this consumer have to stay in sync."""
+        def exchange(ts=None):
+            body = {"req": "GET /rest/user/login HTTP/1.1\n", "resp": "HTTP/1.1 200 OK\n",
+                    "stream_count": 0, "stream_kind": ""}
+            if ts is not None:
+                body["id"] = "1700001200-0001"
+                body["ts"] = ts
+            return body
+
+        findings = [
+            {"id": 1, "name": "Payload names its capture", "traffic_refs": ["1700001200-0001"]},
+            {"id": 2, "name": "Bodies only", "traffic_refs": ["1700001200-0002"]},
+        ]
+        store = {"1700001200-0001": exchange(1700001200), "1700001200-0002": exchange()}
+        tv = run_bench.verify_finding_traffic_refs(findings, store.get, self.window_start, self.window_end)
+        self.assertEqual(tv["verified_keys"], {(int, 1)})
+        self.assertEqual(tv["verified_refs"][1]["timestamp"], 1700001200)
+        self.assertEqual(tv["rejected"][2], "traffic_ref_missing_timestamp")
+
     def test_r2_parses_iso8601_and_millisecond_timestamps(self):
         findings = [
             {"id": "f-iso", "name": "ISO ts", "traffic_refs": [{"traffic_id": "ex-iso"}]},
