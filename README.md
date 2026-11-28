@@ -240,6 +240,22 @@ worker remains confined to the intent it claimed.
   - Press **Stop** when done. Everything stays in your local traffic store.
 
   </details>
+- **Opt-in shared browser with live view and take-over** (Function → Browser): disabled by default
+  (each agent run launches its own private headless browser). Opt in with `-shared-browser` or
+  `ARTEX_SHARED_BROWSER=true` to view the browser live and intervene on CAPTCHAs, email/SMS codes, 2FA,
+  or logins. No anti-bot stealth flags (`AutomationControlled` or `HeadlessChrome` user-agent rewriting)
+  are applied: when a human verification challenge appears, acting tools are refused and the agent hands
+  off via `ask_operator`; press **Take over**, complete it in the view, and **Hand back** so the agent
+  continues in the same tab (an idle operator lock or `ask_operator` hold expires automatically after
+  `-shared-browser-lock-timeout` / `ARTEX_SHARED_BROWSER_LOCK_TIMEOUT`, default `15m`). Profiles are
+  isolated per task or chat session under `<data>/browser-profiles/<scope>`, CDP is isolated over
+  `--remote-debugging-pipe` (Unix) behind a per-run token-authenticated server proxy so agent `Bash`
+  cannot drive Chromium directly, and traffic capture trusts only ARTEX's recording CA SPKI pin rather
+  than disabling certificate verification. Residual risk: because Playwright MCP runs under the same
+  executor UID as agent `Bash`, the per-run token in Playwright MCP's `--cdp-endpoint` argv is readable
+  by same-UID agent processes while the run is active; the token is revoked immediately when the run
+  ends, Chromium binds no TCP port on Unix, and the server CDP proxy enforces the operator hold and
+  active lease on every HTTP request and WebSocket message so operator take-over cannot be bypassed.
 - **Verified findings**: findings carry a POE level, a verification status and a note; a finding is
   `verified` only when a bound proof/response and verbatim evidence quotes support it. Gzip/deflate
   bodies are decoded before the quote check. The findings table supports bulk status updates, and

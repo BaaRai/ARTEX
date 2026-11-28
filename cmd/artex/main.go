@@ -15,6 +15,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -106,6 +108,10 @@ func run() int {
 		// A negative uid turns the drop off; 0 (root) is refused.
 		execUID = flag.Int("exec-uid", server.DefaultExecUID, "uid that agent processes run as (Bash, shell, custom tools, MCP stdio); -1 turns the drop off")
 		execGID = flag.Int("exec-gid", server.DefaultExecGID, "gid that agent processes run as")
+		// Opt-in shared Chromium for live view and operator take-over in the web UI.
+		// Disabled by default so each agent run keeps its own private headless browser.
+		sharedBrowser            = flag.Bool("shared-browser", envBool("ARTEX_SHARED_BROWSER", false), "opt-in: run a shared browser with live view and operator take-over in the web UI; default false gives each agent run a private headless browser (env ARTEX_SHARED_BROWSER)")
+		sharedBrowserLockTimeout = flag.Duration("shared-browser-lock-timeout", envDuration("ARTEX_SHARED_BROWSER_LOCK_TIMEOUT", server.DefaultSharedBrowserLockTimeout), "how long an idle operator take-over or ask_operator hold keeps the shared browser before automatically expiring (env ARTEX_SHARED_BROWSER_LOCK_TIMEOUT)")
 		// Development escape of the isolation self-test, off by default.
 		devNoIsolation = flag.Bool(server.DevNoIsolationFlag, false, "DEVELOPMENT ONLY: on Linux as root, start even when the agent isolation self-test fails; agent processes and file tools may then read the server's keys, config and database credentials")
 	)
@@ -213,7 +219,7 @@ func run() int {
 	}
 	defer mgr.Close()
 
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation))
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation), server.WithSharedBrowser(*sharedBrowser), server.WithSharedBrowserLockTimeout(*sharedBrowserLockTimeout))
 	// ReadTimeout bounds how long the request headers and body may take to arrive.
 	// It does not limit how long a handler runs, so an event stream stays open.
 	// WriteTimeout is left unset: a write deadline would cut that stream.
@@ -273,4 +279,30 @@ func shutdownContext(signalCtx context.Context) (context.Context, context.Cancel
 		}
 	}()
 	return ctx, shutdown
+}
+
+// envBool reads a boolean environment variable, or def when it is unset or not a
+// boolean.
+func envBool(name string, def bool) bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(name)))
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+// envDuration reads a Go duration environment variable (or integer seconds),
+// returning def when unset or invalid.
+func envDuration(name string, def time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return def
 }

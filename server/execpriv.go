@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 )
 
 // Agent process privilege. The server keeps running as root (the Docker image does),
@@ -87,6 +88,27 @@ func logExecOnce(format string, args ...any) {
 
 // execIDString renders an executor id for the environment and the shim arguments.
 func execIDString(id uint32) string { return strconv.FormatUint(uint64(id), 10) }
+
+// WithSharedBrowser turns the shared browser on or off (sharedbrowser.go). Off
+// keeps the previous behavior: each agent run's browser MCP launches its own
+// private headless browser.
+// DefaultSharedBrowserLockTimeout is the default expiry for an idle operator
+// take-over lock or an ask_operator browser hold.
+const DefaultSharedBrowserLockTimeout = 15 * time.Minute
+
+func WithSharedBrowser(on bool) Option {
+	return func(s *Server) { s.sharedBrowserOn = on }
+}
+
+// WithSharedBrowserLockTimeout configures how long an idle operator take-over
+// lock or ask_operator hold keeps the shared browser before expiring.
+func WithSharedBrowserLockTimeout(d time.Duration) Option {
+	return func(s *Server) {
+		if d > 0 {
+			s.sharedBrowserLockTimeout = d
+		}
+	}
+}
 
 // WithExecPrivilege sets the identity agent processes run under. The binary passes the
 // result of ResolveExecPrivilege; tests and other callers keep the zero value.
