@@ -1,5 +1,8 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+import { updateQuery } from "@/lib/navigation";
+
 import * as React from "react";
 
 import {
@@ -1047,18 +1050,20 @@ export default function ChatPage() {
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [convs, setConvs] = React.useState<Conversation[]>([]);
   const [agentFilter, setAgentFilter] = React.useState<string | null>(null);
-  const [selectedId, setSelectedId] = React.useState<number | null>(null);
-  const [sourceRequested, setSourceRequested] = React.useState(false);
+  const [conversationID] = useQueryState("c", "");
+  const selectedId = /^[1-9]\d*$/.test(conversationID) ? Number(conversationID) : null;
+  const setSelectedId = React.useCallback((next: React.SetStateAction<number | null>) => {
+    const raw = new URLSearchParams(window.location.search).get("c");
+    const current = raw && /^[1-9]\d*$/.test(raw) ? Number(raw) : null;
+    const id = typeof next === "function" ? next(current) : next;
+    if (id !== current) updateQuery({ c: id === null ? "" : String(id), approval: null });
+  }, []);
+  const [approvalID] = useQueryState("approval", "");
+  const sourceRequested = Boolean(approvalID);
   const [convsLoaded, setConvsLoaded] = React.useState(false);
   const selectConversation = React.useCallback((id: number | null) => {
-    if (id !== selectedId) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("approval");
-      setSourceRequested(false);
-      window.history.replaceState(null, "", url);
-    }
     setSelectedId(id);
-  }, [selectedId]);
+  }, [setSelectedId]);
 
   const [renamingId, setRenamingId] = React.useState<number | null>(null);
   const [renameText, setRenameText] = React.useState("");
@@ -1152,35 +1157,16 @@ export default function ChatPage() {
     });
   }, []);
 
-  // Restore the open conversation on mount, so a refresh or a return from another
-  // page lands on the same thread instead of the empty draft view: the URL
-  // (?c=<id>) first, else the last conversation opened here. Runs after
-  // hydration (not a lazy useState init) to avoid a server/client mismatch.
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    setSourceRequested(params.has("approval"));
-    const c = params.get("c") ?? getLocalStorageValue(LAST_CONVERSATION_KEY);
-    const id = c ? Number(c) : NaN;
-    if (Number.isFinite(id)) setSelectedId(id);
-  }, []);
-  // Mirror the current selection into the URL (replaceState → no history spam). A
-  // selectedId with no matching conversation (e.g. a stale ?c=, or a just-created
-  // one before reloadConvs lands) simply renders the draft view — harmless — so we
-  // deliberately do NOT auto-clear it here (that raced new-conversation creation).
-  // The same value goes to localStorage for the restore above. On mount this
-  // effect runs once with the initial null before the restored id lands; the
-  // restore has already read the stored value by then and writes it back on the
-  // next render.
-  React.useEffect(() => {
-    const url = new URL(window.location.href);
-    if (selectedId != null) {
-      url.searchParams.set("c", String(selectedId));
-      setLocalStorageValue(LAST_CONVERSATION_KEY, String(selectedId));
-    } else {
-      url.searchParams.delete("c");
-      removeLocalStorageValue(LAST_CONVERSATION_KEY);
+    if (!params.has("c")) {
+      const saved = getLocalStorageValue(LAST_CONVERSATION_KEY);
+      updateQuery({ c: saved && /^[1-9]\d*$/.test(saved) ? saved : "" }, "replace");
     }
-    window.history.replaceState(null, "", url);
+  }, []);
+  React.useEffect(() => {
+    if (selectedId !== null) setLocalStorageValue(LAST_CONVERSATION_KEY, String(selectedId));
+    else removeLocalStorageValue(LAST_CONVERSATION_KEY);
   }, [selectedId]);
 
   const selected = React.useMemo(() => convs.find((c) => c.id === selectedId) ?? null, [convs, selectedId]);

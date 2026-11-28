@@ -1,5 +1,7 @@
 "use client";
 
+import { useRecordHistory } from "@/hooks/use-record-history";
+
 import * as React from "react";
 import {
   RadioIcon,
@@ -126,7 +128,7 @@ export default function LLMRecordsPage() {
   const [recBusy, setRecBusy] = React.useState(false);
 
   // Inline detail panel (Burp-style split, not a dialog)
-  const [selected, setSelected] = React.useState<LLMRecordItem | null>(null);
+  const [selected, setSelected] = useRecordHistory<LLMRecordItem>("record", records);
   const [detail, setDetail] = React.useState<LLMRecordDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   // Normalized view / raw HTTP view. The raw exchange is the only authoritative source when debugging

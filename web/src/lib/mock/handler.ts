@@ -1615,6 +1615,14 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     };
 
   // ── Workspace file manager (demo: static sample tree; writes/creates/deletes hit the {ok:true} write fallback below) ──
+  // Empty notification fixtures keep the settings tabs usable in mock navigation tests.
+  if (path === "/notify/meta") return {
+    kinds: [], enabled: false, public_base_url: "", digest_interval_min: "10",
+    defaults: { digest_interval_min: 10 },
+    stats: { channels: 0, channels_on: 0, pending: 0, failed: 0, sent_today: 0, backlog_age_ms: 0 },
+  };
+  if (path === "/notify/channels") return { channels: [] };
+  if (path === "/notify/deliveries") return { deliveries: [], total: 0, page: 1, page_size: 50 };
   if (path === "/workspace/list") return D.workspaceList(q.get("path") ?? "");
   if (path === "/workspace/read") return D.workspaceRead(q.get("path") ?? "");
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+
 import * as React from "react";
 import { toast } from "sonner";
 import {
@@ -474,6 +476,7 @@ function JudgeCard() {
 // ---- page ----
 
 export default function InterceptPage() {
+  const [tab, setTab] = useQueryState("tab", "rules", ["rules", "judge"]);
   const [rules, setRules]     = React.useState<InterceptRule[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [open, setOpen]       = React.useState(false);
@@ -685,7 +688,7 @@ export default function InterceptPage() {
         </Button>
       </div>
 
-      <Tabs defaultValue="rules" className="flex-1">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1">
         <TabsList>
           <TabsTrigger value="rules">{t("Interception rules")}</TabsTrigger>
           <TabsTrigger value="judge">{t("Model config")}</TabsTrigger>

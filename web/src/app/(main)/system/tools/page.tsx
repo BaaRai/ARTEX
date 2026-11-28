@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+
 import * as React from "react";
 import { toast } from "sonner";
 import { PlayIcon, PlusIcon, RotateCcwIcon, SaveIcon, SearchIcon, Trash2Icon } from "lucide-react";
@@ -375,6 +377,7 @@ function ToolGridCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
 }
 
 export default function ToolsPage() {
+  const [tab, setTab] = useQueryState("tab", "system", ["system", "custom"]);
   const [tools, setTools] = React.useState<Tool[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [captureOn, setCaptureOn] = React.useState(false);
@@ -427,7 +430,7 @@ export default function ToolsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="system">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="system">{t("System tools")}</TabsTrigger>
           <TabsTrigger value="custom">{t("Custom tools")}</TabsTrigger>

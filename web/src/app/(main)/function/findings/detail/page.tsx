@@ -1,6 +1,9 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+
 import * as React from "react";
+import { findingReturnHref } from "@/lib/navigation";
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -64,10 +67,11 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 function FindingDetailInner() {
   const searchParams = useSearchParams();
   const id = searchParams.get("id") ?? "";
+  const backHref = findingReturnHref(searchParams.get("from_task") ?? searchParams.get("context_task"));
   const contextTaskId = searchParams.get("context_task") ?? "";
   const [finding, setFinding] = React.useState<Finding | null>(null);
   const [loaded, setLoaded] = React.useState(false);
-  const [tab, setTab] = React.useState("overview");
+  const [tab, setTab] = useQueryState("tab", "overview", ["overview", "lineage"]);
 
   const load = React.useCallback(() => {
     if (!id) {
@@ -141,7 +145,7 @@ function FindingDetailInner() {
         <p className="text-muted-foreground">{loaded ? t("Finding {id} not found", { id }) : t("Loading…")}</p>
         {loaded && (
           <Button asChild variant="outline">
-            <Link href="/function/findings">
+            <Link href={backHref}>
               <ArrowLeftIcon /> {t("Back to findings")}
             </Link>
           </Button>
@@ -159,7 +163,7 @@ function FindingDetailInner() {
         <div className="flex flex-wrap items-center gap-2">
           <SidebarTrigger className="-ml-1" />
           <Button asChild variant="ghost" size="icon" className="size-7">
-            <Link href="/function/findings">
+            <Link href={backHref}>
               <ArrowLeftIcon />
             </Link>
           </Button>

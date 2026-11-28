@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+
 import * as React from "react";
 import {
   DownloadIcon,
@@ -54,7 +56,7 @@ type EditState = {
 };
 
 export default function WorkspacePage() {
-  const [path, setPath] = React.useState("");
+  const [path, setPath] = useQueryState("path", "");
   const [entries, setEntries] = React.useState<WorkspaceEntry[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [edit, setEdit] = React.useState<EditState | null>(null);
@@ -62,24 +64,26 @@ export default function WorkspacePage() {
   const [mkdirName, setMkdirName] = React.useState("");
   const uploadRef = React.useRef<HTMLInputElement>(null);
 
+  const loadSequence = React.useRef(0);
   const load = React.useCallback(
     (p: string) => {
+      const sequence = ++loadSequence.current;
       setLoading(true);
       api
         .workspaceList(p)
         .then((r) => {
-          setEntries(r.entries);
-          setPath(r.path);
+          if (sequence === loadSequence.current) setEntries(r.entries);
         })
         .catch((e) => toast.error(t("Failed to read directory: {error}", { error: (e as Error).message })))
-        .finally(() => setLoading(false));
+        .finally(() => { if (sequence === loadSequence.current) setLoading(false); });
     },
     [],
   );
 
   React.useEffect(() => {
-    load("");
-  }, [load]);
+    load(path);
+    return () => { loadSequence.current++; };
+  }, [load, path]);
 
   const crumbs = React.useMemo(() => {
     const parts = path ? path.split("/") : [];
@@ -169,7 +173,7 @@ export default function WorkspacePage() {
               {i > 0 && <span className="text-muted-foreground">/</span>}
               <button
                 type="button"
-                onClick={() => load(c.path)}
+                onClick={() => setPath(c.path)}
                 className={cn(
                   "max-w-[160px] truncate rounded px-1.5 py-0.5 hover:bg-accent",
                   i === crumbs.length - 1 ? "text-foreground font-medium" : "text-muted-foreground",
@@ -224,7 +228,7 @@ export default function WorkspacePage() {
                   <TableCell>
                     <button
                       type="button"
-                      onClick={() => (e.dir ? load(e.path) : openFile(e))}
+                      onClick={() => (e.dir ? setPath(e.path) : openFile(e))}
                       className="flex items-center gap-2 text-left hover:underline"
                     >
                       {e.dir ? (

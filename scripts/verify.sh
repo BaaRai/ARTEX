@@ -139,6 +139,7 @@ if want_web; then
     run_step "npm ci" npm --prefix web ci
   fi
   run_step "tsc --noEmit" bash -c 'cd web && npx tsc --noEmit'
+  run_step "web navigation tests" bash -c 'cd web && npm run test:navigation'
   run_step "web polling tests" bash -c 'cd web && npm run test:polling'
   run_step "web replay tests" bash -c 'cd web && npm run test:replay'
   run_step "web upload tests" bash -c 'cd web && npm run test:upload'

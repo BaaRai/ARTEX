@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+
 import * as React from "react";
 
 import { BellIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
@@ -52,7 +54,7 @@ function limitInvalid(raw: string, max: number): boolean {
 export default function NotifyPage() {
   const [meta, setMeta] = React.useState<NotificationMeta | null>(null);
   const [channels, setChannels] = React.useState<NotificationChannel[]>([]);
-  const [tab, setTab] = React.useState<"channels" | "deliveries">("channels");
+  const [tab, setTab] = useQueryState("tab", "channels", ["channels", "deliveries"]);
 
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<NotificationChannel | null>(null);

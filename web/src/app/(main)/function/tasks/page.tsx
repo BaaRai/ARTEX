@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryState } from "@/hooks/use-query-state";
+
 import * as React from "react";
 
 import Link from "next/link";
@@ -297,7 +299,7 @@ function compareTasks(left: Task, right: Task, field: TaskSortField, direction: 
 export default function TasksPage() {
   // The sidebar's company switcher: the server returns only the tasks scoped to it.
   const companyId = useActiveCompanyID();
-  const [activeTab, setActiveTab] = React.useState("current");
+  const [activeTab, setActiveTab] = useQueryState("tab", "current", ["current", "archived"]);
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [categories, setCategories] = React.useState<TaskCategory[]>([]);
   const [categoriesLoaded, setCategoriesLoaded] = React.useState(false);
