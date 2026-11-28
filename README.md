@@ -59,6 +59,11 @@ printed at startup:
 docker compose logs artex | grep "Setup token"
 ```
 
+> **On Docker Desktop for Windows or macOS**, add the Desktop overlay so agent isolation holds:
+> `docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build`. Without it the
+> `artex` container crash-loops on the isolation self-test. See
+> [Docker Desktop on Windows and macOS](#docker-desktop-on-windows-and-macos).
+
 > Multi-arch release images (`linux/amd64`, `linux/arm64`) are published to GitHub Container
 > Registry at `ghcr.io/baarai/artex` from the next tagged release; v0.7.0 predates the publish
 > step. For pulling the prebuilt image and all other installation paths (script, binaries,
@@ -235,6 +240,22 @@ worker remains confined to the intent it claimed.
   - Press **Stop** when done. Everything stays in your local traffic store.
 
   </details>
+- **Opt-in shared browser with live view and take-over** (Function → Browser): disabled by default
+  (each agent run launches its own private headless browser). Opt in with `-shared-browser` or
+  `ARTEX_SHARED_BROWSER=true` to view the browser live and intervene on CAPTCHAs, email/SMS codes, 2FA,
+  or logins. No anti-bot stealth flags (`AutomationControlled` or `HeadlessChrome` user-agent rewriting)
+  are applied: when a human verification challenge appears, acting tools are refused and the agent hands
+  off via `ask_operator`; press **Take over**, complete it in the view, and **Hand back** so the agent
+  continues in the same tab (an idle operator lock or `ask_operator` hold expires automatically after
+  `-shared-browser-lock-timeout` / `ARTEX_SHARED_BROWSER_LOCK_TIMEOUT`, default `15m`). Profiles are
+  isolated per task or chat session under `<data>/browser-profiles/<scope>`, CDP is isolated over
+  `--remote-debugging-pipe` (Unix) behind a per-run token-authenticated server proxy so agent `Bash`
+  cannot drive Chromium directly, and traffic capture trusts only ARTEX's recording CA SPKI pin rather
+  than disabling certificate verification. Residual risk: because Playwright MCP runs under the same
+  executor UID as agent `Bash`, the per-run token in Playwright MCP's `--cdp-endpoint` argv is readable
+  by same-UID agent processes while the run is active; the token is revoked immediately when the run
+  ends, Chromium binds no TCP port on Unix, and the server CDP proxy enforces the operator hold and
+  active lease on every HTTP request and WebSocket message so operator take-over cannot be bypassed.
 - **Verified findings**: findings carry a POE level, a verification status and a note; a finding is
   `verified` only when a bound proof/response and verbatim evidence quotes support it. Gzip/deflate
   bodies are decoded before the quote check. The findings table supports bulk status updates, and
@@ -425,6 +446,60 @@ docker compose -f docker-compose.ghcr.yml up -d
 Pin a version with `ARTEX_IMAGE_TAG=v0.7.1` in `.env` (or `0.7.1`); unset uses `latest`. To use
 custom skills, copy them into a host directory and add `- ./skills:/app/skills` to the `artex`
 volumes, which overrides the built-in `/app/skills`.
+
+#### Docker Desktop on Windows and macOS
+
+Docker Desktop runs containers inside a Linux VM and serves the project's `./data`, `./keys` and
+`./skills` host directories into the container as bind mounts the server cannot lock down. The
+agent-isolation self-test (the fail-closed privilege drop) then refuses to start, so the `artex`
+container crash-loops at startup with `self-test failed ... Bash can create files in /app/data`. At
+startup the server runs as root and `chown`/`chmod`s those paths so the uid-10001 agent executor
+cannot write to them; on Docker Desktop it cannot: Windows/WSL forces the bind mount world-writable
+(`0777`) and ignores `chown`/`chmod`, while macOS serves it as a `fakeowner` filesystem that reports
+`root:root 0755` inside the container but does not enforce it, so uid 10001 can still create files.
+(That is also why the `chmod -R go-w` workaround helps on WSL but does nothing on a Mac.)
+
+Layer `docker-compose.desktop.yml` over the base file to swap those three host bind mounts for
+Docker-managed named volumes, which live inside the VM's own filesystem where the server's
+permission hardening takes effect, so isolation stays **enabled** (no `-dev-insecure-no-isolation`):
+
+If you are migrating an **existing bind-mount deployment** whose Postgres database already holds
+encrypted secrets, seed the named `keys` and `data` volumes **before the first `up`** (or set
+`ARTEX_SECRET_KEY`), otherwise ARTEX will refuse to start against a database with sealed secrets and
+an empty `keys` volume:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.desktop.yml create artex
+docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp ./keys/. artex:/app/keys
+docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp ./data/. artex:/app/data
+```
+
+Then start the stack:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
+# or, from the prebuilt image (use -f docker-compose.ghcr.yml in the migration commands above too):
+docker compose -f docker-compose.ghcr.yml -f docker-compose.desktop.yml up -d
+```
+
+Keep the same `-f` pair for every later `docker compose` command (`logs`, `up -d artex`, `down`,
+`cp`): `-f docker-compose.yml -f docker-compose.desktop.yml` for local builds, or
+`-f docker-compose.ghcr.yml -f docker-compose.desktop.yml` when running the prebuilt GHCR image. The
+named volumes persist across rebuilds, but `data` and `keys` are no longer directly browsable at the
+project path — inspect or back them up with
+`docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp artex:/app/data ./data` (and
+the same for `/app/keys`, substituting `-f docker-compose.ghcr.yml` for GHCR). `/app/skills` is seeded
+from the image's baked skills the first time the volume is created; with a local checkout you can
+refresh it with
+`docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp ./skills/. artex:/app/skills`,
+while GHCR-only installs without a checkout can either stop the stack (`down`) and remove the
+`skills` volume so the next start re-seeds built-in skills from the new image, or bind-mount a host
+directory of custom skills. **Native-Linux installs on a Linux filesystem do not need this overlay**
+— there host bind mounts enforce POSIX ownership and modes, so the default `docker-compose.yml`
+already passes the self-test and keeps `./data`, `./keys` and `./skills` on the host. (Note: Docker
+Engine inside WSL2 with the repository under `/mnt/c` hits the same `0777` bind-mount limitation as
+Docker Desktop — either use this overlay or move the repository onto WSL2's native Linux ext4
+filesystem.)
 
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
@@ -763,9 +838,18 @@ content before sharing.
 timestamped output and rotation:
 
 ```bash
-scripts/backup.sh --with-data          # db dump + data/ archive, keep 14
+scripts/backup.sh --with-data          # db dump + host data/ archive, keep 14
 scripts/backup.sh --keep 7             # db only, keep 7
 ```
+
+> **With `docker-compose.desktop.yml` (named volumes):** `--with-data` archives the host `./data`
+> directory, not the Docker-managed `data` volume. Back up the named volume directly via
+> `docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp artex:/app/data ./data`
+> (use `-f docker-compose.ghcr.yml -f docker-compose.desktop.yml` for GHCR), or archive it with
+> `docker run --rm -v <project>_data:/from:ro -v "$PWD/backups":/to alpine tar -czf /to/artex-data.tar.gz -C /from .`
+> (where `<project>_data` is the Compose project's `data` volume — inspect volume names with
+> `docker compose -f docker-compose.yml -f docker-compose.desktop.yml config --volumes` and
+> `docker volume ls`; back up the project's `keys` volume the same way).
 
 Restore into a running stack:
 
@@ -798,6 +882,17 @@ Daily cron example (03:20, operator crontab):
 > `schema.sql` baseline, then any pending numbered migration from `db/migrations/`, in order, each
 > in its own transaction. Restarting the new binary is the upgrade. Back up `./data`, `keys/` and
 > the database before upgrading.
+
+> **On the [Docker Desktop overlay](#docker-desktop-on-windows-and-macos) (Windows/macOS)**, `data`,
+> `keys` and `skills` are named volumes rather than host directories. `data` and `keys` carry across
+> upgrades the same way, but the `skills` volume is seeded from the image only when it is first
+> created, so a newer image's updated built-in skills do not reach an existing volume. After
+> upgrading, either refresh it from a local checkout with `docker compose -f docker-compose.yml -f
+> docker-compose.desktop.yml cp ./skills/. artex:/app/skills`, or — for GHCR installs without a
+> checkout — stop the stack first (`docker compose -f docker-compose.ghcr.yml -f
+> docker-compose.desktop.yml down`, or `-f docker-compose.yml` for local builds) before removing the
+> volume (`docker volume rm <project>_skills`, checking the project's volume name via `docker compose ... config --volumes` / `docker volume ls`) so the next start re-seeds built-in skills from the new
+> image (alternatively, bind-mount a host directory of custom skills).
 
 **Update banner (opt-in, off by default)**: start ARTEX with `ARTEX_UPDATE_CHECK=1` to ask the
 public GitHub releases API for the latest tag, at most once per 24 hours (cached in memory; a

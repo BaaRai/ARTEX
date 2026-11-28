@@ -27,6 +27,7 @@ interface Form {
   token: string; // empty = keep the stored token
   baseURL: string;
   chats: string; // one chat ID per line
+  users: string; // one user ID per line, for groups
 }
 
 function formFrom(b: ChatBridge | undefined): Form {
@@ -35,10 +36,11 @@ function formFrom(b: ChatBridge | undefined): Form {
     token: "",
     baseURL: typeof b?.config.base_url === "string" ? b.config.base_url : "",
     chats: (b?.allowed_chats ?? []).join("\n"),
+    users: (b?.allowed_users ?? []).join("\n"),
   };
 }
 
-function parseChats(raw: string): string[] {
+function parseIDs(raw: string): string[] {
   return raw
     .split(/[\s,]+/)
     .map((s) => s.trim())
@@ -97,7 +99,8 @@ export default function ChatBridgePage() {
       const saved = await api.chatBridgeSave(KIND, {
         enabled: form.enabled,
         config,
-        allowed_chats: parseChats(form.chats),
+        allowed_chats: parseIDs(form.chats),
+        allowed_users: parseIDs(form.users),
       });
       setBridge(saved);
       setForm(formFrom(saved));
@@ -122,7 +125,11 @@ export default function ChatBridgePage() {
   }
 
   const status: ChatBridgeStatus = bridge?.status ?? { state: "off" };
-  const chatCount = parseChats(form.chats).length;
+  const chats = parseIDs(form.chats);
+  const chatCount = chats.length;
+  // Telegram group and supergroup IDs are negative; private chats are the user's own positive ID.
+  const groupAllowed = chats.some((id) => id.startsWith("-"));
+  const userCount = parseIDs(form.users).length;
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
@@ -212,7 +219,7 @@ export default function ChatBridgePage() {
             />
             <p className="text-muted-foreground text-xs">
               {t(
-                "One per line. To find a chat ID, message the bot from that chat: its refusal names the chat ID. Allowing a group allows every member of it.",
+                "One per line. To find a chat ID, message the bot from that chat: its refusal names the chat ID. In a group, only the allowed users below can use the bot.",
               )}
             </p>
             {form.enabled && chatCount === 0 && (
@@ -220,6 +227,28 @@ export default function ChatBridgePage() {
                 {t(
                   "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.",
                 )}
+              </p>
+            )}
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="cb-users">{t("Allowed user IDs (groups)")}</Label>
+            <Textarea
+              id="cb-users"
+              rows={3}
+              className="font-mono"
+              placeholder={"123456789"}
+              value={form.users}
+              onChange={(e) => setForm((f) => ({ ...f, users: e.target.value }))}
+            />
+            <p className="text-muted-foreground text-xs">
+              {t(
+                "One per line. Needed only for groups: in an allowed group the bot answers only these users, so joining the group grants nothing. A member who is refused gets their user ID in the refusal.",
+              )}
+            </p>
+            {form.enabled && groupAllowed && userCount === 0 && (
+              <p className="text-amber-600 text-xs dark:text-amber-400">
+                {t("A group is allowed but no user is: the bot refuses every member of that group.")}
               </p>
             )}
           </div>
@@ -249,8 +278,14 @@ export default function ChatBridgePage() {
           </div>
           <p className="text-muted-foreground text-xs">
             {t(
-              "The bot uses long polling, so ARTEX opens no inbound port. Messages it sends contain summaries and links, never evidence bodies or credentials.",
+              "Commands: /tasks, /task <id>, /pause, /resume, /findings. Any other message goes to the main agent of the chat's selected task, in the same conversation as the web chat, and its answer is sent back.",
             )}
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {t(
+              "The bot uses long polling, so ARTEX opens no inbound port. Messages it sends contain summaries and links, never evidence bodies or credentials.",
+            )}{" "}
+            {t("Links use the Link-back URL from the notification settings.")}
           </p>
         </CardContent>
       </Card>

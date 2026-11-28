@@ -1130,7 +1130,7 @@ func sanitize(s string) string {
 // Host trees never use these names. DeleteAll skips every underscore-prefixed
 // entry for the same reason.
 func storeDir(name string) bool {
-	switch name {
+	switch strings.ToLower(name) {
 	case "_index", "_blobs", "_ca", "_delete_staging":
 		return true
 	default:
@@ -1332,15 +1332,22 @@ ORDER BY ts DESC LIMIT 8`, fromTS, toTS, arg)
 // response contains line. Get returns the body as recorded, which for a
 // Content-Encoding response is the compressed bytes.
 func (t *Traffic) decodedResponseContains(id, line string) bool {
+	_, dec, ok := t.decodedResponse(id)
+	return ok && strings.Contains(string(dec), line)
+}
+
+// decodedResponse returns the stored head and the decoded body of a compressed
+// response. ok is false when the body is not one decodeBody handles.
+func (t *Traffic) decodedResponse(id string) (head string, body []byte, ok bool) {
 	_, _, respHead, respBody, err := t.loadFullExchange(id, "")
 	if err != nil {
-		return false
+		return "", nil, false
 	}
 	_, _, headers := parseStoredResponseHead(respHead)
 	h := http.Header{}
 	h.Set("Content-Encoding", findHeaderValue(headers, "Content-Encoding"))
 	dec, ok := decodeBody(h, respBody, maxIndexBody)
-	return ok && strings.Contains(string(dec), line)
+	return respHead, dec, ok
 }
 
 // ftsFilter builds the SQL condition restricting rows to those whose indexed
@@ -2519,14 +2526,20 @@ func (t *Traffic) query(host, contains, bodyContains string, page, limit int) ([
 		if err != nil {
 			return nil, err
 		}
-		q += ` AND host=?`
+		// Recorded hosts keep the client's case; hostName is already lowercase.
+		q += ` AND lower(host)=?`
 		args = append(args, hostName)
 		if port != "" {
 			// Recorded rows historically store URL.Hostname() (without the port),
 			// so constrain the original URL authority as a compatibility fallback.
 			// New and old captures therefore share the same search contract.
 			authority := net.JoinHostPort(hostName, port)
-			prefixes := []string{"%://" + authority}
+			var prefixes []string
+			// Anchored per scheme, so a URL quoted in the query string (an
+			// open-redirect or SSRF probe) can't match.
+			for _, scheme := range []string{"http", "https", "ws", "wss"} {
+				prefixes = append(prefixes, scheme+"://"+authority)
+			}
 			// Clients leave a default port out of the Host header, so a capture
 			// of https://host:443 is recorded as https://host, and a WebSocket
 			// over it as wss://host.
@@ -2698,7 +2711,14 @@ func (t *Traffic) Tools() []actool.CoreTool {
 			if rewritten {
 				head = fmt.Sprintf("=== REWRITTEN === rewrite rules %v changed this exchange in the proxy. Shown below: the request as the client sent it and the response as the target sent it, not the rewritten values.\n\n", ruleIDs)
 			}
-			return actool.Text(head + "=== REQUEST ===\n" + clip(req, 2500) + "\n\n=== RESPONSE ===\n" + clip(resp, 4000)), nil
+			respTitle := "=== RESPONSE ==="
+			if respHead, dec, ok := t.decodedResponse(a.ID); ok && !isBinaryBody("", dec) {
+				// Body search matches the decoded text, so show that text rather
+				// than the compressed bytes.
+				respTitle = "=== RESPONSE (body decoded from its Content-Encoding) ==="
+				resp = respHead + "\n" + string(dec)
+			}
+			return actool.Text(head + "=== REQUEST ===\n" + clip(req, 2500) + "\n\n" + respTitle + "\n" + clip(resp, 4000)), nil
 		},
 	})
 

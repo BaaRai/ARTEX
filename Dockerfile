@@ -34,6 +34,7 @@ COPY . .
 # Reuse the frontend built above; build.sh skips its own frontend step.
 COPY --from=web /src/web/out ./server/webui/dist
 ARG ARTEX_VERSION=dev
+ARG ARTEX_REVISION=
 ARG TARGETOS
 ARG TARGETARCH
 # Same flags as the release binaries job (ARTEX_COMPRESS=0, -trimpath,
@@ -43,6 +44,7 @@ RUN ARTEX_SKIP_FRONTEND=1 \
     ARTEX_COMPRESS=0 \
     ARTEX_OUTPUT=/out/artex \
     ARTEX_BUILD_VERSION="${ARTEX_VERSION}" \
+    ARTEX_REVISION="${ARTEX_REVISION}" \
     bash ./build.sh --target "${TARGETOS:-linux}/${TARGETARCH:-amd64}"
 
 # ------------------------------------------------------- third-party tools ---
@@ -160,6 +162,11 @@ RUN set -eux; \
 # ---------------------------------------------------------------- runtime ---
 FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 ARG TARGETARCH
+ARG ARTEX_VERSION=dev
+ARG ARTEX_REVISION=
+LABEL org.opencontainers.image.title="ARTEX" \
+      org.opencontainers.image.version="${ARTEX_VERSION}" \
+      org.opencontainers.image.revision="${ARTEX_REVISION}"
 # Common tools: ripgrep / curl / vim, plus a set of recon staples (add/remove as needed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip xz-utils \

@@ -82,6 +82,7 @@ func (g *Guard) setGate(ic *intercept.Interceptor) {
 func (g *Guard) Hooks() *hook.Registry { return g.reg }
 
 func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
+	intercept.TouchStatefulHeartbeat(ctx)
 	cmd := toolAuditCommand(ev)
 	res := g.applyIntercept(ctx, ev, cmd)
 	if g.targetOnly {
@@ -222,6 +223,9 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event, cmd string) h
 			return g.block(ev.ToolName, systemBlockMessage("manual approval not granted (user rejected or approval timed out)"), cmd)
 		}
 	}
+	if err := intercept.CheckStatefulTool(ctx, ev.ToolName, ev.Input, "", ""); err != nil {
+		return g.block(ev.ToolName, systemBlockMessage(err.Error()), cmd)
+	}
 	return hook.Result{}
 }
 
@@ -320,7 +324,11 @@ var reBlocked = regexp.MustCompile(`(?i)\b(403|forbidden|waf|blocked|rate.?limit
 // postToolUse is the Observer failure-attribution hook (G5): it classifies tool
 // results into blocked / error / ok so the planner can change strategy instead
 // of giving up at a WAF.
-func (g *Guard) postToolUse(_ context.Context, ev hook.Event) hook.Result {
+func (g *Guard) postToolUse(ctx context.Context, ev hook.Event) hook.Result {
+	intercept.TouchStatefulHeartbeat(ctx)
+	if !ev.IsError {
+		intercept.RecordStatefulReadOnly(ctx, ev.ToolName, ev.Input, "", "")
+	}
 	if ev.ToolName != "Bash" {
 		return hook.Result{}
 	}

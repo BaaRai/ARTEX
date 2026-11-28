@@ -711,3 +711,25 @@ DELETE FROM assets a USING deletable d WHERE a.id=d.id`, id, expID)
 	}
 	return result, tx.Commit()
 }
+
+// ExtendTaskTimeout increases timeout_seconds and pushes deadline_at forward by
+// addSeconds (or sets deadline_at to now + addSeconds if the task already started).
+func (d *DB) ExtendTaskTimeout(id int64, addSeconds int) (int, *time.Time, error) {
+	if addSeconds <= 0 {
+		return 0, nil, fmt.Errorf("seconds must be positive")
+	}
+	var timeoutSeconds int
+	var deadline *time.Time
+	err := d.QueryRow(`
+UPDATE tasks
+   SET timeout_seconds = CASE
+           WHEN timeout_seconds > 0 THEN timeout_seconds + $2
+           ELSE $2 END,
+       deadline_at = CASE
+           WHEN deadline_at IS NOT NULL THEN GREATEST(deadline_at, now()) + make_interval(secs => $2)
+           WHEN first_run_at IS NOT NULL THEN now() + make_interval(secs => $2)
+           ELSE NULL END
+ WHERE id = $1 AND deleted_at IS NULL
+ RETURNING timeout_seconds, deadline_at`, id, addSeconds).Scan(&timeoutSeconds, &deadline)
+	return timeoutSeconds, deadline, err
+}

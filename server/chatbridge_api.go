@@ -25,6 +25,7 @@ type chatBridgeDTO struct {
 	Enabled      bool             `json:"enabled"`
 	Config       map[string]any   `json:"config"`
 	AllowedChats []string         `json:"allowed_chats"`
+	AllowedUsers []string         `json:"allowed_users"`
 	SecretKeys   []string         `json:"secret_keys"`
 	Status       chatBridgeStatus `json:"status"`
 	UpdatedAt    *time.Time       `json:"updated_at,omitempty"`
@@ -34,6 +35,7 @@ type chatBridgeRequest struct {
 	Enabled      *bool          `json:"enabled"`
 	Config       map[string]any `json:"config"`
 	AllowedChats *[]string      `json:"allowed_chats"`
+	AllowedUsers *[]string      `json:"allowed_users"`
 }
 
 func (s *Server) chatBridgeDTO(kind string, b *db.ChatBridge) chatBridgeDTO {
@@ -42,6 +44,7 @@ func (s *Server) chatBridgeDTO(kind string, b *db.ChatBridge) chatBridgeDTO {
 		Kind:         kind,
 		Config:       map[string]any{},
 		AllowedChats: []string{},
+		AllowedUsers: []string{},
 		SecretKeys:   tr.SecretKeys(),
 		Status:       s.chatBridges.Status(kind),
 	}
@@ -54,6 +57,7 @@ func (s *Server) chatBridgeDTO(kind string, b *db.ChatBridge) chatBridgeDTO {
 	out.Enabled = b.Enabled
 	out.Config = chatbridge.MaskConfig(kind, cfg)
 	out.AllowedChats = b.AllowedChats
+	out.AllowedUsers = b.AllowedUsers
 	updated := b.UpdatedAt
 	out.UpdatedAt = &updated
 	return out
@@ -109,11 +113,11 @@ func (s *Server) chatBridgeSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	storedCfg := map[string]any{}
-	allowed := []string{}
+	allowed, users := []string{}, []string{}
 	enabled := false
 	if stored != nil {
 		_ = json.Unmarshal(stored.Config, &storedCfg)
-		allowed = stored.AllowedChats
+		allowed, users = stored.AllowedChats, stored.AllowedUsers
 		enabled = stored.Enabled
 	}
 
@@ -127,6 +131,13 @@ func (s *Server) chatBridgeSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AllowedChats != nil {
 		allowed, err = chatbridge.NormalizeAllowedChats(tr, *req.AllowedChats)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
+	if req.AllowedUsers != nil {
+		users, err = chatbridge.NormalizeAllowedUsers(tr, *req.AllowedUsers)
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
@@ -151,7 +162,7 @@ func (s *Server) chatBridgeSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// Update ids are per bot: a new token makes the old cursor meaningless,
 	// so it is cleared in the same statement that stores the token.
-	saved, err := pg.SaveChatBridge(r.Context(), &db.ChatBridge{Kind: kind, Enabled: enabled, Config: raw, AllowedChats: allowed}, secretsChanged(tr, storedCfg, cfg))
+	saved, err := pg.SaveChatBridge(r.Context(), &db.ChatBridge{Kind: kind, Enabled: enabled, Config: raw, AllowedChats: allowed, AllowedUsers: users}, secretsChanged(tr, storedCfg, cfg))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

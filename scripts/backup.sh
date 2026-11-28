@@ -65,6 +65,12 @@ if [ "$WITH_DATA" -eq 1 ]; then
   DATA_OUT="$OUTPUT_DIR/artex-data-$TS.tar.gz"
   # data/ contains files written by the container (root); unreadable ones make
   # tar exit 2. Fail loudly rather than ship a partial archive.
+  # Note: with docker-compose.desktop.yml, data lives in a named Docker volume
+  # rather than host ./data; back it up via:
+  #   docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp artex:/app/data ./data
+  # or archive the Compose project's data volume (check names with
+  # `docker compose -f docker-compose.yml -f docker-compose.desktop.yml config --volumes`):
+  #   docker run --rm -v <project>_data:/from:ro -v "$PWD/backups":/to alpine tar -czf /to/artex-data.tar.gz -C /from .
   if ! tar -czf "$DATA_OUT" data 2>"$OUTPUT_DIR/.tar.err"; then
     rm -f "$DATA_OUT"
     echo "data archive failed (run as root so container-written files are readable):" >&2

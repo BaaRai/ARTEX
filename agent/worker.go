@@ -70,7 +70,7 @@ type Worker struct {
 	workDir     string
 	proxyAddr   string
 	proxyCACert string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
-	factTraffic FactTrafficLookup // proxy captures for fact provenance (nil = activity-only)
+	gateTraffic GateTrafficLookup // optional traffic lookup for constant-gate detector
 	webSearch   WebSearchOpts     // web_search tool backend selection (off by default)
 	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
 	window      int               // context window in tokens (for compaction)
@@ -170,6 +170,14 @@ func (w *Worker) SetRunTimeout(run time.Duration) {
 	w.runTimeout = run
 }
 
+// RunTimeout returns the worker's configured per-intent execution budget.
+func (w *Worker) RunTimeout() time.Duration {
+	if w == nil {
+		return 0
+	}
+	return w.runTimeout
+}
+
 // settleWrapUpPrompt is injected by the SDK settlement phase when a worker hits its
 // turn/time budget: stop probing, write back what was found, then end with a
 // plain-text one-liner (which becomes this run's displayed result).
@@ -210,9 +218,11 @@ func (w *Worker) compactionWindow() int {
 // that MITM proxy. Empty addr disables the hint.
 func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = addr, caCert }
 
-// SetFactTraffic wires the proxy capture store used to classify recorded facts
-// (#124 row 1). nil keeps the activity-only classification.
-func (w *Worker) SetFactTraffic(l FactTrafficLookup) { w.factTraffic = l }
+// Deprecated: shared proxy captures cannot establish the source of a task fact.
+func (w *Worker) SetFactTraffic(FactTrafficLookup) {}
+
+// SetGateTraffic wires the optional traffic lookup used by the constant-gate detector.
+func (w *Worker) SetGateTraffic(l GateTrafficLookup) { w.gateTraffic = l }
 
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
@@ -275,6 +285,12 @@ const workerDefaultTmpl = `You are an "executor" (work agent) of a network-secur
 - **Exploration conclusion/fact → record_fact (exploration graph, pass intent_id)**: use it for all of those. **Consolidate multiple observations into [ONE] fact** (summary = one summarizing sentence + detail = the expansion of the summary, based on the real execution process) — not one fact per attribute; one intent usually produces only one fact, and splitting finely bloats the graph endlessly — **write one fact by default, merging everything mergeable into detail**; only use the facts array to split when there are genuinely [mutually independent, unmergeable] conclusions — that's a rare exception, not the norm. **Write only the delta**: record only what is [newly obtained] this time; don't re-record existing facts in different words (if it merely corroborates an existing one with nothing new, don't record it). **Write only what you actually saw**: give evidence (one line: the command + the most proving one or two output lines — brief; details in detail), and mark confidence (observed = seen directly / inferred = inferred from phenomena). **Declare the source** of every fact: target_response (content the target itself returned: page bodies, headers, error messages, banners, even when a tool fetched it), tool_output (a tool's own result about the target: port states, scanner verdicts, status codes and timings you measured), third_party_intel (OSINT, CVE databases, public reports), operator_input (given by the human operator), or inference (your own reasoning; the default).
 - **Confirmed vulnerability → report_finding (exploration graph, with PoC, pass intent_id)**: **use it only when you actually triggered it this time and obtained reproducible evidence (request/response or command output)**. It is strictly forbidden to treat "version/fingerprint matching a CVE", "the parameter looks injectable", or "inference from external vulnerability databases/changelogs/code diffs" as confirmed, and don't substitute querying a CVE database or comparing patch versions for actually triggering it. Can't trigger it but suspicion remains → record an inferred fact with record_fact (the suspicion point + why it couldn't be triggered) for the planner; don't force it into a finding. Before registering, check list_findings / list_task_findings for an existing finding with the same root cause, endpoint, and parameter: the same defect again means extending that finding's evidence, not registering a duplicate (duplicates burn reviewer trust); a genuinely distinct entry point, parameter, or privilege level remains its own finding per the adversarial gate. When your confidence is not high, also fill report_finding's optional fields: counterevidence = what you tested that did not work; confidence_rationale = why the conclusion holds. Both are optional and never block reporting.
 
+
+**Coordinate via task_brief (not trace reading)**: use the task_brief section in your prompt (or call task_brief / lease_status) to see active goals, open/running intents, host leases, hypotheses, capabilities, and the latest facts/findings; reserve get_worker_trace / search_all_worker_traces strictly for debugging raw execution details.
+
+**Route discovery completeness**: use the curated wordlist at /app/skills/api-recon/wordlists/api.txt (or skills/api-recon/wordlists/api.txt); before reporting a route space exhausted, pass record_coverage with discovery_artifact covering (a) wordlist_run, (b) nested_paths, (c) parameters_tested, (d) method_matrix, and (e) static_docs_js_reviewed.
+
+**Mutation lease conflicts (stateful targets)**: if a mutating tool returns a per-host mutation lease conflict, NEVER use sleep in Bash to wait; call lease_status or wait_for_lease (which waits server-side), do read-only work on the host while waiting, or report blocked if it stays stuck.
 
 **Budget discipline (the deadline contract)**: your run has a step budget and a wall-clock budget. Before starting any command or probe, check it can finish well within what remains; never start work whose timeout can outlive the remaining budget — prefer the smaller variant that lands. When the budget is nearly spent or the wrap-up signal arrives, stop opening new work and land everything already collected (facts first, then findings): a result that exists only in your head is lost.
 
@@ -536,17 +552,20 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
 	tsx.SetTriageClient(w.triage)
-	tsx.SetFactTraffic(w.factTraffic)
 	tsx.SetTaskID(taskID)
+	tsx.SetStatefulGuard(intercept.StatefulGuardFromContext(ctx))
 	coverageEnabled := coverageOn(as, taskID)
 	tsx.SetCoverageEnabled(coverageEnabled)
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
 	}
-	tsx.SetWorkBase(w.workDir)          // ingest_bbot reads its file under the same base as the file tools below
-	tsx.SetOwnerNode(intent.ID)         // assets this worker discovers anchor to its intent → visible to the task
-	tsx.SetEnrich(enr)                  // async DNS/HTTP auto-completion for assets this worker writes
-	tsx.SetNotifyFinding(notifyFinding) // when report_finding lands, wake the planner on the spot with "which intent + finding"
+	tsx.SetWorkBase(w.workDir)  // ingest_bbot reads its file under the same base as the file tools below
+	tsx.SetOwnerNode(intent.ID) // assets this worker discovers anchor to its intent → visible to the task
+	tsx.SetEnrich(enr)          // async DNS/HTTP auto-completion for assets this worker writes
+	tsx.SetNotifyFinding(notifyFinding)
+	if swn := seedWriteNotifyFrom(ctx); swn != nil {
+		tsx.SetNotify(swn)
+	} // when report_finding lands, wake the planner on the spot with "which intent + finding"
 	// base = built-in worker tools ∪ host tools (traffic) ∪ default tools (incl. Bash);
 	// then augment with the agent's visible skills/MCP. During the SDK settlement
 	// phase, Bash is hidden via Settlement.DisabledTools (no local gating needed).
@@ -557,6 +576,13 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// are kept as usual.
 	base = append(base, defaultToolsExcept(w.workDir, "MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
+	gateTraffic := w.gateTraffic
+	ctx = WithGateConstantHooks(ctx, GateConstantHooks{
+		Traffic: gateTraffic,
+		RecordGateConstant: func(gRec GateConstantRecord) (int64, error) {
+			return RecordGateConstantFact(ts, intent.ID, gRec)
+		},
+	})
 	tools, def, cleanup := AugmentTools(WithToolQuery(ctx, nodeSummary(intent)), "worker", base)
 	defer cleanup()
 
@@ -580,6 +606,13 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	workerEnv := newDataEnvelope()
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData(), workerEnv)
+	if brief := renderWorkerTaskBrief(tsx.taskBriefData(ctx), workerEnv); brief != "" {
+		if strings.TrimSpace(overview) == "" {
+			overview = workerEnv.intro() + brief
+		} else {
+			overview += brief
+		}
+	}
 	staticPart, dynamicTail := workerSystemParts(w.proxyAddr, w.proxyCACert, w.workDir, runDir)
 	dynamicTail += frameLessonsBlock(w.lessonsBlock)
 	if w.wantConstraints() {
@@ -618,7 +651,11 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// The task-level deadline (injected via ctx) clamps this run's wall-clock budget +
 	// decides the wrap-up prompt (see taskclock.go).
 	tc := taskClockFrom(ctx)
-	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, w.runTimeout)
+	effBudget := w.runTimeout
+	if seedCap := seedBudgetCapFrom(ctx); seedCap > 0 && (effBudget <= 0 || seedCap < effBudget) {
+		effBudget = seedCap
+	}
+	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, effBudget)
 	settle := wrapupSettlement("worker", []string{"Bash"})
 	if tc.DeadlineUnix > 0 {
 		settle = wrapupSettlementForTask("worker", []string{"Bash"}, clamped)

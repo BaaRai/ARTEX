@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
@@ -61,9 +62,10 @@ type chatBridgeRunner struct {
 	pg *db.DB
 	// transport resolves a kind; tests substitute a fake.
 	transport func(kind string) (chatbridge.Transport, bool)
-	// commands builds the command table of a bridge; the server's commands
-	// are added here as they land.
-	commands func(kind string) []chatbridge.Command
+	// handlers builds the command table of a bridge and the handler of plain
+	// text. server.New installs the task commands; without them the bridge
+	// knows only /help and /whoami.
+	handlers func(kind string) ([]chatbridge.Command, chatbridge.CommandFunc)
 
 	mu    sync.Mutex
 	state map[string]*chatBridgeState
@@ -73,13 +75,19 @@ func newChatBridgeRunner(pg *db.DB) *chatBridgeRunner {
 	return &chatBridgeRunner{
 		pg:        pg,
 		transport: chatbridge.Get,
-		commands:  defaultChatBridgeCommands,
+		handlers:  defaultChatBridgeHandlers,
 		state:     map[string]*chatBridgeState{},
 	}
 }
 
-// defaultChatBridgeCommands is the command table. /help is built into the
-// router. Task and approval commands follow in later changes.
+// defaultChatBridgeHandlers is the handler table of a runner without a
+// server: the commands that need no task and no text handler.
+func defaultChatBridgeHandlers(kind string) ([]chatbridge.Command, chatbridge.CommandFunc) {
+	return defaultChatBridgeCommands(kind), nil
+}
+
+// defaultChatBridgeCommands are the commands that need no task. /help is
+// built into the router.
 func defaultChatBridgeCommands(string) []chatbridge.Command {
 	return []chatbridge.Command{{
 		Name:    "whoami",
@@ -211,7 +219,8 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 			return r.fail(kind, err)
 		}
 		prev := router
-		router = &chatbridge.Router{BotUserName: me.UserName, Commands: r.commands(kind)}
+		cmds, text := r.handlers(kind)
+		router = &chatbridge.Router{BotUserName: me.UserName, Commands: cmds, Text: text}
 		if prevBot != nil && prevBot.ID == me.ID {
 			// Same bot, new settings: chats it already refused stay refused.
 			router.KeepRefusals(prev)
@@ -220,7 +229,7 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 		st.sig, st.router = sig, router
 		st.status.Bot = &me
 		r.mu.Unlock()
-		log.Printf("%s online as @%s, %d allowed chat(s)", tag, me.UserName, len(b.AllowedChats))
+		log.Printf("%s online as @%s, %d allowed chat(s), %d allowed group user(s)", tag, me.UserName, len(b.AllowedChats), len(b.AllowedUsers))
 	}
 
 	pollCtx, cancel := context.WithCancel(ctx)
@@ -284,10 +293,10 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 	r.mu.Unlock()
 
 	for _, u := range updates {
-		decision, reply := router.Route(ctx, kind, b.AllowedChats, u)
+		decision, reply := router.Route(ctx, kind, chatbridge.Access{Chats: b.AllowedChats, Users: b.AllowedUsers}, u)
 		switch decision {
 		case chatbridge.DecisionRefused:
-			log.Printf("%s refused chat %s (user %s @%s): not in the allowlist", tag, u.ChatID, u.UserID, u.UserName)
+			log.Printf("%s refused chat %s (%s, user %s @%s): not allowed", tag, u.ChatID, u.ChatType, u.UserID, u.UserName)
 		case chatbridge.DecisionStale:
 			log.Printf("%s dropped a message from chat %s sent %s ago (older than %s)", tag, u.ChatID, now.Sub(u.Date).Round(time.Second), chatbridge.MaxUpdateAge)
 		case chatbridge.DecisionHandled:
@@ -305,6 +314,43 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 		cancelSend()
 	}
 	return 0
+}
+
+// errChatBridgeGone reports that an answer has nowhere to go any more.
+var errChatBridgeGone = errors.New("the chat is no longer allowed on an enabled bridge")
+
+// Deliver sends text to a chat outside the poll loop, for an answer that
+// arrives after its command returned (a main-agent turn). It re-reads the
+// bridge first: if the bridge was disabled or the chat removed from the
+// allowlist in the meantime, the answer is dropped with errChatBridgeGone.
+func (r *chatBridgeRunner) Deliver(ctx context.Context, kind, chatID, text string) error {
+	if r == nil || r.pg == nil {
+		return errChatBridgeGone
+	}
+	tr, ok := r.transport(kind)
+	if !ok {
+		return errChatBridgeGone
+	}
+	b, err := r.pg.ChatBridgeByKind(ctx, kind)
+	if errors.Is(err, db.ErrChatBridgeNotFound) {
+		return errChatBridgeGone
+	}
+	if err != nil {
+		return err
+	}
+	if !b.Enabled || !slices.Contains(b.AllowedChats, chatID) {
+		return errChatBridgeGone
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(b.Config, &cfg); err != nil {
+		return fmt.Errorf("configuration is not valid JSON: %w", err)
+	}
+	if err := tr.Validate(cfg); err != nil {
+		return err
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, chatBridgeSendWait)
+	defer cancel()
+	return tr.Send(sendCtx, cfg, chatID, text)
 }
 
 func (r *chatBridgeRunner) setOff(kind string) {

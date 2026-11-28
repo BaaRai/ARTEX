@@ -70,13 +70,22 @@ func (s *Server) toolAskOperator() actool.CoreTool {
 				return actool.Errorf("Error: " + err.Error()), nil
 			}
 			text := "OPERATOR INPUT REQUESTED: " + q + " (this intent is pausing; reply here to resume it with your answer)"
+			if s.browser != nil {
+				// The question releases the CAPTCHA block of this run's browser tools, and
+				// a run that was driving the shared browser points the operator at it.
+				holder, _ := browserRunHolder(ri, "worker")
+				if s.browser.UsedRecentlyBy(holder) {
+					text += " — the page is open in the shared browser: Function → Browser, Take over, then Hand back when done"
+				}
+				s.browser.NoteAsk(holder)
+			}
 			act := askOperatorActivity(text, att, targetDerivedHosts(q, goalTargets(t.Goal)))
 			node := ri.IntentID
 			act.NodeID = &node
 			s.engine.emitActivity(t, act)
 			// The control call runs on a detached context: pausing may cancel the
 			// run's context, and the pause bookkeeping itself must complete.
-			if _, err := s.applyIntentControl(context.Background(), t, ri.IntentID, "pause", firstLine(q, 120), ""); err != nil {
+			if _, err := s.applyIntentControl(context.Background(), t, ri.IntentID, "pause_handoff", firstLine(q, 120), ""); err != nil {
 				return actool.Errorf("Error: question delivered but pausing the intent failed: " + err.Error()), nil
 			}
 			return actool.Text("Question delivered to the operator. This intent is pausing now: finish your current step, record everything you already know as facts, and stop. The operator's reply will resume this run and arrive as your next input."), nil

@@ -30,6 +30,7 @@ See README.md for the full contract.
 from __future__ import annotations
 
 import argparse
+import datetime
 import base64
 import hashlib
 import hmac
@@ -41,11 +42,14 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import drost
 
-METHOD_VERSION = "bench-v1"
+METHOD_VERSION = "bench-v2"
+PINNED_JUDGE_MODEL = "deepseek-chat"
+JUDGE_PROMPT_VERSION = "bench-v2-prompt-1"
 TERMINAL_STATUSES = {"done", "timeout", "failed", "stopped", "archived", "canceled"}
 
 
@@ -201,6 +205,21 @@ def fetch_findings(api: Api, tid) -> list[dict]:
         report = detail.get("report") or f.get("report") or ""
         summary = f.get("summary") or detail.get("summary") or ""
         name = f.get("name") or f.get("title") or summary[:80]
+        raw_refs = []
+        for container in (f, detail):
+            if isinstance(container, dict):
+                for key in ("traffic_refs", "traffic"):
+                    vals = container.get(key)
+                    if isinstance(vals, list):
+                        raw_refs.extend(vals)
+        try:
+            tr_payload = api.get(f"/api/exploration/findings/{did}/traffic")
+            tr_items = tr_payload.get("items") or tr_payload.get("traffic_refs") or tr_payload.get("traffic") if isinstance(tr_payload, dict) else tr_payload
+            if isinstance(tr_items, list):
+                raw_refs.extend(tr_items)
+        except (SystemExit, Exception):
+            pass
+        traffic_refs = _extract_traffic_ref_ids(raw_refs)
         out.append({
             "id": fid,
             "finding_id": str(f.get("finding_id") or ""),
@@ -208,6 +227,7 @@ def fetch_findings(api: Api, tid) -> list[dict]:
             "severity": str(f.get("severity") or detail.get("severity") or "?"),
             "summary": str(summary)[:600],
             "report": str(report)[:1600],
+            "traffic_refs": traffic_refs,
         })
     print(f"[findings] fetched {len(out)}")
     return out
@@ -245,6 +265,8 @@ Matching criteria (ALL must be true for detected):
 - Same vulnerability CLASS, or the scanner found a vulnerability earlier in the same data flow whose fix would also prevent the ground truth
 - Same COMPONENT (same endpoint, page, or feature, or a closely related one)
 - Same MECHANISM (same missing check, same injection type, same bypass)
+- VERIFIED PROOF (gates.proof MUST be true): speculative or unverified claims (e.g. "Possible ...", "Not verified", "No request was sent") MUST be marked detected=false
+- UNIQUE FINDING PER ENTRY: each scanner finding may match at most ONE ground-truth entry (never reuse the same matched_finding_id across multiple ground-truth entries)
 
 It is NOT required that severities, finding IDs, or wording match.
 
@@ -258,6 +280,163 @@ When detected is true, copy matched_finding_id exactly from the scanner finding'
 
 Output ONLY a valid JSON array, one object per ground-truth entry:
 [{"gt_id": "...", "detected": true|false, "confidence": "high"|"medium"|"low", "matched_finding_id": <scanner finding id or null>, "gates": {"component": bool, "class": bool, "keywords": bool, "proof": bool}, "reason": "1-2 sentences"}]"""
+
+
+JUDGE_PROMPT_SHA256 = hashlib.sha256(JUDGE_SYSTEM.encode("utf-8")).hexdigest()
+
+
+def ground_truth_hash(gt: dict) -> str:
+    """Deterministic SHA-256 hex digest of the canonicalized ground-truth payload (R5)."""
+    canonical = json.dumps(gt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def validate_judge_contract(args) -> None:
+    """Enforce bench-v2 R5 judge contract: fixed judge model (unless explicitly
+    overridden) and independence from the subject model."""
+    judge_model = (getattr(args, "judge_model", "") or "").strip()
+    subject_model = (getattr(args, "subject_model", "") or "").strip()
+    if not judge_model:
+        raise SystemExit("judge model is required under bench-v2")
+    if judge_model != PINNED_JUDGE_MODEL and not getattr(args, "allow_custom_judge_model", False):
+        raise SystemExit(
+            f"bench-v2 R5 fixes judge model to {PINNED_JUDGE_MODEL!r} (got {judge_model!r}); "
+            "pass --allow-custom-judge-model to override knowingly."
+        )
+    if subject_model and judge_model == subject_model and not getattr(args, "allow_self_judge", False):
+        raise SystemExit(
+            f"judge model equals subject model ({judge_model}); refusing. "
+            "Pass --allow-self-judge to override knowingly."
+        )
+
+
+def _extract_traffic_ref_ids(raw_refs) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(raw_refs, list):
+        return out
+    for item in raw_refs:
+        tid = ""
+        if isinstance(item, str):
+            tid = item.strip()
+        elif isinstance(item, dict):
+            for k in ("traffic_id", "exchange_id", "id"):
+                v = item.get(k)
+                if isinstance(v, str) and v.strip():
+                    tid = v.strip()
+                    break
+        if tid and tid not in seen:
+            seen.add(tid)
+            out.append(tid)
+    return out
+
+
+def parse_timestamp_unix(raw) -> float | None:
+    """Parse a Unix timestamp (seconds or milliseconds) or RFC3339/ISO-8601 string."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        val = float(raw)
+        if not math.isfinite(val) or val <= 0:
+            return None
+        if val > 1e12:  # epoch milliseconds
+            val /= 1000.0
+        return val
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        try:
+            return parse_timestamp_unix(float(s))
+        except ValueError:
+            pass
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            dt = datetime.datetime.fromisoformat(s)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.timestamp()
+    return None
+
+
+def fetch_traffic_capture(api: Api, traffic_id: str) -> dict | None:
+    """Look up a single exchange in this ARTEX instance's capture store (R2)."""
+    tid = (traffic_id or "").strip()
+    if not tid:
+        return None
+    q = urllib.parse.urlencode({"id": tid})
+    try:
+        res = api.get(f"/api/traffic/exchange?{q}")
+        return res if isinstance(res, dict) else None
+    except (SystemExit, Exception):
+        return None
+
+
+def verify_finding_traffic_refs(
+    findings: list[dict],
+    lookup_fn,
+    window_start: float,
+    window_end: float,
+) -> dict:
+    """Enforce bench-v2 R2: a finding earns credit only when it carries at least
+    one traffic_ref present in this run's capture store with a timestamp inside
+    [window_start, window_end]."""
+    verified_keys: set[tuple] = set()
+    verified_refs: dict = {}
+    rejected: dict = {}
+
+    for f in findings:
+        fid = f.get("id")
+        if type(fid) not in (int, str):
+            continue
+        fkey = _finding_key(fid)
+        refs = _extract_traffic_ref_ids(f.get("traffic_refs") or [])
+        if not refs:
+            rejected[fid] = "missing_traffic_ref"
+            continue
+
+        matched_ref = None
+        last_reason = "traffic_ref_not_in_capture_store"
+        for ref in refs:
+            rec = lookup_fn(ref)
+            if not isinstance(rec, dict):
+                last_reason = "traffic_ref_not_in_capture_store"
+                continue
+            rec_id = rec.get("id") or rec.get("exchange_id")
+            if rec_id is not None and str(rec_id).strip() != ref:
+                last_reason = "traffic_ref_id_mismatch"
+                continue
+            ts = None
+            for ts_key in ("ts", "timestamp", "started_at", "created_at", "startedDateTime"):
+                if ts_key in rec:
+                    ts = parse_timestamp_unix(rec.get(ts_key))
+                    if ts is not None:
+                        break
+            if ts is None:
+                last_reason = "traffic_ref_missing_timestamp"
+                continue
+            if ts < window_start or ts > window_end:
+                last_reason = "traffic_ref_outside_run_window"
+                continue
+            matched_ref = {"traffic_id": ref, "timestamp": ts}
+            break
+
+        if matched_ref is not None:
+            verified_keys.add(fkey)
+            verified_refs[fid] = matched_ref
+        else:
+            rejected[fid] = last_reason
+
+    return {
+        "verified_keys": verified_keys,
+        "verified_refs": verified_refs,
+        "rejected": rejected,
+        "window_start": window_start,
+        "window_end": window_end,
+    }
 
 
 def parse_judge_verdicts(raw: str, gt_ids: list[str], scanner_findings: list[dict]) -> list[dict]:
@@ -320,6 +499,11 @@ def judge_battery(args) -> None:
          [{"id": 3, "name": "Possible issue", "severity": "low",
            "summary": "The application might have some problems in some areas", "report": "unclear"}],
          "GT-Z", False),
+        ("unverified", "GT-U: SQL injection login bypass on /rest/user/login",
+         [{"id": 4, "name": "Possible SQL injection at /rest/user/login", "severity": "high",
+           "summary": "Possible SQL injection at /rest/user/login. Not verified.",
+           "report": "No request was sent to confirm."}],
+         "GT-U", False),
     ]
     for label, gt_text, findings, gt_id, expect in cases:
         user = f"## Scanner findings\n{json.dumps(findings, indent=1)}\n\n## Ground truth\n### {gt_text}\n\nRespond with the JSON array."
@@ -328,7 +512,7 @@ def judge_battery(args) -> None:
             verdict = parse_judge_verdicts(raw, [gt_id], findings)[0]
         except ValueError as exc:
             raise SystemExit(f"judge battery case '{label}': invalid output ({exc}); grader not trusted:\n{str(raw)[:300]}") from None
-        got = verdict["detected"]
+        got = bool(verdict["detected"] and (verdict.get("gates") or {}).get("proof"))
         if got != expect:
             raise SystemExit(f"judge battery FAILED on '{label}' (expected detected={expect}, got {got}); a grader that cannot fail the wrong answers does not run")
 
@@ -361,10 +545,59 @@ def wilson(p_hat: float, n: int, z: float = 1.96) -> tuple[float, float]:
     return (max(0.0, center - half), min(1.0, center + half))
 
 
-def tally(gt_findings, verdicts, scanner_findings, invalid_ids) -> dict:
-    detected = [v for v in verdicts if v.get("detected")]
-    matched_ids = {v.get("matched_finding_id") for v in detected}
-    candidates = [f for f in scanner_findings if f["id"] not in matched_ids and f["id"] not in invalid_ids]
+def _finding_key(fid):
+    return (type(fid), fid)
+
+
+def tally(gt_findings, verdicts, scanner_findings, invalid_ids, *, traffic_verification: dict | None = None) -> dict:
+    # Enforce #619 + bench-v2 invariants:
+    # 1. A counted detection requires gates.proof == True.
+    # 2. When traffic_verification is active (R2), the matched finding must have
+    #    at least one traffic_ref verified in this run's capture store and inside
+    #    the run's time window.
+    # 3. Each ground-truth entry consumes a unique scanner finding id (first in GT order).
+    # 4. Tally counts unique credited findings (not raw verdicts).
+    # 5. Unmatched / unproven / unverified-traffic / invalid findings reduce precision directly.
+    # 6. Wilson 95% intervals are reported for both detection_rate and precision (R5).
+    gt_order = {g["id"]: idx for idx, g in enumerate(gt_findings)}
+    ordered_verdicts = sorted(verdicts, key=lambda v: gt_order.get(v.get("gt_id"), len(gt_order)))
+    invalid_keys = {_finding_key(fid) for fid in invalid_ids}
+    valid_finding_keys = {
+        _finding_key(f["id"])
+        for f in scanner_findings
+        if type(f.get("id")) in (int, str) and _finding_key(f["id"]) not in invalid_keys
+    }
+    verified_traffic_keys = traffic_verification["verified_keys"] if traffic_verification is not None else None
+
+    detected = []
+    credited_keys = set()
+    reused_matches_dropped = 0
+    unproven_dropped = 0
+    unverified_traffic_dropped = 0
+    for v in ordered_verdicts:
+        if not v.get("detected"):
+            continue
+        g = v.get("gates") or {}
+        if not g.get("proof"):
+            unproven_dropped += 1
+            continue
+        mid = v.get("matched_finding_id")
+        mkey = _finding_key(mid)
+        if type(mid) not in (int, str) or mkey not in valid_finding_keys:
+            continue
+        if verified_traffic_keys is not None and mkey not in verified_traffic_keys:
+            unverified_traffic_dropped += 1
+            continue
+        if mkey in credited_keys:
+            reused_matches_dropped += 1
+            continue
+        credited_keys.add(mkey)
+        detected.append(v)
+
+    unmatched = [
+        f for f in scanner_findings
+        if _finding_key(f.get("id")) not in credited_keys and _finding_key(f.get("id")) not in invalid_keys
+    ]
     gates = {"component": 0, "class": 0, "keywords": 0, "proof": 0}
     gate_scores = []
     for v in detected:
@@ -375,11 +608,12 @@ def tally(gt_findings, verdicts, scanner_findings, invalid_ids) -> dict:
         for k in gates:
             gates[k] += 1 if g.get(k) else 0
     n = len(gt_findings)
-    rate = len(detected) / n if n else 0.0
+    tp = len(credited_keys)
+    rate = tp / n if n else 0.0
     lo, hi = wilson(rate, n)
-    tp = len(detected)
-    precision_lo = tp / (tp + len(candidates) + len(invalid_ids)) if (tp + len(candidates) + len(invalid_ids)) else 0.0
-    precision_hi = tp / tp if tp else 0.0
+    denom = tp + len(unmatched) + len(invalid_ids)
+    precision = tp / denom if denom else 0.0
+    p_lo, p_hi = wilson(precision, denom)
     return {
         "ground_truth_total": n,
         "detected": tp,
@@ -387,8 +621,18 @@ def tally(gt_findings, verdicts, scanner_findings, invalid_ids) -> dict:
         "detection_rate_wilson95": [round(lo, 4), round(hi, 4)],
         "gate_totals_over_detected": gates,
         "mean_gate_score_of_6": round(sum(gate_scores) / len(gate_scores), 2) if gate_scores else None,
-        "discovery_candidates": [{"id": c["id"], "name": c["name"]} for c in candidates],
-        "precision_bounds_until_verified": [round(precision_lo, 4), round(precision_hi, 4)],
+        "discovery_candidates": [{"id": c["id"], "name": c.get("name", "")} for c in unmatched],
+        "precision": round(precision, 4),
+        "precision_wilson95": [round(p_lo, 4), round(p_hi, 4)],
+        "precision_bounds_until_verified": [round(precision, 4), round(precision, 4)],
+        "reused_matches_dropped": reused_matches_dropped,
+        "unproven_detections_excluded": unproven_dropped,
+        "traffic_verification_enabled": traffic_verification is not None,
+        "unverified_traffic_excluded": unverified_traffic_dropped,
+        "traffic_verification_failures": (
+            {str(k): v for k, v in traffic_verification["rejected"].items()}
+            if traffic_verification is not None else {}
+        ),
         "invalid_findings_excluded": invalid_ids,
         "scanner_findings_total": len(scanner_findings),
     }
@@ -396,22 +640,27 @@ def tally(gt_findings, verdicts, scanner_findings, invalid_ids) -> dict:
 
 def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, findings, verdicts, result) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+    gt_sha = getattr(args, "gt_hash", "")
     (out_dir / "results.json").write_text(json.dumps({
         "method_version": METHOD_VERSION,
         "corpus": corpus,
         "ground_truth_version": args.gt_version,
+        "ground_truth_sha256": gt_sha,
         "task": task_info,
         "task_status": status,
         "subject_model": args.subject_model,
         "llm_profiles": getattr(args, "llm_profiles", ""),
         "judge_model": args.judge_model,
+        "judge_model_pinned": args.judge_model == PINNED_JUDGE_MODEL,
+        "judge_prompt_version": JUDGE_PROMPT_VERSION,
+        "judge_prompt_sha256": JUDGE_PROMPT_SHA256,
         "result": result,
         "verdicts": verdicts,
         "findings": findings,
     }, indent=2))
     lines = [
         f"# ARTEX benchmark run: {corpus}",
-        f"- method `{METHOD_VERSION}`, ground truth `{args.gt_version}`, subject model `{args.subject_model}`, judge `{args.judge_model}`",
+        f"- method `{METHOD_VERSION}`, ground truth `{args.gt_version}` (sha256 `{gt_sha}`), subject model `{args.subject_model}`, judge `{args.judge_model}` (prompt `{JUDGE_PROMPT_VERSION}` sha256 `{JUDGE_PROMPT_SHA256[:16]}`)",
         f"- task #{task_info['id']} terminal status: {status}; scanner findings: {result['scanner_findings_total']}",
     ]
     if getattr(args, "llm_profiles", ""):
@@ -425,7 +674,7 @@ def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, fi
         lines.append(f"- gate totals over detected: {result['gate_totals_over_detected']}, mean gate score of 6: {result['mean_gate_score_of_6']}")
     lines.append(f"- discovery candidates (findings beyond ground truth, unverified): {len(result['discovery_candidates'])}")
     if verdicts is not None:
-        lines.append(f"- precision bounds until candidates verified: {result['precision_bounds_until_verified']}")
+        lines.append(f"- precision: **{result['precision']}** (Wilson 95% {result.get('precision_wilson95')}, bounds {result['precision_bounds_until_verified']})")
     lines.append(f"- invalid findings excluded from every rate: {len(result['invalid_findings_excluded'])}")
     if verdicts is not None:
         lines += [
@@ -468,9 +717,11 @@ def main() -> None:
     ap.add_argument("--gt-version", default="v1")
     ap.add_argument("--subject-model", default="", help="model the task's active profile runs on (for the self-judge guard); required unless --deploy-only")
     ap.add_argument("--judge-url", default=os.environ.get("JUDGE_BASE_URL", ""))
-    ap.add_argument("--judge-model", default=os.environ.get("JUDGE_MODEL", ""))
+    ap.add_argument("--judge-model", default=os.environ.get("JUDGE_MODEL", PINNED_JUDGE_MODEL))
     ap.add_argument("--judge-timeout", type=int, default=900)
     ap.add_argument("--allow-self-judge", action="store_true")
+    ap.add_argument("--allow-custom-judge-model", action="store_true", help="override the bench-v2 R5 pinned judge model knowingly")
+    ap.add_argument("--skip-traffic-verify", action="store_true", help="skip bench-v2 R2 capture-store traffic_ref verification (non-HTTP/capture-off runs only)")
     ap.add_argument("--keep", action="store_true", help="keep the corpus container running after the run")
     args = ap.parse_args()
 
@@ -498,9 +749,9 @@ def main() -> None:
     if args.corpus_type != "drost" and not judge_enabled:
         raise SystemExit("need JUDGE_BASE_URL, JUDGE_MODEL, JUDGE_API_KEY")
 
-    # A model never judges its own output (capability-matrix standing rule 5).
-    if judge_enabled and args.judge_model == args.subject_model and not args.allow_self_judge:
-        raise SystemExit(f"judge model equals subject model ({args.judge_model}); refusing. Pass --allow-self-judge to override knowingly.")
+    # R5: fixed judge model/prompt contract and self-judge independence guard.
+    if judge_enabled:
+        validate_judge_contract(args)
 
     if args.corpus_type == "drost":
         args.corpus = f"drost-{args.drost_id}"
@@ -510,6 +761,7 @@ def main() -> None:
     else:
         gt_path = pathlib.Path(__file__).parent / "ground_truth" / f"{args.corpus}.json"
         gt = json.loads(gt_path.read_text())
+    args.gt_hash = ground_truth_hash(gt)
     gt_findings = gt["findings"]
 
     # drost project/dir are deterministic, so they are known before deploy and
@@ -535,9 +787,19 @@ def main() -> None:
             print(f"[corpus] task target rewritten for ARTEX reachability: {task_url}")
 
         api = Api(args.artex_url, token)
+        run_window_start = time.time()
         task_info = create_task(api, args, task_url, gt)
         status = wait_task(api, task_info["id"], args.task_timeout + 1800)
+        run_window_end = time.time()
         findings = fetch_findings(api, task_info["id"])
+        traffic_verification = None
+        if not args.skip_traffic_verify:
+            traffic_verification = verify_finding_traffic_refs(
+                findings,
+                lambda tid: fetch_traffic_capture(api, tid),
+                run_window_start,
+                run_window_end,
+            )
 
         invalid_ids = [f["id"] for f in findings if not (f["summary"].strip() or f["report"].strip())]
         usable = [f for f in findings if f["id"] not in invalid_ids]
@@ -562,7 +824,7 @@ def main() -> None:
                 judge_battery(args)
                 print("[judge] grading")
                 verdicts = run_judge(args, gt_findings, usable)
-            result = tally(gt_findings, verdicts, findings, invalid_ids)
+            result = tally(gt_findings, verdicts, findings, invalid_ids, traffic_verification=traffic_verification)
         else:
             print("[judge] flag-only run: no judge configured, analysis gates not measured")
             verdicts = None

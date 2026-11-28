@@ -272,6 +272,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			"goal":                   strParam("task goal (what to achieve)"),
 			"parent_ref":             strParam("optional: parent task id (for parent-child linking)"),
 			"source_task_ids":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": fmt.Sprintf("optional: ids of source tasks to inherit read-only (at most %d). The subtask may read the assets/conclusions those tasks already explored as its starting point; unlike parent_ref's plain parent-child pointer, this is content inheritance.", db.MaxTaskSourceCount)},
+			"company_ids":            map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": fmt.Sprintf("optional: ids of companies to link to this task at creation (at most %d). Populates task_scope from the linked companies and makes the task visible in company-filtered views.", db.MaxTaskCompanyCount)},
 			"llm_profile_id":         map[string]any{"type": "integer", "description": "optional: the LLM profile id this subtask's planner/worker uses (see list_llm_profiles); empty inherits the parent task, then falls back to the global active profile"},
 			"timeout_seconds":        map[string]any{"type": "integer", "description": "optional: task-level timeout (seconds). When it fires, a graceful wrap-up runs and the task enters the timeout terminal state; empty or 0 = no time limit"},
 			"plan_heartbeat_seconds": map[string]any{"type": "integer", "description": "optional: planner heartbeat interval (seconds). When this much time has passed since the last planning round ended/the task started with no trigger in between → run one planning round (deadlock backstop + wakes the planner to supervise in-flight workers). Empty or 0 = default 600 (10min);"},
@@ -283,6 +284,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				Goal                 string          `json:"goal"`
 				ParentRef            string          `json:"parent_ref"`
 				SourceTaskIDs        []string        `json:"source_task_ids"`
+				CompanyIDs           []int64         `json:"company_ids"`
 				LLMProfileID         json.RawMessage `json:"llm_profile_id"`
 				TimeoutSeconds       int             `json:"timeout_seconds"`
 				PlanHeartbeatSeconds int             `json:"plan_heartbeat_seconds"`
@@ -314,6 +316,10 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				}
 				seenSources[id] = true
 				sourceIDs = append(sourceIDs, id)
+			}
+			companyIDs, err := db.NormalizeTaskCompanyIDs(a.CompanyIDs)
+			if err != nil {
+				return actool.Errorf(fmt.Sprintf("invalid linked companies: at most %d valid companies may be selected", db.MaxTaskCompanyCount)), nil
 			}
 			// LLM profile resolution: explicit id > inherit parent's pin > active(nil).
 			var pin *int64
@@ -352,6 +358,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			}
 			t, err := s.m.CreateTaskWithOptions(a.Description, a.Goal, db.TaskCreateOptions{
 				SourceTaskIDs:        sourceIDs,
+				CompanyIDs:           companyIDs,
 				LLMProfileIDs:        llmIDs,
 				TimeoutSeconds:       a.TimeoutSeconds,
 				PlanHeartbeatSeconds: a.PlanHeartbeatSeconds,
@@ -686,7 +693,7 @@ WHERE key='add_task_scope' AND system AND description=$2`, seed.Desc, oldTaskSco
 // reaches an old DB otherwise. Preserves each tool's agent binding + enabled flag.
 // Bump the flag whenever these tools' schemas/descriptions change in code.
 func (s *Server) refreshBuiltinToolSchemas() {
-	const flag = "tool_schema_refresh_v7_list_facts_paging"
+	const flag = "tool_schema_refresh_v8_spawn_task_company_ids"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}

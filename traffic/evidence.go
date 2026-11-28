@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,4 +143,65 @@ func splitLegacyEvidence(r io.Reader) (string, io.Reader, error) {
 			return "", nil, err
 		}
 	}
+}
+
+// LatestProbeResponse returns the newest captured exchange for (host, path) since
+// sinceTS, with status, response length, and SHA-256 hash of the response body.
+func (t *Traffic) LatestProbeResponse(host, path string, sinceTS int64) (status int, length int64, bodyHash string, ok bool, err error) {
+	if t == nil || t.db == nil {
+		return 0, 0, "", false, nil
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	path = strings.TrimSpace(path)
+	if host == "" || path == "" {
+		return 0, 0, "", false, nil
+	}
+	rows, err := t.db.Query(`SELECT id, url, status, resp_len FROM exchanges WHERE lower(host)=? AND ts>=? ORDER BY ts DESC LIMIT 25`, host, sinceTS)
+	if err != nil {
+		return 0, 0, "", false, err
+	}
+	defer rows.Close()
+	var matchID string
+	for rows.Next() {
+		var id, rawURL string
+		var st int
+		var ln int64
+		if scanErr := rows.Scan(&id, &rawURL, &st, &ln); scanErr != nil {
+			continue
+		}
+		u, perr := url.Parse(rawURL)
+		if perr != nil {
+			continue
+		}
+		p := u.Path
+		if p == "" {
+			p = "/"
+		}
+		if p == path {
+			matchID, status, length = id, st, ln
+			break
+		}
+	}
+	if matchID == "" {
+		return 0, 0, "", false, nil
+	}
+	var resp []byte
+	var respBlob sql.NullString
+	err = t.db.QueryRow(`SELECT resp_body, resp_blob FROM exchange_bodies WHERE id=?`, matchID).Scan(&resp, &respBlob)
+	if err != nil {
+		return status, length, "", true, nil
+	}
+	if respBlob.Valid && respBlob.String != "" {
+		f, _, berr := t.Blob(respBlob.String)
+		if berr == nil {
+			defer f.Close()
+			h := sha256.New()
+			_, _ = io.Copy(h, f)
+			bodyHash = hex.EncodeToString(h.Sum(nil))
+			return status, length, bodyHash, true, nil
+		}
+	}
+	sum := sha256.Sum256(resp)
+	bodyHash = hex.EncodeToString(sum[:])
+	return status, length, bodyHash, true, nil
 }

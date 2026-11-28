@@ -143,3 +143,43 @@ func TestIndexBodySkipsBinaryContentType(t *testing.T) {
 		t.Fatalf("indexBody on an image/png body = (%q, %v), want (\"\", false)", text, ok)
 	}
 }
+
+// TestTrafficGetShowsDecodedResponse keeps traffic_get readable for a capture
+// that body search found through its decoded text.
+func TestTrafficGetShowsDecodedResponse(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	io.WriteString(gz, compressedPage)
+	for i := range 64 {
+		fmt.Fprintf(gz, "row %d\n", i)
+	}
+	gz.Close()
+
+	tr, _ := openTraffic(t)
+	f := newFlow("api.example.com", "GET", "/passwd", nil, buf.Bytes())
+	f.Response.Header.Set("Content-Type", "text/html")
+	f.Response.Header.Set("Content-Encoding", "gzip")
+	tr.record(f)
+	hits, err := tr.query("api.example.com", "", "root:x:0", 0, 10)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("body search: %d rows, err=%v; want 1", len(hits), err)
+	}
+	out := toolText(t, tr, "traffic_get", `{"id":"`+hits[0].ID+`"}`)
+	if !strings.Contains(out, "root:x:0:0:root") {
+		t.Fatalf("traffic_get does not show the decoded body:\n%s", out)
+	}
+}
+
+// A gzip body with a bad checksum still yields the text that decoded.
+func TestDecodeBodyKeepsTextOnBadGzipChecksum(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	io.WriteString(gz, compressedPage)
+	gz.Close()
+	b := buf.Bytes()
+	b[len(b)-8] ^= 0xff
+	out, ok := decodeBody(http.Header{"Content-Encoding": {"gzip"}}, b, maxIndexBody)
+	if !ok || string(out) != compressedPage {
+		t.Fatalf("decodeBody on a bad gzip checksum = (%q, %v), want the decoded text", out, ok)
+	}
+}

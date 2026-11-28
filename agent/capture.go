@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -35,6 +36,11 @@ func captureRun(ctx context.Context, opts agentcore.Options, input string, emit 
 // multiple prompts on the SAME conversation (e.g. a settlement round that reuses
 // the worker's accumulated context after the main run hit max_turns).
 func captureRunSession(ctx context.Context, s *agentcore.Session, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
+	ctx, cancelPoll := context.WithCancelCause(ctx)
+	defer cancelPoll(nil)
+	pollDet := newPollLoopDetector()
+	gateHooks, _ := gateConstantHooksFromContext(ctx)
+	gateDet := newGateConstantDetector(gateHooks)
 	ctx, auditTrace := intercept.WithTrace(ctx, input, approvalHistory(s.Messages()))
 	defer auditTrace.Finish()
 	// Observe each model call's stop reason, so a provider refusal is reported as
@@ -85,7 +91,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			flush()
 			if ctx.Err() != nil { // engine/user cancellation, not a provider failure
 				sum, detail := terminalText(ctx, &harness.Terminal{Reason: reason, Err: ctx.Err()}, lastTool)
-				rec(activityWithUsage(db.Activity{Kind: "result", Summary: firstLine(sum, 400), Detail: detail}, lastUsage))
+				rec(activityWithUsage(db.Activity{Kind: "result", IsError: false, Summary: firstLine(sum, 400), Detail: detail}, lastUsage))
 				return finalText, reason, ctx.Err()
 			}
 			rec(activityWithUsage(db.Activity{Kind: "result", IsError: true, Summary: "execution error: " + err.Error(), Detail: err.Error()}, lastUsage))
@@ -96,23 +102,47 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			if ev.ToolUse == nil {
 				continue
 			}
+			intercept.TouchStatefulHeartbeat(ctx)
 			flush()
 			toolNames[ev.ToolUse.ID] = ev.ToolUse.Name
 			in := string(ev.ToolUse.Input)
 			lastTool.start(ev.ToolUse.ID, ev.ToolUse.Name, in)
 			auditTrace.Start(ev.ToolUse.ID, ev.ToolUse.Name, ev.ToolUse.Input)
+			pollDet.onToolUse(ev.ToolUse.ID, ev.ToolUse.Name, in)
+			gateDet.onToolUse(ev.ToolUse.ID, ev.ToolUse.Name, in)
 			rec(db.Activity{Kind: "tool_use", Tool: ev.ToolUse.Name, ToolUseID: ev.ToolUse.ID,
 				Summary: ev.ToolUse.Name + " " + firstLine(in, 200), Detail: in})
 		case harness.KindToolResult:
 			if ev.ToolResult == nil {
 				continue
 			}
+			intercept.TouchStatefulHeartbeat(ctx)
 			flush()
 			out := blocksText(ev.ToolResult.Content)
 			lastTool.done(ev.ToolResult.ToolUseID)
 			auditTrace.Complete(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError)
 			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
 				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out})
+			if gRecs, sweepDetected := gateDet.onToolResultMulti(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError); len(gRecs) > 0 || sweepDetected {
+				if gateHooks.RecordGateConstant != nil {
+					for _, gRec := range gRecs {
+						if fid, rerr := gateHooks.RecordGateConstant(gRec); rerr == nil && fid > 0 {
+							rec(db.Activity{
+								Kind:    "text",
+								Summary: fmt.Sprintf("Recorded gate_constant fact #%d on %s%s (HTTP %d across %d probes)", fid, gRec.Host, gRec.Path, gRec.Status, gRec.SampleCount),
+							})
+						}
+					}
+				}
+				if sweepDetected {
+					cancelPoll(ErrSweepLoopDetected)
+					return finalText, reason, ErrSweepLoopDetected
+				}
+			}
+			if pollDet.onToolResult(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError) {
+				cancelPoll(ErrPollLoopDetected)
+				return finalText, reason, ErrPollLoopDetected
+			}
 		case harness.KindText:
 			addDelta("text", ev.Text)
 		case harness.KindThinking:
@@ -148,7 +178,9 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 					sum, detail = terminalText(ctx, ev.Terminal, lastTool)
 				}
 				u := ev.Terminal.Usage // cumulative token usage for this session
-				rec(db.Activity{Kind: "result", IsError: ev.Terminal.Err != nil,
+				code, _, _, hasAbort := AbortReason(ctx)
+				isErr := ev.Terminal.Err != nil && !(hasAbort && code == "operator_handoff")
+				rec(db.Activity{Kind: "result", IsError: isErr,
 					Summary: firstLine(sum, 400), Detail: detail,
 					InputTokens: &u.InputTokens, OutputTokens: &u.OutputTokens,
 					CacheReadTokens: &u.CacheReadTokens, CacheWriteTokens: &u.CacheWriteTokens})

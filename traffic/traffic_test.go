@@ -182,7 +182,7 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 
 func TestHostDirSkipsStorePaths(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"_index", "_blobs", "_ca", "_delete_staging", ".", ".."} {
+	for _, name := range []string{"_index", "_blobs", "_ca", "_delete_staging", "_INDEX", ".", ".."} {
 		if _, ok := hostDir(root, name); ok {
 			t.Fatalf("hostDir(%q) was accepted", name)
 		}

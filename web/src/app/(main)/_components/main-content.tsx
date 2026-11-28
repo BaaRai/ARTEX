@@ -50,7 +50,11 @@ export function MainContent({ children }: { children: ReactNode }) {
     api
       .health()
       .then((h) => {
-        setVersion((h.version ?? "").replace(/^v(?=\d)/, ""));
+        const v = (h.version ?? "").replace(/^v(?=\d)/, "");
+        // A local "dev" build still identifies its source revision when the Go
+        // VCS stamp (or -X main.revision) is present.
+        const commit = h.build?.commit ?? "";
+        setVersion(v === "dev" && commit ? `${v} (${commit.slice(0, 7)})` : v);
         const l = h.latest_version ?? "";
         setLatest(l && getLocalStorageValue(UPDATE_DISMISSED_KEY) !== l ? l : "");
         setDegraded(h.isolation?.mode === "degraded" ? (h.isolation.reason ?? "") : null);

@@ -4,8 +4,9 @@
 //
 // The package is transport-agnostic. A Transport only knows how to fetch new
 // updates, send a text reply and identify the bot; the Router owns every rule
-// that does not depend on the chat app: the chat allowlist, the one-line
-// refusal for unknown chats, dropping stale updates and command parsing.
+// that does not depend on the chat app: the chat and user allowlists, the
+// one-line refusal for unknown chats, dropping stale updates and command
+// parsing.
 //
 // Like notify, the package imports nothing from db or server and transports
 // are stateless: the configuration arrives as map[string]any (the decrypted
@@ -28,10 +29,13 @@ type Update struct {
 	// ChatID identifies the conversation (a private chat or a group). It is the
 	// unit the allowlist works on.
 	ChatID string
-	// ChatType is the transport's own label, for example "private" or "group".
+	// ChatType is ChatTypePrivate for a one-to-one chat with the bot. Any
+	// other value (Telegram uses "group" and "supergroup") is a shared chat,
+	// where the sender must also be an allowed user.
 	ChatType string
-	// UserID and UserName identify the sender inside the chat. They are kept
-	// for attribution in logs; the allowlist does not look at them.
+	// UserID and UserName identify the sender inside the chat. UserID is
+	// checked against the user allowlist in shared chats and kept for
+	// attribution in logs.
 	UserID   string
 	UserName string
 	// FromBot is set when the sender is itself a bot. Bot messages are ignored
@@ -43,6 +47,10 @@ type Update struct {
 	// Date is when the chat app received the message.
 	Date time.Time
 }
+
+// ChatTypePrivate is the ChatType of a one-to-one chat with the bot.
+// Transports map their own label for such chats to it.
+const ChatTypePrivate = "private"
 
 // Identity describes the bot account behind a configuration.
 type Identity struct {
@@ -63,8 +71,10 @@ type Transport interface {
 	// DestinationKeys names the fields that decide where the credentials are
 	// sent. Changing one requires re-entering every secret.
 	DestinationKeys() []string
-	// ValidateChatID checks one allowlist entry.
+	// ValidateChatID checks one chat allowlist entry.
 	ValidateChatID(id string) error
+	// ValidateUserID checks one user allowlist entry.
+	ValidateUserID(id string) error
 	// Identity asks the chat app which bot the configuration belongs to.
 	Identity(ctx context.Context, cfg map[string]any) (Identity, error)
 	// Poll returns the updates after cursor offset. It may block up to the
@@ -99,9 +109,21 @@ func Kinds() []string {
 // a broadcast channel; a long list is more likely a mistake than a need.
 const MaxAllowedChats = 50
 
-// NormalizeAllowedChats trims, validates and de-duplicates an allowlist,
+// MaxAllowedUsers caps the user allowlist.
+const MaxAllowedUsers = 100
+
+// NormalizeAllowedChats trims, validates and de-duplicates a chat allowlist,
 // keeping the operator's order.
 func NormalizeAllowedChats(t Transport, ids []string) ([]string, error) {
+	return normalizeIDs(ids, "chat", t.ValidateChatID, MaxAllowedChats)
+}
+
+// NormalizeAllowedUsers does the same for the user allowlist.
+func NormalizeAllowedUsers(t Transport, ids []string) ([]string, error) {
+	return normalizeIDs(ids, "user", t.ValidateUserID, MaxAllowedUsers)
+}
+
+func normalizeIDs(ids []string, what string, validate func(string) error, max int) ([]string, error) {
 	out := make([]string, 0, len(ids))
 	seen := map[string]bool{}
 	for _, raw := range ids {
@@ -109,19 +131,19 @@ func NormalizeAllowedChats(t Transport, ids []string) ([]string, error) {
 		if id == "" || seen[id] {
 			continue
 		}
-		if err := t.ValidateChatID(id); err != nil {
-			return nil, fmt.Errorf("chat id %q: %w", id, err)
+		if err := validate(id); err != nil {
+			return nil, fmt.Errorf("%s id %q: %w", what, id, err)
 		}
 		seen[id] = true
 		out = append(out, id)
 	}
-	if len(out) > MaxAllowedChats {
-		return nil, fmt.Errorf("at most %d chats can be allowed", MaxAllowedChats)
+	if len(out) > max {
+		return nil, fmt.Errorf("at most %d %ss can be allowed", max, what)
 	}
 	return out, nil
 }
 
-// The allowlist is mandatory in the sense that matters: the Router serves only
+// The chat allowlist is mandatory in the sense that matters: the Router serves only
 // listed chats, and every other chat gets one refusal and then silence. An
 // empty allowlist is therefore a valid, closed state rather than an error: the
 // bridge runs, serves nobody, and answers each chat with the refusal that names

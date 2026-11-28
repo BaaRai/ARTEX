@@ -1897,7 +1897,58 @@ export interface ChatBridge {
   // Masked: credential fields come back as "__masked__…"; sending them back unchanged keeps the stored value.
   config: Record<string, unknown>;
   allowed_chats: string[];
+  allowed_users: string[];
   secret_keys: string[];
   status: ChatBridgeStatus;
   updated_at?: string;
+}
+
+// ---- shared browser (Function → Browser; server/sharedbrowser.go) ----
+export interface SharedBrowserTab {
+  id: string;
+  url: string;
+  title: string;
+}
+
+export interface SharedBrowserStatus {
+  enabled: boolean;
+  running: boolean;
+  error?: string;
+  tabs: SharedBrowserTab[];
+  viewed: string;
+  // The operator holds control; the agent's browser tools wait.
+  operator: boolean;
+  // Label of the agent run driving the browser, empty when idle.
+  agent: string;
+  profile_scope?: string;
+  captcha?: { kind: string; url: string; since: string };
+  width: number;
+  height: number;
+}
+
+export type SharedBrowserAction =
+  | "take"
+  | "release"
+  | "select_tab"
+  | "goto"
+  | "back"
+  | "forward"
+  | "reload"
+  | "new_tab"
+  | "close_tab";
+
+export interface SharedBrowserInput {
+  kind: "mouse" | "wheel" | "key" | "text";
+  type?: string;
+  x?: number;
+  y?: number;
+  button?: "left" | "middle" | "right" | "none";
+  clickCount?: number;
+  deltaX?: number;
+  deltaY?: number;
+  modifiers?: number;
+  key?: string;
+  code?: string;
+  text?: string;
+  keyCode?: number;
 }

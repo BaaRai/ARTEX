@@ -30,7 +30,7 @@ const (
 var toolRAGCore = map[string]bool{
 	"record_fact": true, "insert_assets": true, "report_finding": true, "list_findings": true,
 	"graph_overview": true, "node_detail": true, "add_intent": true, "steer_work": true,
-	"ask_operator": true, "prove_goal": true, "goal_met": true, "list_assets": true,
+	"ask_operator": true, "prove_goal": true, "goal_met": true, "list_assets": true, "lease_status": true, "wait_for_lease": true, "task_brief": true,
 }
 
 type toolQueryKey struct{}

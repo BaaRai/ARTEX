@@ -38,3 +38,23 @@ const (
 	RelProves      = "proves"
 	RelCovers      = "covers" // digest --covers--> member (cold-digest-spec §1); source of truth for "which digest folds node X"
 )
+
+// FactSubtypeHypothesis tags kind=fact nodes that represent planner hypotheses
+// without altering ck_node_kind (zero schema migration).
+const FactSubtypeHypothesis = "hypothesis"
+
+// FactSubtypeCapability tags kind=fact nodes that represent capabilities (#613)
+// without altering ck_node_kind (zero schema migration).
+const FactSubtypeCapability = "capability"
+
+// FactSubtypeGateConstant tags kind=fact nodes recording repeated constant HTTP
+// responses across distinct probe inputs (zero schema migration).
+const FactSubtypeGateConstant = "gate_constant"
+
+// FactSubtypeTargetFingerprint tags kind=fact nodes capturing the initial
+// read-only baseline fingerprint of a task's goal URL at task creation.
+const FactSubtypeTargetFingerprint = "target_fingerprint"
+
+// FactSubtypeDiscoveryCoverage tags kind=fact nodes storing a verified
+// 5-part discovery quality artifact written via record_coverage.
+const FactSubtypeDiscoveryCoverage = "discovery_coverage"

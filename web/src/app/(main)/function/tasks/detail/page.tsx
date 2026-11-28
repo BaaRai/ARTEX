@@ -303,6 +303,17 @@ function TaskDetailInner() {
     }
   }
 
+  async function extendTaskTimeout(seconds: number) {
+    if (!task || ["done", "failed", "timeout"].includes(task.status)) return;
+    try {
+      await api.extendTask(id, seconds);
+      toast.success(t("Task extended by +{minutes}m", { minutes: Math.round(seconds / 60) }));
+      load();
+    } catch (e) {
+      toast.error(t("Extend failed: {error}", { error: (e as Error).message }));
+    }
+  }
+
   async function archiveTask() {
     if (!task || archiving) return;
     setArchiving(true);
@@ -412,6 +423,9 @@ function TaskDetailInner() {
               <TooltipContent>{archiveDisabledReason}</TooltipContent>
             </Tooltip>
           )}
+          <Button size="sm" variant="outline" onClick={() => void extendTaskTimeout(900)} disabled={terminal} title={t("Extend task timeout by 15 minutes")}>
+            {t("+15m")}
+          </Button>
           <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
             {controlIcon}
             {controlLabel}

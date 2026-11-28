@@ -247,6 +247,11 @@ WHERE archive.id=$1 FOR UPDATE OF archive,task`, archiveID).Scan(&taskID, &expID
 			return nil, fmt.Errorf("restore %s: %w", table, err)
 		}
 	}
+	// Archives can predate migration 0016. Repair the graph and its digests
+	// before any restored node becomes visible to readers.
+	if _, err := tx.Exec(`SELECT repair_legacy_fact_captures($1)`, expID); err != nil {
+		return nil, fmt.Errorf("restore fact provenance: %w", err)
+	}
 	if warning, err := restoreTaskRelations(tx, taskID, remappedTables["task_relations"]); err != nil {
 		return nil, err
 	} else {

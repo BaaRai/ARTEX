@@ -6,7 +6,51 @@ on:
   pull_request:
 
 jobs:
+  # Which areas a pull request changes. Each job below runs only for its area;
+  # pushes to main, and any failure of this job, run every job.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      web: ${{ steps.filter.outputs.web }}
+      python: ${{ steps.filter.outputs.python }}
+      shell: ${{ steps.filter.outputs.shell }}
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          predicate-quantifier: some-with-excludes
+          filters: |
+            go:
+              - '**'
+              - '!web/**'
+              - '!docs/**'
+              - '!extension/**'
+              - '!screenshots/**'
+              - '!scripts/benchmark/**'
+              - '!scripts/posture_check*'
+              - '!*.md'
+            web:
+              - 'web/**'
+              - '.github/**'
+            python:
+              - '**/*.py'
+              - 'scripts/benchmark/**'
+              - '.github/**'
+            # Added files too: a new top-level directory must appear in the bot summary.
+            shell:
+              - '**/*.sh'
+              - 'scripts/**'
+              - 'CHANGELOG.md'
+              - '.github/**'
+              - added: '**'
+
   go:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -85,6 +129,8 @@ jobs:
   # day it lands. Once the pinned floor is raised, drop continue-on-error and
   # this becomes a required check.
   go-stable:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
     runs-on: ubuntu-latest
     continue-on-error: true
     services:
@@ -117,6 +163,8 @@ jobs:
       - run: go test -p 1 ./...
 
   govulncheck:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -129,6 +177,8 @@ jobs:
           go-package: ./...
 
   shell:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.shell == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -143,6 +193,8 @@ jobs:
       - run: bash scripts/test-bot-context.sh
 
   web:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -160,11 +212,14 @@ jobs:
       - run: npm run test:replay
       - run: npm run test:upload
       - run: npm run test:traffic-stream
+      - run: npm run test:tamper-hooks
       - run: npm run test:i18n
       - run: npm run test:bash
       - run: npm run build:static
 
   python:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.python == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

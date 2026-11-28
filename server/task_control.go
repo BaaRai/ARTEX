@@ -179,12 +179,18 @@ func (s *Server) applyIntentControl(ctx context.Context, t *Task, iid int64, act
 		return out, fmt.Errorf("node is not an intent")
 	}
 	switch action {
-	case "pause":
+	case "pause", "pause_handoff":
 		if node.State != "running" {
 			return out, fmt.Errorf("only running intents can be paused")
 		}
-		if err := s.engine.ControlWork(ctx, iid, "pause"); err != nil {
-			return out, err
+		var ctrlErr error
+		if action == "pause_handoff" {
+			ctrlErr = s.engine.ControlWorkWithCause(ctx, iid, "pause", agent.AbortOperatorHandoff)
+		} else {
+			ctrlErr = s.engine.ControlWork(ctx, iid, "pause")
+		}
+		if ctrlErr != nil {
+			return out, ctrlErr
 		}
 		out.State = "paused"
 	case "resume":

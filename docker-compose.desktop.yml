@@ -1,0 +1,46 @@
+# Docker Desktop overlay for Windows and macOS. Layer it over the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
+#
+# or, with the published image:
+#
+#   docker compose -f docker-compose.ghcr.yml -f docker-compose.desktop.yml up -d
+#
+# Why this exists: on a VM-backed Docker host the agent-isolation self-test
+# (the fail-closed privilege drop, PR #510) refuses to start when /app/data,
+# /app/keys and /app/skills are HOST bind mounts, so the container crash-loops
+# at startup with "self-test failed ... Bash can create files in /app/data ...".
+# At startup the server runs as root and chowns/chmods those paths so the
+# uid-10001 agent executor cannot write to them; on Docker Desktop it cannot:
+#   - Windows/WSL forces the bind mount world-writable (0777) and ignores
+#     chown/chmod, so the self-test's "writable by others" check trips.
+#   - macOS serves the mount as a "fakeowner" filesystem that reports
+#     root:root 0755 inside the container but does not enforce it, so uid 10001
+#     can still create files. (This is also why the `chmod -R go-w` workaround
+#     from #549 helps on WSL but does nothing on a Mac.)
+#
+# This overlay swaps those three host bind mounts for Docker-managed named
+# volumes, which live inside the Docker VM's own filesystem where the server's
+# chown/chmod take effect, so isolation stays ENABLED (no -dev-insecure-no-isolation).
+# The default docker-compose.yml is left untouched, so native-Linux installs,
+# where host bind mounts work, keep their ./data, ./keys and ./skills directories.
+#
+# Named volumes persist across rebuilds. /app/skills is seeded from the image's
+# baked skills the first time the volume is created; later image skill updates do
+# not overwrite it. Inspect or refresh the volumes from the host with, e.g.:
+#   docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp artex:/app/data ./data
+#   docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp ./skills/. artex:/app/skills
+services:
+  artex:
+    # Overrides the base artex bind mounts by container path: these three named
+    # volumes replace ./data, ./keys and ./skills. pgdata and everything else are
+    # inherited from the base file unchanged.
+    volumes:
+      - data:/app/data
+      - keys:/app/keys
+      - skills:/app/skills
+
+volumes:
+  data:
+  keys:
+  skills:

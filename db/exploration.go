@@ -1827,8 +1827,7 @@ FROM activity WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT $3`, s.expID, 
 // row 1). ok is false when no recorded activity carries any of them. The match
 // is literal and case-sensitive: evidence has to quote the recorded output, not
 // paraphrase it. Callers pass only substantive lines, so a command name alone
-// cannot tie a claim to an activity. The activity's timestamp bounds the search
-// for a proxy capture of the same bytes.
+// cannot tie a claim to an activity.
 func (s *ExplorationStore) ActivityContainingEvidence(nodeID int64, lines []string) (id int64, createdAt time.Time, ok bool, err error) {
 	if nodeID <= 0 || len(lines) == 0 {
 		return 0, time.Time{}, false, nil
@@ -1848,6 +1847,65 @@ ORDER BY id DESC LIMIT 1`, s.expID, nodeID, lines).Scan(&id, &createdAt)
 		return 0, time.Time{}, false, err
 	}
 	return id, createdAt, true, nil
+}
+
+// ToolResultActivityContainingEvidence returns the newest tool_result activity
+// recorded for nodeID in THIS exploration whose summary or detail contains one
+// of the given verbatim evidence lines. Restricting to kind='tool_result'
+// ensures assistant prose or thinking rows cannot corroborate tool_output facts.
+func (s *ExplorationStore) ToolResultActivityContainingEvidence(nodeID int64, lines []string) (id int64, createdAt time.Time, ok bool, err error) {
+	if nodeID <= 0 || len(lines) == 0 {
+		return 0, time.Time{}, false, nil
+	}
+	err = s.db.QueryRow(`SELECT id, created_at FROM activity a
+WHERE exploration_id=$1 AND node_id=$2 AND kind='tool_result'
+  AND EXISTS (SELECT 1 FROM unnest($3::text[]) AS line
+              WHERE strpos(COALESCE(a.detail,''), line) > 0
+                 OR strpos(COALESCE(a.summary,''), line) > 0)
+ORDER BY id DESC LIMIT 1`, s.expID, nodeID, lines).Scan(&id, &createdAt)
+	if err == sql.ErrNoRows {
+		return 0, time.Time{}, false, nil
+	}
+	if err != nil {
+		return 0, time.Time{}, false, err
+	}
+	return id, createdAt, true, nil
+}
+
+// ActivityMatchesProvenance checks that activityID exists in THIS task's
+// exploration with the expected provenance kind: when wantOperator is true,
+// the row must be a human turn (worker='user' AND kind='user'); otherwise it
+// must be a recorded tool_result row.
+func (s *ExplorationStore) ActivityMatchesProvenance(activityID int64, wantOperator bool) (bool, error) {
+	if activityID <= 0 {
+		return false, nil
+	}
+	var ok bool
+	var err error
+	if wantOperator {
+		err = s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM activity
+WHERE exploration_id=$1 AND id=$2 AND worker='user' AND kind='user')`, s.expID, activityID).Scan(&ok)
+	} else {
+		err = s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM activity
+WHERE exploration_id=$1 AND id=$2 AND kind='tool_result')`, s.expID, activityID).Scan(&ok)
+	}
+	return ok, err
+}
+
+// OperatorActivityContainingQuote matches the full quote in a human turn on
+// this intent. A worker can also emit kind=user when it asks for help.
+func (s *ExplorationStore) OperatorActivityContainingQuote(nodeID int64, quote string) (id int64, err error) {
+	if nodeID <= 0 || quote == "" {
+		return 0, nil
+	}
+	err = s.db.QueryRow(`SELECT id FROM activity
+WHERE exploration_id=$1 AND node_id=$2 AND worker='user' AND kind='user'
+  AND (strpos(summary,$3)>0 OR strpos(detail,$3)>0)
+ORDER BY id DESC LIMIT 1`, s.expID, nodeID, quote).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, err
 }
 
 // ActivityListForTerminalIntent is the inherited, incremental-read boundary.
@@ -2359,4 +2417,10 @@ func (s *ExplorationStore) ActivityByIDsForTerminalIntents(ids []int64) ([]Activ
 // exploration node is deleted). taskID and nodeID may be 0 (stored as NULL).
 func (s *ExplorationStore) AddStandaloneFinding(taskID, nodeID int64, vulnclass, name, severity, summary, evidence, worker string, assetIDs []int64) (int64, error) {
 	return s.db.AddFinding(taskID, nodeID, vulnclass, name, severity, summary, evidence, worker, assetIDs)
+}
+
+// UpdateNodePayload updates a node's JSON payload and bumps content_version.
+func (s *ExplorationStore) UpdateNodePayload(id int64, raw json.RawMessage) error {
+	_, err := s.db.Exec(`UPDATE exploration_nodes SET payload=$1, content_version=content_version+1 WHERE id=$2 AND exploration_id=$3`, string(raw), id, s.expID)
+	return err
 }

@@ -121,6 +121,9 @@ import type {
   UsageStats,
   WorkspaceFile,
   WorkspaceListing,
+  SharedBrowserAction,
+  SharedBrowserInput,
+  SharedBrowserStatus,
 } from "@/lib/types";
 
 // Combined file data per attachment upload; matches maxChatUpload in server/chatupload.go.
@@ -275,12 +278,21 @@ function interceptPageQuery(page: number, size: number, filter: InterceptApprova
 
 export const api = {
   // Backend application version (injected via ldflags at release, default "dev").
+  // build.commit fills in the source revision for local builds, so the top bar
+  // can show `dev (abc1234)` instead of a version that identifies nothing.
   // isolation: result of the startup agent isolation self-test; "degraded" shows a banner on every page.
   health: () =>
     get<{
       ok: boolean;
       service: string;
       version: string;
+      build?: {
+        version: string;
+        commit?: string;
+        go_version?: string;
+        build_time?: string;
+        modified?: boolean;
+      };
       latest_version?: string;
       isolation?: { mode: "isolated" | "degraded"; reason?: string };
     }>("/health"),
@@ -377,6 +389,14 @@ export const api = {
   deleteTask: (id: string, options: DeleteTaskOptions) => del<DeleteTaskResult>(`/tasks/${id}`, options),
   controlTask: (id: string, action: "pause" | "resume") =>
     post<{ id: string; paused: boolean; queued: boolean; status: string }>(`/tasks/${id}/control`, { action }),
+  extendTask: (id: string, seconds: number) =>
+    post<{ id: string; added_seconds: number; timeout_seconds: number; deadline_at: number; remaining_seconds: number }>(`/tasks/${id}/extend`, { seconds }),
+  // ---- shared browser (Function → Browser) ----
+  browserStatus: () => get<SharedBrowserStatus>("/browser/status").then((s) => ({ ...s, tabs: arr(s.tabs) })),
+  browserStart: () => post<SharedBrowserStatus>("/browser/start"),
+  browserControl: (action: SharedBrowserAction, target?: string) =>
+    post<SharedBrowserStatus>("/browser/control", { action, target: target ?? "" }),
+  browserInput: (events: SharedBrowserInput[]) => post<void>("/browser/input", { events }),
   controlTasksBatch: (taskIds: string[], action: "pause" | "resume") =>
     post<{ items: BatchControlItem[] }>("/tasks/control/batch", { task_ids: taskIds, action }),
   taskArchives: (input?: { page?: number; size?: number; q?: string; state?: string }) => {
@@ -1072,7 +1092,12 @@ export const api = {
   chatBridges: () => get<ChatBridge[]>(`/chat-bridges`).then(arr),
   chatBridgeSave: (
     kind: string,
-    payload: { enabled?: boolean; config?: Record<string, unknown>; allowed_chats?: string[] },
+    payload: {
+      enabled?: boolean;
+      config?: Record<string, unknown>;
+      allowed_chats?: string[];
+      allowed_users?: string[];
+    },
   ) => put<ChatBridge>(`/chat-bridges/${encodeURIComponent(kind)}`, payload),
   // Asks the chat app which bot the stored token belongs to; sends no message.
   chatBridgeTest: (kind: string) =>
