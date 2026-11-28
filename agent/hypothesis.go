@@ -73,6 +73,11 @@ func (t *ToolSet) upsertHypothesis() actool.CoreTool {
 			if status == "closed" && strings.TrimSpace(a.CloseReason) == "" {
 				return actool.Errorf("close_reason is required when closing a hypothesis"), nil
 			}
+			if status == "closed" && isRouteExhaustionClaim(a.CloseReason+" "+a.Hypothesis) {
+				if gerr := missingDiscoveryCoverageError(t.ts); gerr != nil {
+					return actool.Errorf(gerr.Error()), nil
+				}
+			}
 
 			id := pid(a.ID)
 			if id > 0 {

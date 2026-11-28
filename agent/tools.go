@@ -1644,6 +1644,11 @@ func (t *ToolSet) goalMet() actool.CoreTool {
 			_ = json.Unmarshal(in, &a)
 			// goal_met ends the task only when no goal node is open (#124, F5). A task
 			// without goal nodes keeps the old behavior.
+			if isRouteExhaustionClaim(a.Reason) {
+				if gerr := missingDiscoveryCoverageError(t.ts); gerr != nil {
+					return actool.Errorf(gerr.Error()), nil
+				}
+			}
 			goals, err := t.ts.ListByKind(db.KindGoal, 1000)
 			if err != nil {
 				return actool.Errorf("goal_met refused: the goals of this task could not be read (" + err.Error() + "); the task stays open"), nil
@@ -2071,6 +2076,12 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 			ids := make([]int64, len(items))
 			errs := map[string]string{}
 			for i, it := range items {
+				if isRouteExhaustionClaim(it.Summary + " " + it.Detail) {
+					if gerr := missingDiscoveryCoverageError(t.ts); gerr != nil {
+						errs[strconv.Itoa(i)] = gerr.Error()
+						continue
+					}
+				}
 				id, err := t.recordOneFact(it, defaultIntent)
 				if err != nil {
 					errs[strconv.Itoa(i)] = err.Error()

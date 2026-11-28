@@ -50,3 +50,11 @@ const FactSubtypeCapability = "capability"
 // FactSubtypeGateConstant tags kind=fact nodes recording repeated constant HTTP
 // responses across distinct probe inputs (zero schema migration).
 const FactSubtypeGateConstant = "gate_constant"
+
+// FactSubtypeTargetFingerprint tags kind=fact nodes capturing the initial
+// read-only baseline fingerprint of a task's goal URL at task creation.
+const FactSubtypeTargetFingerprint = "target_fingerprint"
+
+// FactSubtypeDiscoveryCoverage tags kind=fact nodes storing a verified
+// 5-part discovery quality artifact written via record_coverage.
+const FactSubtypeDiscoveryCoverage = "discovery_coverage"

@@ -19,11 +19,12 @@ func (t *ToolSet) recordCoverage() actool.CoreTool {
 		"record_coverage",
 		"Record what you examined on a surface for one risk class (use the goal's vulnclass as risk_area when it applies), including negative results, so an absent finding is never read as a clean target.",
 		obj(map[string]any{
-			"surface":   str("what was examined: a URL, endpoint, parameter, host or feature"),
-			"risk_area": str("risk class, e.g. sqli, xss, idor"),
-			"outcome":   map[string]any{"type": "string", "enum": []string{db.OutcomeReported, db.OutcomeNoIssueFound, db.OutcomeRuledOut, db.OutcomeNotApplicable, db.OutcomeNeedsFollowUp}, "description": "result for this surface and risk class"},
-			"evidence":  str("required for no_issue_found: a fact id, intent id or traffic id that shows the test"),
-			"reason":    str("required for ruled_out and not_applicable: why"),
+			"surface":            str("what was examined: a URL, endpoint, parameter, host or feature"),
+			"risk_area":          str("risk class, e.g. sqli, xss, idor"),
+			"outcome":            map[string]any{"type": "string", "enum": []string{db.OutcomeReported, db.OutcomeNoIssueFound, db.OutcomeRuledOut, db.OutcomeNotApplicable, db.OutcomeNeedsFollowUp}, "description": "result for this surface and risk class"},
+			"evidence":           str("required for no_issue_found: a fact id, intent id or traffic id that shows the test"),
+			"reason":             str("required for ruled_out and not_applicable: why"),
+			"discovery_artifact": map[string]any{"type": "object", "description": "required when declaring a route space exhausted: {wordlist_run:{wordlist,entries_tested,discovered}, nested_paths:[...], parameters_tested:[...], method_matrix:[...], static_docs_js_reviewed:[...]}"},
 		}, "surface", "risk_area", "outcome"),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			if t.coverageDisabled {
@@ -32,12 +33,31 @@ func (t *ToolSet) recordCoverage() actool.CoreTool {
 			if t.as == nil || t.taskID <= 0 {
 				return actool.Errorf("record_coverage requires a task context"), nil
 			}
-			var e db.CoverageEntry
-			if err := json.Unmarshal(in, &e); err != nil {
+			var raw struct {
+				db.CoverageEntry
+				DiscoveryArtifact *DiscoveryArtifact `json:"discovery_artifact"`
+			}
+			if err := json.Unmarshal(in, &raw); err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
+			e := raw.CoverageEntry
 			e.Outcome = strings.ToLower(strings.TrimSpace(e.Outcome))
 			e.Worker, e.IntentID = t.worker, t.ownerNode
+			exhaustClaim := isRouteDiscoveryRiskArea(e.RiskArea) && (e.Outcome == db.OutcomeNoIssueFound || e.Outcome == db.OutcomeRuledOut)
+			if raw.DiscoveryArtifact != nil || exhaustClaim {
+				if raw.DiscoveryArtifact == nil {
+					return actool.Errorf(missingDiscoveryCoverageError(nil).Error()), nil
+				}
+				if missing := raw.DiscoveryArtifact.MissingChecks(); len(missing) > 0 {
+					return actool.Errorf("discovery_artifact incomplete; missing: " + strings.Join(missing, "; ")), nil
+				}
+				if strings.TrimSpace(e.Evidence) == "" {
+					e.Evidence = raw.DiscoveryArtifact.CompactSummary()
+				}
+				if _, ferr := recordDiscoveryCoverageFact(t.ts, t.ownerNode, e.Surface, *raw.DiscoveryArtifact); ferr != nil {
+					return actool.Errorf(ferr.Error()), nil
+				}
+			}
 			if err := t.as.RecordCoverage(t.taskID, e); err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
