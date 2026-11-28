@@ -12,7 +12,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -182,10 +181,7 @@ func New(ctx context.Context, server, url string, headers map[string]string, ins
 	if err != nil {
 		return nil, err
 	}
-	hc := &http.Client{Timeout: timeout, CheckRedirect: redirectPolicy(base)}
-	if insecure {
-		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	}
+	hc := &http.Client{Timeout: timeout, CheckRedirect: redirectPolicy(base), Transport: mcpTransport(insecure)}
 	c := &Client{
 		server:   server,
 		url:      url,
@@ -211,10 +207,7 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 	if err != nil {
 		return nil, err
 	}
-	hc := &http.Client{CheckRedirect: redirectPolicy(base)} // the SSE stream is intentionally long-lived.
-	if insecure {
-		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	}
+	hc := &http.Client{CheckRedirect: redirectPolicy(base), Transport: mcpTransport(insecure)} // the SSE stream is intentionally long-lived.
 	streamCtx, cancel := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, sseURL, nil)
 	if err != nil {
