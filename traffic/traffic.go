@@ -1115,7 +1115,7 @@ func sanitize(s string) string {
 // Host trees never use these names. DeleteAll skips every underscore-prefixed
 // entry for the same reason.
 func storeDir(name string) bool {
-	switch name {
+	switch strings.ToLower(name) {
 	case "_index", "_blobs", "_ca", "_delete_staging":
 		return true
 	default:
@@ -2511,14 +2511,20 @@ func (t *Traffic) query(host, contains, bodyContains string, page, limit int) ([
 		if err != nil {
 			return nil, err
 		}
-		q += ` AND host=?`
+		// Recorded hosts keep the client's case; hostName is already lowercase.
+		q += ` AND lower(host)=?`
 		args = append(args, hostName)
 		if port != "" {
 			// Recorded rows historically store URL.Hostname() (without the port),
 			// so constrain the original URL authority as a compatibility fallback.
 			// New and old captures therefore share the same search contract.
 			authority := net.JoinHostPort(hostName, port)
-			prefixes := []string{"%://" + authority}
+			var prefixes []string
+			// Anchored per scheme, so a URL quoted in the query string (an
+			// open-redirect or SSRF probe) can't match.
+			for _, scheme := range []string{"http", "https", "ws", "wss"} {
+				prefixes = append(prefixes, scheme+"://"+authority)
+			}
 			// Clients leave a default port out of the Host header, so a capture
 			// of https://host:443 is recorded as https://host, and a WebSocket
 			// over it as wss://host.

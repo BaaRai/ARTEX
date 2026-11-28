@@ -142,9 +142,10 @@ func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 		{11, "0011_traffic_tamper_hooks.sql"}, {12, "0012_lesson_withdrawn.sql"},
 		{13, "0013_lesson_evidence_history.sql"}, {14, "0014_bedrock_gateway_profiles.sql"},
 		{15, "0015_chat_bridges.sql"},
-		{16, "0016_chat_bridge_access.sql"}}
+		{16, "0016_chat_bridge_access.sql"},
+		{17, "0017_legacy_fact_capture_provenance.sql"}}
 	if len(applied) != len(want) {
-		t.Fatalf("schema_migrations = %+v, want versions 1 to 16", applied)
+		t.Fatalf("schema_migrations = %+v, want versions 1 to 17", applied)
 	}
 	for i, w := range want {
 		content, err := fs.ReadFile(migrationsFS(), w.name)

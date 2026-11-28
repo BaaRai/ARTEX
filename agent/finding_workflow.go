@@ -70,7 +70,7 @@ func trafficCaptureExplicitlyOff() bool {
 }
 
 const (
-	trafficCaptureOffProveGoalNote     = "\nNote: traffic capture is currently OFF on this server, so no HTTP traffic is being recorded and findings cannot be bound to captured traffic to prove HTTP goals. Recorded findings stay visible, and non-HTTP goals can still be proved with an observed tool_output fact; enable traffic capture in System settings to make HTTP findings provable."
+	trafficCaptureOffProveGoalNote     = "\nNote: traffic capture is currently OFF on this server, so no HTTP traffic is being recorded and findings cannot be bound to captured traffic to prove HTTP goals. Recorded findings stay visible, and non-HTTP goals can still be proved with a fact backed by a recorded operator message; enable traffic capture in System settings to make HTTP findings provable."
 	trafficCaptureOffReportFindingNote = "\nNote: traffic capture is currently OFF on this server, so no HTTP traffic is being recorded. Findings still save with textual/command evidence, but cannot prove goals via prove_goal until traffic capture is enabled in System settings and verified traffic is bound."
 )
 
@@ -97,7 +97,7 @@ func trafficCaptureOffToolNote(toolName string, captureOff bool) string {
 // binary). These notes ride on the tool descriptions, exactly like the capture
 // notes above, so the standing guidance stays empty when the feature is off.
 const (
-	findingBindingOffProveGoalNote     = "\nNote: automatic traffic binding is OFF on this server, so a finding cannot be bound to captured traffic here and cannot close an HTTP goal. Recorded findings stay visible; non-HTTP goals still close with an observed tool_output fact. An operator can enable binding (System settings) or bind captured traffic manually on the finding page, after which a bound finding closes the goal."
+	findingBindingOffProveGoalNote     = "\nNote: automatic traffic binding is OFF on this server, so a finding cannot be bound to captured traffic here and cannot close an HTTP goal. Recorded findings stay visible; non-HTTP goals still close with a fact backed by a recorded operator message. An operator can enable binding (System settings) or bind captured traffic manually on the finding page, after which a bound finding closes the goal."
 	findingBindingOffReportFindingNote = "\nNote: automatic traffic binding is OFF on this server, so report_finding carries no traffic parameters and the bind_finding_traffic tool is not in your toolset. Findings still save with their evidence, but stay unverified and cannot prove a goal. Register a reproducible PoC in evidence as usual; do not guess traffic IDs and do not re-probe only to capture packets."
 	findingBindingOffHintNote          = "\nNote: automatic traffic binding is OFF on this server, so hint traffic parameters are not in this schema. Keep the verified evidence and the known real traffic IDs in the hint text; the receiving task registers the finding and the operator can bind captured traffic later."
 )
@@ -168,7 +168,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 		note := ""
 		switch tool.Name() {
 		case "report_finding":
-			note = "\nBy default the report agent verifies and binds traffic before writing the report. The reporter keeps verification commands, key output, any known real traffic IDs and their purpose in evidence, so the report agent can check them against the execution records; no extra packet capture is needed for binding. Explicit immediate binding is still supported: traffic_refs or evidence_hint_id may submit already-verified references, the latter reading the structured references of the given hint in this task; if either is invalid the whole report fails. A finding without bound traffic stays recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset host is bound (non-HTTP goals close via an observed tool_output fact). The returned finding_id and finding_node_id denote the standalone record and the exploration node respectively."
+			note = "\nBy default the report agent verifies and binds traffic before writing the report. The reporter keeps verification commands, key output, any known real traffic IDs and their purpose in evidence, so the report agent can check them against the execution records; no extra packet capture is needed for binding. Explicit immediate binding is still supported: traffic_refs or evidence_hint_id may submit already-verified references, the latter reading the structured references of the given hint in this task; if either is invalid the whole report fails. A finding without bound traffic stays recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset host is bound (non-HTTP goals close via a fact backed by a recorded operator message). The returned finding_id and finding_node_id denote the standalone record and the exploration node respectively."
 		case "add_hint", "add_task_hint":
 			note = "\nWhen handing off a confirmed vulnerability, keep the verified traffic's IDs, purpose, notes, and order in the corresponding hint's traffic_refs (top-level for a single hint, inside the corresponding hints element for a batch), and state in text exactly which vulnerability it proves. The caller must not hand off only text while dropping existing traffic references. Unverified candidates must not be passed as evidence."
 		case "get_finding_traffic", "bind_finding_traffic", "list_findings", "list_task_findings", "node_detail", "get_task_node_detail", "update_finding_report":
@@ -188,7 +188,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 			guidance += "\nWhen a platform conversation has no task context, do not call report_finding directly; hand off via add_task_hint to the existing corresponding task, let the task agent register it, and verify the result with list_task_findings."
 		}
 		if has["prove_goal"] || has["goal_met"] {
-			guidance += "\nBefore judging a goal complete, finish reporting/handing off the evidence at hand. A finding only closes a goal via prove_goal once it has at least one server-verified bound traffic_ref matching its asset host (an unbound finding stays recorded and visible, and non-HTTP goals close via an observed tool_output fact). Do not end the task or cancel Workers while evidence binding is still pending."
+			guidance += "\nBefore judging a goal complete, finish reporting/handing off the evidence at hand. A finding only closes a goal via prove_goal once it has at least one server-verified bound traffic_ref matching its asset host (an unbound finding stays recorded and visible, and non-HTTP goals close via a fact backed by a recorded operator message). Do not end the task or cancel Workers while evidence binding is still pending."
 		}
 	}
 	if has["update_finding_report"] && has["bind_finding_traffic"] && has["get_finding_traffic"] {

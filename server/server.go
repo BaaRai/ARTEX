@@ -61,6 +61,12 @@ type Server struct {
 
 	chatBridges *chatBridgeRunner // inbound chat bridges (issue #5); nil without PostgreSQL
 
+	// browser is the shared Chromium the operator can watch and take over
+	// (sharedbrowser.go); nil when turned off (-shared-browser=false).
+	browser                  *sharedBrowser
+	sharedBrowserOn          bool
+	sharedBrowserLockTimeout time.Duration
+
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
 	// pwdVersion is auth.password_version, a counter. Zero means no password
@@ -277,7 +283,14 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			}
 			return a.TaskTimeoutWrapupMaxTurns, true
 		})
-		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
+		if s.sharedBrowserOn {
+			s.browser = newSharedBrowser(ctx, sharedBrowserConfig{
+				ProfileDir:          filepath.Join(m.dir, sharedBrowserProfileDir),
+				Priv:                s.execPriv,
+				OperatorLockTimeout: s.sharedBrowserLockTimeout,
+			})
+		}
+		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv, s.browser) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
 		domainReg := s.buildDomainReg()
 		wireTools(m.pg, domainReg)   // built-in tools table: filter per agent + override description/schema + inject defaults
 		seedPrompts(m.pg)            // seed built-in agent default prompt bodies into agent_prompts (only when empty)
@@ -773,6 +786,7 @@ func (s *Server) chatAgentRef() *agent.ChatAgent {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerSideRoutes(mux)
+	s.registerSharedBrowserRoutes(mux)
 
 	// Auth routes — exempt from JWT check (handled in requireAuth)
 	mux.HandleFunc("GET /api/auth/status", s.authStatus)
