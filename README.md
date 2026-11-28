@@ -535,6 +535,8 @@ gh attestation verify <zip> --repo BaaRai/ARTEX   # built by this repository's r
 
 ### Option 4: build the single binary from source
 
+Requires Node.js >= 20.9 (Node 22 LTS recommended; the frontend uses Next.js 16) and Go. `./build.sh` checks the Node version up front.
+
 ```bash
 cd web && npm ci && npm run build:static && cd ..
 cp -r web/out server/webui/dist

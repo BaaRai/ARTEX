@@ -123,6 +123,12 @@ if [ "${ARTEX_SKIP_FRONTEND:-0}" = "1" ]; then
   [ -d server/webui/dist ] || die "ARTEX_SKIP_FRONTEND=1 but server/webui/dist does not exist"
 else
   command -v npm >/dev/null 2>&1 || die "npm not detected (building the frontend static assets requires Node.js/npm)"
+  # Next.js 16 requires Node >= 20.9; CI and the Dockerfile use Node 22.
+  node_ver="$(node --version 2>/dev/null | sed 's/^v//')"
+  node_major="${node_ver%%.*}"; node_rest="${node_ver#*.}"; node_minor="${node_rest%%.*}"
+  if [ -z "$node_major" ] || [ "$node_major" -lt 20 ] || { [ "$node_major" -eq 20 ] && [ "${node_minor:-0}" -lt 9 ]; }; then
+    die "Node.js >= 20.9 is required to build the frontend (found ${node_ver:-none}); Node 22 LTS recommended. Install via nvm/fnm/NodeSource, or set ARTEX_SKIP_FRONTEND=1 to reuse server/webui/dist."
+  fi
   command -v rsync >/dev/null 2>&1 || die "rsync not detected"
   info "Building frontend static assets"
   if [ "${ARTEX_SKIP_NPM_CI:-0}" != "1" ]; then
