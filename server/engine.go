@@ -925,6 +925,7 @@ func (e *Engine) plannerGateContext(ctx context.Context, t *Task, wait time.Dura
 		a.Worker = "planner"
 		e.emitActivity(t, a)
 	}
+	ctx = e.m.auditContext(ctx)
 	ctx = intercept.WithTaskContext(ctx, t.ID, "planner", emit)
 	if sg := e.statefulGuardForTask(); sg != nil {
 		ctx = intercept.WithStatefulGuard(ctx, sg)
@@ -1251,6 +1252,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		emit(a)
 	}
 	label := fmt.Sprintf("%s · #%d", name, iid)
+	workCtx = e.m.auditContext(workCtx)
 	workCtx = intercept.WithTaskContext(workCtx, t.ID, label, taskEmit)
 	workCtx = intercept.WithTargetScope(workCtx, t.targetScope(intercept.DefaultTargetWaitBound))
 	if sg := e.statefulGuardForTask(); sg != nil {

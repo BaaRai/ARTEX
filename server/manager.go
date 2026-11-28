@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/config"
 	pgdb "github.com/Autumn-27/artex/db"
@@ -260,6 +261,7 @@ type Manager struct {
 	dir         string
 	pg          *pgdb.DB
 	assets      *pgdb.AssetStore
+	audit       *accessaudit.Store
 	traffic     *traffic.Traffic       // process-wide recording proxy (may be nil)
 	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
@@ -476,8 +478,24 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	m.interceptor.SetToolProxyCheck(m.toolUsesProxy)
 	// The platform's own endpoints need no target approval.
 	m.interceptor.SetDerivedExemptions(m.targetGateEndpoints)
+	// The public proxy CA below traffic/_ca must remain traversable by the
+	// executor. Only the audit/index directory is private, not its shared parent.
+	if err := os.MkdirAll(filepath.Join(dir, "traffic"), 0o755); err != nil {
+		pg.Close()
+		return nil, err
+	}
+	audit, auditErr := accessaudit.Open(filepath.Join(dir, "traffic", "_index", "access.sqlite"))
+	if auditErr != nil {
+		pg.Close()
+		return nil, fmt.Errorf("open access audit: %w", auditErr)
+	}
+	m.audit = audit
+	m.trafficOn = pg.GetBool(settingTrafficCapture, false)
+	if v, ok, _ := pg.GetSetting(settingGlobalProxy); ok {
+		m.globalProxy = strings.TrimSpace(v)
+	}
 	if proxyAddr != "" {
-		tr, err := traffic.Open(filepath.Join(dir, "traffic"), proxyAddr)
+		tr, err := traffic.OpenAuditProxy(filepath.Join(dir, "traffic"), proxyAddr, os.Getenv("ARTEX_PROXY_INSECURE_TLS") == "1")
 		if err != nil {
 			log.Printf("[traffic] disabled: %v", err)
 		} else {
@@ -496,11 +514,17 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 			if err != nil {
 				_ = tr.Close()
 				_ = pg.Close()
+				m.audit.Close()
 				return nil, fmt.Errorf("recover traffic delete staging: %w", err)
 			}
 		}
 		if tr != nil {
 			m.traffic = tr
+			tr.SetAccessAudit(m.audit)
+			tr.SetCaptureEnabled(m.trafficOn)
+			if err := tr.SetUpstreamProxy(m.globalProxy); err != nil {
+				log.Printf("[proxy] global proxy %q invalid, ignored; set it again in Settings", proxyWithoutCredentials(m.globalProxy))
+			}
 			m.reloadRewriteRules() // in place before the proxy accepts a connection
 			m.reloadTamperHooks()  // opt-in behind ARTEX_TAMPER_HOOKS_ENABLED=1
 			if scfg, ok := traffic.SOCKS5ConfigFromEnv(); ok {
@@ -530,9 +554,6 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 			}()
 		}
 	}
-	// Asset auto-completion engine (§5): HTTP probes routed through the recording
-	// proxy (via m.ProxyAddr, which honors the traffic-capture toggle).
-	m.trafficOn = pg.GetBool(settingTrafficCapture, false)
 	// LLM recording switch (off by default). The recorder reads this flag on every call.
 	m.llmRecOn = pg.GetBool(settingLLMRecord, false)
 	// Load persisted web-search config (default: off, ddgs).
@@ -554,19 +575,8 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if v, ok, _ := pg.GetSetting(settingWebSearchProxy); ok {
 		m.webSearchProxy = v
 	}
-	// Global egress proxy (default: direct). When capture is on, feed it to the
-	// MITM as its upstream so recorded traffic exits through it; when capture is
-	// off, ProxyAddr hands it to agents directly (bash env / WebFetch).
-	if v, ok, _ := pg.GetSetting(settingGlobalProxy); ok {
-		m.globalProxy = strings.TrimSpace(v)
-	}
-	if m.traffic != nil {
-		if err := m.traffic.SetUpstreamProxy(m.globalProxy); err != nil {
-			// Neither the stored value nor err (which quotes it) is logged: both
-			// can carry the proxy credentials.
-			log.Printf("[proxy] global proxy %q invalid, ignored; set it again in Settings (shown without credentials, empty when it cannot be parsed)", proxyWithoutCredentials(m.globalProxy))
-		}
-	}
+	// Native probes keep their existing capture-dependent routing. Bash execution
+	// receives its own attributed inspection proxy through auditContext.
 	m.enrich = enrich.New(m.assets, m.ProxyAddr, 4)
 	// Reconcile the seeded browser MCP with the persisted capture state, so a
 	// restart with capture already on keeps Playwright routed through the proxy.
@@ -575,7 +585,8 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 }
 
 // TrafficEnabled reports whether traffic capture is on (default off). When off,
-// no proxy/traffic tools/prompt are injected into agents (nothing is recorded).
+// traffic tools/prompt are injected into agents. The independent execution
+// proxy still observes metadata without saving bodies.
 func (m *Manager) TrafficEnabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -590,6 +601,9 @@ func (m *Manager) SetTrafficEnabled(on bool) error {
 	}
 	m.mu.Lock()
 	m.trafficOn = on
+	if m.traffic != nil {
+		m.traffic.SetCaptureEnabled(on)
+	}
 	m.mu.Unlock()
 	// Inject (on) or strip (off) the recording proxy + CA on the browser MCP so
 	// Playwright routes through the MITM. Must run after the flag flip above, since
@@ -894,14 +908,15 @@ func (m *Manager) Assets() *pgdb.AssetStore  { return m.assets }
 func (m *Manager) PG() *pgdb.DB              { return m.pg }
 func (m *Manager) Traffic() *traffic.Traffic { return m.traffic }
 
-// ProxyAddr returns the egress proxy address agents route target traffic through:
+// ProxyAddr returns the proxy for native clients and browser MCP. Bash uses
+// ExecutionProxy through auditContext independently of this capture switch:
 //   - capture ON  → the recording MITM proxy (which itself exits via the global
 //     proxy when one is set); agents also get its CA (see ProxyCACert).
 //   - capture OFF → the global egress proxy directly (empty CA — real target
 //     certs), or "" when no global proxy is set (direct, no recording).
 //
 // So the global proxy takes effect in both modes: at the MITM's upstream when
-// capturing, in the agent's own bash env / WebFetch when not.
+// capturing, in native clients when not; the Bash audit proxy always chains it.
 func (m *Manager) ProxyAddr() string {
 	if m.traffic != nil && m.TrafficEnabled() {
 		return m.traffic.ProxyAddr()
@@ -992,6 +1007,9 @@ func (m *Manager) Close() error {
 	defer m.mu.Unlock()
 	if m.traffic != nil {
 		m.traffic.Close()
+	}
+	if m.audit != nil {
+		m.audit.Close()
 	}
 	return m.pg.Close()
 }

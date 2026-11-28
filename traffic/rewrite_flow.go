@@ -452,6 +452,11 @@ func takeReplayNonce(h http.Header) (nonce string, present bool) {
 // request's snapshot slot is reserved; without one the request leaves as the
 // client sent it. Rules fail open: a panic leaves the request unchanged.
 func (s *sink) Request(f *mproxy.Flow) {
+	s.t.captureMu.RLock()
+	defer s.t.captureMu.RUnlock()
+	if !s.captureAllowed(f) {
+		return
+	}
 	if s.t == nil || f.Request == nil || f.Request.URL == nil {
 		return
 	}
@@ -501,6 +506,11 @@ func (s *sink) Request(f *mproxy.Flow) {
 // rewritten response. Without a slot and without response rules/hooks this is
 // the plain record.
 func (s *sink) Response(f *mproxy.Flow) {
+	s.t.captureMu.RLock()
+	defer s.t.captureMu.RUnlock()
+	if !s.captureAllowed(f) {
+		return
+	}
 	if f.Request == nil || f.Response == nil {
 		return
 	}
@@ -642,6 +652,7 @@ func (s *sink) applyStreamResponse(f *mproxy.Flow, res rewrite.Result) {
 // not the interception, may be at fault. Its log names the host, the error class
 // and the rules, never the URL or the error text.
 func (s *sink) RequestError(f *mproxy.Flow, err error) {
+	s.recordAudit(f, "transport_error", 0)
 	if f != nil {
 		s.bypass.Delete(keyOf(f))
 		if snap := s.t.snaps.take(keyOf(f)); snap != nil && snap.requestRewritten() {

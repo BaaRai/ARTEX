@@ -589,6 +589,7 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 	// The conversation's opt-in flag is the one read when the turn started: a
 	// switch through the API applies from the next turn.
 	gate := c.TargetGate
+	ctx = s.m.auditContext(ctx)
 	gctx := intercept.WithTargetScope(ctx, intercept.TargetScope{ConversationID: c.ID, Enabled: func() bool { return gate },
 		WaitBound: intercept.DefaultTargetWaitBound, Interceptor: s.m.interceptor})
 	// On a manual stop ctx is cancelled; Chat already emits a clean "stopped by the user"

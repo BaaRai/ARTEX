@@ -27,6 +27,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/intercept"
 )
 
@@ -450,7 +451,7 @@ type dynamicTransport struct {
 }
 
 func (d dynamicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	return Current().Transport(d.namespace, d.base).RoundTrip(req)
+	return Current().Transport(d.namespace, accessaudit.Transport(d.base, d.namespace)).RoundTrip(req)
 }
 
 const maxSharedBody = 2 << 20 // a larger response is neither coalesced nor cached

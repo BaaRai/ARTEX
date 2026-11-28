@@ -648,6 +648,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if tc.DeadlineUnix > 0 {
 		settle = wrapupSettlementForTask("planner", nil, clamped)
 	}
+	bashEnv, releaseProxy := executionProxyEnv(ctx, "planner", p.proxyAddr, p.proxyCACert)
+	defer releaseProxy()
 	opts := agentcore.Options{
 		Provider:        p.prov,
 		SystemPrompt:    system,
@@ -668,8 +670,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		DeepSeekSearchAPIKey:  p.webSearch.DeepSeekAPIKey,
 		DeepSeekSearchModel:   p.webSearch.DeepSeekModel,
 		WebSearchProxy:        p.webSearch.Proxy,
-		BashEnv:               proxyEnv(p.proxyAddr, p.proxyCACert), // Bash subcommands go through the proxy + trust its CA by default
-		WorkingDir:            taskDir,                              // the main run directory <workDir>/tasks/<taskID>/main
+		BashEnv:               bashEnv, // Bash subcommands go through the proxy + trust its CA by default
+		WorkingDir:            taskDir, // the main run directory <workDir>/tasks/<taskID>/main
 		ToolOutputDir:         TaskToolOutputDir(p.workDir, taskID, taskDir),
 		MaxTurns:              p.maxTurns, // 0 = unlimited (configurable in agent management)
 		MaxDuration:           maxDur,     // 0=unlimited; with a deadline = time remaining until it

@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/db"
 )
 
@@ -664,6 +665,7 @@ VALUES(?,?,?,?,?,?,?)`,
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("committing: %w", err)
 	}
+	t.accessAudit.Load().Record(accessaudit.Event{Source: "har_import", Outcome: "reported_exchange", Method: ex.method, URL: ex.rawURL, Status: ex.status})
 	return true, nil
 }
 

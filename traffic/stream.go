@@ -76,10 +76,21 @@ type streamRow struct {
 	ctype     string // content type handed to spill for the binary check
 }
 
-func (s *sink) WebSocketStart(f *mproxy.Flow) { s.startStream(f, "websocket") }
-func (s *sink) SSEStart(f *mproxy.Flow)       { s.startStream(f, "sse") }
+func (s *sink) WebSocketStart(f *mproxy.Flow) {
+	// The SDK creates a fresh WebSocket flow after the successful handshake,
+	// without Requestheaders/Responseheaders. Bind its immutable capture epoch.
+	s.beginAudit(f)
+	s.recordAudit(f, "response_headers", 101)
+	s.startStream(f, "websocket")
+}
+func (s *sink) SSEStart(f *mproxy.Flow) { s.startStream(f, "sse") }
 
 func (s *sink) WebSocketMessage(f *mproxy.Flow) {
+	s.t.captureMu.RLock()
+	defer s.t.captureMu.RUnlock()
+	if !s.captureAllowed(f) {
+		return
+	}
 	st := s.stream(f)
 	if st == nil || f.WebScoket == nil {
 		return
@@ -90,6 +101,11 @@ func (s *sink) WebSocketMessage(f *mproxy.Flow) {
 }
 
 func (s *sink) SSEMessage(f *mproxy.Flow) {
+	s.t.captureMu.RLock()
+	defer s.t.captureMu.RUnlock()
+	if !s.captureAllowed(f) {
+		return
+	}
 	st := s.stream(f)
 	if st == nil || f.SSE == nil {
 		return
@@ -100,6 +116,8 @@ func (s *sink) SSEMessage(f *mproxy.Flow) {
 }
 
 func (s *sink) WebSocketEnd(f *mproxy.Flow) {
+	s.t.captureMu.RLock()
+	defer s.t.captureMu.RUnlock()
 	v, ok := s.streams.LoadAndDelete(f)
 	if !ok {
 		return
@@ -107,13 +125,15 @@ func (s *sink) WebSocketEnd(f *mproxy.Flow) {
 	st := v.(*streamState)
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if f.WebScoket != nil {
+	if s.captureAllowed(f) && f.WebScoket != nil {
 		s.t.persistStream(st, wsMessagesSince(f.WebScoket, st))
 	}
 	s.t.finishStream(st)
 }
 
 func (s *sink) SSEEnd(f *mproxy.Flow) {
+	s.t.captureMu.RLock()
+	defer s.t.captureMu.RUnlock()
 	v, ok := s.streams.LoadAndDelete(f)
 	if !ok {
 		return
@@ -121,7 +141,7 @@ func (s *sink) SSEEnd(f *mproxy.Flow) {
 	st := v.(*streamState)
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if f.SSE != nil {
+	if s.captureAllowed(f) && f.SSE != nil {
 		s.t.persistStream(st, sseEventsSince(f.SSE, st))
 	}
 	s.t.finishStream(st)
@@ -138,6 +158,11 @@ func (s *sink) stream(f *mproxy.Flow) *streamState {
 // startStream registers the flow before recording its exchange, so a message
 // hook racing the start waits on st.mu instead of being dropped.
 func (s *sink) startStream(f *mproxy.Flow, kind string) {
+	s.t.captureMu.RLock()
+	defer s.t.captureMu.RUnlock()
+	if !s.captureAllowed(f) {
+		return
+	}
 	st := &streamState{kind: kind}
 	st.mu.Lock()
 	defer st.mu.Unlock()

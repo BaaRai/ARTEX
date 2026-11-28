@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
@@ -606,7 +607,11 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 	if tr := s.httpToolTransport(ctx, key, spec); tr != nil {
 		base = tr
 	}
-	client.Transport = egress.Current().Transport(key, base)
+	if s.m != nil && s.m.audit != nil {
+		runCtx = s.m.auditContext(runCtx)
+	}
+	req = req.WithContext(runCtx)
+	client.Transport = egress.Current().Transport(key, accessaudit.Transport(base, key))
 	resp, err := client.Do(req)
 	if err != nil {
 		return actool.Errorf("request failed: " + err.Error()), nil

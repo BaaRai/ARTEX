@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/db"
 )
@@ -37,6 +38,7 @@ const ConvIDKey ctxKey = 0
 
 // WithConvID returns a child context carrying convID.
 func WithConvID(ctx context.Context, convID int64) context.Context {
+	ctx = accessaudit.WithIdentity(ctx, func(i *accessaudit.Identity) { i.ConversationID = convID })
 	return context.WithValue(ctx, ConvIDKey, convID)
 }
 
@@ -60,6 +62,7 @@ type taskCtxInfo struct{ taskID, agentName string }
 // HandleAsk can tag pending records and write intercept_request activities to
 // the task's exploration stream (making them appear inline in session transcripts).
 func WithTaskContext(ctx context.Context, taskID, agentName string, emit func(db.Activity)) context.Context {
+	ctx = accessaudit.WithIdentity(ctx, func(i *accessaudit.Identity) { i.TaskID = taskID; i.Agent = agentName })
 	ctx = context.WithValue(ctx, taskInfoCtxKey, taskCtxInfo{taskID, agentName})
 	if emit != nil {
 		ctx = context.WithValue(ctx, taskEmitCtxKey, emit)

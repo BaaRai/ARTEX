@@ -879,6 +879,8 @@ export const api = {
     post<{ seq: number; created_at: string; current: number }>(`/exploration/main-session/new${tq(task)}`),
 
   // ---- traffic / audit / report / chat ----
+
+  accessAudit: (query: string) => get<import("./access-audit").AccessAuditPage>(`/access-audit?${query}`),
   audit: (task?: string) => get<Audit>(`/audit${tq(task)}`),
   traffic: (
     page = 0,

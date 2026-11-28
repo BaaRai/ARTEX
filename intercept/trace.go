@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/db"
 )
 
@@ -52,6 +53,7 @@ func WithTrace(ctx context.Context, user string, prior []db.InterceptContextEntr
 	for _, e := range prior {
 		t.append(e)
 	}
+	ctx = accessaudit.WithIdentity(ctx, func(i *accessaudit.Identity) { i.RunID = t.runID; i.ToolUseID = "" })
 	return context.WithValue(ctx, traceKey{}, t), t
 }
 
@@ -111,6 +113,12 @@ func WithCall(ctx context.Context, tool string, input []byte) context.Context {
 		}
 		t.mu.Unlock()
 	}
+	ctx = accessaudit.WithIdentity(ctx, func(i *accessaudit.Identity) {
+		i.ToolUseID = ""
+		if a.Correlation == "exact" {
+			i.ToolUseID = a.ToolUseID
+		}
+	})
 	return context.WithValue(ctx, callKey{}, a)
 }
 

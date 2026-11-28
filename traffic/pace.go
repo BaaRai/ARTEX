@@ -24,6 +24,10 @@ const paceWaitMax = 30 * time.Second
 // including those inside its tunnel, is then paced by the current noise
 // profile before it goes upstream. Unmarked connections are not paced here.
 func (s *sink) Requestheaders(f *mproxy.Flow) {
+	s.beginAudit(f)
+	if f.Request != nil {
+		defer f.Request.Header.Del("Proxy-Authorization")
+	}
 	if f.Request == nil || f.ConnContext == nil || f.ConnContext.ClientConn == nil {
 		return
 	}
@@ -45,6 +49,7 @@ func (s *sink) Requestheaders(f *mproxy.Flow) {
 func (s *sink) ClientDisconnected(c *mproxy.ClientConn) {
 	if c != nil {
 		s.paced.Delete(c.Id)
+		s.auditConnections.Delete(c.Id)
 	}
 	if s.t != nil {
 		s.t.snaps.requestSweep()

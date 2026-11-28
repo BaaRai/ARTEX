@@ -200,6 +200,7 @@ type triggeredRun struct {
 }
 
 func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDir string, opts ...Option) *Server {
+	ctx = m.auditContext(ctx)
 	key, err := loadOrCreateJWTKey(keyDir, dataDir)
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
@@ -927,6 +928,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/audit", s.getAudit)
 	mux.HandleFunc("POST /api/gc", s.gc)
+	mux.HandleFunc("GET /api/access-audit", s.getAccessAudit)
 	mux.HandleFunc("GET /api/traffic", s.getTraffic)
 	mux.HandleFunc("GET /api/traffic/hosts", s.getTrafficHosts)
 	mux.HandleFunc("DELETE /api/traffic", s.deleteTraffic)
@@ -4571,6 +4573,7 @@ func (s *Server) startTaskChat(t *Task, turn taskChatTurn) (mode, reply string, 
 				a.Worker = "mainagent"
 				emit(a)
 			})
+			gctx = s.m.auditContext(gctx)
 			gctx = intercept.WithTargetScope(gctx, t.targetScope(intercept.DefaultTargetWaitBound))
 			s.engine.BeginLLMCall(t.ID)
 			out, err := ma.Chat(gctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, t.TargetGuard.Hooks(), emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)

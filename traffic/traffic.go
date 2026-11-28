@@ -31,6 +31,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/traffic/rewrite"
 	"github.com/Autumn-27/norma/permission"
@@ -237,12 +238,17 @@ const TrafficGetDescription = "Fetch the raw request/response of one captured tr
 
 // Traffic runs the recording proxy and owns the file tree + index.
 type Traffic struct {
-	dir   string
-	addr  string
-	db    *sql.DB
-	wmu   sync.Mutex // serializes record() vs DeleteHost (incl. blob GC)
-	seq   atomic.Int64
-	proxy *mproxy.Proxy
+	accessAudit         atomic.Pointer[accessaudit.Store]
+	captureEpoch        atomic.Uint64
+	captureMu           sync.RWMutex // drain persistence before returning from a capture toggle
+	auditLeases         sync.Map     // opaque credential -> trusted accessaudit.Identity
+	replayCaptureLeases sync.Map     // explicit, server-issued manual replay credentials
+	dir                 string
+	addr                string
+	db                  *sql.DB
+	wmu                 sync.Mutex // serializes record() vs DeleteHost (incl. blob GC)
+	seq                 atomic.Int64
+	proxy               *mproxy.Proxy
 	// fts reports whether the full-text index is available. False on a driver
 	// build without FTS5: recording and metadata search still work, body search
 	// degrades to unsupported rather than erroring.
@@ -299,7 +305,15 @@ type Traffic struct {
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
-func Open(dir, addr string) (*Traffic, error) {
+func Open(dir, addr string) (*Traffic, error) { return openProxy(dir, addr, true) }
+
+// OpenAuditProxy verifies upstream certificates by default. Legacy pentest
+// deployments may explicitly opt into insecure target TLS; this is independent
+// of whether full response bodies are recorded.
+func OpenAuditProxy(dir, addr string, insecureTLS bool) (*Traffic, error) {
+	return openProxy(dir, addr, insecureTLS)
+}
+func openProxy(dir, addr string, insecureTLS bool) (*Traffic, error) {
 	for _, d := range []string{dir, filepath.Join(dir, "_index"), filepath.Join(dir, "_ca")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
@@ -338,7 +352,7 @@ func Open(dir, addr string) (*Traffic, error) {
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
 		Addr:        addr,
-		SslInsecure: true,
+		SslInsecure: insecureTLS,
 		CaRootPath:  filepath.Join(dir, "_ca"),
 	})
 	if err != nil {
@@ -616,10 +630,11 @@ func (t *Traffic) DB() *sql.DB { return t.db }
 // the requests of client connections marked for pacing (see pace.go).
 type sink struct {
 	mproxy.BaseAddon
-	t       *Traffic
-	paced   sync.Map // ClientConn.Id of a marked connection -> struct{}
-	streams sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
-	bypass  sync.Map // flowKey of a replay flow bypassing rewrite rules -> struct{}
+	t                *Traffic
+	auditConnections sync.Map // ClientConn.Id -> opaque credential
+	paced            sync.Map // ClientConn.Id of a marked connection -> struct{}
+	streams          sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
+	bypass           sync.Map // flowKey of a replay flow bypassing rewrite rules -> struct{}
 }
 
 // maybePassthrough marks a host to be tunneled transparently on the next

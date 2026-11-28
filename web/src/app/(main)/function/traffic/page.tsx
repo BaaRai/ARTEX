@@ -55,6 +55,8 @@ import { cn } from "@/lib/utils";
 import { useActiveCompanyID } from "@/stores/company/company-store";
 import { t } from "@/i18n";
 
+import { AccessAuditPanel } from "./_components/access-audit-panel";
+
 import { ReplayPanel } from "./_components/replay-panel";
 import { StreamMessagesPanel } from "./_components/stream-messages";
 import { TamperHooksPanel } from "./_components/tamper-hooks-panel";
@@ -98,7 +100,7 @@ const SORT_STORAGE_KEY = "traffic-sort";
 const STATUS_BUCKETS = ["2xx", "3xx", "4xx", "5xx"];
 
 export default function TrafficPage() {
-  const [viewTab, setViewTab] = React.useState<"exchanges" | "hooks">("exchanges");
+  const [viewTab, setViewTab] = React.useState<"exchanges" | "hooks" | "audit">("exchanges");
   // The sidebar's company switcher narrows the list to that company's hosts.
   const companyId = useActiveCompanyID();
   const [selectedFlows, setSelectedFlows] = React.useState<Set<string>>(() => new Set());
@@ -491,13 +493,16 @@ export default function TrafficPage() {
 
       <Tabs
         value={viewTab}
-        onValueChange={(v) => setViewTab(v as "exchanges" | "hooks")}
+        onValueChange={(v) => setViewTab(v as "exchanges" | "hooks" | "audit")}
         className="flex min-h-0 flex-1 flex-col gap-4"
       >
         <TabsList className="w-fit">
           <TabsTrigger value="exchanges">{t("Exchanges")}</TabsTrigger>
+          <TabsTrigger value="audit">{t("Access audit")}</TabsTrigger>
           <TabsTrigger value="hooks">{t("Hooks")}</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="audit" className="mt-0 flex min-h-0 flex-1 flex-col"><AccessAuditPanel /></TabsContent>
 
         <TabsContent value="hooks" className="mt-0 flex min-h-0 flex-1 flex-col gap-4">
           <TamperHooksPanel recentExchanges={exchanges} />

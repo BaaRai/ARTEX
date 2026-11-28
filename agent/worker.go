@@ -660,6 +660,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if tc.DeadlineUnix > 0 {
 		settle = wrapupSettlementForTask("worker", []string{"Bash"}, clamped)
 	}
+	bashEnv, releaseProxy := executionProxyEnv(ctx, "worker", w.proxyAddr, w.proxyCACert)
+	defer releaseProxy()
 	opts := agentcore.Options{
 		Provider:        w.prov,
 		SystemPrompt:    system,
@@ -686,7 +688,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		WebSearchProxy:        w.webSearch.Proxy,
 		// Bash subcommands' HTTP goes through the recording proxy + trusts its CA by
 		// default (tools need no -x/-k).
-		BashEnv:    proxyEnv(w.proxyAddr, w.proxyCACert),
+		BashEnv:    bashEnv,
 		WorkingDir: runDir,
 		MaxTurns:   w.turnCap(ctx), // 0 = unlimited (configurable in agent management); clamped by the intent budget
 		// Wall-clock budget, judged at turn boundaries without interrupting mid-flight;
