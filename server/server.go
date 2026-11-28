@@ -4662,14 +4662,26 @@ func (s *Server) gc(w http.ResponseWriter, r *http.Request) {
 
 // --- utils ---
 
+// cors answers browser preflight only for the console's own origin. The API
+// previously sent Access-Control-Allow-Origin: * on every response; with no
+// Allow-Credentials and a Content-Type-only allow-list that could not grant a
+// cross-origin session, but it was still the wrong default for an authenticated
+// API. sameOrigin is the same check requireAuth applies to cookie sessions.
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(204)
-			return
+		origin := r.Header.Get("Origin")
+		allowed := origin != "" && sameOrigin(r)
+		if origin != "" {
+			w.Header().Add("Vary", "Origin")
+		}
+		if allowed {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(204)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
