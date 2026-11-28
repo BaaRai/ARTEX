@@ -1357,6 +1357,16 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		log.Printf("[worker %s] task %s intent #%d claim lost to another worker, result discarded", name, t.ID, intent.ID)
 		return true
 	}
+	if errors.Is(err, agent.ErrSweepLoopDetected) || errors.Is(workCause, agent.ErrSweepLoopDetected) {
+		workCancel(agent.AbortOperatorHandoff)
+		e.emitSweepLoopOperatorHandoff(t, name, intent.ID)
+		if perr := t.Store.SettleIntentClaim(intent.ID, token, "paused"); perr != nil {
+			log.Printf("[worker %s] task %s intent #%d failed to pause after sweep loop: %v", name, t.ID, intent.ID, perr)
+		}
+		e.touch(t.ID)
+		t.Notify()
+		return true
+	}
 	if errors.Is(err, agent.ErrPollLoopDetected) || errors.Is(workCause, agent.ErrPollLoopDetected) {
 		workCancel(agent.AbortOperatorHandoff)
 		e.emitPollLoopOperatorHandoff(t, name, intent.ID)
@@ -1558,6 +1568,24 @@ func (e *Engine) emitPollLoopOperatorHandoff(t *Task, workerName string, intentI
 		Kind:    "result",
 		IsError: false,
 		Summary: "(paused for operator input: " + agent.AbortOperatorHandoff.Short + "; waiting for operator reply)",
+		Detail:  agent.AbortOperatorHandoff.Text,
+	})
+}
+
+func (e *Engine) emitSweepLoopOperatorHandoff(t *Task, workerName string, intentID int64) {
+	q := "Value sweep loop detected: repeated probes returned identical HTTP responses across different inputs and a gate_constant fact was recorded. Please verify target state or supply new credentials/instructions, or let the planner switch hypothesis class."
+	text := "OPERATOR INPUT REQUESTED: " + q + " (this intent is pausing; reply here to resume it with your answer)"
+	act := askOperatorActivity(text, nil, targetDerivedHosts(q, goalTargets(t.Goal)))
+	act.NodeID = &intentID
+	act.Worker = workerName
+	act.IsError = false
+	e.emitActivity(t, act)
+	e.emitActivity(t, db.Activity{
+		NodeID:  &intentID,
+		Worker:  workerName,
+		Kind:    "result",
+		IsError: false,
+		Summary: "(paused for operator input: " + agent.AbortOperatorHandoff.Short + "; gate_constant recorded — awaiting planner/operator pivot)",
 		Detail:  agent.AbortOperatorHandoff.Text,
 	})
 }

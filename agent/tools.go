@@ -155,6 +155,7 @@ type ToolSet struct {
 	ts                  *db.ExplorationStore
 	factTraffic         FactTrafficLookup // proxy capture store for fact classification; nil = activity-only
 	statefulGuard       *intercept.StatefulTargetGuard
+	strictGateConstant  *bool
 	worker              string
 	taskID              int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
 	// coverageDisabled mirrors tasks.coverage_enabled=false. Stored inverted so the
@@ -282,6 +283,9 @@ func (t *ToolSet) SetTaskID(id int64) { t.taskID = id }
 // SetStatefulGuard wires the per-engine stateful target guard so graph_overview
 // and lease_status can inspect live per-host mutation leases for this task.
 func (t *ToolSet) SetStatefulGuard(g *intercept.StatefulTargetGuard) { t.statefulGuard = g }
+
+// SetGateConstantStrict overrides per-task strict vs shadow mode for gate_constant.
+func (t *ToolSet) SetGateConstantStrict(strict bool) { t.strictGateConstant = &strict }
 
 func (t *ToolSet) statefulLeaseOverview() []intercept.LeaseStatus {
 	if !intercept.StatefulGuardEnabled() || t.statefulGuard == nil || t.taskID <= 0 {
@@ -729,6 +733,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		if len(closedCap) > 0 {
 			out["capabilities_closed"] = closedCap
 		}
+	}
+	if gcs := t.gateConstantOverview(); len(gcs) > 0 {
+		out["gate_constants"] = gcs
 	}
 	if openHyp, closedHyp := t.hypothesisOverview(); len(openHyp) > 0 || len(closedHyp) > 0 {
 		if len(openHyp) > 0 {
@@ -1372,6 +1379,10 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 	if err := t.checkClosedHypothesis(it); err != nil {
 		return 0, err
 	}
+	gateWarn, err := t.checkGateConstantIntent(it)
+	if err != nil {
+		return 0, err
+	}
 	capWarn, err := t.checkIntentCapabilities(it)
 	if err != nil {
 		return 0, err
@@ -1420,6 +1431,9 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 	}
 	if capWarn != "" {
 		payload["capability_shadow_warning"] = capWarn
+	}
+	if gateWarn != "" {
+		payload["gate_constant_shadow_warning"] = gateWarn
 	}
 	id, err := t.ts.AddIntent(payload, priority, anchors, "planner")
 	if err != nil {

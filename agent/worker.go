@@ -560,6 +560,16 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// are kept as usual.
 	base = append(base, defaultToolsExcept(w.workDir, "MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
+	var gateTraffic GateTrafficLookup
+	if gt, ok := w.factTraffic.(GateTrafficLookup); ok {
+		gateTraffic = gt
+	}
+	ctx = WithGateConstantHooks(ctx, GateConstantHooks{
+		Traffic: gateTraffic,
+		RecordGateConstant: func(gRec GateConstantRecord) (int64, error) {
+			return RecordGateConstantFact(ts, intent.ID, gRec)
+		},
+	})
 	tools, def, cleanup := AugmentTools(WithToolQuery(ctx, nodeSummary(intent)), "worker", base)
 	defer cleanup()
 

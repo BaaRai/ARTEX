@@ -46,3 +46,7 @@ const FactSubtypeHypothesis = "hypothesis"
 // FactSubtypeCapability tags kind=fact nodes that represent capabilities (#613)
 // without altering ck_node_kind (zero schema migration).
 const FactSubtypeCapability = "capability"
+
+// FactSubtypeGateConstant tags kind=fact nodes recording repeated constant HTTP
+// responses across distinct probe inputs (zero schema migration).
+const FactSubtypeGateConstant = "gate_constant"
