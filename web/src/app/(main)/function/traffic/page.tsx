@@ -50,7 +50,7 @@ import { formatBytes, formatShortDateTime } from "@/lib/format";
 import { setVisibleInterval } from "@/lib/polling";
 import { useStoredSortPreference } from "@/lib/sort-preference";
 import { httpStatusTone } from "@/lib/status";
-import type { TrafficDetail, TrafficExchange, TrafficHARImportResult, TrafficHost, TrafficResp } from "@/lib/types";
+import type { TrafficExchange } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useActiveCompanyID } from "@/stores/company/company-store";
 import { t } from "@/i18n";
@@ -58,7 +58,7 @@ import { t } from "@/i18n";
 import { ReplayPanel } from "./_components/replay-panel";
 import { StreamMessagesPanel } from "./_components/stream-messages";
 import { TamperHooksPanel } from "./_components/tamper-hooks-panel";
-
+import { createTrafficPageState, trafficPageReducer } from "./_state/traffic-page.reducer";
 
 function MethodBadge({ method }: { method: string }) {
   return <Badge className="shrink-0 font-mono">{method}</Badge>;
@@ -85,7 +85,6 @@ function requestWithHost(raw: string, exchange: TrafficExchange): string {
 // single page, which would only ever list the methods on that page.
 const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 const PAGE_SIZES = [25, 50, 100, 200];
-type HostCountSortDirection = "asc" | "desc";
 
 // Server-sortable columns. The list is sent to the backend verbatim as `sort`,
 // which whitelists these same names, so keep them in sync with traffic.Page.
@@ -98,104 +97,58 @@ const SORT_STORAGE_KEY = "traffic-sort";
 const STATUS_BUCKETS = ["2xx", "3xx", "4xx", "5xx"];
 
 export default function TrafficPage() {
-  const [viewTab, setViewTab] = React.useState<"exchanges" | "hooks">("exchanges");
+  const [state, dispatch] = React.useReducer(trafficPageReducer, undefined, createTrafficPageState);
+  const { viewTab, filters, pagination, list, hostPicker, inspector, linking, deleteMode, harSummary, requests } =
+    state;
+  const { page, size } = pagination;
+  const { traffic } = list;
+  const { hosts, selected: selectedHosts } = hostPicker;
+  const { selected, detail } = inspector;
+  const selectedFlows = state.selection;
+  const deleting = requests.delete.pending;
+  const harImporting = requests.harImport.pending;
+  const harExporting = requests.harExport.pending;
+  const harError = requests.harImport.error;
   // The sidebar's company switcher narrows the list to that company's hosts.
   const companyId = useActiveCompanyID();
-  const [selectedFlows, setSelectedFlows] = React.useState<Set<string>>(() => new Set());
-  const [linking, setLinking] = React.useState(false);
-  const [page, setPage] = React.useState(0);
-  const [size, setSize] = React.useState(50);
-  const [host, setHost] = React.useState(""); // raw host input
-  const [hostQ, setHostQ] = React.useState(""); // debounced → server
-  const [query, setQuery] = React.useState(""); // raw free-text input
-  const [queryQ, setQueryQ] = React.useState(""); // debounced → server
-  const [method, setMethod] = React.useState("all");
 
-  // Advanced filters (issue #177): response-body content, path, status class and
-  // response-size range. Text inputs are debounced like host/query; the status
-  // select applies immediately.
-  const [body, setBody] = React.useState("");
-  const [bodyQ, setBodyQ] = React.useState("");
-  const [path, setPath] = React.useState("");
-  const [pathQ, setPathQ] = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState("all");
-  const [rewrittenFilter, setRewrittenFilter] = React.useState("all");
-  const [respMin, setRespMin] = React.useState("");
-  const [respMinQ, setRespMinQ] = React.useState("");
-  const [respMax, setRespMax] = React.useState("");
-  const [respMaxQ, setRespMaxQ] = React.useState("");
   const [sort, setSort] = useStoredSortPreference<SortField>(SORT_STORAGE_KEY, SORT_FIELDS, "ts", "desc");
 
-  const [traffic, setTraffic] = React.useState<TrafficResp | null>(null);
-  const [selected, setSelected] = React.useState<TrafficExchange | null>(null);
-  const [detail, setDetail] = React.useState<TrafficDetail | null>(null);
-  const [detailLoading, setDetailLoading] = React.useState(false);
-  const [detailTab, setDetailTab] = React.useState("request");
   const streamKind = detail?.stream_kind === "websocket" || detail?.stream_kind === "sse" ? detail.stream_kind : null;
   const hasStream = streamKind !== null;
 
-  const [hosts, setHosts] = React.useState<TrafficHost[]>([]); // target picker
-  const [selectedHosts, setSelectedHosts] = React.useState<string[]>([]); // checked in picker
-  const [pickerOpen, setPickerOpen] = React.useState(false);
-  const [hostCountSortDirection, setHostCountSortDirection] = React.useState<HostCountSortDirection>("desc");
-
-  const [deleteMode, setDeleteMode] = React.useState<"filter" | "selected" | "all" | null>(null); // null = dialog closed
-  const [deleting, setDeleting] = React.useState(false);
-  const [reloadTick, setReloadTick] = React.useState(0); // manual refetch trigger
-
   // HAR 1.2 import/export state
   const harInputRef = React.useRef<HTMLInputElement | null>(null);
-  const [harImporting, setHarImporting] = React.useState(false);
-  const [harExporting, setHarExporting] = React.useState(false);
-  const [harSummary, setHarSummary] = React.useState<TrafficHARImportResult | null>(null);
-  const [harError, setHarError] = React.useState<string | null>(null);
 
-  // Debounce both filters so we don't refetch on every keystroke.
+  // Debounce the text filters so we don't refetch on every keystroke. One shared
+  // timer: the reducer applies every input at once and resets the page only if
+  // an applied value actually changed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the reducer reads the latest inputs; re-arm on every keystroke.
   React.useEffect(() => {
-    const t = setTimeout(() => setHostQ(host.trim()), 300);
+    const t = setTimeout(() => dispatch({ type: "filtersDebounced" }), 300);
     return () => clearTimeout(t);
-  }, [host]);
-  React.useEffect(() => {
-    const t = setTimeout(() => setQueryQ(query.trim()), 300);
-    return () => clearTimeout(t);
-  }, [query]);
-  React.useEffect(() => {
-    const t = setTimeout(() => setBodyQ(body.trim()), 300);
-    return () => clearTimeout(t);
-  }, [body]);
-  React.useEffect(() => {
-    const t = setTimeout(() => setPathQ(path.trim()), 300);
-    return () => clearTimeout(t);
-  }, [path]);
-  React.useEffect(() => {
-    const t = setTimeout(() => setRespMinQ(respMin.trim()), 300);
-    return () => clearTimeout(t);
-  }, [respMin]);
-  React.useEffect(() => {
-    const t = setTimeout(() => setRespMaxQ(respMax.trim()), 300);
-    return () => clearTimeout(t);
-  }, [respMax]);
+  }, [
+    filters.input.host,
+    filters.input.query,
+    filters.input.body,
+    filters.input.path,
+    filters.input.respMin,
+    filters.input.respMax,
+  ]);
 
+  const { applied } = filters;
   const hasAdvancedFilter =
-    Boolean(bodyQ || pathQ || respMinQ || respMaxQ) || statusFilter !== "all" || rewrittenFilter !== "all";
-  const resetAdvancedFilters = () => {
-    setBody("");
-    setBodyQ("");
-    setPath("");
-    setPathQ("");
-    setStatusFilter("all");
-    setRewrittenFilter("all");
-    setRespMin("");
-    setRespMinQ("");
-    setRespMax("");
-    setRespMaxQ("");
-  };
+    Boolean(applied.body || applied.path || applied.respMin || applied.respMax) ||
+    filters.status !== "all" ||
+    filters.rewritten !== "all";
+  const resetAdvancedFilters = () => dispatch({ type: "advancedFiltersCleared" });
 
-  // Any filter/size/sort change resets to the first page.
+  // Filter and size changes reset the page inside the reducer; sort and company
+  // live outside it, so they still reset to the first page here.
   // biome-ignore lint/correctness/useExhaustiveDependencies: these values intentionally trigger a page reset.
   React.useEffect(() => {
-    setPage(0);
-  }, [hostQ, queryQ, method, size, bodyQ, pathQ, statusFilter, rewrittenFilter, respMinQ, respMaxQ, sort, companyId]);
+    dispatch({ type: "pagination/pageChanged", page: 0 });
+  }, [sort, companyId]);
 
   // Load the current page. Auto-refresh only on page 0 (newest) so paging back
   // through history isn't yanked out from under the user.
@@ -204,19 +157,19 @@ export default function TrafficPage() {
     let alive = true;
     const load = () => {
       api
-        .traffic(page, size, hostQ, method, queryQ, {
-          body: bodyQ,
-          path: pathQ,
-          status: statusFilter,
-          rewritten: rewrittenFilter,
-          respMin: respMinQ,
-          respMax: respMaxQ,
+        .traffic(page, size, applied.host, filters.method, applied.query, {
+          body: applied.body,
+          path: applied.path,
+          status: filters.status,
+          rewritten: filters.rewritten,
+          respMin: applied.respMin,
+          respMax: applied.respMax,
           sort: sort.field,
           order: sort.direction,
           company: companyId,
         })
         .then((r) => {
-          if (alive) setTraffic(r);
+          if (alive) dispatch({ type: "trafficLoaded", traffic: r });
         })
         .catch(() => {
           // Keep the last successful snapshot during transient refresh failures.
@@ -224,7 +177,7 @@ export default function TrafficPage() {
       api
         .trafficHosts()
         .then((r) => {
-          if (alive) setHosts(r.hosts ?? []);
+          if (alive) dispatch({ type: "hostsLoaded", hosts: r.hosts ?? [] });
         })
         .catch(() => {
           // Keep the last successful host list during transient refresh failures.
@@ -242,17 +195,17 @@ export default function TrafficPage() {
   }, [
     page,
     size,
-    hostQ,
-    method,
-    queryQ,
-    bodyQ,
-    pathQ,
-    statusFilter,
-    rewrittenFilter,
-    respMinQ,
-    respMaxQ,
+    applied.host,
+    filters.method,
+    applied.query,
+    applied.body,
+    applied.path,
+    filters.status,
+    filters.rewritten,
+    applied.respMin,
+    applied.respMax,
     sort,
-    reloadTick,
+    list.reloadTick,
     companyId,
   ]);
 
@@ -262,10 +215,10 @@ export default function TrafficPage() {
   const sortedHosts = React.useMemo(
     () =>
       [...hosts].sort((a, b) => {
-        const countOrder = hostCountSortDirection === "asc" ? a.count - b.count : b.count - a.count;
+        const countOrder = hostPicker.countSortDirection === "asc" ? a.count - b.count : b.count - a.count;
         return countOrder || a.host.localeCompare(b.host);
       }),
-    [hosts, hostCountSortDirection],
+    [hosts, hostPicker.countSortDirection],
   );
 
   // "Purge" for the unfiltered purge, "Delete" for the host-scoped ones — the dialog's
@@ -284,22 +237,17 @@ export default function TrafficPage() {
   const requestDelete = (mode: "filter" | "selected" | "all"): Promise<{ deleted: number; reclaimed?: number }> => {
     if (mode === "all") return api.trafficDeleteAll();
     if (mode === "selected") return api.trafficDeleteHosts(selectedHosts);
-    return api.trafficDeleteHost(hostQ);
+    return api.trafficDeleteHost(applied.host);
   };
 
   const confirmDelete = () => {
     if (!deleteMode) return;
-    setDeleting(true);
+    dispatch({ type: "request/started", key: "delete" });
     const mode = deleteMode;
     requestDelete(mode)
       .then((r) => {
-        setDeleteMode(null);
-        setSelected(null);
-        setDetail(null);
-        if (mode !== "filter") {
-          setSelectedHosts([]);
-          setPickerOpen(false);
-        }
+        // Also clears the selection, resets to the first page and refetches.
+        dispatch({ type: "deleteSucceeded", mode });
         if (mode === "all") {
           // Reclaimed space is the whole point of compacting an emptied index, so say so.
           const reclaimed = r.reclaimed ?? 0;
@@ -312,39 +260,34 @@ export default function TrafficPage() {
               : t("Purged {count} traffic records", { count: r.deleted }),
           );
         }
-        setPage(0);
-        setReloadTick((t) => t + 1);
       })
       .catch((e) => {
         // Keep the confirmation open so the user can retry a failed deletion.
         if (mode === "all") toast.error(t("Purge failed: {error}", { error: (e as Error).message }));
       })
-      .finally(() => setDeleting(false));
+      .finally(() => dispatch({ type: "request/finished", key: "delete" }));
   };
 
   // Lazy-load the raw request/response for the selected exchange. A new
   // selection opens on Request; a WebSocket/SSE exchange then opens on Stream.
   React.useEffect(() => {
-    setDetailTab("request");
     if (!selected) {
-      setDetail(null);
+      dispatch({ type: "detailCleared" });
       return;
     }
     let alive = true;
-    setDetailLoading(true);
-    setDetail(null);
+    dispatch({ type: "detailLoadStarted" });
     api
       .trafficExchange(selected.id)
       .then((d) => {
         if (!alive) return;
-        setDetail(d);
-        if (d.stream_kind === "websocket" || d.stream_kind === "sse") setDetailTab("stream");
+        dispatch({ type: "detailLoaded", detail: d });
       })
       .catch(() => {
-        if (alive) setDetail({ req: t("(failed to load the messages)"), resp: "" });
+        if (alive) dispatch({ type: "detailLoaded", detail: { req: t("(failed to load the messages)"), resp: "" } });
       })
       .finally(() => {
-        if (alive) setDetailLoading(false);
+        if (alive) dispatch({ type: "detailLoadFinished" });
       });
     return () => {
       alive = false;
@@ -364,19 +307,19 @@ export default function TrafficPage() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    setHarError(null);
-    setHarSummary(null);
+    dispatch({ type: "harImportCleared" });
     if (file.size > 32 * 1024 * 1024) {
       const msg = t("HAR file exceeds the 32 MiB limit");
-      setHarError(msg);
+      dispatch({ type: "request/failed", key: "harImport", error: msg });
       toast.error(msg);
       return;
     }
-    setHarImporting(true);
+    dispatch({ type: "request/started", key: "harImport" });
     try {
       const raw = await file.text();
       const res = await api.trafficImportHAR(raw);
-      setHarSummary(res);
+      // Also resets to the first page and refetches.
+      dispatch({ type: "harImported", summary: res });
       const summary = t("HAR import complete: {imported} imported, {skipped} skipped, {failed} failed", {
         imported: res.imported,
         skipped: res.skipped,
@@ -387,30 +330,28 @@ export default function TrafficPage() {
       } else {
         toast.success(summary);
       }
-      setPage(0);
-      setReloadTick((n) => n + 1);
     } catch (e) {
       const msg = t("HAR import failed: {error}", { error: (e as Error).message });
-      setHarError(msg);
+      dispatch({ type: "request/failed", key: "harImport", error: msg });
       toast.error(msg);
     } finally {
-      setHarImporting(false);
+      dispatch({ type: "request/finished", key: "harImport" });
     }
   };
 
   const handleHarExport = async () => {
-    setHarExporting(true);
+    dispatch({ type: "request/started", key: "harExport" });
     try {
       const meta = await api.trafficExportHAR({
-        host: hostQ,
-        method,
-        q: queryQ,
-        body: bodyQ,
-        path: pathQ,
-        status: statusFilter,
-        rewritten: rewrittenFilter,
-        respMin: respMinQ,
-        respMax: respMaxQ,
+        host: applied.host,
+        method: filters.method,
+        q: applied.query,
+        body: applied.body,
+        path: applied.path,
+        status: filters.status,
+        rewritten: filters.rewritten,
+        respMin: applied.respMin,
+        respMax: applied.respMax,
       });
       if (meta.truncated) {
         toast.warning(
@@ -426,7 +367,7 @@ export default function TrafficPage() {
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setHarExporting(false);
+      dispatch({ type: "request/finished", key: "harExport" });
     }
   };
 
@@ -491,7 +432,7 @@ export default function TrafficPage() {
 
       <Tabs
         value={viewTab}
-        onValueChange={(v) => setViewTab(v as "exchanges" | "hooks")}
+        onValueChange={(v) => dispatch({ type: "fieldsChanged", patch: { viewTab: v as "exchanges" | "hooks" } })}
         className="flex min-h-0 flex-1 flex-col gap-4"
       >
         <TabsList className="w-fit">
@@ -508,7 +449,12 @@ export default function TrafficPage() {
       {harError ? (
         <Alert variant="destructive" className="flex items-center justify-between gap-2 py-2">
           <AlertDescription className="text-xs">{harError}</AlertDescription>
-          <Button variant="ghost" size="icon-xs" aria-label={t("Dismiss")} onClick={() => setHarError(null)}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("Dismiss")}
+            onClick={() => dispatch({ type: "request/errorCleared", key: "harImport" })}
+          >
             <XIcon className="size-3.5" />
           </Button>
         </Alert>
@@ -539,7 +485,12 @@ export default function TrafficPage() {
               </ul>
             ) : null}
           </AlertDescription>
-          <Button variant="ghost" size="icon-xs" aria-label={t("Dismiss")} onClick={() => setHarSummary(null)}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("Dismiss")}
+            onClick={() => dispatch({ type: "harSummaryDismissed" })}
+          >
             <XIcon className="size-3.5" />
           </Button>
         </Alert>
@@ -547,7 +498,10 @@ export default function TrafficPage() {
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+        <Popover
+          open={hostPicker.open}
+          onOpenChange={(open) => dispatch({ type: "hostPickerChanged", patch: { open } })}
+        >
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="h-8">
               <ListChecksIcon className="size-3.5" />
@@ -570,18 +524,22 @@ export default function TrafficPage() {
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        onClick={() => setHostCountSortDirection((current) => (current === "desc" ? "asc" : "desc"))}
+                        onClick={() => dispatch({ type: "hostCountSortToggled" })}
                         aria-label={
-                          hostCountSortDirection === "desc"
+                          hostPicker.countSortDirection === "desc"
                             ? t("Packet count is currently descending; click to switch to ascending")
                             : t("Packet count is currently ascending; click to switch to descending")
                         }
                       >
-                        {hostCountSortDirection === "desc" ? <ArrowDownWideNarrowIcon /> : <ArrowUpNarrowWideIcon />}
+                        {hostPicker.countSortDirection === "desc" ? (
+                          <ArrowDownWideNarrowIcon />
+                        ) : (
+                          <ArrowUpNarrowWideIcon />
+                        )}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {hostCountSortDirection === "desc"
+                      {hostPicker.countSortDirection === "desc"
                         ? t("By packet count, descending")
                         : t("By packet count, ascending")}
                     </TooltipContent>
@@ -592,7 +550,12 @@ export default function TrafficPage() {
                     variant="ghost"
                     size="sm"
                     className="h-6 px-2 text-xs"
-                    onClick={() => setSelectedHosts(allSelected ? [] : hosts.map((h) => h.host))}
+                    onClick={() =>
+                      dispatch({
+                        type: "hostPickerChanged",
+                        patch: { selected: allSelected ? [] : hosts.map((h) => h.host) },
+                      })
+                    }
                   >
                     {allSelected ? t("Clear all") : t("Select all")}
                   </Button>
@@ -612,11 +575,7 @@ export default function TrafficPage() {
                     <Checkbox
                       id={`traffic-host-${index}`}
                       checked={selectedHosts.includes(h.host)}
-                      onCheckedChange={() =>
-                        setSelectedHosts((prev) =>
-                          prev.includes(h.host) ? prev.filter((x) => x !== h.host) : [...prev, h.host],
-                        )
-                      }
+                      onCheckedChange={() => dispatch({ type: "hostToggled", host: h.host })}
                     />
                     <span className="truncate font-mono">{h.host}</span>
                     <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{h.count}</span>
@@ -631,8 +590,8 @@ export default function TrafficPage() {
                 className="w-full"
                 disabled={selectedHosts.length === 0}
                 onClick={() => {
-                  setDeleteMode("selected");
-                  setPickerOpen(false);
+                  dispatch({ type: "deleteRequested", mode: "selected" });
+                  dispatch({ type: "hostPickerChanged", patch: { open: false } });
                 }}
               >
                 {t("Delete selected ({count})", { count: selectedHosts.length })}
@@ -641,15 +600,20 @@ export default function TrafficPage() {
           </PopoverContent>
         </Popover>
         <div className="relative w-48">
-          <Input placeholder="host…" value={host} onChange={(e) => setHost(e.target.value)} className="h-8" />
+          <Input
+            placeholder="host…"
+            value={filters.input.host}
+            onChange={(e) => dispatch({ type: "filterInputChanged", field: "host", value: e.target.value })}
+            className="h-8"
+          />
         </div>
         <Button
           variant="destructive"
           size="sm"
           className="h-8"
-          disabled={!hostQ || deleting}
-          title={hostQ ? undefined : t("Select a target on the left or enter a host first")}
-          onClick={() => setDeleteMode("filter")}
+          disabled={!applied.host || deleting}
+          title={applied.host ? undefined : t("Select a target on the left or enter a host first")}
+          onClick={() => dispatch({ type: "deleteRequested", mode: "filter" })}
         >
           <Trash2Icon className="size-3.5" />
           {t("Delete this target")}
@@ -662,7 +626,7 @@ export default function TrafficPage() {
           className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
           disabled={!traffic?.count || deleting}
           title={traffic?.count ? t("Delete all traffic and compact storage") : t("No traffic records yet")}
-          onClick={() => setDeleteMode("all")}
+          onClick={() => dispatch({ type: "deleteRequested", mode: "all" })}
         >
           <EraserIcon className="size-3.5" />
           {t("Purge all")}
@@ -671,12 +635,12 @@ export default function TrafficPage() {
           <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder={t("Search everything (URL / method / type / status…)")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={filters.input.query}
+            onChange={(e) => dispatch({ type: "filterInputChanged", field: "query", value: e.target.value })}
             className="h-8 pl-8"
           />
         </div>
-        <Select value={method} onValueChange={setMethod}>
+        <Select value={filters.method} onValueChange={(method) => dispatch({ type: "methodChanged", method })}>
           <SelectTrigger size="sm" className="w-32">
             <SelectValue placeholder={t("Method")} />
           </SelectTrigger>
@@ -689,7 +653,10 @@ export default function TrafficPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={String(size)} onValueChange={(v) => setSize(Number(v))}>
+        <Select
+          value={String(size)}
+          onValueChange={(v) => dispatch({ type: "pagination/sizeChanged", size: Number(v) })}
+        >
           <SelectTrigger size="sm" className="w-28">
             <SelectValue />
           </SelectTrigger>
@@ -711,7 +678,7 @@ export default function TrafficPage() {
             size="icon"
             className="size-8"
             disabled={page <= 0}
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            onClick={() => dispatch({ type: "previousPageRequested" })}
           >
             <ChevronLeftIcon />
           </Button>
@@ -723,7 +690,7 @@ export default function TrafficPage() {
             size="icon"
             className="size-8"
             disabled={page + 1 >= pageCount}
-            onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+            onClick={() => dispatch({ type: "nextPageRequested", pageCount })}
           >
             <ChevronRightIcon />
           </Button>
@@ -736,20 +703,20 @@ export default function TrafficPage() {
         <div className="relative w-56">
           <Input
             placeholder={t("Response content (body keyword, ≥3 chars)")}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
+            value={filters.input.body}
+            onChange={(e) => dispatch({ type: "filterInputChanged", field: "body", value: e.target.value })}
             className="h-8"
           />
         </div>
         <div className="relative w-52">
           <Input
             placeholder={t("Path (e.g. /api/user/…)")}
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
+            value={filters.input.path}
+            onChange={(e) => dispatch({ type: "filterInputChanged", field: "path", value: e.target.value })}
             className="h-8"
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={filters.status} onValueChange={(status) => dispatch({ type: "statusFilterChanged", status })}>
           <SelectTrigger size="sm" className="w-28">
             <SelectValue placeholder={t("Status")} />
           </SelectTrigger>
@@ -762,7 +729,10 @@ export default function TrafficPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={rewrittenFilter} onValueChange={setRewrittenFilter}>
+        <Select
+          value={filters.rewritten}
+          onValueChange={(rewritten) => dispatch({ type: "rewrittenFilterChanged", rewritten })}
+        >
           <SelectTrigger size="sm" className="w-32">
             <SelectValue placeholder={t("Rewritten")} />
           </SelectTrigger>
@@ -778,8 +748,8 @@ export default function TrafficPage() {
             type="number"
             min={0}
             placeholder={t("Min (B)")}
-            value={respMin}
-            onChange={(e) => setRespMin(e.target.value)}
+            value={filters.input.respMin}
+            onChange={(e) => dispatch({ type: "filterInputChanged", field: "respMin", value: e.target.value })}
             className="h-8 w-24"
           />
           <span>–</span>
@@ -787,8 +757,8 @@ export default function TrafficPage() {
             type="number"
             min={0}
             placeholder={t("Max (B)")}
-            value={respMax}
-            onChange={(e) => setRespMax(e.target.value)}
+            value={filters.input.respMax}
+            onChange={(e) => dispatch({ type: "filterInputChanged", field: "respMax", value: e.target.value })}
             className="h-8 w-24"
           />
         </div>
@@ -804,11 +774,16 @@ export default function TrafficPage() {
         <span className="text-sm text-muted-foreground">
           {t("{count} flows selected", { count: selectedFlows.size })}
         </span>
-        <Button variant="outline" size="sm" disabled={selectedFlows.size === 0} onClick={() => setLinking(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={selectedFlows.size === 0}
+          onClick={() => dispatch({ type: "fieldsChanged", patch: { linking: true } })}
+        >
           {t("Link to finding")}
         </Button>
         {selectedFlows.size > 0 ? (
-          <Button variant="ghost" size="sm" onClick={() => setSelectedFlows(new Set())}>
+          <Button variant="ghost" size="sm" onClick={() => dispatch({ type: "selection/cleared" })}>
             {t("Clear selection")}
           </Button>
         ) : null}
@@ -825,13 +800,10 @@ export default function TrafficPage() {
                       aria-label={t("Select this page's traffic")}
                       checked={exchanges.length > 0 && exchanges.every((e) => selectedFlows.has(e.id))}
                       onCheckedChange={(checked) =>
-                        setSelectedFlows((previous) => {
-                          const next = new Set(previous);
-                          for (const e of exchanges) {
-                            if (checked === true) next.add(e.id);
-                            else next.delete(e.id);
-                          }
-                          return next;
+                        dispatch({
+                          type: "flowsSelectionChanged",
+                          ids: exchanges.map((e) => e.id),
+                          checked: checked === true,
                         })
                       }
                     />
@@ -872,7 +844,7 @@ export default function TrafficPage() {
                   <TableRow
                     key={e.id}
                     className={cn("cursor-pointer", selected?.id === e.id && "bg-accent hover:bg-accent")}
-                    onClick={() => setSelected(e)}
+                    onClick={() => dispatch({ type: "inspectorChanged", patch: { selected: e } })}
                   >
                     <TableCell>
                       <Checkbox
@@ -880,12 +852,7 @@ export default function TrafficPage() {
                         checked={selectedFlows.has(e.id)}
                         onClick={(event) => event.stopPropagation()}
                         onCheckedChange={(checked) =>
-                          setSelectedFlows((previous) => {
-                            const next = new Set(previous);
-                            if (checked === true) next.add(e.id);
-                            else next.delete(e.id);
-                            return next;
-                          })
+                          dispatch({ type: "flowsSelectionChanged", ids: [e.id], checked: checked === true })
                         }
                       />
                     </TableCell>
@@ -936,11 +903,14 @@ export default function TrafficPage() {
       {linking ? (
         <LinkTrafficDialog
           trafficIds={[...selectedFlows]}
-          onClose={() => setLinking(false)}
-          onBound={() => setSelectedFlows(new Set())}
+          onClose={() => dispatch({ type: "fieldsChanged", patch: { linking: false } })}
+          onBound={() => dispatch({ type: "selection/cleared" })}
         />
       ) : null}
-      <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
+      <Sheet
+        open={selected !== null}
+        onOpenChange={(open) => !open && dispatch({ type: "inspectorChanged", patch: { selected: null } })}
+      >
         <SheetContent className="w-full! max-w-none! gap-0 p-0 sm:w-[48rem]! sm:max-w-[48rem]!">
           {selected && (
             <>
@@ -968,7 +938,11 @@ export default function TrafficPage() {
                 <SheetTitle className="break-all font-mono">{selected.host}</SheetTitle>
                 <SheetDescription className="break-all font-mono">{selected.url}</SheetDescription>
               </SheetHeader>
-              <Tabs value={detailTab} onValueChange={setDetailTab} className="min-h-0 flex-1 gap-0">
+              <Tabs
+                value={inspector.tab}
+                onValueChange={(tab) => dispatch({ type: "inspectorChanged", patch: { tab } })}
+                className="min-h-0 flex-1 gap-0"
+              >
                 <TabsList className={cn("mx-5 mt-4 grid w-auto", hasStream ? "grid-cols-4" : "grid-cols-3")}>
                   <TabsTrigger value="request">{t("Request")}</TabsTrigger>
                   <TabsTrigger value="response">{t("Response")}</TabsTrigger>
@@ -991,7 +965,7 @@ export default function TrafficPage() {
                   )}
                 </TabsList>
                 <TabsContent value="request" className="min-h-0 overflow-auto">
-                  {detailLoading ? (
+                  {inspector.loading ? (
                     <div className="flex items-center gap-2 p-5 text-xs text-muted-foreground">
                       <Loader2Icon className="size-3.5 animate-spin" />
                       {t("Loading messages…")}
@@ -1001,7 +975,7 @@ export default function TrafficPage() {
                   )}
                 </TabsContent>
                 <TabsContent value="response" className="min-h-0 overflow-auto">
-                  {detailLoading ? (
+                  {inspector.loading ? (
                     <div className="flex items-center gap-2 p-5 text-xs text-muted-foreground">
                       <Loader2Icon className="size-3.5 animate-spin" />
                       {t("Loading messages…")}
@@ -1018,7 +992,7 @@ export default function TrafficPage() {
                 {!hasStream && (
                   // Kept mounted so edits survive a look at another tab.
                   <TabsContent value="replay" forceMount className="min-h-0 overflow-auto data-[state=inactive]:hidden">
-                    {detailLoading || !detail ? (
+                    {inspector.loading || !detail ? (
                       <div className="flex items-center gap-2 p-5 text-muted-foreground text-xs">
                         <Loader2Icon className="size-3.5 animate-spin" />
                         {t("Loading…")}
@@ -1028,7 +1002,7 @@ export default function TrafficPage() {
                         exchange={selected}
                         raw={requestWithHost(detail.req, selected)}
                         methods={METHODS}
-                        onRecorded={() => setReloadTick((n) => n + 1)}
+                        onRecorded={() => dispatch({ type: "reloadRequested" })}
                       />
                     )}
                   </TabsContent>
@@ -1042,7 +1016,7 @@ export default function TrafficPage() {
       <AlertDialog
         open={deleteMode !== null}
         onOpenChange={(o) => {
-          if (!o) setDeleteMode(null);
+          if (!o) dispatch({ type: "deleteDialogClosed" });
         }}
       >
         <AlertDialogContent>
@@ -1078,7 +1052,7 @@ export default function TrafficPage() {
                 <>
                   {t(
                     "This will permanently delete all traffic records for hosts containing {host} (including raw requests/responses). This action cannot be undone.",
-                    { host: hostQ },
+                    { host: applied.host },
                   )}
                 </>
               )}

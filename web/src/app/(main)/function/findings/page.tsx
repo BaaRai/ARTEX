@@ -47,10 +47,8 @@ import { statusMeta } from "@/lib/status";
 import type {
   ActiveFindingRetest,
   Finding,
-  FindingAssetNode,
   FindingGroup,
   FindingReportState,
-  FindingStats,
   FindingStatus,
   Severity,
   VerificationStatus,
@@ -62,8 +60,6 @@ import { AssetTree, assetPathOf } from "./_components/asset-tree";
 import {
   FINDING_REPORT_STATES,
   FINDING_STATUSES,
-  type FindingEdit,
-  type FindingReport,
   FindingsTable,
   findingRowKey,
   isSameFinding,
@@ -76,111 +72,50 @@ import {
 import { setVisibleInterval } from "@/lib/polling";
 import { t } from "@/i18n";
 
+import {
+  type ExportFormat,
+  type ExportScope,
+  FINDING_VIEWS,
+  type FindingEditUpdate,
+  type FindingListPreferences,
+  type FindingView,
+  createInitialFindingsPageState,
+  findingsPageReducer,
+} from "./_state/findings-page.reducer";
+
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
-
-// List views: flat = one big cross-task table (default); grouped = collapsible groups by task;
-// asset = left asset tree + the findings under that subtree on the right.
-type FindingView = "flat" | "grouped" | "asset";
-
-const FINDING_VIEWS: FindingView[] = ["flat", "grouped", "asset"];
-
-// One-shot snapshot of the asset tree. Unlike the other two views, the asset view doesn't poll:
-// it re-queries on view entry, filter changes, or finding mutations made on this page.
-interface AssetTreeState {
-  nodes: FindingAssetNode[];
-  findingTotal: number;
-  truncated: boolean;
-  droppedKinds: string[];
-  loaded: boolean;
-  loading: boolean;
-}
-
-const EMPTY_ASSET_TREE: AssetTreeState = {
-  nodes: [],
-  findingTotal: 0,
-  truncated: false,
-  droppedKinds: [],
-  loaded: false,
-  loading: false,
-};
-
-// In the grouped view, every expanded task group carries its own pagination state, independent of the others.
-interface GroupFindingsState {
-  items: Finding[];
-  total: number;
-  page: number;
-  pageSize: number;
-  loaded: boolean;
-  loading: boolean;
-}
-
-// The flat view's page number lives in its own state (not inside the snapshot), so a filter change resets it and triggers a reload.
-interface FlatFindingsState {
-  items: Finding[];
-  total: number;
-  loaded: boolean;
-  loading: boolean;
-}
-
-const EMPTY_FLAT_STATE: FlatFindingsState = { items: [], total: 0, loaded: false, loading: false };
 
 function findingGroupKey(group: FindingGroup) {
   return group.task_id === null ? UNASSIGNED_TASK : String(group.task_id);
 }
-
-const EMPTY_STATS: FindingStats = {
-  total: 0,
-  pending: 0,
-  submitted: 0,
-  accepted: 0,
-  critical: 0,
-  high: 0,
-  medium: 0,
-  low: 0,
-  vulnclasses: [],
-  tasks: [],
-};
 
 export default function FindingsPage() {
   // The sidebar's company switcher narrows everything below on the server: the
   // flat and grouped lists, the asset tree and the stat cards all send `company`.
   // Undefined means all companies.
   const company = useActiveCompany();
-  const [view, setView] = React.useState<FindingView>("flat");
-  const [severity, setSeverity] = React.useState<"all" | Severity>("all");
-  const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
-  const [reportState, setReportState] = React.useState<"all" | FindingReportState>("all");
-  const [verificationStatus, setVerificationStatus] = React.useState<"all" | VerificationStatus>("all");
-  const [vulnclass, setVulnclass] = React.useState<string>("all");
-  const [task, setTask] = React.useState<string>("all");
-  const [sort, setSort] = React.useState<"severity" | "time">("severity");
-  const [search, setSearch] = React.useState("");
-  const [query, setQuery] = React.useState("");
-  const [expanded, setExpanded] = React.useState<string | null>(null);
-  const [flat, setFlat] = React.useState<FlatFindingsState>(EMPTY_FLAT_STATE);
-  const [flatPage, setFlatPage] = React.useState(1);
-  const [flatPageSize, setFlatPageSize] = React.useState(20);
-  const [assetTree, setAssetTree] = React.useState<AssetTreeState>(EMPTY_ASSET_TREE);
-  const [assetScope, setAssetScope] = React.useState<string | null>(null);
-  const [groups, setGroups] = React.useState<FindingGroup[]>([]);
-  const [groupTotal, setGroupTotal] = React.useState(0);
-  const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(() => new Set());
-  const [groupFindings, setGroupFindings] = React.useState<Record<string, GroupFindingsState>>({});
-  const [total, setTotal] = React.useState(0);
-  const [stats, setStats] = React.useState<FindingStats>(EMPTY_STATS);
-  const [statsLoaded, setStatsLoaded] = React.useState(false);
-  const [preferencesHydrated, setPreferencesHydrated] = React.useState(false);
-  const [page, setPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(10);
-  const [deepenFinding, setDeepenFinding] = React.useState<Finding | null>(null);
-  const [retestFinding, setRetestFinding] = React.useState<Finding | null>(null);
-  const [activeRetests, setActiveRetests] = React.useState<Record<string, ActiveFindingRetest>>({});
+  const [state, dispatch] = React.useReducer(findingsPageReducer, undefined, createInitialFindingsPageState);
+  const { view, filters, flat, asset, grouped, exportDialog, deepen, retest, expandedRow, reports, requests } = state;
+  const { severity, status, reportState, verificationStatus, vulnclass, task, sort, search, query } = filters;
+  const { page: flatPage, size: flatPageSize } = state.pagination;
+  const { tree: assetTree, scope: assetScope } = asset;
+  const { groups, groupTotal, expanded: expandedGroups, findings: groupFindings } = grouped;
+  const { page, size: pageSize } = state.groupPagination;
+  const { data: stats, loaded: statsLoaded } = state.stats;
+  const { preferencesHydrated } = state;
+  const selectedIds = state.selection;
+  const bulkBusy = requests.bulkUpdate.pending;
+  const { key: expanded, edit } = expandedRow;
+  const saving = requests.save.pending;
+  const exporting = requests.export.pending;
+  const deepenFinding = deepen.finding;
+  const deepening = requests.deepen.pending;
+  const retestFinding = retest.finding;
+  const activeRetests = retest.active;
   const activeRetestFingerprint = Object.values(activeRetests)
     .map((item) => item.id)
     .join(",");
   const retestRefreshVersion = React.useRef(0);
-  const [deepenDescription, setDeepenDescription] = React.useState("");
-  const [deepening, setDeepening] = React.useState(false);
   const filterFingerprint = JSON.stringify([
     severity,
     status,
@@ -205,7 +140,10 @@ export default function FindingsPage() {
       try {
         const rows = await api.activeFindingRetests();
         if (disposed || version !== retestRefreshVersion.current) return;
-        setActiveRetests(Object.fromEntries(rows.map((item) => [item.finding_id, item])));
+        dispatch({
+          type: "activeRetestsLoaded",
+          active: Object.fromEntries(rows.map((item) => [item.finding_id, item])),
+        });
         failed = false;
       } catch (error) {
         if (!disposed && !failed)
@@ -224,6 +162,8 @@ export default function FindingsPage() {
 
   React.useEffect(() => {
     const raw = getLocalStorageValue(FINDING_LIST_PREFERENCE_KEY);
+    let restoredView: FindingView | undefined;
+    const restored: Partial<FindingListPreferences> = {};
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as {
@@ -236,30 +176,30 @@ export default function FindingsPage() {
           task?: unknown;
           sort?: unknown;
         };
-        if (FINDING_VIEWS.includes(parsed.view as FindingView)) setView(parsed.view as FindingView);
+        if (FINDING_VIEWS.includes(parsed.view as FindingView)) restoredView = parsed.view as FindingView;
         if (parsed.severity === "all" || SEVERITIES.includes(parsed.severity as Severity)) {
-          setSeverity(parsed.severity as "all" | Severity);
+          restored.severity = parsed.severity as "all" | Severity;
         }
         if (parsed.status === "all" || FINDING_STATUSES.includes(parsed.status as FindingStatus)) {
-          setStatus(parsed.status as "all" | FindingStatus);
+          restored.status = parsed.status as "all" | FindingStatus;
         }
         if (parsed.reportState === "all" || FINDING_REPORT_STATES.includes(parsed.reportState as FindingReportState)) {
-          setReportState(parsed.reportState as "all" | FindingReportState);
+          restored.reportState = parsed.reportState as "all" | FindingReportState;
         }
         if (
           parsed.verificationStatus === "all" ||
           VERIFICATION_STATUSES.includes(parsed.verificationStatus as VerificationStatus)
         ) {
-          setVerificationStatus(parsed.verificationStatus as "all" | VerificationStatus);
+          restored.verificationStatus = parsed.verificationStatus as "all" | VerificationStatus;
         }
-        if (typeof parsed.vulnclass === "string" && parsed.vulnclass) setVulnclass(parsed.vulnclass);
-        if (typeof parsed.task === "string" && parsed.task) setTask(parsed.task);
-        if (parsed.sort === "severity" || parsed.sort === "time") setSort(parsed.sort);
+        if (typeof parsed.vulnclass === "string" && parsed.vulnclass) restored.vulnclass = parsed.vulnclass;
+        if (typeof parsed.task === "string" && parsed.task) restored.task = parsed.task;
+        if (parsed.sort === "severity" || parsed.sort === "time") restored.sort = parsed.sort;
       } catch {
         // Ignore malformed or legacy preferences and retain the defaults.
       }
     }
-    setPreferencesHydrated(true);
+    dispatch({ type: "preferencesRestored", view: restoredView, filters: restored });
   }, []);
 
   React.useEffect(() => {
@@ -270,64 +210,36 @@ export default function FindingsPage() {
     );
   }, [preferencesHydrated, reportState, severity, sort, status, task, verificationStatus, view, vulnclass]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the reducer reads the latest search; re-arm on every keystroke.
   React.useEffect(() => {
-    const timer = window.setTimeout(() => setQuery(search.trim()), 300);
+    const timer = window.setTimeout(() => dispatch({ type: "searchDebounced" }), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
 
   // setFindings rewrites the same finding in both view caches at once, so switching views never shows stale state.
   const setFindings = React.useCallback((update: (current: Finding[]) => Finding[]) => {
-    setFlat((current) => ({ ...current, items: update(current.items) }));
-    setGroupFindings((current) => {
-      const next: Record<string, GroupFindingsState> = {};
-      for (const [key, state] of Object.entries(current)) {
-        next[key] = { ...state, items: update(state.items) };
-      }
-      return next;
-    });
+    dispatch({ type: "findingsUpdated", update });
   }, []);
 
-  // Export selection: tracked by finding_id (the standalone table's id), preserved across pages.
-  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
-  const [bulkBusy, setBulkBusy] = React.useState(false);
-  // Export dialog state: scope (current filter / all / selected) × format (single md / per-finding md zip / csv / json).
-  const [exportOpen, setExportOpen] = React.useState(false);
-  const [exportScope, setExportScope] = React.useState<"filtered" | "all" | "selected">("filtered");
-  const [exportFormat, setExportFormat] = React.useState<"md-single" | "md-zip" | "csv" | "json">("md-single");
-  const [exporting, setExporting] = React.useState(false);
-
   const toggleSelected = React.useCallback((id: string, checked: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+    dispatch({ type: "selectionToggled", ids: [id], checked });
   }, []);
 
   const toggleSelectedPage = React.useCallback((ids: string[], checked: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) {
-        if (checked) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
+    dispatch({ type: "selectionToggled", ids, checked });
   }, []);
 
   // When opening the export dialog, default the scope to "Selected" if any rows are checked, else "Current filter".
   function openExport() {
-    setExportScope(selectedIds.size > 0 ? "selected" : "filtered");
-    setExportOpen(true);
+    dispatch({ type: "exportOpened" });
   }
 
   async function doExport() {
-    setExporting(true);
+    dispatch({ type: "request/started", key: "export" });
     try {
       await api.exportFindings({
-        format: exportFormat,
-        scope: exportScope,
+        format: exportDialog.format,
+        scope: exportDialog.scope,
         filters: {
           severity,
           status,
@@ -342,12 +254,12 @@ export default function FindingsPage() {
         },
         ids: [...selectedIds],
       });
-      setExportOpen(false);
+      dispatch({ type: "exportDialogChanged", patch: { open: false } });
       toast.success(t("Export download started"));
     } catch (e) {
       toast.error(t("Export failed: {error}", { error: (e as Error).message }));
     } finally {
-      setExporting(false);
+      dispatch({ type: "request/finished", key: "export" });
     }
   }
 
@@ -369,7 +281,7 @@ export default function FindingsPage() {
   React.useEffect(() => {
     // company is a trigger here, not a value the effect reads.
     void company;
-    setAssetScope(null);
+    dispatch({ type: "assetScopeSelected", scope: null });
   }, [company]);
 
   // The asset view's right-hand list = the flat list + a filter for the selected subtree, so both views share one list state.
@@ -380,7 +292,7 @@ export default function FindingsPage() {
     const requestFilter = filterFingerprint;
     if (activeFilterFingerprint.current !== requestFilter) return;
     const request = ++flatRequest.current;
-    setFlat((current) => ({ ...current, loading: true }));
+    dispatch({ type: "list/loadStarted" });
     try {
       const result = await api.findingsPage({
         page: flatPage,
@@ -397,11 +309,12 @@ export default function FindingsPage() {
         company,
       });
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
-      setFlat({ items: result.items, total: result.total, loaded: true, loading: false });
+      dispatch({ type: "list/loaded", items: result.items, total: result.total });
+      dispatch({ type: "list/loadFinished" });
     } catch {
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
-      // Polling keeps the last successful snapshot visible.
-      setFlat((current) => ({ ...current, loading: false }));
+      // Polling keeps the last successful snapshot visible; a failed first load keeps showing the spinner.
+      dispatch({ type: "list/loadFailed" });
     }
   }, [
     activeAssetScope,
@@ -425,7 +338,7 @@ export default function FindingsPage() {
     const requestFilter = filterFingerprint;
     if (activeFilterFingerprint.current !== requestFilter) return;
     const request = ++assetTreeRequest.current;
-    setAssetTree((current) => ({ ...current, loading: true }));
+    dispatch({ type: "assetTreeLoadStarted" });
     try {
       const result = await api.findingAssetTree({
         severity,
@@ -439,17 +352,16 @@ export default function FindingsPage() {
         company,
       });
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
-      setAssetTree({
+      dispatch({
+        type: "assetTreeLoaded",
         nodes: result.nodes ?? [],
         findingTotal: result.finding_total ?? 0,
         truncated: Boolean(result.truncated),
         droppedKinds: result.dropped_kinds ?? [],
-        loaded: true,
-        loading: false,
       });
     } catch (e) {
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
-      setAssetTree((current) => ({ ...current, loading: false }));
+      dispatch({ type: "assetTreeLoadFailed" });
       toast.error(t("Failed to load the asset tree: {error}", { error: (e as Error).message }));
     }
   }, [
@@ -484,9 +396,12 @@ export default function FindingsPage() {
         company,
       });
       if (request !== groupsRequest.current || activeFilterFingerprint.current !== requestFilter) return;
-      setGroups(result.items);
-      setGroupTotal(result.total);
-      setTotal(result.finding_total);
+      dispatch({
+        type: "groupsLoaded",
+        groups: result.items,
+        groupTotal: result.total,
+        findingTotal: result.finding_total,
+      });
     } catch {
       // Polling keeps the last successful snapshot visible.
     }
@@ -511,17 +426,7 @@ export default function FindingsPage() {
       const requestFilter = filterFingerprint;
       if (activeFilterFingerprint.current !== requestFilter) return;
       groupRequests.current[key] = request;
-      setGroupFindings((current) => ({
-        ...current,
-        [key]: {
-          items: current[key]?.items ?? [],
-          total: current[key]?.total ?? 0,
-          page: groupPage,
-          pageSize: groupPageSize,
-          loaded: current[key]?.loaded ?? false,
-          loading: true,
-        },
-      }));
+      dispatch({ type: "groupLoadStarted", key, page: groupPage, pageSize: groupPageSize });
       try {
         const result = await api.findingsPage({
           page: groupPage,
@@ -537,32 +442,17 @@ export default function FindingsPage() {
           company,
         });
         if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
-        setGroupFindings((current) => ({
-          ...current,
-          [key]: {
-            items: result.items,
-            total: result.total,
-            page: result.page,
-            pageSize: result.page_size,
-            loaded: true,
-            loading: false,
-          },
-        }));
+        dispatch({
+          type: "groupLoaded",
+          key,
+          items: result.items,
+          total: result.total,
+          page: result.page,
+          pageSize: result.page_size,
+        });
       } catch {
         if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
-        setGroupFindings((current) => ({
-          ...current,
-          [key]: {
-            ...(current[key] ?? {
-              items: [],
-              total: 0,
-              page: groupPage,
-              pageSize: groupPageSize,
-              loaded: false,
-            }),
-            loading: false,
-          },
-        }));
+        dispatch({ type: "groupLoadFailed", key, page: groupPage, pageSize: groupPageSize });
       }
     },
     [company, filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, query, sort],
@@ -579,10 +469,7 @@ export default function FindingsPage() {
   const toggleGroup = React.useCallback(
     (key: string) => {
       const opening = !expandedGroups.has(key);
-      const next = new Set(expandedGroups);
-      if (opening) next.add(key);
-      else next.delete(key);
-      setExpandedGroups(next);
+      dispatch({ type: "groupToggled", key, open: opening });
       const state = groupFindings[key];
       if (opening && !state?.loaded && !state?.loading) {
         void loadGroup(key, state?.page ?? 1, state?.pageSize ?? 10);
@@ -620,21 +507,14 @@ export default function FindingsPage() {
   // Reset every view's pagination and expansion when a shared finding filter changes.
   React.useEffect(() => {
     void filterFingerprint;
-    setPage(1);
-    setExpanded(null);
-    setExpandedGroups(new Set());
-    setGroupFindings({});
-    setFlatPage(1);
-    setFlat(EMPTY_FLAT_STATE);
-    // Filters change the tree too; the previously selected node may no longer be in it, so fall back to "All assets".
-    setAssetScope(null);
-    setAssetTree(EMPTY_ASSET_TREE);
+    // Filters change the tree too; the previously selected node may no longer be in it, so the reducer falls back to "All assets".
+    dispatch({ type: "filterFingerprintChanged" });
   }, [filterFingerprint]);
 
   // Switching asset nodes means a different result set; go back to page one.
   React.useEffect(() => {
     void assetScope;
-    setFlatPage(1);
+    dispatch({ type: "pagination/pageChanged", page: 1 });
   }, [assetScope]);
 
   // The asset tree is queried once on view entry / filter change (plus actively re-pulled by
@@ -671,13 +551,14 @@ export default function FindingsPage() {
 
   React.useEffect(() => {
     const lastPage = Math.max(1, Math.ceil(groupTotal / pageSize));
-    if (page > lastPage) setPage(lastPage);
+    if (page > lastPage)
+      dispatch({ type: "groupPagination", action: { type: "pagination/pageChanged", page: lastPage } });
   }, [groupTotal, page, pageSize]);
 
   React.useEffect(() => {
     if (!flat.loaded) return;
     const lastPage = Math.max(1, Math.ceil(flat.total / flatPageSize));
-    if (flatPage > lastPage) setFlatPage(lastPage);
+    if (flatPage > lastPage) dispatch({ type: "pagination/pageChanged", page: lastPage });
   }, [flat.loaded, flat.total, flatPage, flatPageSize]);
 
   // Whole-table aggregates (stat cards + vuln-class options) — independent of the
@@ -688,10 +569,7 @@ export default function FindingsPage() {
       api
         .findingStats(company)
         .then((s) => {
-          if (alive) {
-            setStats(s);
-            setStatsLoaded(true);
-          }
+          if (alive) dispatch({ type: "statsLoaded", stats: s });
         })
         .catch(() => {
           // Keep the previous aggregate snapshot until the next poll.
@@ -707,13 +585,15 @@ export default function FindingsPage() {
 
   React.useEffect(() => {
     if (!statsLoaded) return;
-    if (vulnclass !== "all" && !stats.vulnclasses.includes(vulnclass)) setVulnclass("all");
+    if (vulnclass !== "all" && !stats.vulnclasses.includes(vulnclass)) {
+      dispatch({ type: "filterChanged", patch: { vulnclass: "all" } });
+    }
     if (
       task !== "all" &&
       task !== UNASSIGNED_TASK &&
       !(stats.tasks ?? []).some((option) => String(option.id) === task)
     ) {
-      setTask("all");
+      dispatch({ type: "filterChanged", patch: { task: "all" } });
     }
   }, [stats, statsLoaded, task, vulnclass]);
 
@@ -729,14 +609,13 @@ export default function FindingsPage() {
         // refresh stat cards (pending count) and drop the row if it no longer matches the status filter
         api
           .findingStats(company)
-          .then(setStats)
+          .then((s) => dispatch({ type: "statsRefreshed", stats: s }))
           .catch(() => {
             // The row update remains valid even if the aggregate refresh fails.
           });
         if (status !== "all" && next !== status) {
           setFindings((cur) => cur.filter((x) => !isSameFinding(x, f)));
-          setTotal((t) => Math.max(0, t - 1));
-          setFlat((cur) => ({ ...cur, total: Math.max(0, cur.total - 1) }));
+          dispatch({ type: "findingTotalsDecremented" });
         }
         refreshAfterMutation(f);
       } catch (e) {
@@ -757,14 +636,13 @@ export default function FindingsPage() {
         toast.success(t('Report stage set to "{label}"', { label: REPORT_STATE_META[next].label }));
         api
           .findingStats(company)
-          .then(setStats)
+          .then((s) => dispatch({ type: "statsRefreshed", stats: s }))
           .catch(() => {
             // The row update remains valid even if the aggregate refresh fails.
           });
         if (reportState !== "all" && next !== reportState) {
           setFindings((cur) => cur.filter((x) => !isSameFinding(x, f)));
-          setTotal((t) => Math.max(0, t - 1));
-          setFlat((cur) => ({ ...cur, total: Math.max(0, cur.total - 1) }));
+          dispatch({ type: "findingTotalsDecremented" });
         }
         refreshAfterMutation(f);
       } catch (e) {
@@ -780,24 +658,24 @@ export default function FindingsPage() {
   const applyBulkStatus = React.useCallback(
     async (next: FindingStatus) => {
       if (selectedIds.size === 0 || bulkBusy) return;
-      setBulkBusy(true);
+      dispatch({ type: "request/started", key: "bulkUpdate" });
       try {
         const r = await api.bulkSetFindingStatus([...selectedIds], next);
-        setSelectedIds(new Set());
+        dispatch({ type: "selection/cleared" });
         const label = statusMeta("finding", next).label;
         toast.success(t('Marked {count} findings as "{label}"', { count: r.updated, label }));
         void loadFlat();
         if (view === "asset") void loadAssetTree();
         api
           .findingStats(company)
-          .then(setStats)
+          .then((s) => dispatch({ type: "statsRefreshed", stats: s }))
           .catch(() => {
             // The list reload remains valid even if the aggregate refresh fails.
           });
       } catch (e) {
         toast.error(t("Bulk update failed: {error}", { error: (e as Error).message }));
       } finally {
-        setBulkBusy(false);
+        dispatch({ type: "request/finished", key: "bulkUpdate" });
       }
     },
     [bulkBusy, loadAssetTree, loadFlat, selectedIds, view, company],
@@ -806,24 +684,24 @@ export default function FindingsPage() {
   const applyBulkReportState = React.useCallback(
     async (next: FindingReportState) => {
       if (selectedIds.size === 0 || bulkBusy) return;
-      setBulkBusy(true);
+      dispatch({ type: "request/started", key: "bulkUpdate" });
       try {
         const r = await api.bulkSetFindingReportState([...selectedIds], next);
-        setSelectedIds(new Set());
+        dispatch({ type: "selection/cleared" });
         const label = REPORT_STATE_META[next].label;
         toast.success(t('Set report stage of {count} findings to "{label}"', { count: r.updated, label }));
         void loadFlat();
         if (view === "asset") void loadAssetTree();
         api
           .findingStats(company)
-          .then(setStats)
+          .then((s) => dispatch({ type: "statsRefreshed", stats: s }))
           .catch(() => {
             // The list reload remains valid even if the aggregate refresh fails.
           });
       } catch (e) {
         toast.error(t("Bulk update failed: {error}", { error: (e as Error).message }));
       } finally {
-        setBulkBusy(false);
+        dispatch({ type: "request/finished", key: "bulkUpdate" });
       }
     },
     [bulkBusy, loadAssetTree, loadFlat, selectedIds, view, company],
@@ -831,31 +709,32 @@ export default function FindingsPage() {
 
   // The inline expanded detailed-report cache is keyed by the globally stable row key. report is long-form
   // Markdown the list query doesn't include, so it is fetched once by finding_id on expand; done with empty text = no report yet.
-  const [reports, setReports] = React.useState<Record<string, FindingReport>>({});
-
   // Inline editable buffer: the expanded row's name/category/severity, initialized from the row on expand and cleared on collapse.
   // Only one row expands at a time, so one buffer suffices.
-  const [edit, setEdit] = React.useState<FindingEdit | null>(null);
-  const [saving, setSaving] = React.useState(false);
+  // FindingsTable's onEditChange takes a SetStateAction (it uses functional updates); the reducer applies it to the current buffer.
+  const setEdit = React.useCallback((next: FindingEditUpdate) => dispatch({ type: "editChanged", edit: next }), []);
 
   // toggle expands/collapses a row; a fresh expand initializes the edit buffer and (if not yet fetched) pulls the report cache once by finding_id.
   const toggleRow = React.useCallback(
     (f: Finding) => {
       const key = findingRowKey(f);
       const willOpen = expanded !== key;
-      setExpanded(willOpen ? key : null);
       if (!willOpen) {
-        setEdit(null);
+        dispatch({ type: "rowCollapsed" });
         return;
       }
-      setEdit({ name: f.name ?? "", vulnclass: f.vulnclass, severity: f.severity });
+      dispatch({
+        type: "rowExpanded",
+        key,
+        edit: { name: f.name ?? "", vulnclass: f.vulnclass, severity: f.severity },
+      });
       if (!f.finding_id || reports[key]) return;
       const fid = f.finding_id;
-      setReports((r) => ({ ...r, [key]: { status: "loading", text: "" } }));
+      dispatch({ type: "reportLoadStarted", key });
       api
         .getFinding(fid)
-        .then((full) => setReports((r) => ({ ...r, [key]: { status: "done", text: full.report ?? "" } })))
-        .catch(() => setReports((r) => ({ ...r, [key]: { status: "error", text: "" } })));
+        .then((full) => dispatch({ type: "reportLoaded", key, text: full.report ?? "" }))
+        .catch(() => dispatch({ type: "reportLoadFailed", key }));
     },
     [expanded, reports],
   );
@@ -864,7 +743,7 @@ export default function FindingsPage() {
   const saveEdit = React.useCallback(
     async (f: Finding) => {
       if (!f.finding_id || !edit) return;
-      setSaving(true);
+      dispatch({ type: "request/started", key: "save" });
       try {
         const updated = await api.updateFinding(f.finding_id, {
           name: edit.name.trim(),
@@ -881,7 +760,7 @@ export default function FindingsPage() {
         toast.success(t("Saved"));
         api
           .findingStats(company)
-          .then(setStats)
+          .then((s) => dispatch({ type: "statsRefreshed", stats: s }))
           .catch(() => {
             // The edit remains valid even if the aggregate refresh fails.
           });
@@ -889,7 +768,7 @@ export default function FindingsPage() {
       } catch (e) {
         toast.error(t("Save failed: {error}", { error: (e as Error).message }));
       } finally {
-        setSaving(false);
+        dispatch({ type: "request/finished", key: "save" });
       }
     },
     [edit, refreshAfterMutation, setFindings, company],
@@ -902,19 +781,12 @@ export default function FindingsPage() {
       try {
         await api.deleteFinding(f.finding_id);
         setFindings((cur) => cur.filter((x) => !isSameFinding(x, f)));
-        setSelectedIds((current) => {
-          const next = new Set(current);
-          next.delete(f.finding_id as string);
-          return next;
-        });
-        setTotal((t) => Math.max(0, t - 1));
-        setFlat((cur) => ({ ...cur, total: Math.max(0, cur.total - 1) }));
         const rowKey = findingRowKey(f);
-        setExpanded((cur) => (cur === rowKey ? null : cur));
+        dispatch({ type: "findingDeleted", findingId: f.finding_id as string, rowKey });
         toast.success(t("Vulnerability deleted"));
         api
           .findingStats(company)
-          .then(setStats)
+          .then((s) => dispatch({ type: "statsRefreshed", stats: s }))
           .catch(() => {
             // The deletion remains valid even if the aggregate refresh fails.
           });
@@ -927,27 +799,33 @@ export default function FindingsPage() {
   );
 
   const openDeepen = React.useCallback((f: Finding) => {
-    setDeepenFinding(f);
-    setDeepenDescription("");
+    dispatch({ type: "deepenOpened", finding: f });
+  }, []);
+
+  const setRetestFinding = React.useCallback((finding: Finding | null) => {
+    dispatch({ type: "retestTargetChanged", finding });
+  }, []);
+
+  const setAssetScope = React.useCallback((scope: string | null) => {
+    dispatch({ type: "assetScopeSelected", scope });
   }, []);
 
   async function submitDeepen() {
-    if (!deepenFinding?.finding_id || !deepenDescription.trim() || deepening) return;
-    setDeepening(true);
+    if (!deepenFinding?.finding_id || !deepen.description.trim() || deepening) return;
+    dispatch({ type: "request/started", key: "deepen" });
     try {
-      const result = await api.deepenFinding(deepenFinding.finding_id, deepenDescription.trim());
+      const result = await api.deepenFinding(deepenFinding.finding_id, deepen.description.trim());
       toast.success(
         result.queued
           ? t("Deepen intent #{id} has entered the task queue", { id: result.intent_id })
           : t("Created high-priority worker intent #{id}", { id: result.intent_id }),
       );
       refreshAfterMutation(deepenFinding);
-      setDeepenFinding(null);
-      setDeepenDescription("");
+      dispatch({ type: "deepenClosed" });
     } catch (error) {
       toast.error(t("Submit failed: {error}", { error: (error as Error).message }));
     } finally {
-      setDeepening(false);
+      dispatch({ type: "request/finished", key: "deepen" });
     }
   }
 
@@ -964,7 +842,7 @@ export default function FindingsPage() {
 
   // The "current filter" count in the export dialog: both views share the same filters, only the counting source differs.
   // The flat and asset views share the flat list state; the grouped view's figure comes from the group API's finding_total.
-  const filteredTotal = view === "grouped" ? total : flat.total;
+  const filteredTotal = view === "grouped" ? grouped.findingTotal : flat.total;
   const assetPath = React.useMemo(
     () => (view === "asset" ? assetPathOf(assetTree.nodes, assetScope) : []),
     [assetScope, assetTree.nodes, view],
@@ -1004,10 +882,9 @@ export default function FindingsPage() {
               page={flatPage}
               pageSize={flatPageSize}
               total={flat.total}
-              onPageChange={setFlatPage}
+              onPageChange={(nextPage) => dispatch({ type: "pagination/pageChanged", page: nextPage })}
               onPageSizeChange={(nextSize) => {
-                setFlatPageSize(nextSize);
-                setFlatPage(1);
+                dispatch({ type: "pagination/sizeChanged", size: nextSize });
               }}
               pageSizeOptions={[10, 20, 50, 100]}
             />
@@ -1024,7 +901,7 @@ export default function FindingsPage() {
           <h1 className="text-xl font-semibold tracking-tight">{t("Findings")}</h1>
           <p className="text-muted-foreground text-sm">{t("Cross-task vulnerability overview")}</p>
         </div>
-        <Tabs value={view} onValueChange={(v) => setView(v as FindingView)}>
+        <Tabs value={view} onValueChange={(v) => dispatch({ type: "viewChanged", view: v as FindingView })}>
           <TabsList>
             <TabsTrigger value="flat">{t("All findings")}</TabsTrigger>
             <TabsTrigger value="grouped">{t("By task")}</TabsTrigger>
@@ -1055,7 +932,7 @@ export default function FindingsPage() {
             <InputGroupInput
               type="search"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => dispatch({ type: "filterChanged", patch: { search: event.target.value } })}
               placeholder={t("Search findings")}
               aria-label={t("Search findings")}
             />
@@ -1067,7 +944,9 @@ export default function FindingsPage() {
           <ToggleGroup
             type="single"
             value={severity}
-            onValueChange={(value) => value && setSeverity(value as "all" | Severity)}
+            onValueChange={(value) =>
+              value && dispatch({ type: "filterChanged", patch: { severity: value as "all" | Severity } })
+            }
             variant="outline"
             size="sm"
             spacing={0}
@@ -1087,7 +966,10 @@ export default function FindingsPage() {
             ))}
           </ToggleGroup>
 
-          <Select value={status} onValueChange={(v) => setStatus(v as "all" | FindingStatus)}>
+          <Select
+            value={status}
+            onValueChange={(v) => dispatch({ type: "filterChanged", patch: { status: v as "all" | FindingStatus } })}
+          >
             <SelectTrigger size="sm" className="w-32">
               <SelectValue placeholder={t("Status")} />
             </SelectTrigger>
@@ -1101,7 +983,12 @@ export default function FindingsPage() {
             </SelectContent>
           </Select>
 
-          <Select value={reportState} onValueChange={(v) => setReportState(v as "all" | FindingReportState)}>
+          <Select
+            value={reportState}
+            onValueChange={(v) =>
+              dispatch({ type: "filterChanged", patch: { reportState: v as "all" | FindingReportState } })
+            }
+          >
             <SelectTrigger size="sm" className="w-40">
               <SelectValue placeholder={t("Report stage")} />
             </SelectTrigger>
@@ -1117,7 +1004,9 @@ export default function FindingsPage() {
 
           <Select
             value={verificationStatus}
-            onValueChange={(v) => setVerificationStatus(v as "all" | VerificationStatus)}
+            onValueChange={(v) =>
+              dispatch({ type: "filterChanged", patch: { verificationStatus: v as "all" | VerificationStatus } })
+            }
           >
             <SelectTrigger size="sm" className="w-48">
               <SelectValue placeholder={t("Verification")} />
@@ -1132,7 +1021,7 @@ export default function FindingsPage() {
             </SelectContent>
           </Select>
 
-          <Select value={vulnclass} onValueChange={setVulnclass}>
+          <Select value={vulnclass} onValueChange={(v) => dispatch({ type: "filterChanged", patch: { vulnclass: v } })}>
             <SelectTrigger size="sm" className="w-40">
               <SelectValue placeholder={t("Vulnerability type")} />
             </SelectTrigger>
@@ -1146,7 +1035,7 @@ export default function FindingsPage() {
             </SelectContent>
           </Select>
 
-          <Select value={task} onValueChange={setTask}>
+          <Select value={task} onValueChange={(v) => dispatch({ type: "filterChanged", patch: { task: v } })}>
             <SelectTrigger size="sm" className="w-48">
               <SelectValue placeholder={t("Task")} />
             </SelectTrigger>
@@ -1173,7 +1062,10 @@ export default function FindingsPage() {
             </SelectContent>
           </Select>
 
-          <Select value={sort} onValueChange={(v) => setSort(v as "severity" | "time")}>
+          <Select
+            value={sort}
+            onValueChange={(v) => dispatch({ type: "filterChanged", patch: { sort: v as "severity" | "time" } })}
+          >
             <SelectTrigger size="sm" className="w-36">
               <SelectValue />
             </SelectTrigger>
@@ -1403,10 +1295,11 @@ export default function FindingsPage() {
               page={page}
               pageSize={pageSize}
               total={groupTotal}
-              onPageChange={setPage}
+              onPageChange={(nextPage) =>
+                dispatch({ type: "groupPagination", action: { type: "pagination/pageChanged", page: nextPage } })
+              }
               onPageSizeChange={(nextPageSize) => {
-                setPageSize(nextPageSize);
-                setPage(1);
+                dispatch({ type: "groupPagination", action: { type: "pagination/sizeChanged", size: nextPageSize } });
               }}
               pageSizeOptions={[5, 10, 20]}
             />
@@ -1429,7 +1322,7 @@ export default function FindingsPage() {
               conversation_id: retest.conversation_id,
               status: retest.status === "pending" ? "pending" : "running",
             };
-            setActiveRetests((current) => ({ ...current, [findingId]: active }));
+            dispatch({ type: "retestStarted", retest: active });
           }}
           onClose={() => setRetestFinding(null)}
         />
@@ -1439,8 +1332,7 @@ export default function FindingsPage() {
         open={deepenFinding !== null}
         onOpenChange={(open) => {
           if (open || deepening) return;
-          setDeepenFinding(null);
-          setDeepenDescription("");
+          dispatch({ type: "deepenClosed" });
         }}
       >
         <DialogContent>
@@ -1459,8 +1351,8 @@ export default function FindingsPage() {
               <FieldLabel htmlFor="finding-deepen-description">{t("Exploitation description")}</FieldLabel>
               <Textarea
                 id="finding-deepen-description"
-                value={deepenDescription}
-                onChange={(event) => setDeepenDescription(event.target.value)}
+                value={deepen.description}
+                onChange={(event) => dispatch({ type: "deepenDescriptionChanged", description: event.target.value })}
                 maxLength={4000}
                 placeholder={t(
                   "Describe the exploitation path to verify, boundary conditions, targets, or expected evidence",
@@ -1469,7 +1361,7 @@ export default function FindingsPage() {
               />
               <FieldDescription className="flex justify-between gap-3">
                 <span>{t("The new intent inherits this vulnerability's asset anchors.")}</span>
-                <span className="shrink-0 tabular-nums">{deepenDescription.length} / 4000</span>
+                <span className="shrink-0 tabular-nums">{deepen.description.length} / 4000</span>
               </FieldDescription>
             </Field>
           </FieldGroup>
@@ -1477,14 +1369,13 @@ export default function FindingsPage() {
             <Button
               variant="outline"
               onClick={() => {
-                setDeepenFinding(null);
-                setDeepenDescription("");
+                dispatch({ type: "deepenClosed" });
               }}
               disabled={deepening}
             >
               {t("Cancel")}
             </Button>
-            <Button onClick={submitDeepen} disabled={deepening || !deepenDescription.trim()}>
+            <Button onClick={submitDeepen} disabled={deepening || !deepen.description.trim()}>
               {deepening && <Spinner data-icon="inline-start" />}
               {t("Create deepen intent")}
             </Button>
@@ -1492,7 +1383,10 @@ export default function FindingsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+      <Dialog
+        open={exportDialog.open}
+        onOpenChange={(open) => dispatch({ type: "exportDialogChanged", patch: { open } })}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("Export findings")}</DialogTitle>
@@ -1504,7 +1398,10 @@ export default function FindingsPage() {
           <div className="flex flex-col gap-5 py-1">
             <div className="flex flex-col gap-2">
               <span className="text-xs text-muted-foreground">{t("Export scope")}</span>
-              <RadioGroup value={exportScope} onValueChange={(v) => setExportScope(v as typeof exportScope)}>
+              <RadioGroup
+                value={exportDialog.scope}
+                onValueChange={(v) => dispatch({ type: "exportDialogChanged", patch: { scope: v as ExportScope } })}
+              >
                 <label htmlFor="export-scope-filtered" className="flex items-center gap-2 text-sm">
                   <RadioGroupItem id="export-scope-filtered" value="filtered" />{" "}
                   {t("Export the current filter results ({count} items)", { count: filteredTotal })}
@@ -1524,7 +1421,10 @@ export default function FindingsPage() {
 
             <div className="flex flex-col gap-2">
               <span className="text-xs text-muted-foreground">{t("Export format")}</span>
-              <RadioGroup value={exportFormat} onValueChange={(v) => setExportFormat(v as typeof exportFormat)}>
+              <RadioGroup
+                value={exportDialog.format}
+                onValueChange={(v) => dispatch({ type: "exportDialogChanged", patch: { format: v as ExportFormat } })}
+              >
                 <label htmlFor="export-format-md-single" className="flex items-center gap-2 text-sm">
                   <RadioGroupItem id="export-format-md-single" value="md-single" />{" "}
                   {t("Markdown summary report (a single .md file)")}
@@ -1544,10 +1444,17 @@ export default function FindingsPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>
+            <Button
+              variant="outline"
+              onClick={() => dispatch({ type: "exportDialogChanged", patch: { open: false } })}
+              disabled={exporting}
+            >
               {t("Cancel")}
             </Button>
-            <Button onClick={doExport} disabled={exporting || (exportScope === "selected" && selectedIds.size === 0)}>
+            <Button
+              onClick={doExport}
+              disabled={exporting || (exportDialog.scope === "selected" && selectedIds.size === 0)}
+            >
               <DownloadIcon /> {exporting ? t("Exporting…") : t("Export")}
             </Button>
           </DialogFooter>
