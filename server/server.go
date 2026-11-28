@@ -1136,7 +1136,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
-	out := map[string]any{"ok": true, "service": "artex", "version": BuildVersion}
+	out := map[string]any{"ok": true, "service": "artex", "version": BuildVersion, "build": currentBuildInfo(BuildVersion, BuildCommit)}
 	// The web UI shows a banner on every page for a degraded isolation (isolation.go).
 	if s.isolation.Mode != "" {
 		out["isolation"] = s.isolation

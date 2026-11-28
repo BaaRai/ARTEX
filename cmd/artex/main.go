@@ -61,6 +61,10 @@ func logConfigSnapshot(s configSnapshot) {
 // -ldflags "-X main.version=<tag>". Defaults to "dev" for local builds.
 var version = "dev"
 
+// revision is the full source commit, injected via
+// -ldflags "-X main.revision=<sha>". Empty when the build had no git context.
+var revision = ""
+
 const banner = `
     _    ____ _____ _______  __
    / \  |  _ \_   _| ____\ \/ /
@@ -117,9 +121,10 @@ func run() int {
 	)
 	flag.Parse()
 
-	// hand the build version to the server package so GET /api/health can report it
-	// to the frontend top bar.
+	// hand the build version and source revision to the server package so
+	// GET /api/health can report them to the frontend top bar.
 	server.BuildVersion = version
+	server.BuildCommit = revision
 
 	printBanner(*addr)
 

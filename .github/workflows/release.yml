@@ -196,7 +196,9 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: ARTEX_VERSION=${{ github.ref_name }}
+          build-args: |
+            ARTEX_VERSION=${{ github.ref_name }}
+            ARTEX_REVISION=${{ github.sha }}
           provenance: true
           sbom: true
           cache-from: type=gha

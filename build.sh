@@ -99,6 +99,14 @@ if [ -z "${ARTEX_BUILD_VERSION:-}" ]; then
 fi
 # Release tags are commonly passed with a v prefix; keep the binary version consistent.
 ARTEX_BUILD_VERSION="${ARTEX_BUILD_VERSION#v}"
+# Source revision, shown by /health and the UI next to the version. Docker builds
+# pass it explicitly because the build context has no .git; a local build derives
+# it from the checkout.
+ARTEX_REVISION="${ARTEX_REVISION:-}"
+if [ -z "$ARTEX_REVISION" ] && command -v git >/dev/null 2>&1 \
+   && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  ARTEX_REVISION="$(git rev-parse HEAD 2>/dev/null || true)"
+fi
 ARTEX_OUTPUT_DIR="${ARTEX_OUTPUT_DIR:-dist}"
 ARTEX_PACKAGE_DIR="${ARTEX_PACKAGE_DIR:-$ARTEX_OUTPUT_DIR}"
 ARTEX_UPX_ARGS="${ARTEX_UPX_ARGS:---best --lzma}"
@@ -213,7 +221,9 @@ build_target() {
   fi
   mkdir -p "$(dirname "$output")"
 
-  info "Compiling ${goos}/${goarch}, version ${ARTEX_BUILD_VERSION}"
+  info "Compiling ${goos}/${goarch}, version ${ARTEX_BUILD_VERSION}${ARTEX_REVISION:+ (${ARTEX_REVISION:0:12})}"
+  LDFLAGS="-s -w -buildid= -X main.version=${ARTEX_BUILD_VERSION}"
+  [ -n "${ARTEX_REVISION:-}" ] && LDFLAGS="${LDFLAGS} -X main.revision=${ARTEX_REVISION}"
   GOSUMDB="$ARTEX_GOSUMDB" \
   CGO_ENABLED=0 \
   GOOS="$goos" \
@@ -221,7 +231,7 @@ build_target() {
   go build \
     -tags embedui \
     -trimpath \
-    -ldflags "-s -w -buildid= -X main.version=${ARTEX_BUILD_VERSION}" \
+    -ldflags "${LDFLAGS}" \
     -o "$output" \
     ./cmd/artex
 
