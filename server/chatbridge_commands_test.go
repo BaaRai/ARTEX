@@ -52,7 +52,7 @@ func bridgeCommandServer(t *testing.T) (*Server, *Task, *fakeBridgeTransport) {
 func runBridgeCommand(t *testing.T, s *Server, name, args string) string {
 	t.Helper()
 	cmds, text := s.chatBridgeHandlers(fakeBridgeKind)
-	req := chatbridge.Request{Kind: fakeBridgeKind, ChatID: "100", UserID: "7", Command: name, Args: args}
+	req := chatbridge.Request{Kind: fakeBridgeKind, ChatID: "100", ChatType: chatbridge.ChatTypePrivate, UserID: "7", Command: name, Args: args}
 	if name == "" {
 		return text(context.Background(), req)
 	}
@@ -77,9 +77,15 @@ func TestChatBridgeTaskCommands(t *testing.T) {
 		}
 	}
 
-	if got := runBridgeCommand(t, s, "tasks", ""); !strings.Contains(got, "#"+task.ID+" ") || !strings.Contains(got, "chat bridge commands fixture") {
+	// The task is unnamed: with excerpts off its description stays in ARTEX.
+	if got := runBridgeCommand(t, s, "tasks", ""); !strings.Contains(got, "#"+task.ID+" ") || !strings.Contains(got, "(unnamed)") || strings.Contains(got, "chat bridge commands fixture") {
 		t.Fatalf("/tasks = %q", got)
 	}
+	setBridgeShareText(t, s, true)
+	if got := runBridgeCommand(t, s, "tasks", ""); !strings.Contains(got, "chat bridge commands fixture") {
+		t.Fatalf("/tasks with excerpts = %q", got)
+	}
+	setBridgeShareText(t, s, false)
 	if got := runBridgeCommand(t, s, "task", "abc"); !strings.Contains(got, "is a number") {
 		t.Fatalf("/task abc = %q", got)
 	}
@@ -171,6 +177,21 @@ func TestChatBridgeTaskCommands(t *testing.T) {
 	}
 }
 
+// setBridgeShareText turns excerpts on or off for the fake bridge, keeping
+// its other settings.
+func setBridgeShareText(t *testing.T, s *Server, on bool) {
+	t.Helper()
+	ctx := context.Background()
+	b, err := s.m.PG().ChatBridgeByKind(ctx, fakeBridgeKind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.ShareText = on
+	if _, err := s.m.PG().SaveChatBridge(ctx, b, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChatBridgeRelayAnswer(t *testing.T) {
 	s, task, fake := bridgeCommandServer(t)
 	// The relay runs on the service context; give it a live one.
@@ -179,9 +200,20 @@ func TestChatBridgeRelayAnswer(t *testing.T) {
 	if _, err := s.m.PG().UpsertTaskCredential(tid, db.TaskCredentialInput{Domain: "app.example", Username: "admin", Password: "Correct-Horse-9", Source: "user"}); err != nil {
 		t.Fatal(err)
 	}
-	req := chatbridge.Request{Kind: fakeBridgeKind, ChatID: "100", UserID: "7"}
+	req := chatbridge.Request{Kind: fakeBridgeKind, ChatID: "100", ChatType: chatbridge.ChatTypePrivate, UserID: "7"}
 
 	answer := "Logged in as admin with Correct-Horse-9.\n```http\nGET /admin HTTP/1.1\nCookie: sid=abcdef123456\n```\nNext I will map the admin panel."
+
+	// Excerpts are off by default: the chat hears that there is an answer,
+	// not what it says.
+	s.bridgeRelayAnswer(req, task.ID, answer, nil)
+	if got := fake.sent["100"]; len(got) != 1 || !strings.Contains(got[0], "answered. Read it in ARTEX") || strings.Contains(got[0], "admin") {
+		t.Fatalf("relay without excerpts = %q", got)
+	}
+
+	// With excerpts on, the answer is relayed through SafeText.
+	setBridgeShareText(t, s, true)
+	fake.sent = nil
 	s.bridgeRelayAnswer(req, task.ID, answer, nil)
 	got := fake.sent["100"]
 	if len(got) != 1 {
@@ -213,5 +245,26 @@ func TestChatBridgeRelayAnswer(t *testing.T) {
 	s.bridgeRelayAnswer(req, task.ID, "late answer", nil)
 	if len(fake.sent) != 0 {
 		t.Fatalf("an answer reached a chat that is no longer allowed: %q", fake.sent)
+	}
+
+	// In a group, the user who asked must still be allowed too.
+	group := chatbridge.Request{Kind: fakeBridgeKind, ChatID: "-100", ChatType: "supergroup", UserID: "7"}
+	save := func(users ...string) {
+		t.Helper()
+		if _, err := s.m.PG().SaveChatBridge(context.Background(), &db.ChatBridge{Kind: fakeBridgeKind, Enabled: true, Config: json.RawMessage(`{"bot_token":"x"}`), AllowedChats: []string{"-100"}, AllowedUsers: users}, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("7")
+	fake.sent = nil
+	s.bridgeRelayAnswer(group, task.ID, "group answer", nil)
+	if len(fake.sent["-100"]) != 1 {
+		t.Fatalf("group relay for an allowed user = %q", fake.sent)
+	}
+	save("8")
+	fake.sent = nil
+	s.bridgeRelayAnswer(group, task.ID, "group answer", nil)
+	if len(fake.sent) != 0 {
+		t.Fatalf("an answer reached a group whose asker lost access: %q", fake.sent)
 	}
 }

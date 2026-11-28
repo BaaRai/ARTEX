@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/chatbridge"
@@ -27,8 +26,10 @@ import (
 // when no id is given.
 //
 // What goes back to the chat is a summary and a link, never evidence or a
-// credential: task and finding titles, statuses and counts, and the
-// main agent's answer after chatbridge.SafeText.
+// credential: task and finding titles, statuses and counts. Free-form text
+// (a main-agent answer, the description of an unnamed task) goes out only
+// when the bridge's share_text is on, and then through chatbridge.SafeText.
+// Off, an answer is announced with a link instead.
 
 const (
 	// chatBridgeListLimit caps /tasks and /findings.
@@ -92,6 +93,7 @@ func (s *Server) bridgeTasks(ctx context.Context, req chatbridge.Request) string
 		log.Printf("%s task list metrics: %v", chatBridgeLogTag(req.Kind), err)
 	}
 	selected, _ := s.m.PG().ChatBridgeTask(ctx, req.Kind, req.ChatID)
+	share := s.bridgeShareText(ctx, req.Kind)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Tasks (%d", min(len(list), chatBridgeListLimit))
 	if len(list) > chatBridgeListLimit {
@@ -99,7 +101,7 @@ func (s *Server) bridgeTasks(ctx context.Context, req chatbridge.Request) string
 	}
 	b.WriteString("):")
 	for _, t := range list[:min(len(list), chatBridgeListLimit)] {
-		fmt.Fprintf(&b, "\n#%s %s · %s", t.ID, s.resolvedTaskStatus(t), bridgeTaskTitle(t))
+		fmt.Fprintf(&b, "\n#%s %s · %s", t.ID, s.resolvedTaskStatus(t), s.bridgeTaskTitle(t, share))
 		if f := bridgeSeverityLine(metrics[t.ExpID].Findings, true); f != "" {
 			b.WriteString(" · " + f)
 		}
@@ -117,7 +119,7 @@ func (s *Server) bridgeTask(ctx context.Context, req chatbridge.Request) string 
 		if t == nil {
 			return reply
 		}
-		return s.bridgeTaskSummary(t, "Selected task")
+		return s.bridgeTaskSummary(ctx, req, t, "Selected task")
 	}
 	t, reply := s.bridgeTaskFor(ctx, req, req.Args)
 	if t == nil {
@@ -129,13 +131,13 @@ func (s *Server) bridgeTask(ctx context.Context, req chatbridge.Request) string 
 		return "Could not select task #" + t.ID + ". Try again."
 	}
 	log.Printf("%s chat %s selected task %s (user %s)", chatBridgeLogTag(req.Kind), req.ChatID, t.ID, req.UserID)
-	return s.bridgeTaskSummary(t, "Selected task") + "\n\nMessages without a slash now go to this task's main agent."
+	return s.bridgeTaskSummary(ctx, req, t, "Selected task") + "\n\nMessages without a slash now go to this task's main agent."
 }
 
 // bridgeTaskSummary is the status card of one task.
-func (s *Server) bridgeTaskSummary(t *Task, heading string) string {
+func (s *Server) bridgeTaskSummary(ctx context.Context, req chatbridge.Request, t *Task, heading string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s #%s: %s\nStatus: %s", heading, t.ID, bridgeTaskTitle(t), s.resolvedTaskStatus(t))
+	fmt.Fprintf(&b, "%s #%s: %s\nStatus: %s", heading, t.ID, s.bridgeTaskTitle(t, s.bridgeShareText(ctx, req.Kind)), s.resolvedTaskStatus(t))
 	if m, err := s.m.PG().TaskListMetrics(t.ExpID); err == nil {
 		if m.Goals.Total > 0 {
 			fmt.Fprintf(&b, " · goals %d/%d met", m.Goals.Met, m.Goals.Total)
@@ -187,6 +189,7 @@ func (s *Server) bridgeFindings(ctx context.Context, req chatbridge.Request) str
 		return reply
 	}
 	list, err := s.m.PG().ListFindingsFiltered(db.FindingFilter{TaskID: t.ID, Sort: "severity"}, chatBridgeListLimit)
+	secrets := s.bridgeTaskSecrets(t.ID)
 	if err != nil {
 		log.Printf("%s findings of task %s: %v", chatBridgeLogTag(req.Kind), t.ID, err)
 		return "Could not read the findings. Try again."
@@ -204,7 +207,8 @@ func (s *Server) bridgeFindings(ctx context.Context, req chatbridge.Request) str
 		if title == "" {
 			title = f.VulnClass
 		}
-		fmt.Fprintf(&b, "\n[%s] %s · %s", strings.ToLower(f.Severity), bridgeCut(oneLine(title), chatBridgeTitleRunes), strings.ReplaceAll(f.Status, "_", " "))
+		// Agents write finding titles: filter them like any text they write.
+		fmt.Fprintf(&b, "\n[%s] %s · %s", strings.ToLower(f.Severity), chatbridge.SafeText(oneLine(title), secrets, chatBridgeTitleRunes), strings.ReplaceAll(f.Status, "_", " "))
 		if link := s.bridgeFindingLink(f.ID); link != "" {
 			b.WriteString("\n" + link)
 		}
@@ -239,7 +243,9 @@ func (s *Server) bridgeText(ctx context.Context, req chatbridge.Request) string 
 	}
 	log.Printf("%s user %s in chat %s sent a message to the main agent of task %s", chatBridgeLogTag(req.Kind), req.UserID, req.ChatID, t.ID)
 	if mode == "rule" {
-		return chatbridge.SafeText(ruleReply, nil, chatBridgeAnswerRunes)
+		// The rule handler answers with counts it wrote itself; it is still
+		// filtered like any reply, with the task's credentials masked.
+		return chatbridge.SafeText(ruleReply, s.bridgeTaskSecrets(t.ID), chatBridgeAnswerRunes)
 	}
 	return "Sent to the main agent of task #" + t.ID + ". Its answer will follow here."
 }
@@ -253,6 +259,9 @@ func (s *Server) bridgeRelayAnswer(req chatbridge.Request, taskID, answer string
 		fmt.Fprintf(&b, "The main agent of task #%s stopped without an answer: %s.", taskID, bridgeTurnEndReason(turnErr))
 	case strings.TrimSpace(answer) == "":
 		fmt.Fprintf(&b, "The main agent of task #%s finished without a text answer.", taskID)
+	case !s.bridgeShareText(s.ctx, req.Kind):
+		// Excerpts are off: say that there is an answer, not what it says.
+		fmt.Fprintf(&b, "The main agent of task #%s answered. Read it in ARTEX.", taskID)
 	default:
 		fmt.Fprintf(&b, "Task #%s, main agent:\n\n%s", taskID, chatbridge.SafeText(answer, s.bridgeTaskSecrets(taskID), chatBridgeAnswerRunes))
 	}
@@ -261,7 +270,7 @@ func (s *Server) bridgeRelayAnswer(req chatbridge.Request, taskID, answer string
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
 	defer cancel()
-	if err := s.chatBridges.Deliver(ctx, req.Kind, req.ChatID, b.String()); err != nil && s.ctx.Err() == nil {
+	if err := s.chatBridges.Deliver(ctx, req, b.String()); err != nil && s.ctx.Err() == nil {
 		log.Printf("%s answer of task %s to chat %s not delivered: %v", chatBridgeLogTag(req.Kind), taskID, req.ChatID, err)
 	}
 }
@@ -322,19 +331,30 @@ func (s *Server) bridgeFindingLink(id int64) string {
 	return fmt.Sprintf("%s/function/findings/detail?id=%d", base, id)
 }
 
-// bridgeTaskTitle is the task name, or its description or goal when unnamed.
-func bridgeTaskTitle(t *Task) string {
+// bridgeTaskTitle is the task name. An unnamed task is shown by its
+// description or goal only when share is on, since operators write scope
+// details and sometimes credentials there; the text is filtered like any
+// excerpt. The name, which an operator gives as a title, is filtered too.
+func (s *Server) bridgeTaskTitle(t *Task, share bool) string {
 	title := t.lifecycleSnapshot().Name
-	if strings.TrimSpace(title) == "" {
+	if strings.TrimSpace(title) == "" && share {
 		title = t.Description
+		if strings.TrimSpace(title) == "" {
+			title = t.Goal
+		}
 	}
-	if strings.TrimSpace(title) == "" {
-		title = t.Goal
-	}
-	if strings.TrimSpace(title) == "" {
+	title = chatbridge.SafeText(oneLine(title), s.bridgeTaskSecrets(t.ID), chatBridgeTitleRunes)
+	if title == "" {
 		return "(unnamed)"
 	}
-	return bridgeCut(oneLine(title), chatBridgeTitleRunes)
+	return title
+}
+
+// bridgeShareText reports whether the bridge of kind allows excerpts of
+// free-form text. Any doubt (no row, a read error) means no.
+func (s *Server) bridgeShareText(ctx context.Context, kind string) bool {
+	b, err := s.m.PG().ChatBridgeByKind(ctx, kind)
+	return err == nil && b.ShareText
 }
 
 // bridgeSeverityLine renders finding counts. compact skips zero buckets and
@@ -358,10 +378,3 @@ func bridgeSeverityLine(c db.FindingSeverityCounts, compact bool) string {
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
-
-func bridgeCut(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	return string([]rune(s)[:n-1]) + "…"
-}

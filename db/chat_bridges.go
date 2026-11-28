@@ -10,7 +10,7 @@ import (
 )
 
 // ChatBridge is the stored configuration of one inbound chat bridge
-// (migrations 0015 and 0016). Config is the decrypted JSON; parsing it is
+// (migrations 0015, 0016 and 0018). Config is the decrypted JSON; parsing it is
 // left to package chatbridge, like notification channel configs.
 type ChatBridge struct {
 	ID           int64           `json:"id"`
@@ -20,7 +20,10 @@ type ChatBridge struct {
 	AllowedChats []string        `json:"allowed_chats"`
 	// AllowedUsers are the senders served inside an allowed group chat.
 	AllowedUsers []string `json:"allowed_users"`
-	PollOffset   int64    `json:"poll_offset"`
+	// ShareText allows filtered excerpts of free-form text (main-agent
+	// answers, task descriptions) in what the bot sends. Off by default.
+	ShareText  bool  `json:"share_text"`
+	PollOffset int64 `json:"poll_offset"`
 	// ConfigVersion grows on every save; SetChatBridgeOffset only writes for
 	// the version the poller read.
 	ConfigVersion int64     `json:"config_version"`
@@ -31,12 +34,12 @@ type ChatBridge struct {
 // ErrChatBridgeNotFound is returned when no row exists for a kind.
 var ErrChatBridgeNotFound = errors.New("chat bridge not configured")
 
-const chatBridgeCols = `id, kind, enabled, config, allowed_chats, allowed_users, poll_offset, config_version, created_at, updated_at`
+const chatBridgeCols = `id, kind, enabled, config, allowed_chats, allowed_users, share_text, poll_offset, config_version, created_at, updated_at`
 
 func scanChatBridge(sc interface{ Scan(...any) error }) (*ChatBridge, error) {
 	var b ChatBridge
 	var cfg, allowed, users string
-	if err := sc.Scan(&b.ID, &b.Kind, &b.Enabled, &cfg, &allowed, &users, &b.PollOffset, &b.ConfigVersion, &b.CreatedAt, &b.UpdatedAt); err != nil {
+	if err := sc.Scan(&b.ID, &b.Kind, &b.Enabled, &cfg, &allowed, &users, &b.ShareText, &b.PollOffset, &b.ConfigVersion, &b.CreatedAt, &b.UpdatedAt); err != nil {
 		return nil, err
 	}
 	plain, err := openSecret(colChatBridgeConfig, cfg)
@@ -95,14 +98,14 @@ func (d *DB) SaveChatBridge(ctx context.Context, b *ChatBridge, resetOffset bool
 	if err != nil {
 		return nil, err
 	}
-	row := d.QueryRowContext(ctx, `INSERT INTO chat_bridges(kind, enabled, config, allowed_chats, allowed_users)
-VALUES($1, $2, $3::jsonb, $4::jsonb, $6::jsonb)
+	row := d.QueryRowContext(ctx, `INSERT INTO chat_bridges(kind, enabled, config, allowed_chats, allowed_users, share_text)
+VALUES($1, $2, $3::jsonb, $4::jsonb, $6::jsonb, $7)
 ON CONFLICT (kind) DO UPDATE SET
     enabled=EXCLUDED.enabled, config=EXCLUDED.config, allowed_chats=EXCLUDED.allowed_chats,
-    allowed_users=EXCLUDED.allowed_users,
+    allowed_users=EXCLUDED.allowed_users, share_text=EXCLUDED.share_text,
     poll_offset=CASE WHEN $5 THEN 0 ELSE chat_bridges.poll_offset END,
     config_version=chat_bridges.config_version+1, updated_at=NOW()
-RETURNING `+chatBridgeCols, b.Kind, b.Enabled, cfg, string(allowed), resetOffset, string(users))
+RETURNING `+chatBridgeCols, b.Kind, b.Enabled, cfg, string(allowed), resetOffset, string(users), b.ShareText)
 	return scanChatBridge(row)
 }
 

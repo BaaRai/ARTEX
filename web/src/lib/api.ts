@@ -1095,6 +1095,7 @@ export const api = {
       config?: Record<string, unknown>;
       allowed_chats?: string[];
       allowed_users?: string[];
+      share_text?: boolean;
     },
   ) => put<ChatBridge>(`/chat-bridges/${encodeURIComponent(kind)}`, payload),
   // Asks the chat app which bot the stored token belongs to; sends no message.

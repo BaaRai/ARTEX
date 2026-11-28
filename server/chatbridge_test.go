@@ -284,6 +284,16 @@ func TestChatBridgeAPI(t *testing.T) {
 	if w = request(http.MethodPut, "/api/chat-bridges/telegram", `{"enabled":true}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"allowed_users":["7","8"]`) {
 		t.Fatalf("allowed users kept = %d %s", w.Code, w.Body)
 	}
+	// Excerpts are off until turned on, and other saves keep the choice.
+	if !strings.Contains(w.Body.String(), `"share_text":false`) {
+		t.Fatalf("share_text default = %s", w.Body)
+	}
+	if w = request(http.MethodPut, "/api/chat-bridges/telegram", `{"share_text":true}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"share_text":true`) {
+		t.Fatalf("share_text on = %d %s", w.Code, w.Body)
+	}
+	if w = request(http.MethodPut, "/api/chat-bridges/telegram", `{"enabled":true}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"share_text":true`) {
+		t.Fatalf("share_text kept = %d %s", w.Code, w.Body)
+	}
 	// Unknown kind.
 	if w = request(http.MethodPut, "/api/chat-bridges/carrier-pigeon", `{}`); w.Code != 404 {
 		t.Fatalf("unknown kind = %d", w.Code)

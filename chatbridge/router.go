@@ -35,6 +35,7 @@ type Access struct {
 type Request struct {
 	Kind     string // transport kind
 	ChatID   string
+	ChatType string // ChatTypePrivate or the transport's label for a shared chat
 	UserID   string
 	UserName string
 	Command  string // lower-case command name without the slash; "" for plain text
@@ -127,7 +128,7 @@ func (r *Router) Route(ctx context.Context, kind string, acc Access, u Update) (
 	if forOther {
 		return DecisionIgnored, ""
 	}
-	req := Request{Kind: kind, ChatID: u.ChatID, UserID: u.UserID, UserName: u.UserName, Command: name, Args: args}
+	req := Request{Kind: kind, ChatID: u.ChatID, ChatType: u.ChatType, UserID: u.UserID, UserName: u.UserName, Command: name, Args: args}
 	if name == "" {
 		if r.Text == nil {
 			return DecisionHandled, "Send /help to see what this bot can do."

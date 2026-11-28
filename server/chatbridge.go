@@ -316,41 +316,66 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 	return 0
 }
 
-// errChatBridgeGone reports that an answer has nowhere to go any more.
-var errChatBridgeGone = errors.New("the chat is no longer allowed on an enabled bridge")
+// errChatBridgeGone reports that a message has nowhere to go any more.
+var errChatBridgeGone = errors.New("the bridge is off or the chat is no longer allowed")
 
-// Deliver sends text to a chat outside the poll loop, for an answer that
-// arrives after its command returned (a main-agent turn). It re-reads the
-// bridge first: if the bridge was disabled or the chat removed from the
-// allowlist in the meantime, the answer is dropped with errChatBridgeGone.
-func (r *chatBridgeRunner) Deliver(ctx context.Context, kind, chatID, text string) error {
+// openBridge loads an enabled bridge with its transport and configuration,
+// for work outside the poll loop. It fails with errChatBridgeGone when the
+// bridge is missing or disabled.
+func (r *chatBridgeRunner) openBridge(ctx context.Context, kind string) (chatbridge.Transport, map[string]any, *db.ChatBridge, error) {
 	if r == nil || r.pg == nil {
-		return errChatBridgeGone
+		return nil, nil, nil, errChatBridgeGone
 	}
 	tr, ok := r.transport(kind)
 	if !ok {
-		return errChatBridgeGone
+		return nil, nil, nil, errChatBridgeGone
 	}
 	b, err := r.pg.ChatBridgeByKind(ctx, kind)
 	if errors.Is(err, db.ErrChatBridgeNotFound) {
-		return errChatBridgeGone
+		return nil, nil, nil, errChatBridgeGone
 	}
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	if !b.Enabled || !slices.Contains(b.AllowedChats, chatID) {
-		return errChatBridgeGone
+	if !b.Enabled {
+		return nil, nil, nil, errChatBridgeGone
 	}
 	var cfg map[string]any
 	if err := json.Unmarshal(b.Config, &cfg); err != nil {
-		return fmt.Errorf("configuration is not valid JSON: %w", err)
+		return nil, nil, nil, fmt.Errorf("configuration is not valid JSON: %w", err)
 	}
 	if err := tr.Validate(cfg); err != nil {
+		return nil, nil, nil, err
+	}
+	return tr, cfg, b, nil
+}
+
+// stillAllowed re-applies the access rule of the Router to a request that
+// was authorized earlier: the chat must still be allowed, and in a shared
+// chat so must the user.
+func stillAllowed(b *db.ChatBridge, req chatbridge.Request) bool {
+	if !slices.Contains(b.AllowedChats, req.ChatID) {
+		return false
+	}
+	return req.ChatType == chatbridge.ChatTypePrivate || slices.Contains(b.AllowedUsers, req.UserID)
+}
+
+// Deliver sends text to the chat of req outside the poll loop, for an answer
+// that arrives after its command returned (a main-agent turn). It re-reads
+// the bridge first: if the bridge was disabled, or the chat or the user who
+// asked lost access in the meantime, the answer is dropped with
+// errChatBridgeGone.
+func (r *chatBridgeRunner) Deliver(ctx context.Context, req chatbridge.Request, text string) error {
+	tr, cfg, b, err := r.openBridge(ctx, req.Kind)
+	if err != nil {
 		return err
+	}
+	if !stillAllowed(b, req) {
+		return errChatBridgeGone
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, chatBridgeSendWait)
 	defer cancel()
-	return tr.Send(sendCtx, cfg, chatID, text)
+	return tr.Send(sendCtx, cfg, req.ChatID, text)
 }
 
 func (r *chatBridgeRunner) setOff(kind string) {

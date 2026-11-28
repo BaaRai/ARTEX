@@ -21,8 +21,9 @@ Outbound notifications (pushing findings to a chat) are a separate feature under
 3. With the allowlist still empty the bot serves no chat. From each chat you want to use (a private
    chat or a group), send the bot any message: it answers once with a refusal that names the chat ID.
 4. Add those chat IDs to **Allowed chat IDs** and save. The change applies at once.
-5. For a group, also add the user ID of each person who may use the bot there to **Allowed user
-   IDs**. A member who is not listed gets a refusal naming their user ID.
+5. For a group, also add the user ID of each person who may give the bot commands to **Allowed user
+   IDs**. A member who is not listed gets a refusal naming their user ID. The list belongs to the
+   bot, not to one group: a listed user can use the bot in every allowed group.
 6. Send `/help` to see the commands. `/whoami` shows the chat ID and your user ID.
 7. Send `/tasks`, then `/task <id>` to pick the task this chat works on.
 
@@ -39,15 +40,26 @@ Outbound notifications (pushing findings to a chat) are a separate feature under
 | `/help` | The command list |
 
 `[id]` defaults to the selected task. Each chat keeps its own selection, stored in the database, so
-it survives a restart and two chats can work on different tasks.
+it survives a restart and two chats can work on different tasks. The selection is a convenience,
+not a limit: like an administrator in the web UI, an allowed user can name any task, for example
+`/pause 12`.
 
 Any message that is not a command goes to the **main agent** of the selected task. It is the same
 conversation as the task's web chat: the message shows up there, the agent works as it would for a
-web message, and its answer is sent back to the chat when the turn ends. While the agent is still
+web message, and when the turn ends the chat is told that it answered, with a link (see
+**Text excerpts** below for relaying the answer itself). While the agent is still
 answering, a new message is refused; send it again after the answer arrives. Pausing the task stops
 the turn in progress, and the chat is told so.
 
 Replies link back to ARTEX when **Link-back URL** is set under **System → Notifications**.
+
+### Text excerpts
+
+**Send text excerpts** is off by default. Off, everything the bot sends is fixed wording, titles,
+statuses, counts and links: a main-agent answer is announced with a link, and an unnamed task is
+listed as `(unnamed)` rather than by its description. On, the bot also relays the answer and shows
+the description of unnamed tasks, filtered as described below. Turn it on only if the chat may
+receive what agents write about the target.
 
 ## Security model
 
@@ -56,16 +68,24 @@ Replies link back to ARTEX when **Link-back URL** is set under **System → Noti
   bot; past that it starts over, so a chat may be refused one more time but a new chat always learns
   its ID. An empty allowlist serves no chat at all; that is the state a new bot starts in while you
   collect chat IDs.
-- **In a group, only allowed users are served.** A group is a shared space, so allowing it is not
-  enough: the sender must also be in **Allowed user IDs**, and a group with no allowed users serves
-  nobody. Someone added to the group later gains nothing. A member who is not listed gets one
-  refusal naming their user ID. A private chat is its own user and needs no entry.
-- **Summaries and links only.** Replies carry task and finding titles, statuses and counts, never
-  finding evidence or summaries. The main agent's answer is relayed with code blocks removed (that is
-  where agents put requests, responses and tool output), the task's stored credentials and common
-  secret shapes (authorization and cookie headers, bearer tokens, JWTs, keys, `password=…`)
-  masked, and the text cut to 1500 characters; the full answer stays in ARTEX. An answer is dropped
-  if its chat was removed from the allowlist while the agent worked.
+- **In a group, only allowed users give commands.** The sender must also be in **Allowed user
+  IDs**, and a group with no allowed users serves nobody. A member who is not listed gets one refusal
+  naming their user ID. A private chat is its own user and needs no entry.
+- **An allowed group is a shared audience.** The user list decides who can give commands, not who
+  reads the replies. Every member of an allowed group sees everything the bot sends there (task
+  lists, findings, approval requests), including members added later and, depending on the group's
+  history setting, earlier messages too. Allow a group only if every member may see that.
+- **Summaries and links only by default.** Replies carry task and finding titles, statuses and
+  counts, never finding evidence or summaries. Free-form text goes out only with **Send text
+  excerpts** on, and then through a filter: code is dropped (fenced and indented blocks, where agents
+  put requests, responses and tool output), the task's stored credentials are masked, and so are
+  common secret shapes (credentials in URLs, authorization and cookie headers, bearer tokens, JWTs,
+  well-known API key formats, `curl -u`, session cookies and `password=…`-style pairs, quoted values
+  included). The text is cut to 1500 characters, and the full answer stays in ARTEX. A filter cannot
+  know every shape a credential takes, which is why excerpts are opt-in.
+- **Late answers are re-checked.** An answer is dropped if, while the agent worked, the bridge was
+  switched off, the chat was removed from the allowlist or, in a group, the user who asked was
+  removed from the user list.
 - **No inbound port.** The bot uses long polling (`getUpdates`) over outbound HTTPS.
 - **The token is a secret.** It is encrypted at rest with `keys/secret.key` like other stored
   secrets, shown masked in the UI and API, and never written to logs or error messages (errors keep
@@ -94,7 +114,7 @@ All routes require the administrator JWT.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/chat-bridges` | Every transport with its masked configuration, allowlist and live status |
-| `PUT` | `/api/chat-bridges/{kind}` | Save `enabled`, `config`, `allowed_chats` and `allowed_users`; omitted fields keep their stored value |
+| `PUT` | `/api/chat-bridges/{kind}` | Save `enabled`, `config`, `allowed_chats`, `allowed_users` and `share_text`; omitted fields keep their stored value |
 | `POST` | `/api/chat-bridges/{kind}/test` | Check the stored token and return the bot identity |
 
 `config` follows the notification channel convention: a masked value sent back unchanged keeps the

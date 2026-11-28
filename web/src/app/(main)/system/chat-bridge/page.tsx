@@ -28,6 +28,7 @@ interface Form {
   baseURL: string;
   chats: string; // one chat ID per line
   users: string; // one user ID per line, for groups
+  shareText: boolean; // send filtered excerpts of free-form text
 }
 
 function formFrom(b: ChatBridge | undefined): Form {
@@ -37,6 +38,7 @@ function formFrom(b: ChatBridge | undefined): Form {
     baseURL: typeof b?.config.base_url === "string" ? b.config.base_url : "",
     chats: (b?.allowed_chats ?? []).join("\n"),
     users: (b?.allowed_users ?? []).join("\n"),
+    shareText: b?.share_text ?? false,
   };
 }
 
@@ -101,6 +103,7 @@ export default function ChatBridgePage() {
         config,
         allowed_chats: parseIDs(form.chats),
         allowed_users: parseIDs(form.users),
+        share_text: form.shareText,
       });
       setBridge(saved);
       setForm(formFrom(saved));
@@ -243,7 +246,7 @@ export default function ChatBridgePage() {
             />
             <p className="text-muted-foreground text-xs">
               {t(
-                "One per line. Needed only for groups: in an allowed group the bot answers only these users, so joining the group grants nothing. A member who is refused gets their user ID in the refusal.",
+                "One per line. Needed only for groups: these users can give the bot commands in every allowed group. Every member of an allowed group still sees what the bot sends there. A member who is refused gets their user ID in the refusal.",
               )}
             </p>
             {form.enabled && groupAllowed && userCount === 0 && (
@@ -251,6 +254,23 @@ export default function ChatBridgePage() {
                 {t("A group is allowed but no user is: the bot refuses every member of that group.")}
               </p>
             )}
+          </div>
+
+          <div className="grid gap-2">
+            <div className="flex items-center gap-3">
+              <Switch
+                id="cb-share"
+                checked={form.shareText}
+                disabled={!loaded}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, shareText: v }))}
+              />
+              <Label htmlFor="cb-share">{t("Send text excerpts")}</Label>
+            </div>
+            <p className="text-muted-foreground text-xs">
+              {t(
+                "Off: answers of the main agent are announced with a link, and unnamed tasks are listed as (unnamed). On: the bot also sends filtered excerpts of what agents and operators wrote. The filter masks common credential shapes but cannot catch every one.",
+              )}
+            </p>
           </div>
 
           <div className="grid gap-2">
@@ -278,7 +298,7 @@ export default function ChatBridgePage() {
           </div>
           <p className="text-muted-foreground text-xs">
             {t(
-              "Commands: /tasks, /task <id>, /pause, /resume, /findings. Any other message goes to the main agent of the chat's selected task, in the same conversation as the web chat, and its answer is sent back.",
+              "Commands: /tasks, /task <id>, /pause, /resume, /findings. Any other message goes to the main agent of the chat's selected task, in the same conversation as the web chat, and the chat is told when it answers.",
             )}
           </p>
           <p className="text-muted-foreground text-xs">

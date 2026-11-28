@@ -1898,6 +1898,7 @@ export interface ChatBridge {
   config: Record<string, unknown>;
   allowed_chats: string[];
   allowed_users: string[];
+  share_text: boolean;
   secret_keys: string[];
   status: ChatBridgeStatus;
   updated_at?: string;

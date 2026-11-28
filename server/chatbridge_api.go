@@ -26,6 +26,7 @@ type chatBridgeDTO struct {
 	Config       map[string]any   `json:"config"`
 	AllowedChats []string         `json:"allowed_chats"`
 	AllowedUsers []string         `json:"allowed_users"`
+	ShareText    bool             `json:"share_text"`
 	SecretKeys   []string         `json:"secret_keys"`
 	Status       chatBridgeStatus `json:"status"`
 	UpdatedAt    *time.Time       `json:"updated_at,omitempty"`
@@ -36,6 +37,7 @@ type chatBridgeRequest struct {
 	Config       map[string]any `json:"config"`
 	AllowedChats *[]string      `json:"allowed_chats"`
 	AllowedUsers *[]string      `json:"allowed_users"`
+	ShareText    *bool          `json:"share_text"`
 }
 
 func (s *Server) chatBridgeDTO(kind string, b *db.ChatBridge) chatBridgeDTO {
@@ -58,6 +60,7 @@ func (s *Server) chatBridgeDTO(kind string, b *db.ChatBridge) chatBridgeDTO {
 	out.Config = chatbridge.MaskConfig(kind, cfg)
 	out.AllowedChats = b.AllowedChats
 	out.AllowedUsers = b.AllowedUsers
+	out.ShareText = b.ShareText
 	updated := b.UpdatedAt
 	out.UpdatedAt = &updated
 	return out
@@ -114,11 +117,11 @@ func (s *Server) chatBridgeSave(w http.ResponseWriter, r *http.Request) {
 	}
 	storedCfg := map[string]any{}
 	allowed, users := []string{}, []string{}
-	enabled := false
+	enabled, share := false, false
 	if stored != nil {
 		_ = json.Unmarshal(stored.Config, &storedCfg)
 		allowed, users = stored.AllowedChats, stored.AllowedUsers
-		enabled = stored.Enabled
+		enabled, share = stored.Enabled, stored.ShareText
 	}
 
 	cfg := storedCfg
@@ -146,6 +149,9 @@ func (s *Server) chatBridgeSave(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	if req.ShareText != nil {
+		share = *req.ShareText
+	}
 	// A disabled bridge may hold a partial configuration (the form is saved
 	// before the token is at hand); an enabled one must be complete.
 	if enabled || cfgHas(cfg, tr.SecretKeys()) {
@@ -162,7 +168,7 @@ func (s *Server) chatBridgeSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// Update ids are per bot: a new token makes the old cursor meaningless,
 	// so it is cleared in the same statement that stores the token.
-	saved, err := pg.SaveChatBridge(r.Context(), &db.ChatBridge{Kind: kind, Enabled: enabled, Config: raw, AllowedChats: allowed, AllowedUsers: users}, secretsChanged(tr, storedCfg, cfg))
+	saved, err := pg.SaveChatBridge(r.Context(), &db.ChatBridge{Kind: kind, Enabled: enabled, Config: raw, AllowedChats: allowed, AllowedUsers: users, ShareText: share}, secretsChanged(tr, storedCfg, cfg))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
