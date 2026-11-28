@@ -59,6 +59,11 @@ printed at startup:
 docker compose logs artex | grep "Setup token"
 ```
 
+> **On Docker Desktop for Windows or macOS**, add the Desktop overlay so agent isolation holds:
+> `docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build`. Without it the
+> `artex` container crash-loops on the isolation self-test. See
+> [Docker Desktop on Windows and macOS](#docker-desktop-on-windows-and-macos).
+
 > Multi-arch release images (`linux/amd64`, `linux/arm64`) are published to GitHub Container
 > Registry at `ghcr.io/baarai/artex` from the next tagged release; v0.7.0 predates the publish
 > step. For pulling the prebuilt image and all other installation paths (script, binaries,
@@ -425,6 +430,39 @@ docker compose -f docker-compose.ghcr.yml up -d
 Pin a version with `ARTEX_IMAGE_TAG=v0.7.1` in `.env` (or `0.7.1`); unset uses `latest`. To use
 custom skills, copy them into a host directory and add `- ./skills:/app/skills` to the `artex`
 volumes, which overrides the built-in `/app/skills`.
+
+#### Docker Desktop on Windows and macOS
+
+Docker Desktop runs containers inside a Linux VM and serves the project's `./data`, `./keys` and
+`./skills` host directories into the container as bind mounts the server cannot lock down. The
+agent-isolation self-test (the fail-closed privilege drop) then refuses to start, so the `artex`
+container crash-loops at startup with `self-test failed ... Bash can create files in /app/data`. At
+startup the server runs as root and `chown`/`chmod`s those paths so the uid-10001 agent executor
+cannot write to them; on Docker Desktop it cannot: Windows/WSL forces the bind mount world-writable
+(`0777`) and ignores `chown`/`chmod`, while macOS serves it as a `fakeowner` filesystem that reports
+`root:root 0755` inside the container but does not enforce it, so uid 10001 can still create files.
+(That is also why the `chmod -R go-w` workaround helps on WSL but does nothing on a Mac.)
+
+Layer `docker-compose.desktop.yml` over the base file to swap those three host bind mounts for
+Docker-managed named volumes, which live inside the VM's own filesystem where the server's
+permission hardening takes effect, so isolation stays **enabled** (no `-dev-insecure-no-isolation`):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
+# or, from the prebuilt image:
+docker compose -f docker-compose.ghcr.yml -f docker-compose.desktop.yml up -d
+```
+
+Use the same `-f docker-compose.yml -f docker-compose.desktop.yml` for every later `docker compose`
+command (`logs`, `up -d artex`, `down`). The named volumes persist across rebuilds, but `data` and
+`keys` are no longer directly browsable at the project path — inspect or back them up with
+`docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp artex:/app/data ./data` (and
+the same for `/app/keys`). `/app/skills` is seeded from the image's baked skills the first time the
+volume is created; editing a skill then means refreshing the volume
+(`docker compose -f docker-compose.yml -f docker-compose.desktop.yml cp ./skills/. artex:/app/skills`)
+rather than a live host edit. **Native-Linux installs do not need this overlay** — there host bind
+mounts work, so the default `docker-compose.yml` already passes the self-test and keeps your `./data`,
+`./keys` and `./skills` directories on the host.
 
 For remote MCP you can choose `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings.
 Legacy SSE servers usually establish the event stream with `GET /sse` and receive JSON-RPC over
@@ -798,6 +836,14 @@ Daily cron example (03:20, operator crontab):
 > `schema.sql` baseline, then any pending numbered migration from `db/migrations/`, in order, each
 > in its own transaction. Restarting the new binary is the upgrade. Back up `./data`, `keys/` and
 > the database before upgrading.
+
+> **On the [Docker Desktop overlay](#docker-desktop-on-windows-and-macos) (Windows/macOS)**, `data`,
+> `keys` and `skills` are named volumes rather than host directories. `data` and `keys` carry across
+> upgrades the same way, but the `skills` volume is seeded from the image only when it is first
+> created, so a newer image's updated built-in skills do not reach an existing volume. After
+> upgrading, either refresh it from the checkout with `docker compose -f docker-compose.yml -f
+> docker-compose.desktop.yml cp ./skills/. artex:/app/skills`, or remove the volume (e.g.
+> `docker volume rm artex_skills`) and let the next start re-seed it from the new image.
 
 **Update banner (opt-in, off by default)**: start ARTEX with `ARTEX_UPDATE_CHECK=1` to ask the
 public GitHub releases API for the latest tag, at most once per 24 hours (cached in memory; a
