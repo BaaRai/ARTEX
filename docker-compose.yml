@@ -76,13 +76,13 @@ services:
     volumes:
       # Bind the runtime data directory (traffic index, task files, transcripts, etc.) to data/ in the project root,
       # so it is easy to inspect/back up on the host and survives container rebuilds.
-      - ./data:/app/data
+      - ./data:/app/data:z
       # JWT signing key and secret key (jwt.key, secret.key), kept out of data/, which the file manager browses.
       # Persisting it keeps users signed in across container rebuilds.
-      - ./keys:/app/keys
+      - ./keys:/app/keys:z
       # Mount skills/ from the project root into the container (overriding the image's built-in /app/skills);
       # skill changes require no image rebuild — the container reads the host copy.
-      - ./skills:/app/skills
+      - ./skills:/app/skills:z
     restart: unless-stopped
 
 volumes:
