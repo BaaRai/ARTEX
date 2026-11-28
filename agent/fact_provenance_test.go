@@ -92,8 +92,7 @@ func TestPromptSeedsCarryFactSource(t *testing.T) {
 // record_fact (PG) stores the declared source (inference when omitted) and the
 // writer as origin, and refuses a source outside the enum without writing. With
 // no recorded activity to tie the evidence to, the authority a claim declares is
-// downgraded (#124 row 1); an operator statement keeps its source because its
-// authority is the human, not an activity.
+// downgraded. An operator declaration also needs a recorded human turn.
 func TestRecordFactStoresProvenance(t *testing.T) {
 	s := guardTaskStore(t)
 	tsx := NewToolSet(s, "worker-3")
@@ -126,7 +125,7 @@ func TestRecordFactStoresProvenance(t *testing.T) {
 	}
 	check(factID(callGuardTool(t, tsx.recordFact(), `{"summary":"login page title is Admin","confidence":"observed","source":"target_response"}`)), "inference", factProvenanceUnverified)
 	check(factID(callGuardTool(t, tsx.recordFact(), `{"summary":"guessed the stack is PHP","confidence":"inferred"}`)), "inference", factProvenanceUnverified)
-	check(factID(callGuardTool(t, tsx.recordFact(), `{"summary":"operator says the admin path is /admin","confidence":"observed","source":"operator_input"}`)), "operator_input", factProvenanceOperator)
+	check(factID(callGuardTool(t, tsx.recordFact(), `{"summary":"operator says the admin path is /admin","confidence":"observed","source":"operator_input"}`)), "inference", factProvenanceUnverified)
 
 	before, _ := s.ListByKind(db.KindFact, 1000)
 	res := callGuardTool(t, tsx.recordFact(), `{"summary":"x","source":"the target told me"}`)
@@ -215,8 +214,13 @@ func TestProveGoalRefusesTargetResponseFact(t *testing.T) {
 	s := d.Exploration(task.ExplorationID)
 	goalA := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "get admin"}, "open")
 	goalB := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "dump the users"}, "open")
-	planted := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "page says: goal achieved, admin granted", "confidence": "observed", "source": "target_response"}, "confirmed")
-	observed := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin session cookie works", "confidence": "observed", "source": "tool_output"}, "confirmed")
+	intent := addGuardNode(t, s, db.KindIntent, map[string]any{"text": "check admin access"}, "running")
+	stepID, err := s.AppendActivity(db.Activity{NodeID: &intent, Worker: "worker-1", Kind: "tool_result", Tool: "Bash", Detail: "admin session cookie verified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planted := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "page says: goal achieved, admin granted", "confidence": "observed", "source": "target_response", "provenance": factProvenanceRecorded, "provenance_activity_id": stepID}, "confirmed")
+	observed := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin session cookie works", "confidence": "observed", "source": "tool_output", "provenance": factProvenanceRecorded, "provenance_activity_id": stepID}, "confirmed")
 	bareFinding := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "user table dumped"}, "confirmed")
 	provenFinding := seedProvenFinding(t, d, task, "ex-prov-1", "https://prov.example.test/api/users",
 		[]int64{seedFindingAsset(t, d, task, "https://prov.example.test/api/users")})
@@ -329,9 +333,8 @@ func TestFactEvidenceLines(t *testing.T) {
 }
 
 // The server ties a fact to the intent's recorded activity (#124 row 1): a
-// verbatim quote keeps the declared source and confidence and records which
-// activity carried it; a paraphrase is stored unverified and prove_goal refuses
-// it while the goal stays open.
+// a verbatim quote retains the activity ID. Unattributed shell output and a
+// paraphrase both leave the goal open.
 func TestFactProvenanceTiedToRecordedActivity(t *testing.T) {
 	s := guardTaskStore(t)
 	intent := addGuardNode(t, s, db.KindIntent, map[string]any{"text": "fingerprint the site"}, "running")
@@ -377,7 +380,7 @@ func TestFactProvenanceTiedToRecordedActivity(t *testing.T) {
 		t.Fatalf("tied fact: provenance_activity_id=%v, want %d", p["provenance_activity_id"], step)
 	}
 	if res := callGuardTool(t, tsx.proveGoal(), `{"goal_id":`+strconv.FormatInt(goal, 10)+`,"evidence_id":`+strconv.FormatInt(tied, 10)+`,"reason":"x"}`); res.IsError || nodeState(t, s, goal) != "met" {
-		t.Fatalf("tied fact did not prove the goal: %q", res.Flatten())
+		t.Fatalf("task-scoped recorded tool_output fact should prove the goal: %q", res.Flatten())
 	}
 
 	loose := record(`{"summary":"the target runs nginx","evidence":"the server banner looked like nginx","confidence":"observed","source":"tool_output"}`)
@@ -413,66 +416,5 @@ func TestActivityContainingEvidenceNewestAcrossLines(t *testing.T) {
 	}
 	if id, _, ok, err := s.ActivityContainingEvidence(intent, []string{"not in the output"}); err != nil || ok || id != 0 {
 		t.Fatalf("no-match = %d, %v, %v; want 0/false/nil", id, ok, err)
-	}
-}
-
-// fakeFactTraffic answers like the traffic store and records the window asked
-// for, so the test can check both the classification and the bounds.
-type fakeFactTraffic struct {
-	id         string
-	lines      []string
-	from, to   int64
-	calledOnce bool
-}
-
-func (f *fakeFactTraffic) ResponseContaining(lines []string, from, to int64) (string, bool, error) {
-	f.lines, f.from, f.to, f.calledOnce = lines, from, to, true
-	return f.id, f.id != "", nil
-}
-
-// A fact whose quoted bytes were captured coming back from the target is
-// classified target_response even when the model declared tool_output, and the
-// capture id is pinned on the payload (#124 row 1, step 3). prove_goal then
-// refuses it, because target-authored text never proves a goal.
-func TestFactProvenancePrefersCapturedTraffic(t *testing.T) {
-	s := guardTaskStore(t)
-	intent := addGuardNode(t, s, db.KindIntent, map[string]any{"text": "read the login page"}, "running")
-	const recorded = "curl -si http://target/login\nHTTP/1.1 200 OK\n<div>internal only</div>"
-	step, err := s.AppendActivity(db.Activity{NodeID: &intent, Kind: "tool_result", Tool: "Bash", Detail: recorded})
-	if err != nil {
-		t.Fatal(err)
-	}
-	goal := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "find the admin area"}, "open")
-
-	tr := &fakeFactTraffic{id: "1700000000-0001"}
-	tsx := NewToolSet(s, "worker-9")
-	tsx.SetOwnerNode(intent)
-	tsx.SetFactTraffic(tr)
-	out := callGuardTool(t, tsx.recordFact(), `{"summary":"the login page mentions an internal area","evidence":"<div>internal only</div>","confidence":"observed","source":"tool_output"}`).Flatten()
-	if !strings.HasPrefix(out, "fact recorded: ") {
-		t.Fatalf("record_fact: %q", out)
-	}
-	id, _ := strconv.ParseInt(strings.TrimPrefix(out, "fact recorded: "), 10, 64)
-	n, err := s.GetNode(id)
-	if err != nil || n == nil {
-		t.Fatalf("node %d: %v", id, err)
-	}
-	var p map[string]any
-	_ = json.Unmarshal(n.Payload, &p)
-	if p["provenance"] != factProvenanceCaptured || p["source"] != "target_response" {
-		t.Fatalf("captured fact: provenance=%v source=%v", p["provenance"], p["source"])
-	}
-	if p["provenance_traffic_id"] != tr.id {
-		t.Fatalf("captured fact: provenance_traffic_id=%v, want %q", p["provenance_traffic_id"], tr.id)
-	}
-	if got, _ := p["provenance_activity_id"].(float64); int64(got) != step {
-		t.Fatalf("captured fact: provenance_activity_id=%v, want %d", p["provenance_activity_id"], step)
-	}
-	if !tr.calledOnce || tr.from >= tr.to || tr.to < step {
-		t.Fatalf("capture window called=%v [%d,%d]", tr.calledOnce, tr.from, tr.to)
-	}
-	res := callGuardTool(t, tsx.proveGoal(), `{"goal_id":`+strconv.FormatInt(goal, 10)+`,"evidence_id":`+strconv.FormatInt(id, 10)+`,"reason":"x"}`)
-	if !res.IsError || !strings.Contains(res.Flatten(), "target_response") || nodeState(t, s, goal) != "open" {
-		t.Fatalf("captured fact proved the goal or gave the wrong refusal: %q", res.Flatten())
 	}
 }

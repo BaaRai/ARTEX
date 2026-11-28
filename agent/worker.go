@@ -70,7 +70,7 @@ type Worker struct {
 	workDir     string
 	proxyAddr   string
 	proxyCACert string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
-	factTraffic FactTrafficLookup // proxy captures for fact provenance (nil = activity-only)
+	gateTraffic GateTrafficLookup // optional traffic lookup for constant-gate detector
 	webSearch   WebSearchOpts     // web_search tool backend selection (off by default)
 	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
 	window      int               // context window in tokens (for compaction)
@@ -218,9 +218,11 @@ func (w *Worker) compactionWindow() int {
 // that MITM proxy. Empty addr disables the hint.
 func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = addr, caCert }
 
-// SetFactTraffic wires the proxy capture store used to classify recorded facts
-// (#124 row 1). nil keeps the activity-only classification.
-func (w *Worker) SetFactTraffic(l FactTrafficLookup) { w.factTraffic = l }
+// Deprecated: shared proxy captures cannot establish the source of a task fact.
+func (w *Worker) SetFactTraffic(FactTrafficLookup) {}
+
+// SetGateTraffic wires the optional traffic lookup used by the constant-gate detector.
+func (w *Worker) SetGateTraffic(l GateTrafficLookup) { w.gateTraffic = l }
 
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
@@ -550,7 +552,6 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
 	tsx.SetTriageClient(w.triage)
-	tsx.SetFactTraffic(w.factTraffic)
 	tsx.SetTaskID(taskID)
 	tsx.SetStatefulGuard(intercept.StatefulGuardFromContext(ctx))
 	coverageEnabled := coverageOn(as, taskID)
@@ -575,10 +576,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// are kept as usual.
 	base = append(base, defaultToolsExcept(w.workDir, "MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
-	var gateTraffic GateTrafficLookup
-	if gt, ok := w.factTraffic.(GateTrafficLookup); ok {
-		gateTraffic = gt
-	}
+	gateTraffic := w.gateTraffic
 	ctx = WithGateConstantHooks(ctx, GateConstantHooks{
 		Traffic: gateTraffic,
 		RecordGateConstant: func(gRec GateConstantRecord) (int64, error) {

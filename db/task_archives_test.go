@@ -180,6 +180,14 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 		t.Fatal(err)
 	}
 	store := d.Exploration(task.ExplorationID)
+	// Older archives can contain a capture ID from another task. Retain the
+	// independent activity link and unrelated fact fields on restore.
+	legacyFactID := insertFactCaptureFixture(t, d, task.ExplorationID, KindFact, "confirmed", legacyFactCaptureFixture)
+	strayFactID := insertFactCaptureFixture(t, d, task.ExplorationID, KindFact, "confirmed", strayFactCaptureFixture)
+	staleDigestID, err := store.AddDigest(map[string]any{"body": "old capture classification"}, []int64{strayFactID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	nodeID, err := store.AddNode(KindFact, map[string]any{"summary": "archived fact", "asset_ids": []int64{assetID}}, 1, "confirmed", "worker", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -300,6 +308,12 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	}
 	if live.Name != "cold task" || !live.Paused {
 		t.Fatalf("restored task metadata mismatch: %+v", live)
+	}
+	assertFactCaptureFixture(t, d, legacyFactID, repairedFactCaptureFixture, 1)
+	assertFactCaptureFixture(t, d, strayFactID, repairedStrayFactCaptureFixture, 1)
+	digest, err := store.GetNode(staleDigestID)
+	if err != nil || digest == nil || digest.State != StateDigestSuperseded {
+		t.Fatalf("restored stale digest = %+v: %v", digest, err)
 	}
 	if err := d.QueryRow(`SELECT count(*) FROM exploration_nodes WHERE exploration_id=$1`, task.ExplorationID).Scan(&nodes); err != nil {
 		t.Fatal(err)

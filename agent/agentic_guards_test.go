@@ -183,9 +183,14 @@ func TestProveGoalRequiresObservedFact(t *testing.T) {
 
 	goalA := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "get admin"}, "open")
 	goalB := addGuardNode(t, s, db.KindGoal, map[string]any{"text": "dump the users"}, "open")
-	inferred := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin is probably reachable", "confidence": "inferred"}, "confirmed")
-	unlabeled := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin reachable"}, "confirmed")
-	observed := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "logged in as admin", "confidence": " Observed "}, "confirmed")
+	intent := addGuardNode(t, s, db.KindIntent, map[string]any{"text": "verify admin access"}, "running")
+	stepID, err := s.AppendActivity(db.Activity{NodeID: &intent, Worker: "worker-1", Kind: "tool_result", Tool: "Bash", Detail: "uid=0(admin) groups=0(admin)"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inferred := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin is probably reachable", "confidence": "inferred", "source": "tool_output", "provenance": factProvenanceRecorded, "provenance_activity_id": stepID}, "confirmed")
+	unlabeled := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "admin reachable", "source": "tool_output", "provenance": factProvenanceRecorded, "provenance_activity_id": stepID}, "confirmed")
+	observed := addGuardNode(t, s, db.KindFact, map[string]any{"summary": "logged in as admin", "confidence": " Observed ", "source": "tool_output", "provenance": factProvenanceRecorded, "provenance_activity_id": stepID}, "confirmed")
 	bareFinding := addGuardNode(t, s, db.KindFinding, map[string]any{"summary": "user table dumped"}, "confirmed")
 	provenFinding := seedProvenFinding(t, d, task, "ex-guard-1", "https://guard.example.test/api/users",
 		[]int64{seedFindingAsset(t, d, task, "https://guard.example.test/api/users")})

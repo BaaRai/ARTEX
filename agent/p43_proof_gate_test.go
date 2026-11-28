@@ -122,11 +122,18 @@ func TestProveGoalFindingProofGatePG(t *testing.T) {
 		t.Fatalf("verified bound finding should close goalHTTP: isErr=%v state=%q msg=%q", isErr, nodeState(t, store, goalHTTP), msg)
 	}
 
-	// 5. Non-HTTP goal closes via an observed tool_output fact (not via finding exemption).
+	// 5. Non-HTTP goal closes via a task-scoped observed tool_output fact tied to recorded tool_result activity.
+	tcpIntent := addGuardNode(t, store, db.KindIntent, map[string]any{"text": "probe redis tcp 6379"}, "running")
+	tcpStep, err := store.AppendActivity(db.Activity{NodeID: &tcpIntent, Worker: "worker-1", Kind: "tool_result", Tool: "Bash", Detail: "6379/tcp open redis redis_version:7.2.4"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	nonHTTPFact := addGuardNode(t, store, db.KindFact, map[string]any{
-		"summary":    "nmap confirmed port 6379 open with unauthenticated Redis INFO",
-		"source":     "tool_output",
-		"confidence": "observed",
+		"summary":                "nmap confirmed port 6379 open with unauthenticated Redis INFO",
+		"source":                 "tool_output",
+		"confidence":             "observed",
+		"provenance":             factProvenanceRecorded,
+		"provenance_activity_id": tcpStep,
 	}, "confirmed")
 	if isErr, msg := prove(goalTCP, nonHTTPFact); isErr || nodeState(t, store, goalTCP) != "met" || !planner.GoalMet {
 		t.Fatalf("non-HTTP observed tool_output fact should close goalTCP and task: isErr=%v state=%q GoalMet=%v msg=%q",

@@ -153,7 +153,6 @@ type ToolSet struct {
 	as                  *db.AssetStore   // asset store (optional; nil = asset tools not available)
 	cs                  *db.CompanyStore // company store (optional)
 	ts                  *db.ExplorationStore
-	factTraffic         FactTrafficLookup // proxy capture store for fact classification; nil = activity-only
 	statefulGuard       *intercept.StatefulTargetGuard
 	strictGateConstant  *bool
 	worker              string
@@ -271,10 +270,8 @@ func NewToolSet(ts *db.ExplorationStore, worker string) *ToolSet {
 	return &ToolSet{ts: ts, worker: worker}
 }
 
-// SetFactTraffic wires the proxy capture store used to relabel facts whose
-// evidence came back from the target (#124 row 1, step 3). Callers pass the
-// process traffic store; nil leaves classification activity-only.
-func (t *ToolSet) SetFactTraffic(l FactTrafficLookup) { t.factTraffic = l }
+// Deprecated: shared proxy captures cannot establish the source of a task fact.
+func (t *ToolSet) SetFactTraffic(FactTrafficLookup) {}
 
 // SetTaskID sets the PG task id on this ToolSet so that report_finding can
 // dual-write to the standalone findings table (which survives task deletion).
@@ -1134,9 +1131,6 @@ func compactNode(n *db.Node) map[string]any {
 		if id, ok := p["provenance_activity_id"]; ok && id != nil {
 			m["provenance_activity_id"] = id
 		}
-		if tid, ok := p["provenance_traffic_id"].(string); ok && tid != "" {
-			m["provenance_traffic_id"] = tid
-		}
 	}
 	if n.Inherited {
 		inheritedMap(m, n.SourceTaskID)
@@ -1544,8 +1538,15 @@ func (t *ToolSet) SetTrafficProofChecker(fn func(ctx context.Context, trafficID 
 	t.trafficProofChecker = fn
 }
 
+// normalizeOperatorMatchText collapses runs of whitespace and lowercases text
+// so prove_goal can verify that an operator_input fact's summary is contained
+// in its verified human-message evidence without extrapolating new claims.
+func normalizeOperatorMatchText(s string) string {
+	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
+}
+
 func (t *ToolSet) proveGoal() actool.CoreTool {
-	return t.writeExpTool("prove_goal", "Call when you judge that a finding/fact proves a goal met: links the evidence node to the goal node and marks the goal met. A finding closes a goal ONLY when it has at least one server-verified bound traffic_ref whose host matches the finding's asset (recomputed from current bindings, so a later bind_finding_traffic counts); an unbound finding stays recorded and visible but cannot close a goal. Non-HTTP goals (TCP, DNS, cloud without packets) close via an observed fact whose source is tool_output (or operator_input), not target_response. A finding whose triage status is false_positive, duplicate, or ignored is refused. Any other evidence is refused and the goal stays open.",
+	return t.writeExpTool("prove_goal", "Call when you judge that a finding/fact proves a goal met: links the evidence node to the goal node and marks the goal met. Evidence must belong to this task (facts or findings from linked tasks cannot close this task's goals). A finding closes a goal ONLY when it has at least one server-verified bound traffic_ref whose host matches the finding's asset (recomputed from current bindings, so a later bind_finding_traffic counts); an unbound finding stays recorded and visible but cannot close a goal. Non-HTTP goals (TCP, DNS, cloud without packets) can close with an observed task-scoped tool_output fact tied to a recorded tool_result activity in this task, or an observed operator_input fact that quotes a human message in this task. Facts with missing, unverified, or legacy provenance fail closed. A finding whose triage status is false_positive, duplicate, or ignored is refused. Any other evidence is refused and the goal stays open.",
 		obj(map[string]any{
 			"goal_id":     idp("goal node id"),
 			"evidence_id": idp("id of the finding/fact node that proves it"),
@@ -1566,41 +1567,82 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 			if err != nil || goalNode == nil || goalNode.Kind != db.KindGoal {
 				return actool.Errorf("goal_id must be a goal node of this task (related-task goals are read-only)"), nil
 			}
-			evidenceNode, err := t.ts.GetNodeWithSources(ev)
+			// Task-local only: evidence from a linked/source task must never close this task's goal.
+			evidenceNode, err := t.ts.GetNode(ev)
 			if err != nil || evidenceNode == nil || (evidenceNode.Kind != db.KindFact && evidenceNode.Kind != db.KindFinding) {
-				return actool.Errorf("evidence_id must be a fact/finding node of this task or a directly related task"), nil
+				return actool.Errorf("evidence_id must be a fact/finding node of this task (evidence from linked tasks cannot close this task's goals)"), nil
 			}
-			// A fact proves a goal only when it was seen directly (#124, F5): an inferred
-			// conclusion, or one without a confidence, is refused and the goal stays open.
-			// The confidence is declared by the agent that recorded the fact.
-			if cp, isCap := isCapabilityNode(evidenceNode); isCap && !cp.Verified {
+			// A fact proves a goal only when it was directly observed AND carries
+			// server-verified task-scoped provenance (#124, F5, #602): missing,
+			// unverified, or retired provenance fails closed and keeps the goal open.
+			cp, isCap := isCapabilityNode(evidenceNode)
+			if isCap && !cp.Verified {
 				return actool.Errorf(fmt.Sprintf("prove_goal refused: capability #%d is unverified (requires a proving finding, fact, or traffic reference)", ev)), nil
 			}
-			if evidenceNode.Kind == db.KindFact {
+			if evidenceNode.Kind == db.KindFact && !isCap {
 				var fp map[string]any
 				_ = json.Unmarshal(evidenceNode.Payload, &fp)
-				// A fact the server could not tie to recorded work is not authority
-				// (#124 row 1): the declared source alone does not make it one. Legacy
-				// facts written before provenance existed carry no key and keep their
-				// old behaviour; every new fact carries one.
-				if prov, ok := fp["provenance"].(string); ok && prov == factProvenanceUnverified {
+				provRaw, _ := fp["provenance"].(string)
+				prov := strings.ToLower(strings.TrimSpace(provRaw))
+				switch prov {
+				case factProvenanceOperator, factProvenanceRecorded:
+					// Allowed provenances; validated against source and task activity below.
+				case factProvenanceUnverified:
 					note, _ := fp["provenance_note"].(string)
 					if note == "" {
 						note = "its evidence is not tied to a recorded activity"
 					}
-					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d is unverified (%s). Goal %d stays open: prove it with a finding or with a fact whose evidence quotes this intent's recorded activity.", ev, note, goal)), nil
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d is unverified (%s). Goal %d stays open: use a verified finding, a task-scoped observed tool_output fact tied to recorded tool_result activity, or a fact backed by a recorded operator message.", ev, note, goal)), nil
+				default:
+					return actool.Errorf(fmt.Sprintf("prove_goal refused (fail-closed): fact %d has missing or unverified provenance %q. Goal %d stays open: prove it with a verified finding, a task-scoped observed tool_output fact tied to recorded tool_result activity, or an operator_input fact.", ev, provRaw, goal)), nil
 				}
 				confidence, _ := fp["confidence"].(string)
 				if strings.ToLower(strings.TrimSpace(confidence)) != "observed" {
 					if confidence == "" {
 						confidence = "none"
 					}
-					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has confidence %q, and a fact proves a goal only when its confidence is \"observed\" (seen directly in tool output). Goal %d stays open: prove it with a finding backed by verified bound traffic or with an observed tool_output fact.", ev, confidence, goal)), nil
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has confidence %q, and a fact proves a goal only when its confidence is \"observed\". Goal %d stays open: prove it with a finding backed by verified bound traffic, a task-scoped observed tool_output fact, or an operator_input fact.", ev, confidence, goal)), nil
 				}
+				sourceRaw, _ := fp["source"].(string)
+				source := strings.ToLower(strings.TrimSpace(sourceRaw))
 				// A fact whose declared source is the target's own response is not
 				// authoritative (#124, F4): the target could have planted it.
-				if source, _ := fp["source"].(string); strings.ToLower(strings.TrimSpace(source)) == factSourceTargetResponse {
-					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has source \"target_response\" (its content comes from the target, which could have planted it), and such a fact never proves a goal. Goal %d stays open: prove it with a finding backed by verified bound traffic or with an observed fact from another source.", ev, goal)), nil
+				if source == factSourceTargetResponse {
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: fact %d has source \"target_response\" (its content comes from the target, which could have planted it), and such a fact never proves a goal. Goal %d stays open: prove it with a finding backed by verified bound traffic or with a verified task-scoped tool_output/operator_input fact.", ev, goal)), nil
+				}
+				// Verify source matches provenance and references an actual activity of THIS task.
+				var wantOperator bool
+				switch {
+				case source == factSourceOperatorInput && prov == factProvenanceOperator:
+					wantOperator = true
+				case source == factSourceToolOutput && prov == factProvenanceRecorded:
+					wantOperator = false
+				default:
+					return actool.Errorf(fmt.Sprintf("prove_goal refused (fail-closed): fact %d source %q with provenance %q cannot prove a goal. Goal %d stays open: use a verified finding, a task-scoped recorded tool_output fact, or an operator_input fact.", ev, sourceRaw, provRaw, goal)), nil
+				}
+				var actID int64
+				if rawID, ok := fp["provenance_activity_id"].(float64); ok && rawID > 0 {
+					actID = int64(rawID)
+				}
+				okAct, err := t.ts.ActivityMatchesProvenance(actID, wantOperator)
+				if err != nil {
+					return actool.Errorf(fmt.Sprintf("prove_goal refused (fail-closed): fact %d activity verification unavailable (%v). Goal %d stays open.", ev, err, goal)), nil
+				}
+				if !okAct {
+					return actool.Errorf(fmt.Sprintf("prove_goal refused (fail-closed): fact %d is not backed by a matching recorded activity in this task. Goal %d stays open.", ev, goal)), nil
+				}
+				// For operator_input facts, prevent a benign real operator quote in
+				// evidence from smuggling an unrelated summary claim (e.g. "admin access
+				// granted"): the normalized summary must appear inside the verified
+				// operator evidence quote. tool_output paths stay unchanged.
+				if source == factSourceOperatorInput {
+					summaryRaw, _ := fp["summary"].(string)
+					evidenceRaw, _ := fp["evidence"].(string)
+					normSummary := normalizeOperatorMatchText(summaryRaw)
+					normEvidence := normalizeOperatorMatchText(evidenceRaw)
+					if normSummary == "" || normEvidence == "" || !strings.Contains(normEvidence, normSummary) {
+						return actool.Errorf(fmt.Sprintf("prove_goal refused (fail-closed): operator_input fact %d summary %q is not contained in its verified operator evidence quote. Goal %d stays open: quote the operator's actual statement in summary without extrapolating.", ev, summaryRaw, goal)), nil
+					}
 				}
 			}
 			if evidenceNode.Kind == db.KindFinding {
@@ -1618,7 +1660,7 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 					return actool.Errorf(fmt.Sprintf("prove_goal refused (fail-closed): finding %d proof verification unavailable (%v). Goal %d stays open.", ev, err, goal)), nil
 				}
 				if !check.Proven {
-					return actool.Errorf(fmt.Sprintf("prove_goal refused: finding %d cannot close goal %d (%s). The finding remains recorded and visible; bind at least one verified traffic_ref matching the finding's asset via bind_finding_traffic, or for non-HTTP goals prove with an observed tool_output fact. Goal %d stays open.", ev, goal, check.Reason, goal)), nil
+					return actool.Errorf(fmt.Sprintf("prove_goal refused: finding %d cannot close goal %d (%s). The finding remains recorded and visible; bind at least one verified traffic_ref matching the finding's asset via bind_finding_traffic, or for non-HTTP goals prove with a fact backed by a recorded operator message. Goal %d stays open.", ev, goal, check.Reason, goal)), nil
 				}
 			}
 			_ = t.ts.Link(ev, db.RelProves, goal)
@@ -1679,7 +1721,7 @@ func (t *ToolSet) goalMet() actool.CoreTool {
 // --- worker write tools ---
 
 func (t *ToolSet) addFinding() actool.CoreTool {
-	return writeTool("report_finding", "Record a confirmed finding, with evidence providing verifiable proof such as command output and logs. In a task context, pass the current intent_id. The returned finding_id is the standalone finding record ID; finding_node_id is the exploration node ID (the first line keeps that node number). A finding without bound traffic stays recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset host is bound (for non-HTTP goals, prove with an observed tool_output fact).", obj(map[string]any{
+	return writeTool("report_finding", "Record a confirmed finding, with evidence providing verifiable proof such as command output and logs. In a task context, pass the current intent_id. The returned finding_id is the standalone finding record ID; finding_node_id is the exploration node ID (the first line keeps that node number). A finding without bound traffic stays recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset host is bound (for non-HTTP goals, prove with a fact backed by a recorded operator message).", obj(map[string]any{
 		"vulnclass": str("vulnerability class"), "name": str("vulnerability name"), "severity": str("critical|high|medium|low"), "summary": str("finding summary"),
 		"intent_id": idp("the current task's intent id"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "affected asset ids"},
 		"evidence":         str("evidence/PoC text"),
@@ -1812,9 +1854,9 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		}{RecordedFinding: recorded, EvidenceStatus: "bound"}
 		if len(recorded.Traffic.Bindings) == 0 {
 			result.EvidenceStatus = "not_bound"
-			result.EvidenceNote = "Finding saved without bound traffic (recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset is bound). Bind verified HTTP traffic via bind_finding_traffic or the findings page; for non-HTTP goals, prove the goal with an observed tool_output fact. Do not create the finding again."
+			result.EvidenceNote = "Finding saved without bound traffic (recorded and visible, but cannot close a goal via prove_goal until verified traffic matching its asset is bound). Bind verified HTTP traffic via bind_finding_traffic or the findings page; for non-HTTP goals, prove the goal with a fact backed by a recorded operator message. Do not create the finding again."
 			if !findingTrafficBindingEnabled() {
-				result.EvidenceNote = "Finding saved without bound traffic. Automatic agent traffic binding is off: this finding remains visible but cannot close a goal unless traffic is bound manually later (or a non-HTTP goal is proven with an observed tool_output fact)."
+				result.EvidenceNote = "Finding saved without bound traffic. Automatic agent traffic binding is off: this finding remains visible but cannot close a goal unless traffic is bound manually later (or a non-HTTP goal is proven with a fact backed by a recorded operator message)."
 			}
 		}
 		if ignoredHintNote != "" {
@@ -1865,23 +1907,11 @@ var factSources = []string{factSourceTargetResponse, factSourceToolOutput, factS
 // the payload; only a tie (or an explicit operator statement) is authoritative.
 const (
 	factProvenanceRecorded   = "recorded_activity" // evidence quoted from this intent's activity
-	factProvenanceCaptured   = "captured_traffic"  // the quoted bytes came back from the target through the proxy
 	factProvenanceOperator   = "operator_input"    // told to the agent by the human operator
-	factProvenanceUnverified = "unverified"        // no recorded activity carries the evidence
+	factProvenanceUnverified = "unverified"        // evidence is missing or its source is uncertain
 )
 
-// factCaptureWindowBefore/After bound the proxy captures considered part of one
-// recorded activity. The activity row is written when the tool call returns, so
-// the matching response lands just before it; the margins absorb slow calls and
-// small clock differences between the two stores.
-const (
-	factCaptureWindowBefore = 10 * time.Minute
-	factCaptureWindowAfter  = 2 * time.Minute
-)
-
-// FactTrafficLookup is the proxy capture store seen from the fact layer. Kept as
-// an interface so the agent does not depend on the traffic package. nil = no
-// capture available, and facts keep the activity-only classification.
+// FactTrafficLookup is the legacy shared capture lookup accepted by SetFactTraffic.
 type FactTrafficLookup interface {
 	ResponseContaining(lines []string, fromTS, toTS int64) (id string, ok bool, err error)
 }
@@ -1914,40 +1944,44 @@ func factEvidenceLines(evidence string) []string {
 	return out
 }
 
-// factProvenance classifies one fact against the intent's recorded activity.
-// Beyond the activity tie it checks whether the quoted bytes were captured
-// coming back from the target through the proxy, in which case the target
-// authored them and the fact is classified target_response even when the model
-// wrote tool_output (#124 row 1, step 3). A database error keeps the fact
-// (writes must not fail on the check) but marks it unverified, so the
-// conservative outcome is the one that survives.
-func (t *ToolSet) factProvenance(source, evidence string, intent int64) (status string, activityID int64, trafficID string, note string) {
-	if source == factSourceOperatorInput {
-		return factProvenanceOperator, 0, "", ""
-	}
+// factProvenance can identify an activity in this intent. A shared-recorder
+// text match cannot establish which task sent an exchange.
+func (t *ToolSet) factProvenance(source, evidence string, intent int64) (status string, activityID int64, note string) {
 	if intent <= 0 || t.ts == nil {
-		return factProvenanceUnverified, 0, "", "no intent was recorded, so no activity could corroborate the evidence"
+		return factProvenanceUnverified, 0, "no intent was recorded, so no activity could corroborate the evidence"
 	}
 	lines := factEvidenceLines(evidence)
 	if len(lines) == 0 {
-		return factProvenanceUnverified, 0, "", "evidence is missing or too short to quote a recorded activity; a fact proves a goal only when its evidence is tied to one"
+		return factProvenanceUnverified, 0, "evidence is missing or too short to quote a recorded activity; a fact proves a goal only when its evidence is tied to one"
 	}
-	id, at, ok, err := t.ts.ActivityContainingEvidence(intent, lines)
+	if source == factSourceOperatorInput {
+		id, err := t.ts.OperatorActivityContainingQuote(intent, strings.TrimSpace(evidence))
+		if err != nil || id == 0 {
+			return factProvenanceUnverified, 0, "the evidence does not quote a verified operator message in this intent"
+		}
+		return factProvenanceOperator, id, ""
+	}
+	if source == factSourceToolOutput {
+		id, _, ok, err := t.ts.ToolResultActivityContainingEvidence(intent, lines)
+		if err != nil {
+			return factProvenanceUnverified, 0, "the recorded tool activity could not be read, so the evidence is unverified"
+		}
+		if !ok {
+			return factProvenanceUnverified, 0, "evidence does not quote any line of this intent's recorded tool_result activity; quote the tool output verbatim instead of paraphrasing it"
+		}
+		return factProvenanceRecorded, id, ""
+	}
+	id, _, ok, err := t.ts.ActivityContainingEvidence(intent, lines)
 	if err != nil {
-		return factProvenanceUnverified, 0, "", "the recorded activity could not be read, so the evidence is unverified"
+		return factProvenanceUnverified, 0, "the recorded activity could not be read, so the evidence is unverified"
 	}
 	if !ok {
-		return factProvenanceUnverified, 0, "", "evidence does not quote any line of this intent's recorded activity; quote the output verbatim instead of paraphrasing it"
+		return factProvenanceUnverified, 0, "evidence does not quote any line of this intent's recorded activity; quote the output verbatim instead of paraphrasing it"
 	}
-	if t.factTraffic != nil && !at.IsZero() {
-		from, to := at.Add(-factCaptureWindowBefore).Unix(), at.Add(factCaptureWindowAfter).Unix()
-		// A capture miss or an unreadable capture store is not a write failure:
-		// the activity tie stands and the fact stays classified as tool output.
-		if tid, hit, _ := t.factTraffic.ResponseContaining(lines, from, to); hit && tid != "" {
-			return factProvenanceCaptured, id, tid, ""
-		}
+	if source == factSourceTargetResponse {
+		return factProvenanceRecorded, id, ""
 	}
-	return factProvenanceRecorded, id, "", ""
+	return factProvenanceUnverified, id, "the recorded activity does not establish the source of the quoted text"
 }
 
 // normalizeFactSource returns the stored source for a record_fact input: empty
@@ -1995,19 +2029,14 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 	// confidence imply: it is stored as inference/inferred and marked unverified,
 	// so prove_goal refuses it even if the model labelled it observed.
 	confidence := strings.TrimSpace(it.Confidence)
-	prov, provActivity, provTraffic, provNote := t.factProvenance(source, it.Evidence, intent)
+	prov, provActivity, provNote := t.factProvenance(source, it.Evidence, intent)
 	if prov == factProvenanceUnverified {
-		if source == factSourceTargetResponse || source == factSourceToolOutput {
+		if source == factSourceTargetResponse || source == factSourceToolOutput || source == factSourceOperatorInput {
 			source = factSourceInference
 		}
 		if strings.EqualFold(confidence, "observed") {
 			confidence = "inferred"
 		}
-	}
-	if prov == factProvenanceCaptured {
-		// The matched bytes came back from the target, whichever tool carried
-		// them: relabel from the capture rather than trusting the declaration.
-		source = factSourceTargetResponse
 	}
 	payload := map[string]any{"summary": it.Summary, "source": source, "provenance": prov}
 	if it.Detail != "" {
@@ -2021,9 +2050,6 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 	}
 	if provActivity > 0 {
 		payload["provenance_activity_id"] = provActivity
-	}
-	if provTraffic != "" {
-		payload["provenance_traffic_id"] = provTraffic
 	}
 	if provNote != "" {
 		payload["provenance_note"] = provNote
@@ -2062,7 +2088,7 @@ func (t *ToolSet) recordFact() actool.CoreTool {
 		"  · evidence = [one line] of key evidence supporting this conclusion (the command + the one or two most proving output lines), **keep it brief** — details belong in detail; don't paste large output blocks here.\n"+
 		"  · confidence = observed (seen directly in output) | inferred (inferred from phenomena).\n"+
 		"  · source = where the content came from: target_response (content the target itself returned: page bodies, headers, error messages, banners, even when a tool fetched it) | tool_output (a tool's own result about the target: port states, scanner verdicts, status codes, timings) | third_party_intel (OSINT, CVE databases, public reports) | operator_input (given by the human operator) |       inference (your own reasoning; the default when omitted). Any other value is refused.\n"+
-		"  · **evidence is checked against this intent's recorded activity**: quote the output verbatim rather than paraphrasing it. A fact whose evidence matches no recorded activity is stored as provenance=unverified, its source is downgraded to inference, an observed confidence becomes inferred, and prove_goal refuses it. If the quoted bytes were also captured coming back from the target through the proxy, the server stores source=target_response (provenance=captured_traffic) regardless of the source you declared, because the target authored them.\n"+
+		"  · **evidence is checked against this intent's recorded activity**: quote the output verbatim. Shell and other free-text tool output can relay a target's words and cannot prove a goal by themselves. For operator_input, quote the operator's message to this intent.\n"+
 		"  · **Negative conclusions** (not injectable / port closed / no entry found, etc.) state only \"observation + tentative reading\" — state what you actually saw; whether to abandon the direction is for the planner to decide globally; always provide evidence, mark inferred when the means weren't exhausted or the evidence is weak (including probed only once, looks-like), and mark observed only when truly exhausted and directly seen."+
 		recordFactContractNote,
 		recordFactSchema(),
