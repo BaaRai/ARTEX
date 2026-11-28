@@ -1,6 +1,7 @@
 ---
 name: patch-diff
 description: "Invoke this skill when the task is recovering a vulnerability from a vendor fix: a CVE with a patch but no public PoC, Patch Tuesday triage, a distribution backport gap, or a closed-source security patch that needs root-cause analysis. Diff the patched and unpatched builds, infer the bug class from the added guards, and verify with a PoC that crashes only the unpatched build."
+mcps: browser
 ---
 
 # Patch Diff (N-day recovery from vendor fixes)

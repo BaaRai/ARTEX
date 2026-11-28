@@ -1,6 +1,7 @@
 ---
 name: api-recon
 description: Invoke this skill when collecting a website's API endpoints.
+mcps: browser
 ---
 
 # API Recon (frontend API reconnaissance)

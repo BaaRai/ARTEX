@@ -1,6 +1,7 @@
 ---
 name: api-security
 description: "Invoke this skill when the task is authorized offensive testing of a REST, GraphQL, WebSocket, or SOAP API beyond recon: authentication and authorization flaws (BOLA, IDOR, BFLA), JWT and OAuth weaknesses, GraphQL-specific abuse, input validation, business logic, rate-limit trust confusion, and excessive data exposure."
+mcps: browser
 ---
 
 # API Security Testing (REST, GraphQL, WebSocket, SOAP)

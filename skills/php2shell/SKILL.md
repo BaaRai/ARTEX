@@ -1,6 +1,7 @@
 ---
 name: php2shell
 description: "Invoke this skill when a task holds an LFI/file-inclusion finding on a PHP target (or needs to assess one) and the target may run PHP 5.4-8.5.11 with default session.upload_progress settings: turns a read-only LFI into verified RCE via the session-file-injection chain (CVE-2026-109618/109619), lab-first and gated by program policy. Also covers passive detection of the vulnerable configuration."
+mcps: browser
 ---
 
 # php2shell: session.upload_progress LFI-to-RCE (CVE-2026-109618/109619)

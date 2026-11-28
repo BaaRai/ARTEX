@@ -1,6 +1,7 @@
 ---
 name: edr-bypass-re
 description: "Invoke this skill for authorized adversary-simulation work that must understand and evaluate endpoint defense telemetry: mapping what an EDR or AV actually monitors (user-mode hooks, kernel callbacks, ETW providers, AMSI), surveying installed hooks from memory, and evaluating countermeasure combinations in an isolated lab, mapped to MITRE ATT&CK T1562."
+mcps: browser
 ---
 
 # EDR Bypass RE (defense telemetry analysis for authorized adversary simulation)

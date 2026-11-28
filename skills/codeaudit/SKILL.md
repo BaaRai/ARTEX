@@ -1,6 +1,7 @@
 ---
 name: codeaudit
 description: "Invoke this skill when the task is a white-box audit of source code the operator provided or fetched (a plugin, an application, a repository). Attacker-first forward analysis from every user-controllable input to dangerous sinks, adversarial verification, PoC with measured impact."
+mcps: browser
 ---
 
 # Code Audit (white-box source review)

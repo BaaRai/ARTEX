@@ -1,6 +1,7 @@
 ---
 name: bbot-recon
 description: "Invoke this skill when a hunt task needs breadth-first recon on an authorized target: subdomain enumeration, subdomain-takeover surface, archived URLs, parameter mining, IP/ASN enrichment, or when one-shot tools (subfinder, httpx, nuclei) would need manual piping between steps. Runs bbot (recursive event-graph scanner, installed in the image) under hard program-policy gates: passive zero-touch mode when scanners are banned, active modules only when the program allows them."
+mcps: browser
 ---
 
 # bbot-recon: recursive recon under program-policy gates
