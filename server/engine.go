@@ -1261,6 +1261,17 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// Run budget (off by default): meter this run's calls; its effective budget is
 	// min(intent budget, task remaining above the wrap-up reserve).
 	workCtx, meter := e.budgetIntent(workCtx, t.ID)
+	if intent.Origin == "seed" {
+		var seedOnce sync.Once
+		workCtx = agent.WithSeedWriteNotify(workCtx, func() {
+			seedOnce.Do(func() {
+				t.Notify()
+			})
+		})
+		if capDur := agent.SeedIntentBudget(t.TimeoutSeconds, worker.RunTimeout()); capDur > 0 {
+			workCtx = agent.WithSeedBudgetCap(workCtx, capDur)
+		}
+	}
 	// nudges deliberately sits outside the model_error rerun loop: the idle-turn rerun
 	// cap is a per-intent total, and one rerun round must not reset it back to zero.
 	hooks := steerHooks{

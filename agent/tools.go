@@ -1787,7 +1787,8 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				iid = t.ownerNode
 			}
 			t.notifyFinding(iid, a.Summary)
-		} else if t.notify != nil {
+		}
+		if t.notify != nil {
 			t.notify()
 		}
 		t.writes.Findings++

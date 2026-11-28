@@ -2127,3 +2127,33 @@ func (t *Task) drainTriggers() []agent.TriggerEvent {
 	t.pendingTriggers = nil
 	return ev
 }
+
+// ExtendTaskTimeout adds addSeconds to the task's timeout budget and updates its
+// live lifecycle deadline. Returns (newTimeoutSeconds, deadlineUnix, err).
+func (m *Manager) ExtendTaskTimeout(id string, addSeconds int) (int, int64, error) {
+	m.taskStateMu.Lock()
+	defer m.taskStateMu.Unlock()
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	newTimeout, dl, err := m.pg.ExtendTaskTimeout(n, addSeconds)
+	if err != nil {
+		return 0, 0, err
+	}
+	var dlUnix int64
+	if dl != nil {
+		dlUnix = dl.Unix()
+	}
+	m.mu.Lock()
+	if t := m.tasks[id]; t != nil {
+		t.TimeoutSeconds = newTimeout
+		t.updateLifecycle(func(state *taskLifecycleState) {
+			if dlUnix > 0 {
+				state.DeadlineAt = dlUnix
+			}
+		})
+	}
+	m.mu.Unlock()
+	return newTimeout, dlUnix, nil
+}

@@ -398,6 +398,9 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 				}
 			}
 
+			if len(results) > 0 && t.notify != nil {
+				t.notify()
+			}
 			return jsonResult(map[string]any{
 				"results": results,
 				"errors":  errs,

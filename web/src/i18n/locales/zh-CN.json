@@ -2752,5 +2752,9 @@
   "Only for a self-hosted Bot API server or a relay. Changing it requires entering the token again.": "仅用于自托管的 Bot API 服务器或中转。修改后需要重新填写 Token。",
   "The bot uses long polling, so ARTEX opens no inbound port. Messages it sends contain summaries and links, never evidence bodies or credentials.": "机器人使用长轮询，因此 ARTEX 不会开放任何入站端口。它发送的消息只包含摘要和链接，绝不包含证据正文或凭据。",
   "The bot is off. Enter a token and switch it on.": "机器人已关闭。请填写 Token 并将其开启。",
-  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "尚未允许任何聊天：机器人会拒绝所有聊天，并在回复中告知其聊天 ID。在此添加你的聊天 ID 即可开始使用。"
+  "No chat is allowed yet: the bot refuses every chat and replies with its chat ID. Add your chat ID here to start using it.": "尚未允许任何聊天：机器人会拒绝所有聊天，并在回复中告知其聊天 ID。在此添加你的聊天 ID 即可开始使用。",
+  "Task extended by +{minutes}m": "任务超时已延长 +{minutes} 分钟",
+  "Extend failed: {error}": "延长失败：{error}",
+  "Extend task timeout by 15 minutes": "将任务超时延长 15 分钟",
+  "+15m": "+15m"
 }

@@ -170,6 +170,14 @@ func (w *Worker) SetRunTimeout(run time.Duration) {
 	w.runTimeout = run
 }
 
+// RunTimeout returns the worker's configured per-intent execution budget.
+func (w *Worker) RunTimeout() time.Duration {
+	if w == nil {
+		return 0
+	}
+	return w.runTimeout
+}
+
 // settleWrapUpPrompt is injected by the SDK settlement phase when a worker hits its
 // turn/time budget: stop probing, write back what was found, then end with a
 // plain-text one-liner (which becomes this run's displayed result).
@@ -548,10 +556,13 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
 	}
-	tsx.SetWorkBase(w.workDir)          // ingest_bbot reads its file under the same base as the file tools below
-	tsx.SetOwnerNode(intent.ID)         // assets this worker discovers anchor to its intent → visible to the task
-	tsx.SetEnrich(enr)                  // async DNS/HTTP auto-completion for assets this worker writes
-	tsx.SetNotifyFinding(notifyFinding) // when report_finding lands, wake the planner on the spot with "which intent + finding"
+	tsx.SetWorkBase(w.workDir)  // ingest_bbot reads its file under the same base as the file tools below
+	tsx.SetOwnerNode(intent.ID) // assets this worker discovers anchor to its intent → visible to the task
+	tsx.SetEnrich(enr)          // async DNS/HTTP auto-completion for assets this worker writes
+	tsx.SetNotifyFinding(notifyFinding)
+	if swn := seedWriteNotifyFrom(ctx); swn != nil {
+		tsx.SetNotify(swn)
+	} // when report_finding lands, wake the planner on the spot with "which intent + finding"
 	// base = built-in worker tools ∪ host tools (traffic) ∪ default tools (incl. Bash);
 	// then augment with the agent's visible skills/MCP. During the SDK settlement
 	// phase, Bash is hidden via Settlement.DisabledTools (no local gating needed).
@@ -633,7 +644,11 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// The task-level deadline (injected via ctx) clamps this run's wall-clock budget +
 	// decides the wrap-up prompt (see taskclock.go).
 	tc := taskClockFrom(ctx)
-	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, w.runTimeout)
+	effBudget := w.runTimeout
+	if seedCap := seedBudgetCapFrom(ctx); seedCap > 0 && (effBudget <= 0 || seedCap < effBudget) {
+		effBudget = seedCap
+	}
+	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, effBudget)
 	settle := wrapupSettlement("worker", []string{"Bash"})
 	if tc.DeadlineUnix > 0 {
 		settle = wrapupSettlementForTask("worker", []string{"Bash"}, clamped)

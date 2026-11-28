@@ -852,6 +852,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tasks/{id}/constraints/{cid}", s.deleteConstraint) // constraint management: delete a constraint
 	mux.HandleFunc("POST /api/tasks/{id}/control", s.control)
 	mux.HandleFunc("POST /api/tasks/{id}/retarget", s.retargetTaskHandler)
+	mux.HandleFunc("POST /api/tasks/{id}/extend", s.extendTaskHandler)
 	mux.HandleFunc("PUT /api/tasks/{id}/llm", s.updateTaskLLMProfiles)
 	mux.HandleFunc("GET /api/tasks/{id}/llm/resolution", s.taskLLMResolutionHandler)
 	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/control", s.controlIntent)
@@ -4689,4 +4690,69 @@ func atoiDefault(s string, d int) int {
 		return n
 	}
 	return d
+}
+
+const maxExtendTaskSeconds = 3600
+
+func (s *Server) extendTaskHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	t, ok := s.m.Task(id)
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	var req struct {
+		Seconds int `json:"seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.Seconds <= 0 || req.Seconds > maxExtendTaskSeconds {
+		writeErr(w, 400, fmt.Sprintf("seconds must be between 1 and %d", maxExtendTaskSeconds))
+		return
+	}
+	if isTerminalStatus(s.resolvedTaskStatus(t)) {
+		writeErr(w, 409, "cannot extend a terminal task")
+		return
+	}
+	if t.TimeoutSeconds <= 0 {
+		writeErr(w, 409, "task has no timeout configured (timeout_seconds=0); cannot extend an unbounded task")
+		return
+	}
+	if s.engine != nil {
+		if !s.engine.beginTaskOperation(id) {
+			writeErr(w, 409, "task is being deleted")
+			return
+		}
+		defer s.engine.decInflight(id)
+	}
+	newTimeout, dlUnix, err := s.m.ExtendTaskTimeout(id, req.Seconds)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if s.engine != nil {
+		s.engine.ExtendTaskDeadline(s.ctx, t, dlUnix)
+		s.engine.emitActivity(t, db.Activity{
+			Worker:  "system",
+			Kind:    "text",
+			Summary: fmt.Sprintf("Task timeout extended by +%ds (total budget=%ds)", req.Seconds, newTimeout),
+		})
+	}
+	var remS int64
+	if dlUnix > 0 {
+		remS = dlUnix - time.Now().Unix()
+		if remS < 0 {
+			remS = 0
+		}
+	}
+	t.Notify()
+	writeJSON(w, 200, map[string]any{
+		"id":                id,
+		"added_seconds":     req.Seconds,
+		"timeout_seconds":   newTimeout,
+		"deadline_at":       dlUnix,
+		"remaining_seconds": remS,
+	})
 }
