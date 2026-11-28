@@ -1,0 +1,87 @@
+name: Installation help
+description: Ask for help installing, starting or reaching the ARTEX console
+title: "[install] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Read [INSTALL.md](https://github.com/BaaRai/ARTEX/blob/main/INSTALL.md)
+        first and try the matching troubleshooting section. Remove the setup token, passwords, API
+        keys and target data from every output you paste.
+  - type: input
+    id: os
+    attributes:
+      label: OS and architecture
+      placeholder: Ubuntu 24.04 amd64, Windows 11 with Docker Desktop, macOS 15 arm64
+    validations:
+      required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: Docker setup
+      options:
+        - Docker Desktop on Windows
+        - Docker Desktop on macOS
+        - Docker Engine on Linux
+        - Docker Engine inside WSL2
+        - No Docker, local binary or source build
+        - Other, explained below
+    validations:
+      required: true
+  - type: dropdown
+    id: method
+    attributes:
+      label: Installation method
+      options:
+        - ./install.sh
+        - docker compose up -d --build
+        - docker-compose.ghcr.yml
+        - Prebuilt release binary
+        - Built from source
+        - Other, explained below
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version shown in the top right
+      description: For example v0.7.1, main-abc1234, or dev.
+      placeholder: dev
+  - type: textarea
+    id: error
+    attributes:
+      label: What happens
+      description: The exact error, the command that produced it, and what you expected.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: ps
+    attributes:
+      label: docker compose ps
+      description: Paste the full output.
+      render: shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: docker compose logs --tail=120 artex
+      description: Remove the setup token, passwords, API keys and target data before pasting.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: health
+    attributes:
+      label: Health check from the Docker host
+      description: Output of curl -sS http://127.0.0.1:8787/api/health
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before posting
+      options:
+        - label: I read INSTALL.md and tried the matching troubleshooting section.
+          required: true
+        - label: I removed the setup token, passwords, API keys and target data from the logs.
+          required: true

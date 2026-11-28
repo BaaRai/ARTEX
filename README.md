@@ -16,7 +16,7 @@ and every finding stays bound to the assets and HTTP traffic that prove it.
 [![Go](https://img.shields.io/github/go-mod/go-version/BaaRai/ARTEX?color=6b34db)](go.mod)
 [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/VKyvMTcgXh)
 
-[Quick start](#quick-start) · [Screenshots](#screenshots) · [How it works](#how-it-works) · [Install](#installation) · [Configuration](#configuration) · [Security](SECURITY.md)
+[Quick start](#quick-start) · [Install guide](INSTALL.md) · [Screenshots](#screenshots) · [How it works](#how-it-works) · [Installation](#installation) · [Configuration](#configuration) · [Security](SECURITY.md)
 
 [![Join us on Discord](https://img.shields.io/badge/JOIN%20US%20ON-DISCORD-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/VKyvMTcgXh)
 
@@ -42,6 +42,9 @@ justify it, and every autonomous action passes through scope rules, approval gat
   your own Anthropic/OpenAI-compatible endpoint, or a local Ollama.
 
 ---
+
+> **Installing ARTEX for the first time?** [INSTALL.md](INSTALL.md) has the three-command Docker
+> setup, the first login with the setup token, and fixes for the most common installation errors.
 
 ## Quick start
 
