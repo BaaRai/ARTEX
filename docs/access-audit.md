@@ -63,8 +63,10 @@ fail verification unless the operator deliberately sets
 A client's `curl -k` cannot disable verification on the proxy's upstream leg.
 Certificate-pinned clients, explicit proxies, `--noproxy`, custom transports and
 NO_PROXY exclusions can bypass or fail inspection; no hard network enforcement
-is claimed. Raw TCP/UDP and remote SSRF/RCE pivots still need the later gateway,
-Go/bubblewrap controls and judge policy. Disabling the proxy listener removes
+is claimed. The later gateway and Go/bubblewrap backend can constrain local egress. They
+cannot observe or contain a remote server's SSRF/RCE second hop. Induced-access
+investigation needs indexed trigger evidence and independently sourced receipts;
+action authorization remains a separate control. Disabling the proxy listener removes
 this execution coverage; existing native-client audit remains available.
 
 With capture off, requests and responses stream through without saving bodies,
@@ -145,3 +147,103 @@ gateway must define its own fail-closed contract; this PR does not implement it.
 Rollback: run the previous application build. The audit database is separate
 from existing PostgreSQL/traffic schemas; it is ignored by earlier builds. Keep
 or remove it deliberately according to the investigation's retention needs.
+
+## Business investigation requirement: induced remote access
+
+An operator may receive only an unexpected destination URL/hostname and a time
+window. They need to determine whether an ARTEX task caused that request through
+SSRF or RCE, and open the exact triggering action without asking an agent to scan
+the workspace. Successful collection of the worker's direct requests does not
+meet this requirement by itself.
+
+### Verified current behavior
+
+A real worker ran one Bash invocation against owned loopback fixtures with full
+capture disabled. Independent target receipts were reconciled against every
+audit page and request ID:
+
+| Case | Target receipts | Proxy request events | Response events |
+| --- | ---: | ---: | ---: |
+| Bash for-loop / curl | 100 | 100 | 100 |
+| Python for-loop / urllib | 100 | 100 | 100 |
+| Python for-loop / requests.Session | 100 | 100 | 100 |
+| Same path, ten different query strings | 10 | 10 | 10 |
+| Fixed mock application / first hop | 5 | 5 | 5 |
+| Application-side second hop | 5 | 0 | 0 |
+
+The worker's 315 requests produced 630 events with 315 distinct correlated
+request IDs, no missing/duplicate events in this run, and zero new write failures.
+All first-hop responses were HTTP 200. Full recordings stayed at 10. The test task
+was paused and the temporary fixtures stopped; existing task pause flags were
+preserved. This is a sequential HTTP loop and connection-reuse test, not a
+throughput, crash-durability, HTTPS-batch or remote-RCE qualification.
+
+The mock application used a separate direct client, restricted to the fixed
+secondary fixture, to model a server-side request outside the worker proxy. Its
+five target receipts prove the second-hop observation gap; they are not evidence
+that local gateway or bubblewrap changes could observe a remote server's egress.
+
+Audit preserves the first-hop scheme, host, port and path but removes **all query
+keys and values**, including the nested secondary target. The ten query-only
+variations remain separate events but cannot be distinguished by query content.
+The existing tool-input keyword search found the secondary origin, while a search
+for the fully assembled secondary URL returned no matches. The address was built
+from variables in the script, so literal command search is only a fallback.
+
+### Open acceptance gap in implementation PR 2
+
+This requirement belongs to searchable evidence/provenance in PR 2 (#596), not a
+promise that the later sandbox will observe remote side effects. Keep PR #596
+Draft; the controlled first-hop acceptance does not complete the investigation
+workflow. Implementation of the following items is still pending:
+
+- Index candidate destination references as actions occur. Reuse trusted
+  task/run/tool-call/activity IDs. Distinguish a command/script reference from a
+  destination actually submitted in an outbound request. Include tool inputs and
+  references to the exact executed script/artifact version; extract destinations
+  from observable query, forms/JSON and other supported request-body formats
+  before general redaction. Full traffic recording must remain optional.
+- Preserve useful parameter structure with explicit redaction. Normalize
+  destination scheme/host/IP/port/path, redact credentials, and apply bounded,
+  versioned decoding/extraction with truncation and unsupported-format markers.
+  Do not default to retaining arbitrary raw queries/bodies or treating every
+  parameter as safe. Retain an authorized evidence reference and artifact digest
+  for investigation instead of requiring a fresh disk scan.
+- Keep evidence classes separate: `command_reference`, `submitted_target`,
+  `network_observation`, and independently sourced `correlated_receipt` are
+  different claims. A mention in a downloaded page is not an action, and an
+  extracted payload URL is not proof of a remote connection. Do not execute or
+  fetch extracted content to enrich the index. Extraction has no policy authority.
+- Accept independently obtained callback/OAST or target-side receipts with source
+  and correlation identifiers. Without such evidence the remote hop remains
+  unconfirmed. Domain/time proximity alone must not manufacture a causal edge;
+  raw/opaque remote code can remain unresolved even with the index.
+- Search one URL/hostname/time window across observed destinations and indexed
+  trigger references. Return task, worker, exact action, first-hop target,
+  candidate secondary destination, evidence class, corroboration and coverage.
+  Unknown attribution and missing evidence stay explicit. Respect existing
+  operator/company authorization, retention, deletion and archival semantics.
+
+### Required follow-up acceptance fixtures
+
+1. SSRF target in a query and in a JSON/form body: searching only the secondary
+   hostname/path finds the submitted target and its first-hop action while full
+   capture is off, without retaining the synthetic secret parameter.
+2. A fixed, harmless remote-command fixture with a destination assembled from
+   script variables: link the submitted command/artifact and any extracted
+   destination; mark opaque/dynamic cases unresolved instead of reporting no
+   access. This loop test did not execute an RCE exploit.
+3. A callback/target receipt confirms only its correlated hop. Without a receipt,
+   show a trigger reference, not confirmed access. Multiple concurrent tasks
+   referencing the same destination must not borrow each other's evidence.
+4. A returned document that merely quotes the same URL must not become a tool
+   attempt or confirmed access. Encoded payloads, extraction limits, query-only
+   variations, missing artifacts and archived tasks expose their limits clearly.
+5. Starting from only the business-reported destination and time window, reach
+   the triggering task and evidence in the ordinary UI/API without agent-mode
+   disk scanning. Historical backfill, if offered, is a separately labeled,
+   bounded import of existing retained evidence, never invented network history.
+
+This amendment does not expand the four-PR plan or claim these pending controls
+are implemented. The gateway/action-authorization and Linux Go/bubblewrap PRs
+continue to own scope enforcement and local execution containment.
