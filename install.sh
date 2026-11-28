@@ -171,7 +171,7 @@ install_local(){
     2)
       ensure_docker
       local pw; pw="$(ask 'Postgres password (press Enter for random)' "$(rand)")"
-      docker run -d --name artex-pg -p 5432:5432 \
+      docker run -d --name artex-pg -p 127.0.0.1:5432:5432 \
         -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
         -v artex-pg:/var/lib/postgresql/data postgres:16-alpine
       DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=artex DB_PASS="$pw" DB_NAME=artex DB_SSL=disable ;;
