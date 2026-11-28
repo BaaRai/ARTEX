@@ -171,9 +171,6 @@ install_local(){
     2)
       ensure_docker
       local pw; pw="$(ask 'Postgres password (press Enter for random)' "$(rand)")"
-      # Bind to loopback only: ARTEX connects on 127.0.0.1 (see DB_HOST below), and
-      # Docker's published-port rules bypass host firewalls such as UFW, so a bare
-      # -p 5432:5432 would expose PostgreSQL on every interface of a public VPS.
       docker run -d --name artex-pg -p 127.0.0.1:5432:5432 \
         -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
         -v artex-pg:/var/lib/postgresql/data postgres:16-alpine
