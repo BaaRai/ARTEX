@@ -43,7 +43,7 @@ const (
 
 // chatBridgeHandlers is the command table and the text handler the bridge
 // runner uses.
-func (s *Server) chatBridgeHandlers(kind string) ([]chatbridge.Command, chatbridge.CommandFunc) {
+func (s *Server) chatBridgeHandlers(kind string) chatBridgeHandlerSet {
 	cmds := append(defaultChatBridgeCommands(kind),
 		chatbridge.Command{Name: "tasks", Summary: "list recent tasks", Run: s.bridgeTasks},
 		chatbridge.Command{Name: "task", Usage: "[id]", Summary: "select the task this chat works on, or show it", Run: s.bridgeTask},
@@ -51,7 +51,7 @@ func (s *Server) chatBridgeHandlers(kind string) ([]chatbridge.Command, chatbrid
 		chatbridge.Command{Name: "resume", Usage: "[id]", Summary: "resume the task", Run: s.bridgeResume},
 		chatbridge.Command{Name: "findings", Usage: "[id]", Summary: "the task's findings, most severe first", Run: s.bridgeFindings},
 	)
-	return cmds, s.bridgeText
+	return chatBridgeHandlerSet{Commands: cmds, Text: s.bridgeText, Callback: s.bridgeApprovalPress}
 }
 
 const bridgeNoTaskReply = "No task selected. Send /tasks to see the tasks, then /task <id>. After that, messages without a slash go to that task's main agent."
@@ -126,7 +126,7 @@ func (s *Server) bridgeTask(ctx context.Context, req chatbridge.Request) string 
 		return reply
 	}
 	id, _ := strconv.ParseInt(t.ID, 10, 64)
-	if err := s.m.PG().SetChatBridgeTask(ctx, req.Kind, req.ChatID, id); err != nil {
+	if err := s.m.PG().SetChatBridgeTask(ctx, req.Kind, req.ChatID, req.ChatType, id); err != nil {
 		log.Printf("%s select task %s in chat %s: %v", chatBridgeLogTag(req.Kind), t.ID, req.ChatID, err)
 		return "Could not select task #" + t.ID + ". Try again."
 	}

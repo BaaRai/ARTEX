@@ -138,10 +138,11 @@ func (d *DB) ChatBridgeTask(ctx context.Context, kind, chatID string) (string, e
 	return strconv.FormatInt(id, 10), nil
 }
 
-// SetChatBridgeTask records the task a chat works on. The bridge row of kind
-// must exist, and so must the task.
-func (d *DB) SetChatBridgeTask(ctx context.Context, kind, chatID string, taskID int64) error {
-	_, err := d.ExecContext(ctx, `INSERT INTO chat_bridge_chats(kind, chat_id, task_id) VALUES($1, $2, $3)
-ON CONFLICT (kind, chat_id) DO UPDATE SET task_id=EXCLUDED.task_id, updated_at=NOW()`, kind, chatID, taskID)
+// SetChatBridgeTask records the task a chat works on, and the chat's type
+// (approval pushes need it). The bridge row of kind must exist, and so must
+// the task.
+func (d *DB) SetChatBridgeTask(ctx context.Context, kind, chatID, chatType string, taskID int64) error {
+	_, err := d.ExecContext(ctx, `INSERT INTO chat_bridge_chats(kind, chat_id, task_id, chat_type) VALUES($1, $2, $3, $4)
+ON CONFLICT (kind, chat_id) DO UPDATE SET task_id=EXCLUDED.task_id, chat_type=EXCLUDED.chat_type, updated_at=NOW()`, kind, chatID, taskID, chatType)
 	return err
 }

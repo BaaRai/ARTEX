@@ -62,10 +62,10 @@ type chatBridgeRunner struct {
 	pg *db.DB
 	// transport resolves a kind; tests substitute a fake.
 	transport func(kind string) (chatbridge.Transport, bool)
-	// handlers builds the command table of a bridge and the handler of plain
-	// text. server.New installs the task commands; without them the bridge
-	// knows only /help and /whoami.
-	handlers func(kind string) ([]chatbridge.Command, chatbridge.CommandFunc)
+	// handlers builds the command table of a bridge and the handlers of plain
+	// text and button presses. server.New installs the task commands and
+	// approvals; without them the bridge knows only /help and /whoami.
+	handlers func(kind string) chatBridgeHandlerSet
 
 	mu    sync.Mutex
 	state map[string]*chatBridgeState
@@ -80,10 +80,17 @@ func newChatBridgeRunner(pg *db.DB) *chatBridgeRunner {
 	}
 }
 
+// chatBridgeHandlerSet is what a bridge's Router dispatches to.
+type chatBridgeHandlerSet struct {
+	Commands []chatbridge.Command
+	Text     chatbridge.CommandFunc
+	Callback chatbridge.CallbackFunc
+}
+
 // defaultChatBridgeHandlers is the handler table of a runner without a
-// server: the commands that need no task and no text handler.
-func defaultChatBridgeHandlers(kind string) ([]chatbridge.Command, chatbridge.CommandFunc) {
-	return defaultChatBridgeCommands(kind), nil
+// server: the commands that need no task, no text or button handler.
+func defaultChatBridgeHandlers(kind string) chatBridgeHandlerSet {
+	return chatBridgeHandlerSet{Commands: defaultChatBridgeCommands(kind)}
 }
 
 // defaultChatBridgeCommands are the commands that need no task. /help is
@@ -219,8 +226,8 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 			return r.fail(kind, err)
 		}
 		prev := router
-		cmds, text := r.handlers(kind)
-		router = &chatbridge.Router{BotUserName: me.UserName, Commands: cmds, Text: text}
+		h := r.handlers(kind)
+		router = &chatbridge.Router{BotUserName: me.UserName, Commands: h.Commands, Text: h.Text, Callback: h.Callback}
 		if prevBot != nil && prevBot.ID == me.ID {
 			// Same bot, new settings: chats it already refused stay refused.
 			router.KeepRefusals(prev)
@@ -292,8 +299,13 @@ func (r *chatBridgeRunner) step(ctx context.Context, kind string) time.Duration 
 	st.status.LastUpdateAt = &now
 	r.mu.Unlock()
 
+	acc := chatbridge.Access{Chats: b.AllowedChats, Users: b.AllowedUsers}
 	for _, u := range updates {
-		decision, reply := router.Route(ctx, kind, chatbridge.Access{Chats: b.AllowedChats, Users: b.AllowedUsers}, u)
+		if u.CallbackID != "" {
+			r.handleCallback(ctx, tr, cfg, router, acc, kind, u)
+			continue
+		}
+		decision, reply := router.Route(ctx, kind, acc, u)
 		switch decision {
 		case chatbridge.DecisionRefused:
 			log.Printf("%s refused chat %s (%s, user %s @%s): not allowed", tag, u.ChatID, u.ChatType, u.UserID, u.UserName)
@@ -376,6 +388,26 @@ func (r *chatBridgeRunner) Deliver(ctx context.Context, req chatbridge.Request, 
 	sendCtx, cancel := context.WithTimeout(ctx, chatBridgeSendWait)
 	defer cancel()
 	return tr.Send(sendCtx, cfg, req.ChatID, text)
+}
+
+// handleCallback routes a button press, answers it (which also stops the
+// spinner on the button) and applies the edit the handler asked for.
+func (r *chatBridgeRunner) handleCallback(ctx context.Context, tr chatbridge.Transport, cfg map[string]any, router *chatbridge.Router, acc chatbridge.Access, kind string, u chatbridge.Update) {
+	tag := chatBridgeLogTag(kind)
+	decision, reply := router.RouteCallback(ctx, kind, acc, u)
+	if decision == chatbridge.DecisionRefused {
+		log.Printf("%s refused a button press in chat %s (%s, user %s @%s): not allowed", tag, u.ChatID, u.ChatType, u.UserID, u.UserName)
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, chatBridgeSendWait)
+	defer cancel()
+	if err := tr.AnswerCallback(sendCtx, cfg, u.CallbackID, reply.Toast); err != nil {
+		log.Printf("%s answer to a button press in chat %s failed: %v", tag, u.ChatID, err)
+	}
+	if reply.Edit != "" && u.MessageID != "" {
+		if err := tr.EditText(sendCtx, cfg, u.ChatID, u.MessageID, reply.Edit); err != nil {
+			log.Printf("%s edit of message %s in chat %s failed: %v", tag, u.MessageID, u.ChatID, err)
+		}
+	}
 }
 
 func (r *chatBridgeRunner) setOff(kind string) {

@@ -147,7 +147,7 @@ func TestTelegramPollParsesAndSendsOffset(t *testing.T) {
 	if body["offset"] != float64(41) || body["timeout"] != float64(25) {
 		t.Fatalf("getUpdates body = %v", body)
 	}
-	if au, _ := body["allowed_updates"].([]any); len(au) != 1 || au[0] != "message" {
+	if au, _ := body["allowed_updates"].([]any); len(au) != 2 || au[0] != "message" {
 		t.Fatalf("allowed_updates = %v", body["allowed_updates"])
 	}
 }
@@ -280,5 +280,57 @@ func TestTelegramValidateUserID(t *testing.T) {
 		if err := tr.ValidateUserID(bad); err == nil {
 			t.Errorf("%q: want error", bad)
 		}
+	}
+}
+
+func TestTelegramButtonsEditAndCallbacks(t *testing.T) {
+	f, cfg := newFakeTelegram(t)
+	tr := telegramTransport{}
+	ctx := context.Background()
+
+	f.on("sendMessage", `{"ok":true,"result":{"message_id":321}}`, 200)
+	id, err := tr.SendButtons(ctx, cfg, "100", "Approve?", [][]Button{{{Text: "Allow", Data: "ap:n:a"}, {Text: "Block", Data: "ap:n:d"}}})
+	if err != nil || id != "321" {
+		t.Fatalf("SendButtons = %q %v", id, err)
+	}
+	kb, _ := f.bodies["sendMessage"]["reply_markup"].(map[string]any)["inline_keyboard"].([]any)
+	row, _ := kb[0].([]any)
+	if len(row) != 2 || row[0].(map[string]any)["callback_data"] != "ap:n:a" || row[1].(map[string]any)["text"] != "Block" {
+		t.Fatalf("keyboard = %v", f.bodies["sendMessage"]["reply_markup"])
+	}
+	if _, err := tr.SendButtons(ctx, cfg, "100", "x", [][]Button{{{Text: "big", Data: strings.Repeat("d", 65)}}}); err == nil {
+		t.Fatal("oversized callback data must be refused")
+	}
+
+	if err := tr.EditText(ctx, cfg, "100", "321", "Decided"); err != nil {
+		t.Fatal(err)
+	}
+	if b := f.bodies["editMessageText"]; b["message_id"] != float64(321) || b["text"] != "Decided" || b["reply_markup"] != nil {
+		t.Fatalf("editMessageText body = %v", b)
+	}
+	f.on("editMessageText", `{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`, 400)
+	if err := tr.EditText(ctx, cfg, "100", "321", "Decided"); err != nil {
+		t.Fatalf("an unchanged message is not an error: %v", err)
+	}
+
+	if err := tr.AnswerCallback(ctx, cfg, "cb-9", strings.Repeat("x", 300)); err != nil {
+		t.Fatal(err)
+	}
+	if b := f.bodies["answerCallbackQuery"]; b["callback_query_id"] != "cb-9" || utf16Len(b["text"].(string)) > telegramToastLimit {
+		t.Fatalf("answerCallbackQuery body = %v", b)
+	}
+
+	// A press arrives as a callback_query update.
+	f.on("getUpdates", `{"ok":true,"result":[{"update_id":7,"callback_query":{"id":"cb-1","from":{"id":42,"username":"op"},"data":"ap:n:d","message":{"message_id":321,"chat":{"id":-100,"type":"supergroup"}}}}]}`, 200)
+	ups, err := tr.Poll(ctx, cfg, 0)
+	if err != nil || len(ups) != 1 {
+		t.Fatalf("poll = %+v %v", ups, err)
+	}
+	u := ups[0]
+	if u.CallbackID != "cb-1" || u.CallbackData != "ap:n:d" || u.MessageID != "321" || u.ChatID != "-100" || u.ChatType != "supergroup" || u.UserID != "42" || u.Text != "" {
+		t.Fatalf("callback update = %+v", u)
+	}
+	if au, _ := f.bodies["getUpdates"]["allowed_updates"].([]any); len(au) != 2 || au[1] != "callback_query" {
+		t.Fatalf("allowed_updates = %v", f.bodies["getUpdates"]["allowed_updates"])
 	}
 }

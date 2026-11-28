@@ -123,7 +123,7 @@ func readApplied(t *testing.T, d *DB) []appliedMigration {
 // embedded migration is recorded with the SHA-256 of its file.
 func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 	t.Helper()
-	for _, table := range []string{"llm_records", "llm_usage", "llm_context", "traffic_tamper_hooks", "traffic_tamper_hook_versions", "chat_bridges", "chat_bridge_chats"} {
+	for _, table := range []string{"llm_records", "llm_usage", "llm_context", "traffic_tamper_hooks", "traffic_tamper_hook_versions", "chat_bridges", "chat_bridge_chats", "chat_bridge_approvals"} {
 		var exists bool
 		if err := d.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists); err != nil {
 			t.Fatal(err)
@@ -144,9 +144,10 @@ func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 		{15, "0015_chat_bridges.sql"},
 		{16, "0016_chat_bridge_access.sql"},
 		{17, "0017_legacy_fact_capture_provenance.sql"},
-		{18, "0018_chat_bridge_share_text.sql"}}
+		{18, "0018_chat_bridge_share_text.sql"},
+		{19, "0019_chat_bridge_approvals.sql"}}
 	if len(applied) != len(want) {
-		t.Fatalf("schema_migrations = %+v, want versions 1 to 18", applied)
+		t.Fatalf("schema_migrations = %+v, want versions 1 to 19", applied)
 	}
 	for i, w := range want {
 		content, err := fs.ReadFile(migrationsFS(), w.name)

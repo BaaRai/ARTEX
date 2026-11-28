@@ -44,8 +44,22 @@ type Update struct {
 	// Text is the message text. Empty for updates that carry no text (stickers,
 	// photos, joins); those are ignored.
 	Text string
-	// Date is when the chat app received the message.
+	// Date is when the chat app received the message. A button press has no
+	// date of its own; it is zero there.
 	Date time.Time
+	// CallbackID is set when the update is a press on one of the bot's
+	// buttons rather than a message. CallbackData is the data of the pressed
+	// button, MessageID the message that carries the buttons.
+	CallbackID   string
+	CallbackData string
+	MessageID    string
+}
+
+// Button is one button under a message. Data comes back in the update of a
+// press; transports limit its size (Telegram: 64 bytes).
+type Button struct {
+	Text string
+	Data string
 }
 
 // ChatTypePrivate is the ChatType of a one-to-one chat with the bot.
@@ -83,6 +97,15 @@ type Transport interface {
 	// Send delivers a plain-text reply to a chat. Transports truncate text
 	// that exceeds the chat app's message limit.
 	Send(ctx context.Context, cfg map[string]any, chatID, text string) error
+	// SendButtons sends a plain-text message with rows of buttons and
+	// returns the id of the message.
+	SendButtons(ctx context.Context, cfg map[string]any, chatID, text string, rows [][]Button) (string, error)
+	// EditText replaces the text of a message the bot sent and removes its
+	// buttons.
+	EditText(ctx context.Context, cfg map[string]any, chatID, messageID, text string) error
+	// AnswerCallback acknowledges a button press, with an optional short
+	// notice shown to the user who pressed.
+	AnswerCallback(ctx context.Context, cfg map[string]any, callbackID, text string) error
 }
 
 var registry = map[string]Transport{

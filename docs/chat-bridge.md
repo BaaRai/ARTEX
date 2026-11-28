@@ -1,8 +1,8 @@
 # Chat Bot (Inbound Chat Bridge)
 
 The chat bot lets an operator talk to ARTEX from a chat app instead of the web UI. Telegram is the
-first transport. This page covers connecting a bot, who may use it, the task commands and the
-main-agent conversation. Remote approvals build on it
+first transport. This page covers connecting a bot, who may use it, the task commands, the
+main-agent conversation and remote approvals
 ([issue #5](https://github.com/BaaRai/ARTEX/issues/5)).
 
 Outbound notifications (pushing findings to a chat) are a separate feature under
@@ -53,6 +53,24 @@ the turn in progress, and the chat is told so.
 
 Replies link back to ARTEX when **Link-back URL** is set under **System → Notifications**.
 
+## Approvals
+
+When an interception rule or the target gate asks for a human decision on a task, the request is
+sent to every chat that selected the task with `/task`, with **Allow** and **Block** buttons. A
+press decides the request exactly as the buttons in ARTEX do, and the approval records name the
+chat user as the approver (`telegram:<user id>`). The message is then edited to show the outcome
+and the buttons are removed.
+
+- The message shows the task, the tool, the agent, the target address for a target request and
+  the risk score. The request itself and the rule's reason are free-form, so they are shown only
+  with **Send text excerpts** on, filtered.
+- The buttons work once, only in the chat and on the message they were sent with, and expire after
+  30 minutes. If the request is decided in ARTEX or elsewhere first, or the buttons expire, the
+  message is edited and the buttons are removed. After that, decide in ARTEX.
+- In a group, only allowed users can press; anyone else gets a notice with their user ID. A group
+  with no allowed users gets no approval requests.
+- Requests are looked for every few seconds while the bot is on.
+
 ### Text excerpts
 
 **Send text excerpts** is off by default. Off, everything the bot sends is fixed wording, titles,
@@ -83,6 +101,12 @@ receive what agents write about the target.
   well-known API key formats, `curl -u`, session cookies and `password=…`-style pairs, quoted values
   included). The text is cut to 1500 characters, and the full answer stays in ARTEX. A filter cannot
   know every shape a credential takes, which is why excerpts are opt-in.
+- **One-time approval buttons.** Each approval message carries a random nonce in its button data.
+  Only the SHA-256 of the nonce is stored, so reading the database does not give a working button.
+  A press is checked against the chat, the message, the expiry and whether the nonce was used, and
+  the nonce is spent in the same database statement, so a replayed or forwarded press, a second
+  press, or a press racing a decision in ARTEX cannot act twice. Presses go through the same access
+  rules as messages.
 - **Late answers are re-checked.** An answer is dropped if, while the agent worked, the bridge was
   switched off, the chat was removed from the allowlist or, in a group, the user who asked was
   removed from the user list.

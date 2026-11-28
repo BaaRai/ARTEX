@@ -51,12 +51,12 @@ func bridgeCommandServer(t *testing.T) (*Server, *Task, *fakeBridgeTransport) {
 
 func runBridgeCommand(t *testing.T, s *Server, name, args string) string {
 	t.Helper()
-	cmds, text := s.chatBridgeHandlers(fakeBridgeKind)
+	h := s.chatBridgeHandlers(fakeBridgeKind)
 	req := chatbridge.Request{Kind: fakeBridgeKind, ChatID: "100", ChatType: chatbridge.ChatTypePrivate, UserID: "7", Command: name, Args: args}
 	if name == "" {
-		return text(context.Background(), req)
+		return h.Text(context.Background(), req)
 	}
-	for _, c := range cmds {
+	for _, c := range h.Commands {
 		if c.Name == name {
 			return c.Run(context.Background(), req)
 		}

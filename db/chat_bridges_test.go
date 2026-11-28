@@ -115,17 +115,17 @@ func TestChatBridgeAllowedUsersAndChatTask(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = d.DeleteTask(t1.ID); _ = d.DeleteTask(t2.ID) })
 
-	if err := d.SetChatBridgeTask(ctx, kind, "-1001", t1.ID); err != nil {
+	if err := d.SetChatBridgeTask(ctx, kind, "-1001", "supergroup", t1.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetChatBridgeTask(ctx, kind, "-1001", t2.ID); err != nil {
+	if err := d.SetChatBridgeTask(ctx, kind, "-1001", "supergroup", t2.ID); err != nil {
 		t.Fatal(err)
 	}
 	if id, err := d.ChatBridgeTask(ctx, kind, "-1001"); err != nil || id != strconv.FormatInt(t2.ID, 10) {
 		t.Fatalf("selection = %q, %v; want %d", id, err, t2.ID)
 	}
 	// A task that does not exist cannot be selected.
-	if err := d.SetChatBridgeTask(ctx, kind, "100", 1<<60); err == nil {
+	if err := d.SetChatBridgeTask(ctx, kind, "100", "private", 1<<60); err == nil {
 		t.Fatal("selecting a missing task must fail")
 	}
 	// Deleting the task clears the selection.

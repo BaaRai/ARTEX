@@ -303,6 +303,11 @@ export default function ChatBridgePage() {
           </p>
           <p className="text-muted-foreground text-xs">
             {t(
+              "Approval requests of a chat's selected task are sent there with Allow and Block buttons. Each button works once, only in that chat, and expires after 30 minutes.",
+            )}
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {t(
               "The bot uses long polling, so ARTEX opens no inbound port. Messages it sends contain summaries and links, never evidence bodies or credentials.",
             )}{" "}
             {t("Links use the Link-back URL from the notification settings.")}

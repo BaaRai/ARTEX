@@ -2752,6 +2752,7 @@
   "One per line. Needed only for groups: these users can give the bot commands in every allowed group. Every member of an allowed group still sees what the bot sends there. A member who is refused gets their user ID in the refusal.": "每行一个。仅群组需要：这些用户可以在所有允许的群组中向机器人发送命令。允许的群组中的每个成员仍能看到机器人在该群组发送的内容。被拒绝的成员会在拒绝消息中看到自己的用户 ID。",
   "A group is allowed but no user is: the bot refuses every member of that group.": "已允许群组，但未允许任何用户：机器人会拒绝该群组的所有成员。",
   "Commands: /tasks, /task <id>, /pause, /resume, /findings. Any other message goes to the main agent of the chat's selected task, in the same conversation as the web chat, and the chat is told when it answers.": "命令：/tasks、/task <id>、/pause、/resume、/findings。其他消息会发送给该聊天所选任务的主智能体，与网页聊天是同一个对话，主智能体回答后会通知该聊天。",
+  "Approval requests of a chat's selected task are sent there with Allow and Block buttons. Each button works once, only in that chat, and expires after 30 minutes.": "聊天所选任务的审批请求会带着“允许”和“阻止”按钮发送到该聊天。每个按钮只能使用一次，仅在该聊天中有效，30 分钟后过期。",
   "Send text excerpts": "发送文本摘录",
   "Off: answers of the main agent are announced with a link, and unnamed tasks are listed as (unnamed). On: the bot also sends filtered excerpts of what agents and operators wrote. The filter masks common credential shapes but cannot catch every one.": "关闭：主智能体的回答仅以链接通知，未命名的任务显示为 (unnamed)。开启：机器人还会发送经过过滤的智能体和操作员所写内容的摘录。过滤器会屏蔽常见的凭据格式，但无法识别所有格式。",
   "Links use the Link-back URL from the notification settings.": "链接使用通知设置中的回链地址。",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +23,16 @@ type fakeBridgeTransport struct {
 	sent     map[string][]string
 	pollErr  error
 	identity int
+	// buttons are the messages sent with buttons, edits the edited texts by
+	// message id, toasts the answers to button presses.
+	buttons []fakeButtonMessage
+	edits   map[string]string
+	toasts  []string
+}
+
+type fakeButtonMessage struct {
+	chatID, messageID, text string
+	rows                    [][]chatbridge.Button
 }
 
 const fakeBridgeKind = "t-fake-bridge"
@@ -56,6 +67,29 @@ func (f *fakeBridgeTransport) Send(_ context.Context, _ map[string]any, chatID, 
 		f.sent = map[string][]string{}
 	}
 	f.sent[chatID] = append(f.sent[chatID], text)
+	return nil
+}
+
+func (f *fakeBridgeTransport) SendButtons(_ context.Context, _ map[string]any, chatID, text string, rows [][]chatbridge.Button) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := strconv.Itoa(1000 + len(f.buttons))
+	f.buttons = append(f.buttons, fakeButtonMessage{chatID: chatID, messageID: id, text: text, rows: rows})
+	return id, nil
+}
+func (f *fakeBridgeTransport) EditText(_ context.Context, _ map[string]any, _, messageID, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.edits == nil {
+		f.edits = map[string]string{}
+	}
+	f.edits[messageID] = text
+	return nil
+}
+func (f *fakeBridgeTransport) AnswerCallback(_ context.Context, _ map[string]any, _, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.toasts = append(f.toasts, text)
 	return nil
 }
 

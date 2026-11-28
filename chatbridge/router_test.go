@@ -215,3 +215,46 @@ func TestRouteGroupServesOnlyAllowedUsers(t *testing.T) {
 		t.Fatalf("private chat: got %v", d)
 	}
 }
+
+func TestRouteCallbackAccess(t *testing.T) {
+	var got Request
+	r := testRouter()
+	r.Callback = func(_ context.Context, req Request) CallbackReply {
+		got = req
+		return CallbackReply{Toast: "done", Edit: "edited"}
+	}
+	press := func(chat, chatType, user string) Update {
+		return Update{ID: 9, ChatID: chat, ChatType: chatType, UserID: user, CallbackID: "cb1", CallbackData: "ap:x:a", MessageID: "55"}
+	}
+	acc := Access{Chats: []string{"100", "-100"}, Users: []string{"7"}}
+
+	d, reply := r.RouteCallback(context.Background(), KindTelegram, acc, press("100", ChatTypePrivate, "7"))
+	if d != DecisionHandled || reply.Toast != "done" || reply.Edit != "edited" || got.Args != "ap:x:a" || got.MessageID != "55" || got.ChatType != ChatTypePrivate {
+		t.Fatalf("allowed press: %v %+v, request %+v", d, reply, got)
+	}
+	// Unknown chat, and an unlisted member of an allowed group: a notice,
+	// and the handler does not run.
+	got = Request{}
+	if d, reply := r.RouteCallback(context.Background(), KindTelegram, acc, press("999", ChatTypePrivate, "999")); d != DecisionRefused || reply.Toast == "" || reply.Edit != "" || got.Args != "" {
+		t.Fatalf("unknown chat: %v %+v", d, reply)
+	}
+	if d, reply := r.RouteCallback(context.Background(), KindTelegram, acc, press("-100", "supergroup", "9")); d != DecisionRefused || !strings.Contains(reply.Toast, "9") || got.Args != "" {
+		t.Fatalf("unlisted group member: %v %+v", d, reply)
+	}
+	if d, _ := r.RouteCallback(context.Background(), KindTelegram, acc, press("-100", "supergroup", "7")); d != DecisionHandled {
+		t.Fatalf("listed group member: %v", d)
+	}
+	// A press from a bot, or no handler.
+	b := press("100", ChatTypePrivate, "7")
+	b.FromBot = true
+	if d, _ := r.RouteCallback(context.Background(), KindTelegram, acc, b); d != DecisionIgnored {
+		t.Fatalf("bot press: %v", d)
+	}
+	if d, reply := testRouter().RouteCallback(context.Background(), KindTelegram, acc, press("100", ChatTypePrivate, "7")); d != DecisionIgnored || reply.Toast == "" {
+		t.Fatalf("no handler: %v %+v", d, reply)
+	}
+	// A press is not a message: Route ignores it.
+	if d, _ := r.Route(context.Background(), KindTelegram, acc, press("100", ChatTypePrivate, "7")); d != DecisionIgnored {
+		t.Fatalf("Route on a press: %v", d)
+	}
+}
