@@ -20,3 +20,12 @@ updates:
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
       - dependency-name: "golang"
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  # Keep the SHA-pinned action references current. Dependabot understands the
+  # " # vN.N.N" comment next to a pinned commit and bumps both when a tag moves.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(actions)"
