@@ -133,6 +133,33 @@ func insertAssetsRuleLoadFailure(err error) (actool.Result, bool) {
 	return actool.Errorf("asset intercept rules are unavailable; insertion refused"), true
 }
 
+// triggerEnrichment hands one freshly inserted asset to the async enrichment
+// engine: a domain gets a DNS resolve, an HTTP service gets a probe. Only the
+// types the engine can act on are triggered — an IP, app, endpoint or non-HTTP
+// service has nothing to resolve or probe on its own.
+//
+// The trigger is best-effort by design: the engine dedups by cooldown, drops the
+// job when its queue is full, resolves DNS ungated and gates the HTTP probe on
+// the target scope carried by ctx (a probe without a scope dials nothing). A nil
+// engine — no manager, or a tool set built outside a worker run — is a no-op.
+func (t *ToolSet) triggerEnrichment(ctx context.Context, typ string, id int64, item assetInputItem) {
+	if t.enrich == nil || id <= 0 {
+		return
+	}
+	switch typ {
+	case "root_domain", "subdomain":
+		if host := strings.TrimSpace(item.Domain); host != "" {
+			t.enrich.ResolveDomain(id, host)
+		}
+	case "service":
+		// Only the HTTP branch (url set) has something to probe; a non-HTTP
+		// service carries no URL, so the empty check covers both.
+		if raw := strings.TrimSpace(item.URL); raw != "" {
+			t.enrich.ProbeSite(ctx, id, raw)
+		}
+	}
+}
+
 // insertAssets is the unified insert_assets agent tool.
 func (t *ToolSet) insertAssets() actool.CoreTool {
 	return writeTool(
@@ -216,7 +243,7 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 				}, "type"),
 			},
 		}, "assets"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			if t.as == nil {
 				return actool.Errorf("insert_assets is not enabled: AssetStore is not initialized"), nil
 			}
@@ -364,6 +391,9 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 				results = append(results, result{Index: i, ID: id, Type: typ})
 				t.writes.Assets++
 				t.anchorOwner(id)
+				// Auto-completion is triggered only for an asset that was actually
+				// written: a gated or failed item must not be resolved or probed.
+				t.triggerEnrichment(ctx, typ, id, item)
 				if taskID > 0 {
 					var sourceNodeID *int64
 					if t.ownerNode > 0 {
