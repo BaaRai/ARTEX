@@ -25,7 +25,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Autumn-27/artex/accessaudit"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/archivestore"
 	"github.com/Autumn-27/artex/db"
@@ -195,6 +194,7 @@ type triggeredRun struct {
 }
 
 func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDir string, opts ...Option) *Server {
+	ctx = m.auditContext(ctx)
 	key, err := loadOrCreateJWTKey(keyDir, dataDir)
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
@@ -4512,7 +4512,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 				a.Worker = "mainagent"
 				emit(a)
 			})
-			gctx = accessaudit.WithStore(gctx, s.m.audit)
+			gctx = s.m.auditContext(gctx)
 			gctx = intercept.WithTargetScope(gctx, t.targetScope(intercept.DefaultTargetWaitBound))
 			s.engine.BeginLLMCall(t.ID)
 			_, err := ma.Chat(gctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, t.TargetGuard.Hooks(), emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)

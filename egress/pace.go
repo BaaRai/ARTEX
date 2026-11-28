@@ -41,8 +41,8 @@ func IsPaceMarker(proxyAuthorization string) bool {
 	if err != nil {
 		return false
 	}
-	user, _, _ := strings.Cut(string(dec), ":")
-	return user == PaceUser
+	user, password, _ := strings.Cut(string(dec), ":")
+	return user == PaceUser || password == PaceUser
 }
 
 // Wait paces one request to hostKey under the current profile. See

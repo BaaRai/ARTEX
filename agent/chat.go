@@ -198,7 +198,9 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 
 	var bashEnv []string
 	if !isOrchestrationChatAgent(agentKey) {
-		bashEnv = proxyEnv(c.proxyAddr, c.proxyCACert) // Bash subcommands go through the proxy + trust the CA by default
+		var releaseProxy func()
+		bashEnv, releaseProxy = executionProxyEnv(ctx, agentKey, c.proxyAddr, c.proxyCACert)
+		defer releaseProxy() // Bash subcommands go through the proxy + trust the CA by default
 	}
 
 	system, boundary := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir), def)

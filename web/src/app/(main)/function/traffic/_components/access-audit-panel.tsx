@@ -113,6 +113,7 @@ export function AccessAuditPanel() {
             <option value="">{t("All")}</option>
             <option value="native_http">native_http</option>
             <option value="webfetch_trace">webfetch_trace</option>
+            <option value="execution_proxy">execution_proxy</option>
             <option value="recording_proxy">recording_proxy</option>
             <option value="extension_ingest">extension_ingest</option>
             <option value="har_import">har_import</option>

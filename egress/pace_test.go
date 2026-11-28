@@ -27,6 +27,7 @@ func TestIsPaceMarker(t *testing.T) {
 	for v, want := range map[string]bool{
 		"Basic " + enc("artex-pace:artex-pace"):  true,
 		"basic " + enc("artex-pace:x"):           true,
+		"Basic " + enc("opaque:artex-pace"):      true,
 		"Basic " + enc("user:pass"):              false,
 		"Bearer " + enc("artex-pace:artex-pace"): false,
 		"Basic !!!":                              false,

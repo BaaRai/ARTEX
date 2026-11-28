@@ -338,6 +338,12 @@ func (t *Traffic) replayClient() (*http.Client, func(), error) {
 	if !roots.AppendCertsFromPEM(pem) {
 		return nil, nil, fmt.Errorf("proxy CA: no certificate in %s", t.CACertPath())
 	}
+	// Manual Replay explicitly requests saving this exchange, independently of
+	// automatic worker capture. A private capability authorizes only this client;
+	// an incoming header cannot opt arbitrary worker requests into body storage.
+	token := rand.Text()
+	t.replayCaptureLeases.Store(token, struct{}{})
+	proxyURL.User = url.UserPassword(token, "")
 	transport := &http.Transport{
 		Proxy:              http.ProxyURL(proxyURL),
 		TLSClientConfig:    &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
@@ -347,5 +353,8 @@ func (t *Traffic) replayClient() (*http.Client, func(), error) {
 		Transport:     transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	return client, transport.CloseIdleConnections, nil
+	return client, func() {
+		transport.CloseIdleConnections()
+		t.replayCaptureLeases.Delete(token)
+	}, nil
 }

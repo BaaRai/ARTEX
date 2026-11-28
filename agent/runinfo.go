@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"github.com/Autumn-27/artex/accessaudit"
+	"strconv"
 
 	"github.com/Autumn-27/artex/db"
 )
@@ -35,6 +37,11 @@ type runInfoKey struct{}
 
 // WithRunInfo attaches run attribution to ctx.
 func WithRunInfo(ctx context.Context, ri RunInfo) context.Context {
+	ctx = accessaudit.WithIdentity(ctx, func(i *accessaudit.Identity) {
+		if ri.TaskID > 0 {
+			i.TaskID = strconv.FormatInt(ri.TaskID, 10)
+		}
+	})
 	return context.WithValue(ctx, runInfoKey{}, ri)
 }
 

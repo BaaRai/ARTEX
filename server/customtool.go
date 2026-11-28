@@ -593,7 +593,7 @@ func (s *Server) runHTTPTool(ctx context.Context, key string, execRaw json.RawMe
 		base = tr
 	}
 	if s.m != nil && s.m.audit != nil {
-		runCtx = accessaudit.WithStore(runCtx, s.m.audit)
+		runCtx = s.m.auditContext(runCtx)
 	}
 	req = req.WithContext(runCtx)
 	client.Transport = egress.Current().Transport(key, accessaudit.Transport(base, key))
