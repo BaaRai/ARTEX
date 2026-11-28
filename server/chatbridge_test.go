@@ -31,6 +31,7 @@ func (f *fakeBridgeTransport) Validate(map[string]any) error { return nil }
 func (f *fakeBridgeTransport) SecretKeys() []string          { return []string{"bot_token"} }
 func (f *fakeBridgeTransport) DestinationKeys() []string     { return nil }
 func (f *fakeBridgeTransport) ValidateChatID(string) error   { return nil }
+func (f *fakeBridgeTransport) ValidateUserID(string) error   { return nil }
 func (f *fakeBridgeTransport) Identity(context.Context, map[string]any) (chatbridge.Identity, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -96,10 +97,10 @@ func TestChatBridgeRunnerStep(t *testing.T) {
 
 	now := time.Now()
 	fake.updates = []chatbridge.Update{
-		{ID: 10, ChatID: "100", UserID: "7", Text: "/whoami", Date: now},
-		{ID: 11, ChatID: "666", UserID: "9", Text: "/whoami", Date: now},
-		{ID: 12, ChatID: "666", UserID: "9", Text: "again", Date: now},
-		{ID: 13, ChatID: "100", UserID: "7", Text: "/whoami", Date: now.Add(-time.Hour)},
+		{ID: 10, ChatType: chatbridge.ChatTypePrivate, ChatID: "100", UserID: "7", Text: "/whoami", Date: now},
+		{ID: 11, ChatType: chatbridge.ChatTypePrivate, ChatID: "666", UserID: "9", Text: "/whoami", Date: now},
+		{ID: 12, ChatType: chatbridge.ChatTypePrivate, ChatID: "666", UserID: "9", Text: "again", Date: now},
+		{ID: 13, ChatType: chatbridge.ChatTypePrivate, ChatID: "100", UserID: "7", Text: "/whoami", Date: now.Add(-time.Hour)},
 	}
 	if wait := r.step(ctx, fakeBridgeKind); wait != 0 {
 		t.Fatalf("online step: wait %v, status %+v", wait, r.Status(fakeBridgeKind))
@@ -127,7 +128,7 @@ func TestChatBridgeRunnerStep(t *testing.T) {
 
 	// A save during a poll: the cursor write is refused for the old version
 	// and the batch is dropped, not acted on.
-	fake.updates = []chatbridge.Update{{ID: 20, ChatID: "100", UserID: "7", Text: "/whoami", Date: time.Now()}}
+	fake.updates = []chatbridge.Update{{ID: 20, ChatType: chatbridge.ChatTypePrivate, ChatID: "100", UserID: "7", Text: "/whoami", Date: time.Now()}}
 	fake.pollErr = nil
 	r.transport = func(kind string) (chatbridge.Transport, bool) {
 		return &saveDuringPoll{fakeBridgeTransport: fake, pg: pg, saved: saved}, true
@@ -147,8 +148,8 @@ func TestChatBridgeRunnerStep(t *testing.T) {
 	}
 	fake.sent = nil
 	fake.updates = []chatbridge.Update{
-		{ID: 30, ChatID: "100", UserID: "7", Text: "/whoami", Date: time.Now()},
-		{ID: 31, ChatID: "777", UserID: "8", Text: "/whoami", Date: time.Now()},
+		{ID: 30, ChatType: chatbridge.ChatTypePrivate, ChatID: "100", UserID: "7", Text: "/whoami", Date: time.Now()},
+		{ID: 31, ChatType: chatbridge.ChatTypePrivate, ChatID: "777", UserID: "8", Text: "/whoami", Date: time.Now()},
 	}
 	if wait := r.step(ctx, fakeBridgeKind); wait != 0 || r.Status(fakeBridgeKind).State != "online" {
 		t.Fatalf("empty allowlist: wait %v status %+v", wait, r.Status(fakeBridgeKind))
@@ -163,10 +164,25 @@ func TestChatBridgeRunnerStep(t *testing.T) {
 	// Saving the same bot's configuration keeps the refusal memory: a chat
 	// refused before the save is not refused a second time.
 	r.Reload(fakeBridgeKind)
-	fake.updates = []chatbridge.Update{{ID: 32, ChatID: "777", UserID: "8", Text: "hello?", Date: time.Now()}}
+	fake.updates = []chatbridge.Update{{ID: 32, ChatType: chatbridge.ChatTypePrivate, ChatID: "777", UserID: "8", Text: "hello?", Date: time.Now()}}
 	r.step(ctx, fakeBridgeKind)
 	if got := fake.sent["777"]; len(got) != 1 {
 		t.Fatalf("after a save, refused chat replies = %q, want no second refusal", got)
+	}
+
+	// An allowed group serves only allowed users; another member is refused
+	// by user ID.
+	if _, err := pg.SaveChatBridge(ctx, &db.ChatBridge{Kind: fakeBridgeKind, Enabled: true, Config: saved.Config, AllowedChats: []string{"-100"}, AllowedUsers: []string{"7"}}, false); err != nil {
+		t.Fatal(err)
+	}
+	fake.sent = nil
+	fake.updates = []chatbridge.Update{
+		{ID: 40, ChatType: "supergroup", ChatID: "-100", UserID: "7", Text: "/whoami", Date: time.Now()},
+		{ID: 41, ChatType: "supergroup", ChatID: "-100", UserID: "9", Text: "/whoami", Date: time.Now()},
+	}
+	r.step(ctx, fakeBridgeKind)
+	if got := fake.sent["-100"]; len(got) != 2 || !strings.Contains(got[0], "Your user ID: 7") || !strings.Contains(got[1], "user ID 9") || strings.Contains(got[1], "Your user ID") {
+		t.Fatalf("group replies = %q, want the answer for user 7 and a refusal naming user 9", got)
 	}
 
 	// Disabling turns the bridge off.
@@ -255,6 +271,18 @@ func TestChatBridgeAPI(t *testing.T) {
 	w = request(http.MethodPut, "/api/chat-bridges/telegram", `{"allowed_chats":["@me"]}`)
 	if w.Code != 400 {
 		t.Fatalf("bad chat id = %d %s", w.Code, w.Body)
+	}
+	// Allowed users: normalized like chats, a malformed id is refused, and
+	// saving other fields keeps the list.
+	w = request(http.MethodPut, "/api/chat-bridges/telegram", `{"allowed_users":["7"," 7 ","8"]}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"allowed_users":["7","8"]`) {
+		t.Fatalf("allowed users = %d %s", w.Code, w.Body)
+	}
+	if w = request(http.MethodPut, "/api/chat-bridges/telegram", `{"allowed_users":["-100"]}`); w.Code != 400 {
+		t.Fatalf("a chat id as a user id = %d %s", w.Code, w.Body)
+	}
+	if w = request(http.MethodPut, "/api/chat-bridges/telegram", `{"enabled":true}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"allowed_users":["7","8"]`) {
+		t.Fatalf("allowed users kept = %d %s", w.Code, w.Body)
 	}
 	// Unknown kind.
 	if w = request(http.MethodPut, "/api/chat-bridges/carrier-pigeon", `{}`); w.Code != 404 {

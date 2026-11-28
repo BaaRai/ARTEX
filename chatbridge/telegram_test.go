@@ -268,3 +268,17 @@ func TestConfigMaskAndPrepare(t *testing.T) {
 		t.Fatalf("unknown kind must mask to empty, got %v", m)
 	}
 }
+
+func TestTelegramValidateUserID(t *testing.T) {
+	tr := telegramTransport{}
+	for _, ok := range []string{"7", "123456789"} {
+		if err := tr.ValidateUserID(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "0", "-100", "@op", "12a"} {
+		if err := tr.ValidateUserID(bad); err == nil {
+			t.Errorf("%q: want error", bad)
+		}
+	}
+}

@@ -295,6 +295,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		// Inbound chat bridges: an operator drives ARTEX from a chat app. Off until a bridge is enabled,
 		// and only allowlisted chats are served; long polling only, so no inbound port is opened.
 		s.chatBridges = newChatBridgeRunner(m.pg)
+		s.chatBridges.handlers = s.chatBridgeHandlers
 		go s.chatBridges.Run(s.ctx)
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
 	}
@@ -4422,7 +4423,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.engine.IsDeleting(t.ID) {
-		writeErr(w, 409, "task is being deleted; cannot send a new message")
+		writeErr(w, 409, errTaskChatDeleting.Error())
 		return
 	}
 	// Note: a paused task does not block main-agent conversations. The main-agent orchestration session is independent of the
@@ -4440,22 +4441,61 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	mode, reply, err := s.startTaskChat(t, taskChatTurn{Message: req.Message, AgentMessage: agentMessage, Attachments: req.Attachments, Seg: req.Seg})
+	if err != nil {
+		writeErr(w, 409, err.Error())
+		return
+	}
+	if mode == "llm" {
+		writeJSON(w, 202, map[string]any{"status": "accepted", "mode": "llm"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"reply": reply, "mode": "rule"})
+}
+
+// taskChatTurn is one human message to a task's main agent, from the web chat
+// or from a chat bridge. Both write into the same main-agent conversation.
+type taskChatTurn struct {
+	Message      string           // the text shown in the transcript
+	AgentMessage string           // the text the agent receives (with mention snapshots); "" = Message
+	Attachments  []chatAttachment // files uploaded via method 1
+	Seg          *int             // target main-session segment; nil = newest segment
+	// Done, when set, is called once an LLM turn has ended and the task is
+	// free for the next message, with the agent's final answer or the reason
+	// the turn ended without one. Rule mode does not call it: startTaskChat
+	// returns that reply directly.
+	Done func(answer string, err error)
+}
+
+var (
+	errTaskChatDeleting = errors.New("task is being deleted; cannot send a new message")
+	errTaskChatBusy     = errors.New("the main agent is still processing the previous message, please wait")
+)
+
+// startTaskChat admits one turn for t's main agent. With an LLM it starts the
+// turn in the background and returns mode "llm"; the steps and the answer
+// stream to the web UI as activity, and turn.Done receives the answer. Without
+// one it answers with the rule handler and returns mode "rule" and the reply.
+// It fails with errTaskChatDeleting or errTaskChatBusy.
+func (s *Server) startTaskChat(t *Task, turn taskChatTurn) (mode, reply string, err error) {
+	agentMessage := turn.AgentMessage
+	if agentMessage == "" {
+		agentMessage = turn.Message
+	}
 	// Admission is serialized with deletion's chat cancellation. Mark every chat
 	// turn busy before its first activity/file write, including rule-mode turns.
 	// If deletion wins the race, the second barrier check rejects this request.
 	s.chatMu.Lock()
 	if s.engine.IsDeleting(t.ID) {
 		s.chatMu.Unlock()
-		writeErr(w, 409, "task is being deleted; cannot send a new message")
-		return
+		return "", "", errTaskChatDeleting
 	}
 	if s.chatBusy[t.ID] {
 		s.chatMu.Unlock()
-		writeErr(w, 409, "the main agent is still processing the previous message, please wait")
-		return
+		return "", "", errTaskChatBusy
 	}
 	ctx, cancel := context.WithCancelCause(s.ctx)
-	ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: req.Message})
+	ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: turn.Message})
 	s.chatBusy[t.ID] = true
 	s.chatCancel[t.ID] = cancel
 	s.chatMu.Unlock()
@@ -4465,8 +4505,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	// mainagent row with it so this turn's transcript + activity land in that segment.
 	// Missing seg (older clients) falls back to the newest segment.
 	mainSeg := 0
-	if req.Seg != nil && *req.Seg >= 0 {
-		mainSeg = *req.Seg
+	if turn.Seg != nil && *turn.Seg >= 0 {
+		mainSeg = *turn.Seg
 	} else {
 		mainSeg, _ = t.Store.CurrentMainSeg()
 	}
@@ -4477,7 +4517,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	// worker="mainagent" (the per-task activity table, replayed via SSE). With
 	// attachments, the activity's Detail carries {text, attachments} so the transcript
 	// renders attachment cards.
-	humanTurn := userActivityWithAttachments("mainagent", req.Message, req.Attachments)
+	humanTurn := userActivityWithAttachments("mainagent", turn.Message, turn.Attachments)
 	humanTurn.MainSeg = segPtr
 	s.engine.emitActivity(t, humanTurn)
 	var ma *agent.MainAgent
@@ -4485,14 +4525,19 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		ma = s.agentsForTask(t).main
 	}
 	if ma != nil {
-		// Run the agent on a per-turn cancellable ctx (NOT r.Context()): the turn can
+		// Run the agent on a per-turn cancellable ctx (NOT the request context): the turn can
 		// take minutes (multi-tool loop), and binding it to the request lifecycle meant
 		// a page reload / proxy timeout cancelled it mid-run ("context canceled"). The
 		// steps + final answer stream back live via SSE (worker="mainagent"), so the
 		// handler returns immediately and the browser never needs to hold the request.
 		go func() {
+			var answer string
+			var turnErr error
 			defer func() {
 				s.finishTaskChat(t.ID, cancel)
+				if turn.Done != nil {
+					turn.Done(answer, turnErr)
+				}
 			}()
 			// emit every step (thinking/tool_use/tool_result/text/result) so the main
 			// agent session shows its work live, like worker/planner. The final answer
@@ -4506,7 +4551,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			// Splice the list of [absolute paths] of uploaded attachments into the message sent to the agent; it uses them to open files via Read/Bash.
 			// mainDir = the main agent's run directory (its CWD, tasks/<id>/main), the same call as chatUpload's target dir and the agent itself.
 			mainDir := agent.EnsureRunDir(s.m.dir, maTaskID, 0)
-			agentMsg := composeAgentMessage(agentMessage, req.Attachments, mainDir)
+			agentMsg := composeAgentMessage(agentMessage, turn.Attachments, mainDir)
 			// Tag the turn for the target gate: the task, the "mainagent" lane and the approval scope.
 			gctx := intercept.WithTaskContext(ctx, t.ID, "mainagent", func(a db.Activity) {
 				a.Worker = "mainagent"
@@ -4514,19 +4559,26 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			})
 			gctx = intercept.WithTargetScope(gctx, t.targetScope(intercept.DefaultTargetWaitBound))
 			s.engine.BeginLLMCall(t.ID)
-			_, err := ma.Chat(gctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, t.TargetGuard.Hooks(), emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
+			out, err := ma.Chat(gctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, t.TargetGuard.Hooks(), emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
 			s.engine.EndLLMCall(t.ID)
-			if err != nil && ctx.Err() == nil {
-				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "(main agent error: " + err.Error() + ")", MainSeg: segPtr})
+			answer = out
+			if err != nil {
+				turnErr = err
+				if ctx.Err() == nil {
+					s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "(main agent error: " + err.Error() + ")", MainSeg: segPtr})
+				} else {
+					// Stopped by the user, paused with the task, or the server
+					// is shutting down: report why rather than the bare cancel.
+					turnErr = context.Cause(ctx)
+				}
 			}
 		}()
-		writeJSON(w, 202, map[string]any{"status": "accepted", "mode": "llm"})
-		return
+		return "llm", "", nil
 	}
-	reply := s.fallbackChat(t, req.Message)
+	reply = s.fallbackChat(t, turn.Message)
 	s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", Summary: reply, MainSeg: segPtr})
 	s.finishTaskChat(t.ID, cancel)
-	writeJSON(w, 200, map[string]any{"reply": reply, "mode": "rule"})
+	return "rule", reply, nil
 }
 
 func (s *Server) cancelTaskChat(taskID string, cause error) bool {
