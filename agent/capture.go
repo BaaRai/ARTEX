@@ -123,13 +123,15 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			auditTrace.Complete(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError)
 			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
 				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out})
-			if gRec, sweepDetected := gateDet.onToolResult(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError); gRec != nil || sweepDetected {
-				if gRec != nil && gateHooks.RecordGateConstant != nil {
-					if fid, rerr := gateHooks.RecordGateConstant(*gRec); rerr == nil && fid > 0 {
-						rec(db.Activity{
-							Kind:    "text",
-							Summary: fmt.Sprintf("Recorded gate_constant fact #%d on %s%s (HTTP %d across %d probes)", fid, gRec.Host, gRec.Path, gRec.Status, gRec.SampleCount),
-						})
+			if gRecs, sweepDetected := gateDet.onToolResultMulti(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError); len(gRecs) > 0 || sweepDetected {
+				if gateHooks.RecordGateConstant != nil {
+					for _, gRec := range gRecs {
+						if fid, rerr := gateHooks.RecordGateConstant(gRec); rerr == nil && fid > 0 {
+							rec(db.Activity{
+								Kind:    "text",
+								Summary: fmt.Sprintf("Recorded gate_constant fact #%d on %s%s (HTTP %d across %d probes)", fid, gRec.Host, gRec.Path, gRec.Status, gRec.SampleCount),
+							})
+						}
 					}
 				}
 				if sweepDetected {
