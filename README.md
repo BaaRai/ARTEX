@@ -757,6 +757,11 @@ For a recurring problem, share the ARTEX version or commit, the model and versio
 excerpt of the affected input and result. Remove credentials, target data, and other sensitive
 content before sharing.
 
+### Reviewing a published vulnerability advisory
+
+See [Reviewing a published vulnerability advisory](docs/operator-advisory-review.md) for the
+CVE and GHSA review workflow.
+
 ### Backups
 
 `scripts/backup.sh` dumps the Postgres database (and optionally the data directory) with
