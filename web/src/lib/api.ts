@@ -278,12 +278,21 @@ function interceptPageQuery(page: number, size: number, filter: InterceptApprova
 
 export const api = {
   // Backend application version (injected via ldflags at release, default "dev").
+  // build.commit fills in the source revision for local builds, so the top bar
+  // can show `dev (abc1234)` instead of a version that identifies nothing.
   // isolation: result of the startup agent isolation self-test; "degraded" shows a banner on every page.
   health: () =>
     get<{
       ok: boolean;
       service: string;
       version: string;
+      build?: {
+        version: string;
+        commit?: string;
+        go_version?: string;
+        build_time?: string;
+        modified?: boolean;
+      };
       latest_version?: string;
       isolation?: { mode: "isolated" | "degraded"; reason?: string };
     }>("/health"),

@@ -9,6 +9,40 @@ warn(){ printf '\033[33m[!]\033[0m %s\n' "$*"; }
 die(){  printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 ask(){  local p="$1" d="${2:-}" a; read -rp "$p${d:+ [$d]}: " a; echo "${a:-$d}"; }
 rand(){ head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24; }
+
+# ── Build identity: keep .env and the binary in step with the checkout ─────────
+BUILD_VERSION="dev"
+BUILD_REVISION=""
+
+# set_env replaces KEY=... in .env (or appends it) without touching other lines.
+set_env(){
+  local key="$1" value="$2" tmp
+  tmp="$(mktemp)"
+  awk -v k="$key" -v v="$value" '
+    $0 ~ "^" k "=" { print k "=" v; found=1; next }
+    { print }
+    END { if (!found) print k "=" v }
+  ' .env > "$tmp"
+  chmod --reference=.env "$tmp" 2>/dev/null || true
+  mv "$tmp" .env
+}
+
+# stamp_version records the commit the image or binary is built from. Without it
+# docker-compose.yml passes ARTEX_VERSION=dev and every local install reports the
+# same meaningless version in the UI and the startup banner.
+stamp_version(){
+  if ! command -v git >/dev/null 2>&1 || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    warn "not a git working copy: leaving ARTEX_VERSION in .env unchanged"
+    return 0
+  fi
+  BUILD_VERSION="$(git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD)"
+  BUILD_REVISION="$(git rev-parse HEAD 2>/dev/null || true)"
+  if [ -f .env ]; then
+    set_env ARTEX_VERSION "$BUILD_VERSION"
+    [ -n "$BUILD_REVISION" ] && set_env ARTEX_REVISION "$BUILD_REVISION"
+  fi
+  ok "Build identity: ${BUILD_VERSION}${BUILD_REVISION:+ (${BUILD_REVISION:0:12})}"
+}
 # json_str prints $1 as a JSON string literal: backslash, double quote and the
 # control characters read -r can return are escaped.
 json_str(){
@@ -121,6 +155,7 @@ install_docker(){
   else
     info "reusing existing .env"
   fi
+  stamp_version
   info "building the image from this checkout and starting..."
   docker compose up -d --build
   ok "started → http://localhost:8787"
@@ -168,6 +203,9 @@ JSON
   # go environment check
   command -v go >/dev/null 2>&1 || die "Go not detected; please install Go (>=1.26) first: https://go.dev/dl/"
   ok "Go: $(go version)"
+  stamp_version
+  LDFLAGS="-X main.version=${BUILD_VERSION}"
+  [ -n "${BUILD_REVISION}" ] && LDFLAGS="${LDFLAGS} -X main.revision=${BUILD_REVISION}"
 
   # embedding the frontend requires node to produce the static assets
   if command -v npm >/dev/null 2>&1; then
@@ -175,10 +213,10 @@ JSON
     ( cd web && npm ci --ignore-scripts && npm run build:static )
     rm -rf server/webui/dist && mkdir -p server/webui && cp -r web/out server/webui/dist
     info "compiling embedded single binary..."
-    CGO_ENABLED=0 go build -tags embedui -trimpath -o artex ./cmd/artex
+    CGO_ENABLED=0 go build -tags embedui -trimpath -ldflags "${LDFLAGS}" -o artex ./cmd/artex
   else
     warn "npm not detected: building a backend WITHOUT the embedded frontend (run npm run dev separately for the frontend)"
-    CGO_ENABLED=0 go build -o artex ./cmd/artex
+    CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o artex ./cmd/artex
   fi
   ok "build complete → ./artex"
 

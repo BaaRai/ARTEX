@@ -28,6 +28,7 @@ services:
       context: .
       args:
         ARTEX_VERSION: ${ARTEX_VERSION:-dev}
+        ARTEX_REVISION: ${ARTEX_REVISION:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     image: artex:local
